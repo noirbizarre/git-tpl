@@ -262,7 +262,7 @@ mod tests {
 
     /// The SSH and HTTPS forms of one repository must agree, or a user who
     /// switches between them silently orphans the rendered ref and the next
-    /// merge conflicts on every file.
+    /// merge, having no common ancestor, conflicts on everything that differs.
     #[test]
     fn the_ssh_and_https_forms_of_a_repository_derive_the_same_id() {
         let https = TemplateId::derive("https://github.com/rawtools/rust-library").unwrap();

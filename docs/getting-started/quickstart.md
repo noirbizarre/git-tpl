@@ -82,6 +82,9 @@ git tpl init ../rust-library-template
 git-tpl asks the questions, writes `.config/git.tpl.toml`, renders the template
 into `refs/tpl/rust-library-template`, and merges it into your branch.
 
+This works on a project that already has files too — the merge reconciles the
+two sides. See [an existing project](../usage/init.md#an-existing-project).
+
 ```console
 Template: rust-library-template
 Revision: 4f2c1a9

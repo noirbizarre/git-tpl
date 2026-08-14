@@ -39,6 +39,9 @@ cd my-project
 git tpl init https://github.com/rawtools/rust-library-template
 ```
 
+That works on an empty repository and on a project that already has files — see
+[adopting an existing project](usage/init.md#an-existing-project).
+
 Later, when the template moves on:
 
 ```sh

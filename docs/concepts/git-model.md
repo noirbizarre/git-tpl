@@ -104,12 +104,20 @@ main:  A ─── M
 ```
 
 That merge is the load-bearing step. Without it, `G0` is not an ancestor of
-`main`, so the *first* `git tpl update` would have no merge base and would
-conflict on every line of every file. Which is exactly the failure mode this
-whole design exists to avoid.
+`main`, so the *first* `git tpl update` would have no merge base — and without
+one, Git cannot tell your edits from the template's. Every file that differs
+would conflict, including files you customised that the template never changed.
+Which is exactly the failure mode this whole design exists to avoid.
 
 If you would rather wire it up yourself, `git tpl init --no-merge` stops after
 creating the ref.
+
+This is also how a project that already has files joins a template. There is no
+second command for it: the same merge runs, and Git reconciles the two sides by
+content rather than by ancestry. A file identical to the rendered one merges
+silently, a file you have edited conflicts only on the lines that differ, and a
+file the template adds is staged for you. See
+[an existing project](../usage/init.md#an-existing-project).
 
 ## What is in the commit
 

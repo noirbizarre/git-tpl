@@ -58,6 +58,12 @@ cd my-project
 git tpl init https://github.com/rawtools/rust-library-template
 ```
 
+That works on an empty repository and on a project that already has files. On an
+existing project the merge reconciles the two sides: files identical to the
+rendered ones merge silently, files you have edited conflict only on the lines
+that differ, and files the template adds are staged for you. Resolve as you
+would any merge.
+
 Later, when the template moves on:
 
 ```sh

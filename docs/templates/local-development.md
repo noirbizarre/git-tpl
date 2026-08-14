@@ -105,9 +105,11 @@ construction.
 Edit `[template] source` in `.config/git.tpl.toml` and run `git tpl update`.
 
 The rendered ref is keyed by the template id, so pointing at a *renamed* source
-whose id differs starts a new ref with no shared history — and the first merge
-from it will conflict broadly, because there is no common ancestor. If the two
-templates are genuinely the same template at a new address, keep the id stable:
+whose id differs starts a new ref with no shared history — and because the first
+merge from it has no common ancestor, everything that differs between the two
+renderings conflicts, including files you customised that neither template
+changed. If the two templates are genuinely the same template at a new address,
+keep the id stable:
 
 ```toml
 [template]

@@ -302,8 +302,11 @@ pub struct InitOutcome {
 ///
 /// The merge is the load-bearing step: without it the template commit is not an
 /// ancestor of the branch, so the *first* `update` would have no merge base and
-/// would conflict on every line of every file. See
-/// `docs/adr/009-init-merges-unrelated-histories.md`.
+/// Git could not tell the user's edits from the template's — every file that
+/// differs would conflict, including ones the user customised that the template
+/// never changed. See `docs/adr/009-init-merges-unrelated-histories.md`, and
+/// `tests/init.rs::without_a_merge_base_a_customisation_conflicts_the_template_never_touched`
+/// for the demonstration.
 #[allow(clippy::too_many_arguments)]
 pub fn init(
     project: &LibGit2,

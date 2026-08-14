@@ -22,8 +22,10 @@ git tpl init <template> [--ref <ref>] [--answer k=v]... [options]
 ## The merge is the point
 
 Step 10 is not a convenience. Without it the template commit is not an ancestor
-of your branch, so the *first* `git tpl update` would have no merge base and
-would conflict on every line of every file.
+of your branch, so the *first* `git tpl update` would have no merge base — and
+without one, Git cannot tell your edits from the template's. Every file that
+differs would conflict, including files you customised that the template never
+changed.
 
 ```
 main:  A ─── M
@@ -97,3 +99,66 @@ main:  G0
 ```
 
 Which is the cleanest possible history for a project generated from a template.
+
+## An existing project
+
+`init` also works on a project that already has files — one generated last year
+by another tool, or written by hand and since grown to resemble a template.
+There is no separate command, because there is no separate behaviour: the orphan
+commit is merged, and Git reconciles the two sides.
+
+```sh
+cd my-existing-project
+git tpl init https://github.com/rawtools/rust-library-template
+```
+
+**Expect conflicts, and expect them to be small.** Because there is no merge
+base, Git compares the two sides by content:
+
+| Your project | What happens |
+|---|---|
+| A file identical to the rendered one | Merged silently. Nothing to reconcile. |
+| A file that differs | Conflicts **only on the lines that differ**, not the whole file. |
+| A file the template renders and you lack | Added and staged for you. |
+| A file the template does not render | Untouched. It is not the template's. |
+
+So a `README.md` you changed one line of comes back as a three-line conflict,
+not a page of markers.
+
+Resolve them as you would any merge — this is ordinary Git, and git-tpl
+contributes no conflict resolution of its own ([ADR-002](../adr/002-no-custom-reconciliation.md)):
+
+```console
+$ git tpl init ../rust-library-template --defaults
+
+Created refs/tpl/rust-library-template
+
+  added     Cargo.toml
+  added     README.md
+  added     src/lib.rs
+
+warning: the merge left conflicts. Resolve them and commit:
+
+  README.md
+
+  git status
+  git commit
+
+$ git mergetool          # or edit the markers by hand
+$ git commit
+```
+
+That first merge is the only awkward one. Afterwards `G0` is an ancestor of your
+branch, so every `git tpl update` from then on is a small diff against a genuine
+merge base — the same experience as a project generated from the template on day
+one.
+
+!!! tip "Look before you merge"
+
+    `git tpl init <template> --no-merge` creates the ref without merging, so
+    `git tpl diff` shows exactly what the merge would reconcile. When you are
+    ready, `git tpl merge` performs it. `--dry-run` is smaller still: it reports
+    what would be asked and rendered, and creates nothing.
+
+    `diff` is a tree diff, so it also lists files you have that the template does
+    not — including `.config/git.tpl.toml`. That is expected.
