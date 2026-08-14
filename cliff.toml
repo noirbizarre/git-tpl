@@ -111,7 +111,7 @@ commit_parsers = [
 [bump]
 initial_tag = "0.1.0"
 features_always_bump_minor = true
-# git-tpl writes to Git refs and defines an on-disk template format. A breaking
-# change to either is something users must be told about through the version
-# number, not discover on upgrade.
-breaking_always_bump_major = true
+# git-tpl writes to Git refs and defines an on-disk template format.
+# A breaking change to either is something users must be told about through the version number, not discover on upgrade.
+# But until 1.0, we bump the minor version for breaking changes, so that users can see that something changed.
+breaking_always_bump_major = false
