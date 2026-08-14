@@ -10,7 +10,7 @@ version of the project is worse than none, because it is believed.
 ## Where things stand
 
 **The core model works end to end.** `init → update → diff → merge` on real
-repositories, with real libgit2 merges and real conflicts. 395 tests pass.
+repositories, with real libgit2 merges and real conflicts. 424 tests pass.
 
 ```
 main:  A ─── M ─── B ─── M'
@@ -31,6 +31,7 @@ main:  A ─── M ─── B ─── M'
 | `merge` | ✅ libgit2 merge, `--abort`, zero custom conflict logic |
 | `fetch` / `push` | ✅ explicit refspecs, never forced, divergence refused |
 | Questions | ✅ string, boolean, integer, choice, multi_choice |
+| Answers from a file | ✅ `--answers-from`, TOML/JSON/YAML, repeatable; unknown keys ignored and reported |
 | Conditional questions | ✅ skipped questions are *absent*, not null |
 | Dynamic defaults | ✅ evaluated at prompt time |
 | `choices_from` | ✅ structured reference into the context |
@@ -61,7 +62,7 @@ main:  A ─── M ─── B ─── M'
 | **`gh-tpl`** | Dropped from the bootstrap. Returns as a second `[[bin]]`, or by promoting the package to a workspace member — mechanical, no code movement. See ADR-004. |
 | **SSH integration tests** | The credential path is implemented (agent → default keys → helper) and auth failures are translated into actionable diagnostics. Not exercised against a real host, because CI must not depend on anyone's private credentials. |
 | **`git tpl show`, `git tpl detach`** | No clear semantics yet. Not implemented until there are. |
-| **Testing a template** | A template author renders into a scratch directory and looks. There is no `render` command and no test runner, so most templates have no tests. See *Next*. |
+| **Testing a template** | A template author renders into a scratch directory and looks. There is no `render` command and no test runner, so most templates have no tests. The fixtures a runner would read are now expressible — `--answers-from` ships. See *Next*. |
 | **Template inheritance** | A template is one repository, standing alone. Fifteen templates in an organisation means fifteen copies of the same CI workflow. See *Next*. |
 | **User configuration** | There is no `~/.config/git-tpl.toml`. Prompt defaults come from the template alone, template sources are written out in full every time, and remote-data trust is per-invocation with no persistent list. See *Next*. |
 | **Distribution beyond crates.io** | `cargo install`, `mise use -g cargo:git-tpl`, `mise use -g github:noirbizarre/git-tpl` and raw release binaries. No AUR package, no Homebrew formula, no mise registry entry. See *Next*. |
@@ -70,52 +71,7 @@ main:  A ─── M ─── B ─── M'
 
 ## Next
 
-### 1. Answers from a file
-
-`--answer key=value` already exists on `init` and `update`. Its file form is
-missing, and it is the piece that makes several unrelated things work at once:
-
-```
-git tpl init <template> --answers-from answers.json
-git tpl init <template> --answers-from converted.toml
-git tpl init <template> --answers-from house-defaults.toml --answer name=thing
-```
-
-- migrating from Copier, Cruft, or anything else that records its answers
-- creating many projects from one set of house values
-- re-rendering a template in CI without a terminal, next to `--defaults`
-- checking a template's fixtures in, which is what its own test suite wants
-
-A tool-specific `--from-copier` would have bought only the first, and would have
-put a competitor's file format in our CLI surface permanently. The generic flag
-is smaller and does more, which is the usual sign it is the right one.
-
-Details that need deciding, because each is a place to get it wrong:
-
-**Format.** TOML, JSON and YAML — the same three the data sources take, through
-the same parsers. YAML matters here specifically: `.copier-answers.yml` and most
-hand-written house-defaults files are YAML, and requiring a `yq` step before the
-flag is usable would have undercut the point of having it.
-
-The objection to YAML was the 1.1 scalar rules, and it does not survive contact
-with a 1.2 parser — see `docs/data/index.md#about-yaml` and
-`yaml_uses_the_1_2_scalar_rules` in `src/data/mod.rs`.
-
-**Unknown keys are ignored, and reported.** A Copier answers file carries
-`_src_path`, `_commit`, and questions the template has since dropped. Erroring
-on those makes the flag useless for the case that motivated it. Ignoring them
-silently loses a typo'd key. So: ignore, and print what was ignored.
-
-**Precedence, stated once and tested.** `--answer` beats the file; the file
-beats answers recorded in `.config/git.tpl.toml`; a question not covered by any
-of them is asked as usual. A file value that fails the question's declared type
-is an error, not a coercion — the existing rule for `--answer`.
-
-**No renaming.** The flag maps names to names. A template that renamed a
-question between tools needs its answers edited, and pretending otherwise
-would mean shipping a mapping language.
-
-### 2. A persistent trust list
+### 1. A persistent trust list
 
 Remote data sources ship, gated by a confirmation shown before any fetch, plus
 `--trust` for one invocation. What is missing is the ability to say "I always
@@ -125,12 +81,12 @@ access on every run.
 That is a user-side fact — it belongs on the machine of the only party who can
 consent to it, never in `.config/git.tpl.toml`, because a project cannot consent
 on its reader's behalf. So it arrives with the user configuration file, as
-`[trust].templates`, and is described in item 8 rather than duplicated here.
+`[trust].templates`, and is described in item 7 rather than duplicated here.
 
 The gate it plugs into already exists: `TrustGate` in `src/data/`, selected in
 `commands::trust`. A pattern match becomes one more arm alongside `--trust`.
 
-### 3. SSH verification
+### 2. SSH verification
 
 Not a CI job. A documented procedure a developer can run against a private
 repository of their own:
@@ -143,7 +99,7 @@ repository of their own:
 The credential callback tries the agent first precisely so a passphrase never
 has to be typed. That is the part worth confirming by hand.
 
-### 4. `gh-tpl`
+### 3. `gh-tpl`
 
 `gh extension install` requires a repository named `gh-tpl` shipping a binary
 named `gh-tpl`, and this repository is `noirbizarre/git-tpl`. Options, in order of
@@ -156,7 +112,7 @@ preference:
 The CLI layer is already thin enough that the second binary is a `main.rs` and
 a different `bin_name`.
 
-### 5. Question validation
+### 4. Question validation
 
 ```toml
 [questions.project_name]
@@ -169,7 +125,7 @@ A bad distribution name is currently caught by the first `uv build` rather than
 at the prompt. `pattern` rather than `validator` on purpose: Copier's validator
 is an arbitrary expression, and that door stays shut.
 
-### 6. Git-seeded question defaults
+### 5. Git-seeded question defaults
 
 ADR-006 already promises this and it is not implemented:
 
@@ -187,7 +143,7 @@ not asked — `--defaults`, `tpl.interactive false` — it must fall back to
 `default` and never to the machine's config, or the tree varies by machine and
 the model breaks. That is the whole design, and it needs the test that says so.
 
-### 7. Distribution: AUR and Homebrew
+### 6. Distribution: AUR and Homebrew
 
 Cheap, because a release already produces six binaries and a `SHA256SUMS`. Both
 packages are consumers of an artefact that exists; neither needs a build change.
@@ -224,7 +180,7 @@ entry in `jdx/mise`'s `registry.toml` is what makes the short
 All of this is downstream of a version somebody else depends on. Packaging
 0.1.x means chasing it.
 
-### 8. A user configuration file
+### 7. A user configuration file
 
 Three unrelated frustrations with one home: retyping your name into every
 project, typing `https://github.com/` twenty times a day, and confirming the
@@ -275,7 +231,7 @@ in `tpl.*`.
 #### `[defaults]` seeds prompts, never the context
 
 This is the whole design, and the only thing that keeps invariant 2 true. It is
-item 6's rule (`default_from = "git:user.name"`) applied to a second source.
+item 5's rule (`default_from = "git:user.name"`) applied to a second source.
 
 - A key matching a question name becomes that question's **prompt default**.
 - The value the user accepts is recorded in `.config/git.tpl.toml` like any
@@ -288,7 +244,7 @@ item 6's rule (`default_from = "git:user.name"`) applied to a second source.
   `user_defaults_do_not_apply_when_questions_are_not_asked`.
 - Keys matching no question are ignored and reported, exactly as for
   `--answers-from`.
-- Precedence, stated once and tested, extending item 1's chain:
+- Precedence, stated once and tested, extending the chain `--answers-from` established:
 
   ```
   --answer  >  --answers-from  >  answers in .config/git.tpl.toml
@@ -366,7 +322,7 @@ Two things this is not, so it is not read as a weakening:
 - It does not create a place to record trust *in the project*. Trust lives on
   the machine of the only party who can consent to it.
 
-### 9. Testing a template
+### 8. Testing a template
 
 A template author has no way to say *"given these answers, this is what comes
 out"* except to render into a scratch directory and look. Every template above
@@ -374,7 +330,7 @@ a few files therefore has no tests, and the first person to find a broken
 conditional is the person generating a project from it.
 
 Everything needed already exists: rendering produces a tree without touching a
-worktree, questions can be answered from a file (item 1), and diagnostics carry
+worktree, questions can be answered from a file, and diagnostics carry
 stable codes.
 
 **The primitive first: `git tpl render`.**
@@ -435,11 +391,10 @@ template really needs twelve cases, twelve files say so honestly.
 **Exit codes come from `exit.rs`,** unchanged, so `git tpl test` is usable in
 CI without wrapping.
 
-This is downstream of item 1: the fixtures *are* answers files, read by the same
-parsers, and building the test runner first would mean building a second way to
-supply answers.
+The fixtures *are* answers files, read by the same parsers — which is why
+`--answers-from` had to come first.
 
-### 10. Template inheritance
+### 9. Template inheritance
 
 The largest template-side feature there is, and the one that decides whether an
 organisation with fifteen templates maintains fifteen copies of its CI workflow.
@@ -508,7 +463,7 @@ Parent-relative source paths, validated: removing a path the parent does not
 have is an **error**. Otherwise a rename upstream silently resurrects a file the
 child spent a release removing, and nobody notices until it ships.
 
-**`{% extends %}` needs the loader that item 11 already wants.** `{% import %}`
+**`{% extends %}` needs the loader that item 10 already wants.** `{% import %}`
 fails today because no loader is registered; inheritance needs the same loader,
 backed by the layered trees, resolving child-first. One trap, and it is the
 obvious one: a child's `base.html.jinja` writing `{% extends "base.html.jinja" %}`
@@ -536,7 +491,7 @@ This changes the manifest, which is a contract, and changes what "the template"
 means for provenance and for `refs/tpl/<id>`. It needs **ADR-013** before it
 needs code.
 
-### 11. Smaller things
+### 10. Smaller things
 
 
 - `git tpl show <path>` — the template's version of one file. Wanted whenever a
@@ -547,7 +502,7 @@ needs code.
 - Shared macros. `{% import "macros.jinja" %}` fails today because no loader is
   registered; a loader backed by the template's own tree reads nothing outside
   the template revision and executes nothing, so it costs no invariant. Wanted
-  by any template much above fifty files, and a prerequisite for item 10.
+  by any template much above fifty files, and a prerequisite for item 9.
 - Named tests for two behaviours that are currently correct but undefended: a
   computed value holding a sequence (`| select`) and one holding a table
   (`dict()`) both keep their type through `evaluate()`. Nothing would catch a
@@ -577,7 +532,7 @@ Not oversights. Each is a decision, and most have an ADR.
   ancestry — see the correction in ADR-009 and the tests in `tests/init.rs`.
   What was missing was documentation, not code.
 - **Copier or Cruft compatibility** — a useful reference, not a goal. Reading
-  `.copier-answers.yml` through the generic `--answers-from` (item 1) is not
+  `.copier-answers.yml` through the generic `--answers-from` is not
   compatibility; it is one of four things that flag buys.
 - **A gitoxide backend** — libgit2 is the backend. The abstraction keeps the
   option open; nobody is taking it.
@@ -601,7 +556,7 @@ it or not at all. What the ADR would have to establish:
   and 2 stay literally true, and their tests stay untouched. If either has to be
   relaxed, the feature is declined.
 - Trust is per-invocation and explicit, or it comes from the user's own
-  `[trust]` list (item 8). Never from `.config/git.tpl.toml` — the project
+  `[trust]` list (item 7). Never from `.config/git.tpl.toml` — the project
   cannot consent on the reader's behalf.
 - Tasks run on `init`, not on `update`. `update` being a ref-only operation is
   most of its value.
@@ -625,7 +580,7 @@ correct semantic — it is a tree diff — and it is documented, but the first
 **The template is cloned fresh on every run.** Correct and slow for a large
 remote template. A cache would need invalidation, and a stale cache silently
 rendering an old template is a far worse failure than a slow fetch — so this
-stays until it actually hurts. Inheritance (item 10) is what would make it
+stays until it actually hurts. Inheritance (item 9) is what would make it
 hurt: a three-deep chain is three clones per run.
 
 **A remote data source is fetched on every run.** Once per run, but never

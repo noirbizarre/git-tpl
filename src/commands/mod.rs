@@ -16,6 +16,7 @@ pub use push::run as push;
 pub use status::run as status;
 pub use update::run as update;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tpl::git::GitBackend;
@@ -112,4 +113,53 @@ pub fn answering<'a>(
     } else {
         tpl::ops::Answering::Interactive(prompter)
     }
+}
+
+/// Report supplied answers that name no question in the template.
+///
+/// Not an error: an answers file carried over from another generator has
+/// `_src_path` in it, and a template drops questions over time. Not silent
+/// either, because that is how a typo'd key becomes an afternoon spent
+/// wondering why an answer had no effect.
+pub fn report_ignored(ctx: &Context, ignored: &[String]) {
+    if ignored.is_empty() {
+        return;
+    }
+
+    ctx.blank();
+    ctx.say(crate::theme::warning(
+        &ctx.theme,
+        "answers ignored: they name no question in this template",
+    ));
+    for key in ignored {
+        ctx.say(format!("  {key}"));
+    }
+}
+
+/// Everything supplied without a prompt, in precedence order.
+///
+/// Files first, in the order they were given, then `--answer`. So:
+///
+/// ```text
+/// --answer  >  the last --answers-from  >  earlier --answers-from
+///           >  answers in .config/git.tpl.toml  >  the question's default
+/// ```
+///
+/// The last two are applied by `ops::update`, which is the only place that has
+/// a recorded configuration to merge. Stated and implemented once here so that
+/// the four call sites — `init`, `init --dry-run`, `update`,
+/// `update --dry-run` — cannot come to disagree about the order.
+pub fn supplied(args: &AnswerArgs) -> Result<BTreeMap<String, tpl::template::Value>, OpError> {
+    let mut out = BTreeMap::new();
+
+    for path in &args.answers_from {
+        out.extend(tpl::answers::load(path)?);
+    }
+
+    out.extend(
+        args.parsed()
+            .map_err(|message| OpError::InvalidArgument { message })?,
+    );
+
+    Ok(out)
 }

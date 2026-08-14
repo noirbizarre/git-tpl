@@ -99,6 +99,10 @@ format = "json"
 | `.json` | JSON |
 | `.yaml`, `.yml` | YAML |
 
+The same three, read by the same parsers, are what
+[`--answers-from`](../usage/answers.md) accepts — one decision about what YAML
+means rather than two.
+
 Three formats is a deliberate limit, and adding a fourth needs a real reason.
 All three have exact type mappings, and whichever you pick, the same file
 produces the same context.

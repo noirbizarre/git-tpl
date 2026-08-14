@@ -7,7 +7,7 @@ use tpl::git::{GitBackend, MergeOutcome};
 use tpl::gitconfig::Preferences;
 use tpl::ops::{self, OpError};
 
-use super::{Context, answering, trust};
+use super::{Context, answering, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, InitArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, heading, muted, warning};
@@ -25,10 +25,10 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
     let ctx = Context::discover(global)?;
     let preferences = Preferences::load(&ctx.repo)?;
 
-    let supplied = args.answers.parsed().map_err(bad_answer)?;
+    let answers = supplied(&args.answers)?;
 
     if args.dry_run {
-        return dry_run(&ctx, &args, supplied);
+        return dry_run(&ctx, &args, answers);
     }
 
     let mut prompter = Interactive;
@@ -39,7 +39,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
         &args.template,
         args.r#ref.clone(),
         args.id.as_deref(),
-        supplied,
+        answers,
         args.dirty,
         !args.no_merge,
         answering(&args.answers, preferences.interactive, &mut prompter),
@@ -50,6 +50,8 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
             &mut confirmer,
         ),
     )?;
+
+    report_ignored(&ctx, &outcome.ignored_answers);
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &args.template));
@@ -123,7 +125,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
 fn dry_run(
     ctx: &Context,
     args: &InitArgs,
-    supplied: BTreeMap<String, tpl::template::Value>,
+    answers: BTreeMap<String, tpl::template::Value>,
 ) -> Result<(), OpError> {
     let template = ops::resolve::resolve(ops::Request {
         source: &args.template,
@@ -132,6 +134,15 @@ fn dry_run(
         dirty: args.dirty,
     })?;
     let graph = tpl::graph::Graph::build(&template.manifest)?;
+
+    // The same rule `ops::render` applies, and for the same reason — a dry run
+    // exists to find exactly this sort of mistake before anything is written.
+    let ignored: Vec<String> = answers
+        .keys()
+        .filter(|key| !template.manifest.questions.contains_key(*key))
+        .cloned()
+        .collect();
+    report_ignored(ctx, &ignored);
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &template.manifest.name));
@@ -147,7 +158,7 @@ fn dry_run(
     for node in graph.order() {
         match node.kind {
             tpl::graph::NodeKind::Question => {
-                let supplied_note = if supplied.contains_key(&node.key) {
+                let supplied_note = if answers.contains_key(&node.key) {
                     muted(&ctx.theme, "  (supplied)")
                 } else {
                     String::new()
@@ -178,8 +189,4 @@ fn io(error: std::io::Error) -> OpError {
         context: "determine the current directory".into(),
         reason: error.to_string(),
     })
-}
-
-fn bad_answer(message: String) -> OpError {
-    OpError::InvalidArgument { message }
 }

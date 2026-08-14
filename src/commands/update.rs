@@ -3,7 +3,7 @@
 use tpl::gitconfig::Preferences;
 use tpl::ops::{self, OpError, UpdateOutcome};
 
-use super::{Context, answering, trust};
+use super::{Context, answering, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, heading, muted};
@@ -24,10 +24,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
         config.template.r#ref = Some(reference.clone());
     }
 
-    let overrides = args
-        .answers
-        .parsed()
-        .map_err(|message| OpError::InvalidArgument { message })?;
+    let overrides = supplied(&args.answers)?;
 
     if args.dry_run {
         return dry_run(
@@ -57,11 +54,15 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
     )?;
 
     match outcome {
-        UpdateOutcome::UpToDate { revision } => {
+        UpdateOutcome::UpToDate {
+            revision,
+            ignored_answers,
+        } => {
             ctx.say(format!(
                 "Already up to date with {} at {revision}.",
                 config.template.source
             ));
+            report_ignored(&ctx, &ignored_answers);
         }
 
         UpdateOutcome::Updated {
@@ -70,8 +71,10 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
             previous_revision,
             revision,
             answers_changed,
+            ignored_answers,
             ..
         } => {
+            report_ignored(&ctx, &ignored_answers);
             ctx.blank();
             ctx.say(field(&ctx.theme, "Template", &config.template.source));
             ctx.say(field(
@@ -131,8 +134,8 @@ fn dry_run(
     interactive: bool,
     trusted: bool,
 ) -> Result<(), OpError> {
-    let mut supplied = config.answers.clone();
-    supplied.extend(overrides);
+    let mut answers = config.answers.clone();
+    answers.extend(overrides);
 
     let mut prompter = Interactive;
     let answering = if interactive {
@@ -153,8 +156,10 @@ fn dry_run(
     };
 
     let rendered = ops::render(
-        &ctx.repo, &ctx.root, config, supplied, dirty, answering, trust,
+        &ctx.repo, &ctx.root, config, answers, dirty, answering, trust,
     )?;
+
+    report_ignored(ctx, &rendered.ignored_answers);
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
     let tip = tpl::git::GitBackend::resolve_ref(&ctx.repo, &ref_name)?;

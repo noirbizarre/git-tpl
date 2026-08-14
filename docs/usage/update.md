@@ -123,6 +123,7 @@ new question with no default is then an error.
 |---|---|
 | `--ref <ref>` | Render this revision instead of the configured one. Does not change the configuration. |
 | `--answer k=v` | Override an answer for this run and record it. Repeatable. |
+| `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
 | `--defaults` | Accept defaults for unanswered questions instead of prompting. |
 | `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--dirty` | Render the template's working tree. Local templates only. |

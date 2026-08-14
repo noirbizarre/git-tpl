@@ -53,6 +53,15 @@ pub enum OpError {
     #[diagnostic(transparent)]
     Eval(#[from] EvalError),
 
+    /// An `--answers-from` file could not be read.
+    ///
+    /// Separate from `InvalidArgument` because the flag itself was well formed:
+    /// what failed was the file it named, and the diagnostic that says so
+    /// already carries the path and the reason.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Answers(#[from] crate::answers::AnswersError),
+
     /// A data source was refused, or could not be confirmed.
     ///
     /// Separate from `Eval` because the trust gate runs before evaluation
@@ -195,6 +204,11 @@ pub struct Render {
     pub tree: Oid,
     /// What produced it.
     pub provenance: Provenance,
+    /// Supplied answers that name no question in this template.
+    ///
+    /// Reported rather than fatal, and reported rather than silent — see the
+    /// comment where it is computed.
+    pub ignored_answers: Vec<String>,
 }
 
 /// Resolve, evaluate and render — everything short of touching a ref.
@@ -220,6 +234,18 @@ pub fn render(
     // Built and validated before anything is prompted: a cycle or a typo
     // discovered after six answered questions is the worst possible time.
     let graph = Graph::build(&template.manifest)?;
+
+    // A supplied answer naming no question is ignored rather than fatal: an
+    // answers file carried over from another generator has `_src_path` and
+    // `_commit` in it, and a template drops questions over time — erroring
+    // would make `--answers-from` useless for the case that motivated it.
+    // Silence would swallow a typo, so it is reported instead. The caller
+    // prints it; this layer does not print.
+    let ignored_answers: Vec<String> = supplied
+        .keys()
+        .filter(|key| !template.manifest.questions.contains_key(*key))
+        .cloned()
+        .collect();
 
     // Every remote source is confirmed here, before evaluation, so the user
     // sees the whole of what the template wants to do on the network in one
@@ -276,6 +302,7 @@ pub fn render(
         context,
         tree,
         provenance,
+        ignored_answers,
     })
 }
 
@@ -296,6 +323,8 @@ pub struct InitOutcome {
     pub config_committed: bool,
     /// The revision that was rendered.
     pub revision: String,
+    /// Supplied answers that name no question in this template.
+    pub ignored_answers: Vec<String>,
 }
 
 /// Attach a template to a repository and merge the initial rendering.
@@ -409,6 +438,7 @@ pub fn init(
         config_path,
         config_committed,
         revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+        ignored_answers: rendered.ignored_answers,
     })
 }
 
@@ -421,6 +451,10 @@ pub enum UpdateOutcome {
     UpToDate {
         /// The revision that was rendered.
         revision: String,
+        /// Supplied answers that name no question in this template. Carried
+        /// even here: a typo'd key is worth reporting whether or not the
+        /// rendering changed.
+        ignored_answers: Vec<String>,
     },
     /// A new commit was added to the rendered ref.
     Updated {
@@ -438,6 +472,8 @@ pub enum UpdateOutcome {
         /// template adds a question. Worth telling the user, since it is the
         /// one file `update` does modify.
         answers_changed: bool,
+        /// Supplied answers that name no question in this template.
+        ignored_answers: Vec<String>,
     },
 }
 
@@ -490,6 +526,7 @@ pub fn update(
     {
         return Ok(UpdateOutcome::UpToDate {
             revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+            ignored_answers: rendered.ignored_answers,
         });
     }
 
@@ -522,6 +559,7 @@ pub fn update(
         previous_revision,
         revision: describe_revision(&rendered.template.reference, rendered.template.revision),
         answers_changed,
+        ignored_answers: rendered.ignored_answers,
     })
 }
 

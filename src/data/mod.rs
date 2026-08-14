@@ -14,6 +14,10 @@ use miette::Diagnostic;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+pub mod format;
+
+pub use format::Format;
+
 use crate::git::{Oid, libgit2::LibGit2};
 use crate::template::{DataSourceDecl, Value};
 
@@ -72,44 +76,6 @@ impl SourceKind {
             "template" => Some(SourceKind::TemplateFile),
             "local" => Some(SourceKind::LocalFile),
             "remote" => Some(SourceKind::Remote),
-            _ => None,
-        }
-    }
-}
-
-/// The format a data source is parsed as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Format {
-    /// TOML.
-    Toml,
-    /// JSON.
-    Json,
-    /// YAML 1.2.
-    Yaml,
-}
-
-impl Format {
-    /// Infer from a path's extension, defaulting to TOML.
-    fn infer(source: &str) -> Self {
-        let path = source.split(['?', '#']).next().unwrap_or(source);
-        match path.rsplit('.').next() {
-            Some(e) if e.eq_ignore_ascii_case("json") => Format::Json,
-            Some(e) if e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml") => {
-                Format::Yaml
-            }
-            _ => Format::Toml,
-        }
-    }
-
-    /// Parse an explicit `format`.
-    fn parse(format: &str) -> Option<Self> {
-        match format {
-            "toml" => Some(Format::Toml),
-            "json" => Some(Format::Json),
-            // Both spellings, because a source whose extension is `.yml` and
-            // whose `format` must be written `yaml` is a papercut with no
-            // upside.
-            "yaml" | "yml" => Some(Format::Yaml),
             _ => None,
         }
     }
@@ -693,40 +659,16 @@ fn expected_digest(name: &str, decl: &DataSourceDecl) -> Result<Option<String>, 
     Ok(Some(normalised))
 }
 
-/// Parse bytes into a structured value.
+/// Parse bytes into a structured value, naming the source that failed.
 ///
-/// Types are preserved: a table stays a table, `8080` stays an integer. Nothing
-/// is stringified on the way in.
+/// The formats themselves live in `data::format`, shared with answers files so
+/// that YAML means one thing in this project rather than two.
 fn parse(name: &str, location: &str, format: Format, bytes: &[u8]) -> Result<Value, DataError> {
-    let text = std::str::from_utf8(bytes).map_err(|e| DataError::Parse {
+    format::parse_value(format, bytes).map_err(|reason| DataError::Parse {
         name: name.to_string(),
         location: location.to_string(),
-        reason: format!("not valid UTF-8: {e}"),
-    })?;
-
-    match format {
-        Format::Toml => toml::from_str::<toml::Value>(text)
-            .map(Value::from)
-            .map_err(|e| DataError::Parse {
-                name: name.to_string(),
-                location: location.to_string(),
-                reason: e.message().to_string(),
-            }),
-        Format::Json => serde_json::from_str::<serde_json::Value>(text)
-            .map(Value::from)
-            .map_err(|e| DataError::Parse {
-                name: name.to_string(),
-                location: location.to_string(),
-                reason: e.to_string(),
-            }),
-        Format::Yaml => serde_norway::from_str::<serde_norway::Value>(text)
-            .map(Value::from)
-            .map_err(|e| DataError::Parse {
-                name: name.to_string(),
-                location: location.to_string(),
-                reason: e.to_string(),
-            }),
-    }
+        reason,
+    })
 }
 
 #[cfg(test)]

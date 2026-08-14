@@ -44,6 +44,7 @@ Use `--no-merge` to stop after step 9 and wire it up yourself.
 |---|---|
 | `--ref <ref>` | Branch, tag or commit. Defaults to the remote's default branch. |
 | `--answer k=v` | Supply an answer, skipping its prompt. Repeatable. |
+| `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
 | `--defaults` | Accept every default without prompting. |
 | `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--id <id>` | Override the derived template id, and so the ref name. |

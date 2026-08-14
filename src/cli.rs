@@ -1,6 +1,7 @@
 //! Argument types only. The implementations live in [`crate::commands`].
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use tpl::template::Value;
@@ -164,6 +165,12 @@ pub struct AnswerArgs {
     #[arg(long = "answer", value_name = "KEY=VALUE")]
     pub answers: Vec<String>,
 
+    /// Read answers from a TOML, JSON or YAML file (repeatable)
+    ///
+    /// Later files win over earlier ones, and `--answer` wins over all of them.
+    #[arg(long = "answers-from", value_name = "PATH")]
+    pub answers_from: Vec<PathBuf>,
+
     /// Accept every default without prompting
     #[arg(long)]
     pub defaults: bool,
@@ -300,6 +307,7 @@ mod tests {
         let args = AnswerArgs {
             answers: vec!["name=demo".into(), "ci=true".into()],
             defaults: false,
+            answers_from: Vec::new(),
         };
         let parsed = args.parsed().unwrap();
 
@@ -313,6 +321,7 @@ mod tests {
         let args = AnswerArgs {
             answers: vec!["motto=a=b=c".into()],
             defaults: false,
+            answers_from: Vec::new(),
         };
         assert_eq!(
             args.parsed().unwrap()["motto"],
@@ -325,6 +334,7 @@ mod tests {
         let args = AnswerArgs {
             answers: vec!["name".into()],
             defaults: false,
+            answers_from: Vec::new(),
         };
         let error = args.parsed().unwrap_err();
         assert!(error.contains("key=value"), "{error}");
@@ -335,6 +345,7 @@ mod tests {
         let args = AnswerArgs {
             answers: vec!["suffix=".into()],
             defaults: false,
+            answers_from: Vec::new(),
         };
         assert_eq!(
             args.parsed().unwrap()["suffix"],
@@ -348,6 +359,7 @@ mod tests {
     fn answer_flags_are_refused_where_they_would_be_ignored() {
         assert!(Cli::try_parse_from(["git-tpl", "diff", "--answer", "a=b"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "push", "--defaults"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "diff", "--answers-from", "a.toml"]).is_err());
     }
 
     #[test]
