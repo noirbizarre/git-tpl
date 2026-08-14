@@ -1,0 +1,500 @@
+//! The Git abstraction.
+//!
+//! libgit2 is the only backend, but it is confined to [`libgit2`] so that the
+//! domain, rendering and CLI layers never name a `git2` type. That confinement
+//! is enforced by the `git-backend-isolation` prek hook, because a trait alone
+//! enforces nothing — see `docs/adr/011-git-backend-isolation.md`.
+
+pub mod libgit2;
+
+use std::fmt;
+use std::path::PathBuf;
+
+use miette::Diagnostic;
+use thiserror::Error;
+
+pub use libgit2::LibGit2;
+
+/// A Git object id.
+///
+/// Ours, not `git2`'s, so that a signature in `ops` or `render` does not name a
+/// `git2` type and quietly make the abstraction decorative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Oid([u8; 20]);
+
+impl Oid {
+    /// Build from raw bytes.
+    pub fn from_bytes(bytes: [u8; 20]) -> Self {
+        Self(bytes)
+    }
+
+    /// The raw bytes.
+    pub fn as_bytes(&self) -> &[u8; 20] {
+        &self.0
+    }
+
+    /// The full 40-character hex form.
+    pub fn to_hex(self) -> String {
+        hex::encode(self.0)
+    }
+
+    /// The abbreviated form used in output.
+    pub fn short(self) -> String {
+        self.to_hex()[..7].to_string()
+    }
+
+    /// Parse a full hex object id.
+    pub fn parse(hex_str: &str) -> Option<Self> {
+        let bytes = hex::decode(hex_str).ok()?;
+        let array: [u8; 20] = bytes.try_into().ok()?;
+        Some(Self(array))
+    }
+}
+
+impl fmt::Display for Oid {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_hex())
+    }
+}
+
+/// A file's mode, as Git records it.
+///
+/// Git stores nothing else about a file's permissions, which is why the
+/// executable bit is the only thing rendering preserves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileMode {
+    /// A regular file, `100644`.
+    Blob,
+    /// An executable file, `100755`.
+    BlobExecutable,
+    /// A symbolic link, `120000`.
+    Link,
+    /// A directory, `040000`.
+    Tree,
+    /// A submodule, `160000`.
+    Commit,
+}
+
+impl FileMode {
+    /// The numeric mode Git writes.
+    pub fn as_u32(self) -> u32 {
+        match self {
+            FileMode::Blob => 0o100644,
+            FileMode::BlobExecutable => 0o100755,
+            FileMode::Link => 0o120000,
+            FileMode::Tree => 0o040000,
+            FileMode::Commit => 0o160000,
+        }
+    }
+
+    /// Interpret a numeric mode.
+    pub fn from_u32(mode: u32) -> Option<Self> {
+        match mode {
+            0o100644 => Some(FileMode::Blob),
+            0o100755 => Some(FileMode::BlobExecutable),
+            0o120000 => Some(FileMode::Link),
+            0o040000 => Some(FileMode::Tree),
+            0o160000 => Some(FileMode::Commit),
+            _ => None,
+        }
+    }
+
+    /// Whether this mode holds file content.
+    pub fn is_blob(self) -> bool {
+        matches!(self, FileMode::Blob | FileMode::BlobExecutable)
+    }
+}
+
+/// One entry in a flattened tree listing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TreeEntry {
+    /// The path relative to the tree root, with `/` separators.
+    pub path: String,
+    /// The object it points at.
+    pub oid: Oid,
+    /// Its mode.
+    pub mode: FileMode,
+}
+
+/// How a path changed between two trees.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    /// Present in the new tree only.
+    Added,
+    /// Present in both, with different content.
+    Modified,
+    /// Present in the old tree only.
+    Deleted,
+}
+
+impl ChangeKind {
+    /// The label used in command output, padded to a common width so that the
+    /// paths beside them line up.
+    pub fn label(self) -> &'static str {
+        match self {
+            ChangeKind::Added => "added   ",
+            ChangeKind::Modified => "modified",
+            ChangeKind::Deleted => "deleted ",
+        }
+    }
+}
+
+/// A single change between two trees.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    /// What happened.
+    pub kind: ChangeKind,
+    /// The path it happened to.
+    pub path: String,
+}
+
+/// How a local ref relates to its remote counterpart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AheadBehind {
+    /// Commits the local ref has that the remote does not.
+    pub ahead: usize,
+    /// Commits the remote has that the local ref does not.
+    pub behind: usize,
+}
+
+impl AheadBehind {
+    /// Neither side has anything the other lacks.
+    pub fn is_synced(self) -> bool {
+        self.ahead == 0 && self.behind == 0
+    }
+
+    /// Both sides have commits the other lacks — rendered independently.
+    pub fn is_diverged(self) -> bool {
+        self.ahead > 0 && self.behind > 0
+    }
+}
+
+/// The outcome of a merge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MergeOutcome {
+    /// Already contained; nothing to do.
+    UpToDate,
+    /// The branch pointer moved forward.
+    FastForward {
+        /// The commit the branch now points at.
+        to: Oid,
+    },
+    /// A merge commit was created.
+    Merged {
+        /// The merge commit.
+        commit: Oid,
+    },
+    /// Conflicts were left in the index for the user to resolve.
+    Conflicted {
+        /// The conflicting paths.
+        paths: Vec<String>,
+    },
+    /// The merge was staged but not committed, as asked.
+    Staged,
+}
+
+/// A commit's author or committer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signature {
+    /// Display name.
+    pub name: String,
+    /// Email address.
+    pub email: String,
+}
+
+/// A commit, as the domain needs to see it.
+#[derive(Debug, Clone)]
+pub struct Commit {
+    /// Its object id.
+    pub oid: Oid,
+    /// The tree it points at.
+    pub tree: Oid,
+    /// Its parents.
+    pub parents: Vec<Oid>,
+    /// The full commit message, trailers included.
+    pub message: String,
+}
+
+/// Errors from Git operations.
+#[derive(Debug, Error, Diagnostic)]
+pub enum GitError {
+    /// The path is not inside a Git repository.
+    #[error("`{}` is not a Git repository", path.display())]
+    #[diagnostic(
+        code(tpl::git::not_a_repository),
+        help("run `git init` first, or `git tpl init --init` to do both")
+    )]
+    NotARepository {
+        /// The path that was searched from.
+        path: PathBuf,
+    },
+
+    /// A ref does not exist.
+    #[error("`{name}` does not exist")]
+    #[diagnostic(code(tpl::git::no_such_ref))]
+    NoSuchRef {
+        /// The ref that was looked for.
+        name: String,
+    },
+
+    /// A revision could not be resolved.
+    #[error("could not resolve `{revision}` in `{origin}`")]
+    #[diagnostic(
+        code(tpl::git::no_such_revision),
+        help("`ref` must be a branch, tag or commit that exists in the template repository")
+    )]
+    NoSuchRevision {
+        /// The revision that was asked for.
+        revision: String,
+        /// The repository it was looked for in.
+        // Not named `source`: thiserror reserves that name for `#[source]`.
+        origin: String,
+    },
+
+    /// Authentication failed.
+    ///
+    /// Reported separately from other network failures because the remedy is
+    /// entirely different, and libgit2's own message ("authentication
+    /// required but no callback set") tells a user nothing actionable.
+    #[error("authentication failed for `{url}`")]
+    #[diagnostic(
+        code(tpl::git::auth),
+        help(
+            "tried: {methods}.\n\
+             For SSH, check that an agent is running and holds your key:\n  \
+             ssh-add -l\n\
+             For HTTPS, check that a credential helper is configured:\n  \
+             git config --get credential.helper"
+        )
+    )]
+    Authentication {
+        /// The remote that refused.
+        url: String,
+        /// The methods that were attempted.
+        methods: String,
+    },
+
+    /// A network operation failed for a reason other than authentication.
+    #[error("could not reach `{url}`")]
+    #[diagnostic(code(tpl::git::network))]
+    Network {
+        /// The remote.
+        url: String,
+        /// libgit2's message.
+        reason: String,
+    },
+
+    /// The worktree has uncommitted changes and the operation needs it clean.
+    #[error("the working tree has uncommitted changes")]
+    #[diagnostic(
+        code(tpl::git::dirty_worktree),
+        help("commit or stash them first — this operation performs a merge")
+    )]
+    DirtyWorktree,
+
+    /// Pushing would overwrite commits the remote has and we do not.
+    #[error("`{ref_name}` has diverged from the remote")]
+    #[diagnostic(
+        code(tpl::git::diverged),
+        help(
+            "local is {ahead} ahead and {behind} behind. Both were rendered independently; reconcile them:\n  \
+             git tpl fetch\n  \
+             git merge {remote_ref}\n  \
+             git tpl push"
+        )
+    )]
+    Diverged {
+        /// The local ref.
+        ref_name: String,
+        /// The remote-tracking ref.
+        remote_ref: String,
+        /// Commits only we have.
+        ahead: usize,
+        /// Commits only the remote has.
+        behind: usize,
+    },
+
+    /// A commit cannot be created without an identity.
+    #[error("no Git identity configured")]
+    #[diagnostic(
+        code(tpl::git::no_identity),
+        help(
+            "git-tpl creates commits, which need an author:\n  \
+             git config --global user.name  \"Your Name\"\n  \
+             git config --global user.email \"you@example.com\""
+        )
+    )]
+    NoIdentity,
+
+    /// Anything else libgit2 reported.
+    #[error("{context}")]
+    #[diagnostic(code(tpl::git::backend))]
+    Backend {
+        /// What we were trying to do.
+        context: String,
+        /// libgit2's message.
+        reason: String,
+    },
+}
+
+/// The operations git-tpl needs from a Git implementation.
+///
+/// Every method takes and returns types defined in this module, never the
+/// backend's own. That is what makes the backend replaceable, and it is
+/// enforced by a hook rather than by hope.
+pub trait GitBackend {
+    /// The repository's working directory.
+    fn workdir(&self) -> Result<PathBuf, GitError>;
+
+    /// Whether the repository has no commits yet.
+    fn is_empty(&self) -> Result<bool, GitError>;
+
+    /// Whether the working tree and index are clean.
+    fn is_clean(&self) -> Result<bool, GitError>;
+
+    /// The commit `HEAD` points at, if any.
+    fn head_commit(&self) -> Result<Option<Oid>, GitError>;
+
+    /// The short name of the current branch, if any.
+    fn head_branch(&self) -> Result<Option<String>, GitError>;
+
+    /// Resolve a ref to the commit it points at.
+    fn resolve_ref(&self, name: &str) -> Result<Option<Oid>, GitError>;
+
+    /// Read a commit.
+    fn commit(&self, oid: Oid) -> Result<Commit, GitError>;
+
+    /// List a tree, recursively, in Git's canonical (sorted) order.
+    ///
+    /// Traversal order is Git's rather than the filesystem's, because
+    /// `readdir` order varies by filesystem and rendering must be
+    /// deterministic.
+    fn list_tree(&self, tree: Oid) -> Result<Vec<TreeEntry>, GitError>;
+
+    /// Read a blob's contents.
+    fn read_blob(&self, oid: Oid) -> Result<Vec<u8>, GitError>;
+
+    /// Write a blob and return its id.
+    fn write_blob(&self, content: &[u8]) -> Result<Oid, GitError>;
+
+    /// Build a tree from a flat list of path/blob/mode entries.
+    fn build_tree(&self, entries: &[TreeEntry]) -> Result<Oid, GitError>;
+
+    /// Create a commit without moving any ref.
+    fn create_commit(&self, tree: Oid, parents: &[Oid], message: &str) -> Result<Oid, GitError>;
+
+    /// Point a ref at a commit.
+    fn set_ref(&self, name: &str, oid: Oid, reflog_message: &str) -> Result<(), GitError>;
+
+    /// The differences between two trees, in path order.
+    fn diff_trees(&self, from: Option<Oid>, to: Oid) -> Result<Vec<Change>, GitError>;
+
+    /// A textual patch between two trees, as `git diff` would render it.
+    fn diff_patch(&self, from: Option<Oid>, to: Oid, paths: &[String]) -> Result<String, GitError>;
+
+    /// Whether `ancestor` is reachable from `descendant`.
+    fn is_ancestor(&self, ancestor: Oid, descendant: Oid) -> Result<bool, GitError>;
+
+    /// How two commits relate.
+    fn ahead_behind(&self, local: Oid, upstream: Oid) -> Result<AheadBehind, GitError>;
+
+    /// Merge a commit into the current branch.
+    ///
+    /// Implemented with the backend's own merge. git-tpl contributes no
+    /// conflict resolution of its own — see
+    /// `docs/adr/002-no-custom-reconciliation.md`.
+    fn merge(
+        &self,
+        commit: Oid,
+        message: &str,
+        commit_result: bool,
+    ) -> Result<MergeOutcome, GitError>;
+
+    /// Fetch refs matching a refspec from a remote.
+    fn fetch_refspec(&self, remote: &str, refspec: &str) -> Result<(), GitError>;
+
+    /// Push refs matching a refspec to a remote.
+    fn push_refspec(&self, remote: &str, refspec: &str) -> Result<(), GitError>;
+
+    /// Read a `tpl.*` configuration value.
+    fn config_string(&self, key: &str) -> Result<Option<String>, GitError>;
+
+    /// Read a boolean `tpl.*` configuration value.
+    fn config_bool(&self, key: &str) -> Result<Option<bool>, GitError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_oid_round_trips_through_hex() {
+        let hex_str = "4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29";
+        let oid = Oid::parse(hex_str).unwrap();
+        assert_eq!(oid.to_hex(), hex_str);
+        assert_eq!(oid.short(), "4f2c1a9");
+    }
+
+    #[test]
+    fn a_malformed_oid_is_rejected_rather_than_truncated() {
+        assert_eq!(Oid::parse("abc"), None);
+        assert_eq!(Oid::parse("zz2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29"), None);
+    }
+
+    /// Git records only the executable bit, which is why it is the only
+    /// permission rendering preserves.
+    #[test]
+    fn file_modes_round_trip() {
+        for mode in [
+            FileMode::Blob,
+            FileMode::BlobExecutable,
+            FileMode::Link,
+            FileMode::Tree,
+            FileMode::Commit,
+        ] {
+            assert_eq!(FileMode::from_u32(mode.as_u32()), Some(mode));
+        }
+        assert_eq!(FileMode::from_u32(0o100777), None);
+    }
+
+    #[test]
+    fn change_labels_are_the_same_width_so_paths_align() {
+        let widths: Vec<_> = [ChangeKind::Added, ChangeKind::Modified, ChangeKind::Deleted]
+            .iter()
+            .map(|k| k.label().len())
+            .collect();
+        assert!(widths.windows(2).all(|w| w[0] == w[1]), "{widths:?}");
+    }
+
+    #[test]
+    fn divergence_needs_commits_on_both_sides() {
+        assert!(
+            AheadBehind {
+                ahead: 2,
+                behind: 1
+            }
+            .is_diverged()
+        );
+        assert!(
+            !AheadBehind {
+                ahead: 2,
+                behind: 0
+            }
+            .is_diverged()
+        );
+        assert!(
+            !AheadBehind {
+                ahead: 0,
+                behind: 1
+            }
+            .is_diverged()
+        );
+        assert!(
+            AheadBehind {
+                ahead: 0,
+                behind: 0
+            }
+            .is_synced()
+        );
+    }
+}
