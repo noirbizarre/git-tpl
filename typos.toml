@@ -1,0 +1,18 @@
+[files]
+extend-exclude = [
+  # Short SHAs in the changelog and the lockfiles read as typos.
+  "Cargo.lock",
+  "mise.lock",
+  "CHANGELOG.md",
+  # Snapshots record output verbatim, including any deliberate typo under test.
+  "tests/snapshots/**",
+  # Build output.
+  "site/**",
+]
+
+[default.extend-words]
+# A deliberate typo. `tests/questions.rs` asserts that git-tpl reports it with a
+# "did you mean `project_name`?" suggestion, and `docs/templates/questions.md`
+# shows that diagnostic. Correcting it here would delete the test that proves
+# the suggestion works.
+projct = "projct"

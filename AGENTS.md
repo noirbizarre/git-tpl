@@ -1,0 +1,144 @@
+# AGENTS.md
+
+Notes for anyone — human or otherwise — changing this repository.
+
+## What this project is
+
+git-tpl renders a template into a Git ref. Updating the template advances that
+ref. The user merges it with plain `git merge`.
+
+That sentence is the whole design. Most proposals that feel like improvements
+are proposals to do something Git already does, and they should be declined.
+
+Read `docs/concepts/git-model.md` before changing anything structural.
+
+## Non-negotiable invariants
+
+Each of these is enforced by a hook or a test. If you find yourself working
+around one, you are about to break the project.
+
+1. **`update` does not modify `HEAD`, the index or the worktree.** Not "should
+   not" — does not. The renderer writes into a `TreeBuilder`, so there is no
+   code path that opens a project file for writing. Keep it that way.
+   `tests/update.rs` fingerprints all three.
+
+2. **Rendering is deterministic.** Same template revision, same answers, same
+   data → byte-identical tree. This is what makes an unchanged template produce
+   no commit. Never introduce a timestamp, an environment read, a hash-map
+   iteration over user data, or a filesystem traversal order.
+
+3. **Template refs are append-only.** The parent is the previous tip, always.
+   Never amend, never force. Rewriting destroys the merge base a user's branch
+   depends on.
+
+4. **`git2` appears only in `src/git/libgit2.rs`.** The `git-backend-isolation`
+   prek hook fails the commit otherwise. If you need a Git capability, add it to
+   the `GitBackend` trait — do not import `git2` "just this once".
+
+5. **Templates cannot execute code.** No subprocess, no shell, no eval, no
+   hooks. Network access exists only in `src/data/`. Template repositories and
+   remote data are untrusted input.
+
+## Layout
+
+```
+src/
+├── lib.rs           the library surface
+├── main.rs          the git-tpl binary
+├── exit.rs          exit codes, defined once
+├── config.rs        .config/git.tpl.toml
+├── gitconfig.rs     tpl.* preferences and their precedence
+├── refs.rs          template id → refs/tpl/<id>
+├── provenance.rs    commit trailers
+├── template/        manifest, questions, the Value type
+├── context.rs       the shared evaluation context
+├── graph.rs         the dependency DAG
+├── eval.rs          expression evaluation and prompting
+├── render.rs        the tree walk
+├── data/            data sources
+├── git/             the Git abstraction
+│   ├── mod.rs       GitBackend — our types, never git2's
+│   └── libgit2.rs   the only implementation
+├── ops/             orchestration, one function per command
+├── cli.rs           argument types only
+├── theme.rs         formatting helpers that return String
+├── prompt.rs        the demand-based prompter
+└── commands/        one module per subcommand
+```
+
+Dependencies point inward. Nothing below `ops` knows a command exists; nothing
+in `template/` or `render.rs` knows about the CLI.
+
+## When you touch...
+
+**`src/template/` or `src/config.rs`** — the on-disk format is a contract. A
+breaking change needs a `!` on the commit and an ADR.
+
+**`src/render.rs`** — re-read invariant 2. Anything that could vary between two
+runs is a bug, not a feature.
+
+**`src/git/mod.rs`** — adding to the trait is right; adding a `git2` type to a
+signature is not.
+
+**`src/ops/mod.rs`** — this is where the commands' semantics live. A change here
+almost certainly needs a documentation change in `docs/usage/`.
+
+**Anything user-visible** — update the corresponding page under `docs/`. In the
+same PR. A feature is not finished when it works; it is finished when someone
+else can find out that it works.
+
+## Style
+
+**Every non-obvious line carries a comment saying why.** Not what — the code
+says what. Ideally naming the failure it prevents:
+
+```rust
+// Rejected rather than resolved. A template repository is untrusted input,
+// and `..` here is a request to write outside the tree.
+```
+
+A comment that restates the code is worse than none. A comment recording the
+bug that motivated the line saves the next person an afternoon.
+
+**Errors are typed and actionable.** `thiserror` for the library, `miette` at
+the binary edge. A diagnostic must carry the two things the user does not
+already know: what specifically failed, and what to do. Compare:
+
+```
+x could not load template data source `things`          ← useless
+help: source: data/absent.toml                          ← useful
+      reason: no such file in the template repository at revision ffa9b4a
+```
+
+Diagnostic codes are `tpl::<area>::<kind>`.
+
+**Test names are sentences.** `an_unchanged_template_produces_no_commit`, not
+`test_update_2`. The name should say what would be broken if it failed.
+
+**Integration tests use real Git.** No mocks, ever. The premise of the project
+is that Git's behaviour is the behaviour; a test against a stub would test the
+stub. `tests/common/mod.rs` builds real repositories in temporary directories.
+
+## Commits
+
+Conventional Commits, enforced by commitlint on `commit-msg`. The type becomes a
+changelog heading, so choose it as if someone will read it in release notes —
+because they will.
+
+## Before you push
+
+```sh
+mise run ci
+```
+
+Formatting, Clippy, spelling, workflow linting, tests and the documentation
+build. Same as CI.
+
+## Things that will be declined
+
+With reasons, in `docs/development/contributing.md`. Briefly: custom merge
+logic, a second template engine, code execution from templates, runtime values
+in the render context, automatic ref push/fetch, Copier compatibility.
+
+If you think one of these is wrong, the way to change it is an ADR that
+supersedes the existing one — not a PR that quietly works around it.

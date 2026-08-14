@@ -1,0 +1,75 @@
+default_install_hook_types = ["pre-commit", "commit-msg"]
+
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "check-added-large-files" },
+  { id = "check-merge-conflict" },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+  { id = "check-json" },
+  { id = "end-of-file-fixer", exclude_types = ["rust"] },
+  { id = "mixed-line-ending" },
+  { id = "trailing-whitespace", exclude = "^tests/(snapshots/.*\\.snap|fixtures/.*)$" },
+]
+
+[[repos]]
+repo = "https://github.com/alessandrojcm/commitlint-pre-commit-hook"
+rev = "v9.21.0"
+
+[[repos.hooks]]
+id = "commitlint"
+stages = ["commit-msg"]
+additional_dependencies = ["@commitlint/config-conventional"]
+
+[[repos]]
+repo = "local"
+
+# Suppressions are configured in .github/actionlint.yml, not here: the same
+# file serves `mise run lint:actions`, so the two cannot disagree.
+[[repos.hooks]]
+id = "actionlint"
+name = "actionlint"
+language = "system"
+entry = "actionlint"
+files = "^\\.github/workflows/.*\\.ya?ml$"
+
+[[repos.hooks]]
+id = "typos"
+name = "typos"
+language = "system"
+entry = "typos"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "fmt"
+name = "cargo fmt"
+language = "system"
+entry = "cargo fmt --all -- --check"
+files = "\\.rs$"
+pass_filenames = false
+
+[[repos.hooks]]
+id = "clippy"
+name = "cargo clippy"
+language = "system"
+entry = "cargo clippy --all-targets --all-features -- -D warnings"
+files = "\\.rs$"
+pass_filenames = false
+
+# The Git backend is replaceable only for as long as `git2` types never reach
+# the domain (ADR-011). The `GitBackend` trait alone does not enforce that: one
+# `use git2::Oid` in render.rs and the abstraction is decorative, with nothing
+# failing until someone actually attempts the swap years later. This is the
+# enforcement.
+#
+# The lookbehind is load-bearing: a plain `git2::` also matches `libgit2::`,
+# which every module legitimately names when it constructs a backend, and the
+# hook would have failed on day one for the wrong reason.
+[[repos.hooks]]
+id = "git-backend-isolation"
+name = "git2 is confined to the libgit2 backend"
+language = "system"
+entry = "bash -c '! grep -rnP --include=*.rs \"(?<![A-Za-z0-9_])git2::\" src | grep -v \"^src/git/libgit2\\.rs:\"'"
+files = "\\.rs$"
+pass_filenames = false

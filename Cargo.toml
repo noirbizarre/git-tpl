@@ -1,0 +1,97 @@
+# git-tpl — Git-native project templates.
+#
+# Single crate, `[lib]` + `[[bin]]`, matching the convention of the sibling
+# projects (gh-ship, gh-settings). The library holds the whole engine; the
+# binary is a thin CLI over it, so integration tests can exercise either.
+# See docs/adr/004-single-crate.md.
+
+[package]
+name = "git-tpl"
+version = "0.1.0"
+edition = "2024"
+# The MSRV. Checked by a dedicated CI job, which greps this very line — keep it
+# a plain literal. `rust-toolchain.toml` separately pins the channel to develop
+# against; the two answer different questions.
+rust-version = "1.88"
+license = "MIT"
+authors = ["Axel H. <noirbizarre@gmail.com>"]
+description = "Git-native project templates"
+repository = "https://github.com/rawtools/git-tpl"
+homepage = "https://rawtools.github.io/git-tpl/"
+documentation = "https://rawtools.github.io/git-tpl/"
+readme = "README.md"
+keywords = ["git", "template", "scaffolding", "minijinja", "project"]
+categories = ["command-line-utilities", "development-tools"]
+
+# The binary name is mandated by Git: `git tpl ...` resolves to an executable
+# named `git-tpl` on PATH. It is not a stylistic choice, and renaming it breaks
+# the only invocation the project is named after.
+[[bin]]
+name = "git-tpl"
+path = "src/main.rs"
+
+# The engine is a library first. The binary is one frontend; `gh-tpl` will be
+# another. Integration tests use both — the library for engine-level assertions,
+# the binary for output snapshots.
+[lib]
+name = "tpl"
+path = "src/lib.rs"
+
+[dependencies]
+# Errors & diagnostics
+thiserror = "2"
+miette = { version = "7", features = ["fancy"] }
+
+# Git. libgit2 bindings. `vendored-libgit2` builds libgit2 from source rather
+# than linking whatever the host happens to ship, so the six release targets and
+# every developer machine get identical Git semantics.
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+
+# Templating. The only rendering engine, deliberately.
+# `builtins` provides the filters templates actually reach for (lower, replace,
+# trim). `loader` lets the renderer resolve `{% include %}` within the template
+# tree rather than the filesystem.
+minijinja = { version = "2", features = ["builtins", "loader"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+console = "0.16"
+demand = "2"
+
+# Configuration & data
+serde = { version = "1", features = ["derive"] }
+# `preserve_order` keeps JSON object key order stable. Data files feed
+# `choices_from`, and a choice list whose order changes between runs would make
+# rendering non-deterministic for no reason. See ADR-006.
+serde_json = { version = "1", features = ["preserve_order"] }
+toml = { version = "0.9", features = ["preserve_order"] }
+# Question declaration order breaks ties in the dependency sort (ADR-007), so
+# it is the only ordering a template author controls and must survive parsing.
+# A plain map would lose it.
+indexmap = { version = "2", features = ["serde"] }
+# The answers digest recorded in the provenance trailers. `sha2` rather than a
+# faster non-cryptographic hash because the digest is written into Git history
+# and read back to decide whether a re-render is needed.
+sha2 = "0.10"
+hex = "0.4"
+# A remote template is cloned into a fresh temporary directory per run.
+# Caching between runs would be faster, but a stale cache silently rendering an
+# old template is a far worse failure than a slow fetch — in a tool whose whole
+# premise is reproducibility.
+tempfile = "3"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+insta = { version = "1", features = ["filters"] }
+# The integration harness fingerprints the worktree to prove `update` does not
+# touch it. Already a runtime dependency; listed for the tests' own use.
+sha2 = "0.10"
+hex = "0.4"
+rstest = "0.26"
+pretty_assertions = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

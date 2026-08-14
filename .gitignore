@@ -1,0 +1,15 @@
+/target
+
+# Zensical documentation build output
+site/
+
+# Coverage output
+lcov.info
+
+# Local mise overrides that are not shared
+mise.local.toml
+
+# `mise.lock` IS committed, deliberately: it pins tools to exact builds so CI
+# and a developer's machine run the same versions. Negated here because a
+# global gitignore commonly excludes it.
+!mise.lock
