@@ -31,7 +31,7 @@ Instead, a template *declares* the data it wants. The data layer owns:
 
 - resolution — turning a `source` into something concrete
 - loading — reading a file, or making a request
-- parsing — TOML and JSON, into structured values
+- parsing — TOML, JSON and YAML, into structured values
 - caching — one fetch per source per run, no matter how many things use it
 - validation — a parse failure names the source
 - provenance — recording what contributed to a rendering
@@ -68,7 +68,7 @@ See [Local data](local.md) and [Remote data](remote.md).
 
 ## Formats
 
-TOML and JSON, chosen by the file extension, overridable:
+TOML, JSON and YAML, chosen by the file extension, overridable:
 
 ```toml
 [data.registry]
@@ -76,9 +76,43 @@ source = "https://example.com/registry"
 format = "json"
 ```
 
-Two formats is a deliberate limit. Both are unambiguous, both have exact type
-mappings, and neither has YAML's habit of turning `no` into `false` and `1.0`
-into a float. Adding a format needs a real reason.
+| Extension | Format |
+|---|---|
+| `.toml`, anything else | TOML |
+| `.json` | JSON |
+| `.yaml`, `.yml` | YAML |
+
+Three formats is a deliberate limit, and adding a fourth needs a real reason.
+All three have exact type mappings, and whichever you pick, the same file
+produces the same context.
+
+### About YAML
+
+YAML is accepted as **YAML 1.2**, which is not the YAML that earned the
+reputation. Under the older 1.1 rules `no` resolved to `false`, `on` to `true`
+and `12:30:00` to the integer 45000 — the kind of thing that changes a rendered
+tree without changing a character of the template. None of that happens here:
+
+```yaml
+country: no       # the string "no", not false
+at: 12:30:00      # the string "12:30:00"
+mode: 0755        # the string "0755"
+enabled: true     # a boolean, because it was written as one
+```
+
+Two further points, because a data source is untrusted input:
+
+- **Duplicate keys, multiple documents and unbounded alias expansion are
+  refused**, rather than resolved to whichever answer the parser happened to
+  reach first.
+- **A tag is not an instruction.** `!!python/object:os.system` is the classic
+  YAML exploit; here the tag is dropped and the scalar kept, because git-tpl
+  constructs nothing from data.
+
+One thing YAML 1.2 removed that you may miss: the **merge key `<<` is not
+merged**. Anchors and aliases work, but `<<: *base` leaves a literal `<<` key in
+the mapping rather than folding its contents in. If you want shared fragments,
+alias the whole node.
 
 ## Types are preserved
 

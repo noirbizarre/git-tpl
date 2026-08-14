@@ -37,7 +37,7 @@ main:  A ─── M ─── B ─── M'
 | Dependency graph | ✅ static, topologically sorted, cycles and typos rejected up front |
 | Template data sources | ✅ read from the template's Git tree at the resolved revision |
 | Project data sources | ✅ with traversal refused |
-| TOML and JSON | ✅ types preserved |
+| TOML, JSON and YAML | ✅ types preserved; YAML 1.2, hostile documents refused |
 | Provenance | ✅ commit trailers, round-tripped |
 | Determinism | ✅ asserted by test; no runtime context exists |
 | Local template development | ✅ including `--dirty` |

@@ -70,6 +70,12 @@ serde = { version = "1", features = ["derive"] }
 # rendering non-deterministic for no reason. See ADR-006.
 serde_json = { version = "1", features = ["preserve_order"] }
 toml = { version = "1.1", features = ["preserve_order"] }
+# YAML 1.2, which is the only kind worth accepting: the 1.1 scalar rules are
+# what gave YAML its reputation, resolving `no` to false and `12:30:00` to a
+# sexagesimal integer. `serde_norway` is the maintained fork of the archived
+# `serde_yaml`, named for that bug. It also rejects duplicate keys and bounds
+# alias expansion, both of which matter for a remote data source.
+serde_norway = "0.9"
 # Question declaration order breaks ties in the dependency sort (ADR-007), so
 # it is the only ordering a template author controls and must survive parsing.
 # A plain map would lose it.

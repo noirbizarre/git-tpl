@@ -67,20 +67,20 @@ pub enum Format {
     Toml,
     /// JSON.
     Json,
+    /// YAML 1.2.
+    Yaml,
 }
 
 impl Format {
     /// Infer from a path's extension, defaulting to TOML.
     fn infer(source: &str) -> Self {
         let path = source.split(['?', '#']).next().unwrap_or(source);
-        if path
-            .rsplit('.')
-            .next()
-            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
-        {
-            Format::Json
-        } else {
-            Format::Toml
+        match path.rsplit('.').next() {
+            Some(e) if e.eq_ignore_ascii_case("json") => Format::Json,
+            Some(e) if e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml") => {
+                Format::Yaml
+            }
+            _ => Format::Toml,
         }
     }
 
@@ -89,6 +89,10 @@ impl Format {
         match format {
             "toml" => Some(Format::Toml),
             "json" => Some(Format::Json),
+            // Both spellings, because a source whose extension is `.yml` and
+            // whose `format` must be written `yaml` is a papercut with no
+            // upside.
+            "yaml" | "yml" => Some(Format::Yaml),
             _ => None,
         }
     }
@@ -414,6 +418,13 @@ fn parse(name: &str, location: &str, format: Format, bytes: &[u8]) -> Result<Val
                 location: location.to_string(),
                 reason: e.to_string(),
             }),
+        Format::Yaml => serde_norway::from_str::<serde_norway::Value>(text)
+            .map(Value::from)
+            .map_err(|e| DataError::Parse {
+                name: name.to_string(),
+                location: location.to_string(),
+                reason: e.to_string(),
+            }),
     }
 }
 
@@ -437,6 +448,9 @@ mod tests {
     #[case("data/licenses.toml", Format::Toml)]
     #[case("data/registry.json", Format::Json)]
     #[case("data/REGISTRY.JSON", Format::Json)]
+    #[case("data/teams.yaml", Format::Yaml)]
+    #[case("data/teams.yml", Format::Yaml)]
+    #[case("data/TEAMS.YML", Format::Yaml)]
     #[case("https://example.com/registry", Format::Toml)]
     fn the_format_is_inferred_from_the_extension(#[case] source: &str, #[case] expected: Format) {
         assert_eq!(Format::infer(source), expected);
@@ -488,6 +502,125 @@ mod tests {
         .unwrap();
 
         assert_eq!(from_json, from_toml);
+    }
+
+    #[test]
+    fn yaml_parses_to_the_same_value_shape_as_toml() {
+        let from_yaml = parse(
+            "x",
+            "x.yaml",
+            Format::Yaml,
+            b"versions:\n  timeout: 30\n  strict: true\n",
+        )
+        .unwrap();
+        let from_toml = parse(
+            "x",
+            "x.toml",
+            Format::Toml,
+            b"[versions]\ntimeout = 30\nstrict = true\n",
+        )
+        .unwrap();
+
+        assert_eq!(from_yaml, from_toml);
+    }
+
+    /// The reason YAML is acceptable at all, and the reason the parser is
+    /// pinned to a 1.2 implementation. Under YAML 1.1 every one of these
+    /// resolves to something else — `no` to false, `12:30:00` to 45000 — which
+    /// would silently change a rendered tree. If this test ever fails, the
+    /// dependency has regressed to 1.1 and YAML support should be withdrawn
+    /// rather than patched around.
+    #[rstest]
+    #[case(b"country: no\n", "country", Value::String("no".into()))]
+    #[case(b"country: NO\n", "country", Value::String("NO".into()))]
+    #[case(b"answer: yes\n", "answer", Value::String("yes".into()))]
+    #[case(b"toggle: on\n", "toggle", Value::String("on".into()))]
+    #[case(b"at: 12:30:00\n", "at", Value::String("12:30:00".into()))]
+    #[case(b"mode: 0755\n", "mode", Value::String("0755".into()))]
+    #[case(b"real: true\n", "real", Value::Bool(true))]
+    fn yaml_uses_the_1_2_scalar_rules(
+        #[case] input: &[u8],
+        #[case] key: &str,
+        #[case] expected: Value,
+    ) {
+        let parsed = parse("x", "x.yaml", Format::Yaml, input).unwrap();
+        let Value::Table(table) = parsed else {
+            panic!("expected a table, got {parsed:?}");
+        };
+        assert_eq!(table.get(key), Some(&expected));
+    }
+
+    /// Anchors are expanded, but `<<` is an ordinary key: the merge key is a
+    /// separate specification that YAML 1.2 dropped. A template author who
+    /// expects `d.x` here gets `d['<<'].x`, so it is worth failing loudly in a
+    /// test rather than in someone's rendered file.
+    #[test]
+    fn a_yaml_alias_is_expanded_but_a_merge_key_is_not_merged() {
+        let parsed = parse(
+            "x",
+            "x.yaml",
+            Format::Yaml,
+            b"base: &b\n  x: 1\nuse: *b\nd:\n  <<: *b\n  y: 2\n",
+        )
+        .unwrap();
+        let Value::Table(table) = parsed else {
+            panic!("expected a table");
+        };
+
+        assert_eq!(
+            table.get("use"),
+            Some(&Value::Table(BTreeMap::from([(
+                "x".to_string(),
+                Value::Integer(1)
+            )])))
+        );
+        let Some(Value::Table(d)) = table.get("d") else {
+            panic!("expected `d` to be a table");
+        };
+        assert!(d.contains_key("<<"), "the merge key stays a literal key");
+        assert!(!d.contains_key("x"), "and is not merged into the mapping");
+    }
+
+    /// A data source is untrusted input, and these are the three ways a YAML
+    /// document turns that into a problem: ambiguity, unbounded expansion, and
+    /// a tag asking to construct something. All three must fail or defuse
+    /// rather than surprise.
+    #[rstest]
+    #[case::duplicate_keys(b"a: 1\na: 2\n".to_vec())]
+    #[case::more_than_one_document(b"a: 1\n---\nb: 2\n".to_vec())]
+    #[case::billion_laughs(billion_laughs())]
+    fn a_hostile_yaml_document_is_refused(#[case] input: Vec<u8>) {
+        assert!(parse("x", "x.yaml", Format::Yaml, &input).is_err());
+    }
+
+    /// A tag is not an instruction. `!!python/object:os.system` is the classic
+    /// YAML deserialisation exploit, and here it is inert: the tag is dropped
+    /// and the scalar kept, because git-tpl constructs nothing from data.
+    #[test]
+    fn a_yaml_tag_is_inert() {
+        let parsed = parse(
+            "x",
+            "x.yaml",
+            Format::Yaml,
+            b"a: !!python/object:os.system 'ls'\n",
+        )
+        .unwrap();
+        let Value::Table(table) = parsed else {
+            panic!("expected a table");
+        };
+        assert_eq!(table.get("a"), Some(&Value::String("ls".into())));
+    }
+
+    fn billion_laughs() -> Vec<u8> {
+        let mut yaml = String::from("a: &a [x, x, x, x, x, x, x, x, x]\n");
+        for i in 0..8u8 {
+            let (this, prev) = ((b'b' + i) as char, (b'a' + i) as char);
+            let refs = std::iter::repeat_n(format!("*{prev}"), 9)
+                .collect::<Vec<_>>()
+                .join(", ");
+            yaml.push_str(&format!("{this}: &{this} [{refs}]\n"));
+        }
+        yaml.into_bytes()
     }
 
     #[test]
