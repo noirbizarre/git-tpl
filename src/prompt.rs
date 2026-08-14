@@ -105,7 +105,19 @@ impl Prompter for Interactive {
                     .or(default)
                     .map(ToString::to_string)
                     .unwrap_or_default();
-                Ok(Value::String(text_input(title, help, &placeholder)?))
+
+                loop {
+                    let value = Value::String(text_input(title, help, &placeholder)?);
+                    // Not `demand`'s own validator hook: `text_input` maps an
+                    // empty submission back to the placeholder, and a validator
+                    // runs on the typed text — so pressing Enter on a
+                    // pre-filled prompt would submit an unchecked default.
+                    match tpl::eval::validate_pattern(name, question, &value) {
+                        Ok(()) => return Ok(value),
+                        // Re-ask rather than abort, as the integer branch does.
+                        Err(error) => eprintln!("  {error}"),
+                    }
+                }
             }
         }
     }

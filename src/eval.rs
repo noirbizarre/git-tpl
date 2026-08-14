@@ -81,6 +81,23 @@ pub enum EvalError {
         choices: String,
     },
 
+    /// An answer does not match the question's `pattern`.
+    #[error("`{value}` is not a valid answer for `{question}`")]
+    #[diagnostic(
+        code(tpl::eval::pattern_mismatch),
+        help(
+            "{reason}\nif this answer was recorded by an earlier render, the template has since narrowed what it accepts — edit `{question}` in `.config/git.tpl.toml`"
+        )
+    )]
+    PatternMismatch {
+        /// The question.
+        question: String,
+        /// The rejected value.
+        value: String,
+        /// Why it was rejected — the question's `message`, or its `pattern`.
+        reason: String,
+    },
+
     /// A question needs an answer and there is no way to obtain one.
     #[error("no answer for `{question}`")]
     #[diagnostic(
@@ -270,6 +287,10 @@ pub fn resolve(
                 };
 
                 validate_choice(&node.key, question, &answer, choices.as_deref())?;
+                // Deliberately here rather than in the prompter: this covers
+                // the supplied branch too, which is where an answer replayed
+                // from `.config/git.tpl.toml` by `update` arrives.
+                validate_pattern(&node.key, question, &answer)?;
                 context.set_answer(&node.key, answer);
             }
         }
@@ -419,6 +440,44 @@ fn validate_choice(
     }
 
     Ok(())
+}
+
+/// Check an answer against the question's `pattern`.
+///
+/// Public because the interactive prompter re-asks on a mismatch rather than
+/// aborting, and must reject exactly what [`resolve`] would reject. `resolve`
+/// checks again regardless, so the prompt's loop is ergonomics and this is the
+/// enforcement point.
+pub fn validate_pattern(name: &str, question: &Question, answer: &Value) -> Result<(), EvalError> {
+    let Some(pattern) = question.pattern.as_deref() else {
+        return Ok(());
+    };
+
+    // Only text is matched. The manifest refuses `pattern` on any other kind,
+    // so a non-string here is a value that failed to coerce, and `coerce` has
+    // already reported it more precisely than a regex could.
+    let Value::String(text) = answer else {
+        return Ok(());
+    };
+
+    // Unreachable: `Manifest::validate` compiled this pattern at load time. A
+    // panic here would turn a hypothetical into a crash, and skipping the check
+    // is the same outcome as the pattern not being there.
+    let Ok(regex) = regex_lite::Regex::new(pattern) else {
+        return Ok(());
+    };
+
+    if regex.is_match(text) {
+        return Ok(());
+    }
+
+    Err(EvalError::PatternMismatch {
+        question: name.to_string(),
+        value: text.clone(),
+        reason: question
+            .pattern_message()
+            .unwrap_or_else(|| format!("must match `{pattern}`")),
+    })
 }
 
 /// The templates a `{% import %}` or `{% include %}` may resolve to.

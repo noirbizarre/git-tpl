@@ -10,7 +10,7 @@ version of the project is worse than none, because it is believed.
 ## Where things stand
 
 **The core model works end to end.** `init → update → diff → merge` on real
-repositories, with real libgit2 merges and real conflicts. 436 tests pass.
+repositories, with real libgit2 merges and real conflicts. 474 tests pass.
 
 ```
 main:  A ─── M ─── B ─── M'
@@ -31,6 +31,7 @@ main:  A ─── M ─── B ─── M'
 | `merge` | ✅ libgit2 merge, `--abort`, zero custom conflict logic |
 | `fetch` / `push` | ✅ explicit refspecs, never forced, divergence refused |
 | Questions | ✅ string, boolean, integer, choice, multi_choice |
+| Question validation | ✅ `pattern` + `message` on `string` questions; checked wherever an answer arrives, compiled at load time |
 | Answers from a file | ✅ `--answers-from`, TOML/JSON/YAML, repeatable; unknown keys ignored and reported |
 | Conditional questions | ✅ skipped questions are *absent*, not null |
 | Dynamic defaults | ✅ evaluated at prompt time |
@@ -83,7 +84,7 @@ access on every run.
 That is a user-side fact — it belongs on the machine of the only party who can
 consent to it, never in `.config/git.tpl.toml`, because a project cannot consent
 on its reader's behalf. So it arrives with the user configuration file, as
-`[trust].templates`, and is described in item 6 rather than duplicated here.
+`[trust].templates`, and is described in item 5 rather than duplicated here.
 
 The gate it plugs into already exists: `TrustGate` in `src/data/`, selected in
 `commands::trust`. A pattern match becomes one more arm alongside `--trust`.
@@ -114,20 +115,7 @@ preference:
 The CLI layer is already thin enough that the second binary is a `main.rs` and
 a different `bin_name`.
 
-### 4. Question validation
-
-```toml
-[questions.project_name]
-type = "string"
-pattern = "^[a-zA-Z][a-zA-Z0-9-_.]+$"
-message = "must start with a letter"
-```
-
-A bad distribution name is currently caught by the first `uv build` rather than
-at the prompt. `pattern` rather than `validator` on purpose: Copier's validator
-is an arbitrary expression, and that door stays shut.
-
-### 5. Distribution: AUR and Homebrew
+### 4. Distribution: AUR and Homebrew
 
 Cheap, because a release already produces six binaries and a `SHA256SUMS`. Both
 packages are consumers of an artefact that exists; neither needs a build change.
@@ -164,7 +152,7 @@ entry in `jdx/mise`'s `registry.toml` is what makes the short
 All of this is downstream of a version somebody else depends on. Packaging
 0.1.x means chasing it.
 
-### 6. A user configuration file
+### 5. A user configuration file
 
 Three unrelated frustrations with one home: retyping your name into every
 project, typing `https://github.com/` twenty times a day, and confirming the
@@ -307,7 +295,7 @@ Two things this is not, so it is not read as a weakening:
 - It does not create a place to record trust *in the project*. Trust lives on
   the machine of the only party who can consent to it.
 
-### 7. Testing a template
+### 6. Testing a template
 
 A template author has no way to say *"given these answers, this is what comes
 out"* except to render into a scratch directory and look. Every template above
@@ -379,7 +367,7 @@ CI without wrapping.
 The fixtures *are* answers files, read by the same parsers — which is why
 `--answers-from` had to come first.
 
-### 8. Template inheritance
+### 7. Template inheritance
 
 The largest template-side feature there is, and the one that decides whether an
 organisation with fifteen templates maintains fifteen copies of its CI workflow.
@@ -480,7 +468,7 @@ This changes the manifest, which is a contract, and changes what "the template"
 means for provenance and for `refs/tpl/<id>`. It needs **ADR-014** before it
 needs code.
 
-### 9. Smaller things
+### 8. Smaller things
 
 
 - `git tpl show <path>` — the template's version of one file. Wanted whenever a
@@ -541,7 +529,7 @@ it or not at all. What the ADR would have to establish:
   and 2 stay literally true, and their tests stay untouched. If either has to be
   relaxed, the feature is declined.
 - Trust is per-invocation and explicit, or it comes from the user's own
-  `[trust]` list (item 6). Never from `.config/git.tpl.toml` — the project
+  `[trust]` list (item 5). Never from `.config/git.tpl.toml` — the project
   cannot consent on the reader's behalf.
 - Tasks run on `init`, not on `update`. `update` being a ref-only operation is
   most of its value.
@@ -565,7 +553,7 @@ correct semantic — it is a tree diff — and it is documented, but the first
 **The template is cloned fresh on every run.** Correct and slow for a large
 remote template. A cache would need invalidation, and a stale cache silently
 rendering an old template is a far worse failure than a slow fetch — so this
-stays until it actually hurts. Inheritance (item 8) is what would make it
+stays until it actually hurts. Inheritance (item 7) is what would make it
 hurt: a three-deep chain is three clones per run.
 
 **A remote data source is fetched on every run.** Once per run, but never

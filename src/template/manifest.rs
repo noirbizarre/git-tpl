@@ -238,6 +238,38 @@ impl Manifest {
                     });
                 }
             }
+
+            if let Some(pattern) = &question.pattern {
+                // A pattern is checked against text. On a boolean or a choice
+                // it would either never fail or always fail, and the author
+                // would have to render to find out which.
+                if question.kind != super::QuestionKind::String {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: format!(
+                            "`pattern` only applies to `string` questions, not `{}`",
+                            question.kind.type_name()
+                        ),
+                    });
+                }
+
+                // Compiled now and discarded. The cost is one compile per load;
+                // the alternative is a template author learning their pattern
+                // does not parse from a bug report by one of their users.
+                if let Err(error) = regex_lite::Regex::new(pattern) {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: format!("`pattern` is not a valid regular expression: {error}"),
+                    });
+                }
+            } else if question.message.is_some() {
+                // Almost always a `pattern` that was renamed or deleted and a
+                // `message` left behind, which would then never be shown.
+                return Err(ManifestError::InvalidQuestion {
+                    name: name.clone(),
+                    reason: "`message` has no `pattern` to explain".into(),
+                });
+            }
         }
 
         Ok(())
@@ -530,6 +562,74 @@ mod tests {
         };
         assert_eq!(name, "ci");
         assert!(reason.contains("only applies to `string` questions"));
+    }
+
+    /// A pattern is checked against text; on any other kind it would either
+    /// never fail or always fail, and rendering is a poor way to find out.
+    #[test]
+    fn a_pattern_is_rejected_on_a_non_string_question() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.ci]
+            type = "boolean"
+            pattern = "^y"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "ci");
+        assert!(reason.contains("`pattern` only applies to `string` questions"));
+    }
+
+    /// Compiled at load time so the author finds out, rather than a user of
+    /// their template halfway through a questionnaire.
+    #[test]
+    fn an_uncompilable_pattern_is_rejected_at_load_time() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.slug]
+            type = "string"
+            pattern = "^[a-z"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "slug");
+        assert!(
+            reason.contains("not a valid regular expression"),
+            "{reason}"
+        );
+    }
+
+    /// Otherwise a deleted `pattern` leaves a message that is never shown.
+    #[test]
+    fn a_message_without_a_pattern_is_rejected() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.slug]
+            type = "string"
+            message = "lowercase only"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "slug");
+        assert!(reason.contains("`message` has no `pattern`"), "{reason}");
     }
 
     #[test]

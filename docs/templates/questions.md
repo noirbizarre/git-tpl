@@ -20,6 +20,8 @@ help = "Used for the package name and the README title"
 | `choices` | array | The offered choices, for `choice` and `multi_choice`. |
 | `choices_from` | string | A reference to a list, instead of `choices`. |
 | `default_from` | string | Where the *prompt default* comes from. `git:<key>` only. |
+| `pattern` | string | A regular expression every answer must match. `string` only. |
+| `message` | string | What to say when `pattern` rejects an answer. |
 
 ## Types
 
@@ -161,6 +163,57 @@ Precedence, highest first:
 
 A key that is unset, or set to an empty value, is simply absent: the question
 falls back to its `default`.
+
+## Validation
+
+A `string` question can constrain what it accepts with a regular expression:
+
+```toml
+[questions.package_name]
+type = "string"
+pattern = "^[a-z][a-z0-9-]*$"
+message = "must be lowercase and start with a letter"
+```
+
+At the prompt, an answer that does not match is rejected and the question is
+asked again — a typo costs you one line, not the six answers you have already
+given.
+
+```
+> Package name: My Package
+  `My Package` is not a valid answer for `package_name`
+```
+
+`message` is optional. Without it the pattern itself is quoted, which is honest
+but rarely as useful as a sentence.
+
+**It is a pattern, not an expression.** An arbitrary validator would be code
+running on a template's behalf, and templates cannot execute code — see
+[Security](../concepts/determinism.md#security). The syntax is the usual one minus
+backtracking: no lookaround and no backreferences, so a pattern costs time
+linear in the answer's length however it is written.
+
+**Checked wherever an answer arrives.** Not only at the prompt: `--answer`,
+`--answers-from` and the answers already recorded in `.config/git.tpl.toml` are
+all matched against it. So a template that *narrows* a pattern fails the next
+`update` of a project holding a value it would no longer accept, exactly as a
+[withdrawn choice](#when-a-choice-is-withdrawn) does:
+
+```
+`My-Thing` is not a valid answer for `slug`
+
+  help: must be lowercase and start with a letter
+        if this answer was recorded by an earlier render, the template has
+        since narrowed what it accepts — edit `slug` in `.config/git.tpl.toml`
+```
+
+Rendering from a value the template has disowned would produce a commit nobody
+asked for.
+
+Two things are rejected when the manifest loads rather than at the prompt: a
+`pattern` on any question that is not a `string`, and a pattern that does not
+compile. A `message` with no `pattern` is rejected too — it is almost always a
+`pattern` that was removed, leaving behind a sentence nothing would ever show.
 
 ## Choices
 

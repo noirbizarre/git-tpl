@@ -730,3 +730,192 @@ default_from = "git:tpl.ci"
         .failure()
         .says("only applies to `string` questions");
 }
+
+/// The manifest field that stops a bad distribution name reaching the first
+/// build. A pattern, never an expression: an arbitrary validator would be code
+/// running on a template's behalf, and invariant 5 says no.
+const PATTERNED: &str = r#"
+name = "patterned"
+
+[questions.slug]
+type = "string"
+default = "thing"
+pattern = "^[a-z][a-z0-9-]*$"
+message = "must be lowercase and start with a letter"
+"#;
+
+fn patterned_world() -> World {
+    World::with_template(PATTERNED, &[("slug.txt.jinja", "{{ slug }}\n")])
+}
+
+#[test]
+fn an_answer_matching_the_pattern_is_accepted() {
+    let world = patterned_world();
+
+    world.init(&["--answer", "slug=my-thing"]).success();
+    assert_eq!(world.project.read("slug.txt"), "my-thing\n");
+}
+
+/// The check has to cover the supplied path, not only the prompt: `--answer`
+/// is exactly how a bad value would otherwise reach a commit.
+#[test]
+fn an_answer_the_pattern_refuses_is_reported() {
+    let world = patterned_world();
+
+    world
+        .init(&["--answer", "slug=My Thing"])
+        .failure()
+        .says("slug")
+        .says("must be lowercase and start with a letter");
+}
+
+/// Without a `message` there is still something to say — the pattern itself.
+#[test]
+fn a_pattern_without_a_message_reports_the_pattern() {
+    let world = World::with_template(
+        r#"
+name = "bare"
+
+[questions.slug]
+type = "string"
+default = "thing"
+pattern = "^[a-z]+$"
+"#,
+        &[("slug.txt.jinja", "{{ slug }}\n")],
+    );
+
+    world
+        .init(&["--answer", "slug=NOPE"])
+        .failure()
+        .says("^[a-z]+$");
+}
+
+/// A question that does not apply has no answer at all, so there is nothing to
+/// match — a pattern must not resurrect it.
+#[test]
+fn a_skipped_question_is_never_checked_against_its_pattern() {
+    let world = World::with_template(
+        r#"
+name = "conditional"
+
+[questions.publish]
+type = "boolean"
+default = false
+
+[questions.slug]
+type = "string"
+when = "{{ publish }}"
+default = "NOT A SLUG"
+pattern = "^[a-z]+$"
+"#,
+        &[("out.txt.jinja", "{{ publish }}\n")],
+    );
+
+    world.init(&[]).success();
+}
+
+/// The same reasoning as a withdrawn choice: a template that narrows what it
+/// accepts must say so, rather than silently rendering a tree from a value it
+/// would no longer allow.
+#[test]
+fn an_answer_a_narrowed_pattern_no_longer_accepts_is_reported() {
+    let manifest = |pattern: &str| {
+        format!(
+            r#"
+name = "narrowing"
+
+[questions.slug]
+type = "string"
+default = "thing"
+pattern = "{pattern}"
+"#
+        )
+    };
+
+    let world = World::with_template(
+        &manifest("^[A-Za-z-]+$"),
+        &[("slug.txt.jinja", "{{ slug }}\n")],
+    );
+
+    world.init(&["--answer", "slug=My-Thing"]).success();
+    assert_eq!(world.project.read("slug.txt"), "My-Thing\n");
+
+    // The template tightens the pattern, and this project's recorded answer no
+    // longer matches it.
+    world
+        .template
+        .repo
+        .write("template.toml", &manifest("^[a-z-]+$"));
+    world.template.repo.commit_all("feat!: slugs are lowercase");
+
+    tpl(&world.project, &["update", "--defaults"])
+        .failure()
+        .says("slug")
+        .says(".config/git.tpl.toml");
+
+    assert_eq!(
+        world.project.read("slug.txt"),
+        "My-Thing\n",
+        "a failed update must leave the worktree alone"
+    );
+}
+
+/// A pattern matches text. On a boolean it could only ever always pass or
+/// always fail, and the author would render to find out which.
+#[test]
+fn a_pattern_on_a_non_string_question_is_reported_before_any_prompt() {
+    let world = World::with_template(
+        r#"
+name = "bad"
+
+[questions.ci]
+type = "boolean"
+pattern = "^y"
+"#,
+        &[("out.txt.jinja", "x\n")],
+    );
+
+    world
+        .init(&[])
+        .failure()
+        .says("`pattern` only applies to `string` questions");
+}
+
+/// Compiled when the manifest is read, so the template author is the one who
+/// finds out — not a user, six questions into a questionnaire.
+#[test]
+fn an_uncompilable_pattern_is_reported_before_any_prompt() {
+    let world = World::with_template(
+        r#"
+name = "bad"
+
+[questions.slug]
+type = "string"
+pattern = "^[a-z"
+"#,
+        &[("out.txt.jinja", "x\n")],
+    );
+
+    world
+        .init(&[])
+        .failure()
+        .says("not a valid regular expression");
+}
+
+/// Almost always a `pattern` that was renamed or removed, leaving behind a
+/// message nothing would ever show.
+#[test]
+fn a_message_without_a_pattern_is_reported_before_any_prompt() {
+    let world = World::with_template(
+        r#"
+name = "bad"
+
+[questions.slug]
+type = "string"
+message = "lowercase only"
+"#,
+        &[("out.txt.jinja", "x\n")],
+    );
+
+    world.init(&[]).failure().says("`message` has no `pattern`");
+}

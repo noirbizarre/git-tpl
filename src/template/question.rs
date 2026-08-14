@@ -100,6 +100,24 @@ pub struct Question {
     /// (ADR-006, `docs/concepts/determinism.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_from: Option<String>,
+
+    /// A regular expression every answer must match. `string` questions only.
+    ///
+    /// A pattern rather than an expression, deliberately: an arbitrary
+    /// validator is code running on behalf of a template, and invariant 5 says
+    /// no. Compiled when the manifest is read, so a broken pattern fails on the
+    /// author's first render rather than mid-questionnaire on a user's machine.
+    /// Checked wherever an answer arrives — prompted, `--answer`,
+    /// `--answers-from`, or replayed from `.config/git.tpl.toml` by `update`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+
+    /// What to say when `pattern` rejects an answer.
+    ///
+    /// Optional: without it the diagnostic quotes the pattern, which is honest
+    /// but rarely kind. Meaningless without `pattern`, and refused there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 /// The only source `default_from` accepts.
@@ -134,6 +152,19 @@ impl Question {
         self.default_from
             .as_deref()
             .and_then(|source| source.strip_prefix(GIT_PREFIX))
+    }
+
+    /// What to say when `pattern` rejects an answer.
+    ///
+    /// Built here rather than at each call site so the prompt's retry message
+    /// and the diagnostic a supplied answer produces are the same sentence.
+    pub fn pattern_message(&self) -> Option<String> {
+        let pattern = self.pattern.as_deref()?;
+        Some(
+            self.message
+                .clone()
+                .unwrap_or_else(|| format!("must match `{pattern}`")),
+        )
     }
 }
 
@@ -190,6 +221,8 @@ mod tests {
             choices: None,
             choices_from: None,
             default_from: None,
+            pattern: None,
+            message: None,
         };
         assert_eq!(question.default_expression(), None);
     }
@@ -211,7 +244,33 @@ mod tests {
             choices: None,
             choices_from: None,
             default_from: default_from.map(str::to_string),
+            pattern: None,
+            message: None,
         };
         assert_eq!(question.git_config_key(), expected);
+    }
+
+    #[rstest]
+    #[case(None, None, None)]
+    #[case(Some("^[a-z]+$"), None, Some("must match `^[a-z]+$`"))]
+    #[case(Some("^[a-z]+$"), Some("lowercase only"), Some("lowercase only"))]
+    fn a_pattern_without_a_message_explains_itself(
+        #[case] pattern: Option<&str>,
+        #[case] message: Option<&str>,
+        #[case] expected: Option<&str>,
+    ) {
+        let question = Question {
+            kind: QuestionKind::String,
+            prompt: None,
+            help: None,
+            default: None,
+            when: None,
+            choices: None,
+            choices_from: None,
+            default_from: None,
+            pattern: pattern.map(str::to_string),
+            message: message.map(str::to_string),
+        };
+        assert_eq!(question.pattern_message().as_deref(), expected);
     }
 }

@@ -103,6 +103,12 @@ tempfile = "3"
 # is a claim made by the server.
 ureq = "3"
 
+# Question `pattern` validation. The pattern comes from a template, which is
+# untrusted input, and `regex-lite` has no backtracking — a hostile pattern
+# costs time linear in the subject rather than exponential. It also carries no
+# Unicode tables, so it adds neither a build-time cost nor an MSRV risk.
+regex-lite = "0.1.9"
+
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
