@@ -9,6 +9,39 @@ into it, so there is nothing to install alongside.
 cargo install git-tpl
 ```
 
+## With mise
+
+[mise](https://mise.jdx.dev) installs git-tpl globally or per project, and pins
+the version in `mise.toml` so everyone working on the project has the same one.
+
+=== "From crates.io"
+
+    ```sh
+    mise use -g cargo:git-tpl
+    ```
+
+    Compiled from source, so it works on every platform mise supports —
+    including the ones the release binaries do not cover.
+
+=== "From a release binary"
+
+    ```sh
+    mise use -g github:noirbizarre/git-tpl
+    ```
+
+    No compiler needed, and mise verifies the artifact attestation and the SLSA
+    provenance of the asset it downloads. Limited to the six published targets.
+
+Either form puts an executable named `git-tpl` on your `PATH` through mise's
+shims, which is all Git needs to resolve `git tpl`.
+
+!!! note "The backend prefix is not optional"
+
+    `mise use git-tpl` on its own fails: there is no entry for git-tpl in mise's
+    registry yet, so the tool has to be named by its backend — `cargo:` or
+    `github:`. Getting the short name is tracked in
+    [PLAN.md](https://github.com/noirbizarre/git-tpl/blob/main/PLAN.md).
+
 ## From a release
 
 Download the binary for your platform from the
