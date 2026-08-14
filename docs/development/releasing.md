@@ -51,6 +51,23 @@ mise run release        # git cliff --bumped-version
 
 Neither writes anything.
 
+!!! tip "Set `GITHUB_TOKEN` for these"
+
+    `cliff.toml` declares `[remote.github]`, so git-cliff calls the GitHub API to
+    work out who contributed for the first time. Unauthenticated, that is 60
+    requests per hour **per IP**, and it does not fail gracefully — git-cliff
+    panics trying to parse the rate-limit response as a commit list.
+
+    ```sh
+    export GITHUB_TOKEN=$(gh auth token)
+    ```
+
+    The token only ever reads public metadata. CI passes the GitHub App's
+    installation token for the same reason — runners share IP addresses, so the
+    anonymous budget there is permanently spent by other people — and uses the
+    App rather than `secrets.GITHUB_TOKEN` because its limit is higher:
+    5000/hour against 1000/hour per repository.
+
 ## Configuration
 
 | File | Owns |

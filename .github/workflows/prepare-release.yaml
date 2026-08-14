@@ -16,8 +16,9 @@ on:
         type: boolean
         default: false
 
-# The push authenticates as a GitHub App, whose installation permissions apply
-# instead of these. These cover the checkout, which only reads.
+# Every API call in this workflow — the push, and git-cliff's metadata reads —
+# authenticates as the GitHub App, whose installation permissions apply instead
+# of these. These cover `actions/checkout` alone, which only reads.
 permissions:
   contents: read
 
@@ -77,6 +78,20 @@ jobs:
 
       - name: Compute the next version
         id: version
+        # `cliff.toml` declares `[remote.github]`, so git-cliff calls the GitHub
+        # API — even for `--bumped-version`, which needs none of the result.
+        # Unauthenticated that is 60 requests per hour *per IP*, and
+        # GitHub-hosted runners share IPs, so the budget is spent by strangers
+        # before the job starts. It does not degrade gracefully: git-cliff
+        # parses the rate-limit error as a commit list and panics.
+        #
+        # The App installation token is used rather than `secrets.GITHUB_TOKEN`
+        # because it carries the higher limit — 5000/hour against 1000/hour per
+        # repository — and the App is already authorised for everything read
+        # here. Set per step, not at job level: a step output is not resolvable
+        # in `jobs.<id>.env`.
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
 
@@ -106,6 +121,9 @@ jobs:
 
       - name: Generate the changelog
         if: steps.version.outputs.changed == 'true'
+        env:
+          # Same reason as the step above.
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
           git cliff --bump -o CHANGELOG.md
