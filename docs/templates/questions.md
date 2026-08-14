@@ -19,6 +19,7 @@ help = "Used for the package name and the README title"
 | `when` | expression | Ask only if this evaluates truthy. |
 | `choices` | array | The offered choices, for `choice` and `multi_choice`. |
 | `choices_from` | string | A reference to a list, instead of `choices`. |
+| `default_from` | string | Where the *prompt default* comes from. `git:<key>` only. |
 
 ## Types
 
@@ -122,6 +123,44 @@ default = "{{ project_name | lower | replace(' ', '-') }}"
 
 It is evaluated at prompt time, after everything it references has been resolved.
 You see the computed value pre-filled and can accept or replace it.
+
+### Git-seeded defaults
+
+Some values are facts about the person, not about the template. `default_from`
+pre-fills the prompt from the machine's Git configuration, so you press Enter
+and move on:
+
+```toml
+[questions.author]
+type = "string"
+default_from = "git:user.name"
+default = "anonymous"
+```
+
+`git:<key>` is the only form, and only `string` questions accept it — a Git
+configuration value is a string, and both rules are enforced when the manifest
+is loaded rather than when the prompt appears.
+
+!!! warning "It seeds the prompt, never the context"
+
+    If the question is **not asked** — `--defaults`, `tpl.interactive false`,
+    CI — `default_from` is not read at all and `default` applies. Otherwise the
+    same template would render two different trees on two machines, and
+    [determinism](../concepts/determinism.md) is what the whole ref model rests
+    on. The value only becomes part of the render once a human has accepted it,
+    at which point it is recorded in `.config/git.tpl.toml` like any other
+    answer — so the project stays reproducible for someone whose `user.name` is
+    different.
+
+Precedence, highest first:
+
+```
+--answer  >  --answers-from  >  answers in .config/git.tpl.toml
+          >  default_from (only when asked)  >  default
+```
+
+A key that is unset, or set to an empty value, is simply absent: the question
+falls back to its `default`.
 
 ## Choices
 
@@ -342,7 +381,9 @@ anything depending on it resolves normally. Values are parsed according to the
 question's declared type.
 
 `--defaults` accepts every default without prompting; a question with no default
-and no supplied answer is then an error.
+and no supplied answer is then an error. `default_from` is ignored here, because
+nothing on the machine can answer a question on the user's behalf — see
+[Git-seeded defaults](#git-seeded-defaults).
 
 On `update`, answers come from `.config/git.tpl.toml`. A question added to the
 template since the last render has no recorded answer, and is prompted for —

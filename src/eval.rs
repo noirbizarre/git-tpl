@@ -109,12 +109,17 @@ pub enum EvalError {
 
 /// How answers are obtained for questions that have none.
 pub trait Prompter {
-    /// Ask a question, given its resolved default and choices.
+    /// Ask a question, given its resolved default, prompt seed and choices.
+    ///
+    /// `seed` is separate from `default` on purpose: a prompter that does not
+    /// ask must not be able to use one, and a fifth argument it ignores makes
+    /// that structural rather than a matter of discipline.
     fn ask(
         &mut self,
         name: &str,
         question: &Question,
         default: Option<&Value>,
+        seed: Option<&Value>,
         choices: Option<&[Choice]>,
     ) -> Result<Value, EvalError>;
 }
@@ -131,6 +136,11 @@ impl Prompter for DefaultsOnly {
         name: &str,
         _question: &Question,
         default: Option<&Value>,
+        // Ignored, and this is the whole of PLAN item 5. A `default_from`
+        // value comes from the machine's Git configuration; using it where no
+        // human confirms it would make the same template render two different
+        // trees on two machines.
+        _seed: Option<&Value>,
         _choices: Option<&[Choice]>,
     ) -> Result<Value, EvalError> {
         default.cloned().ok_or_else(|| EvalError::Unanswered {
@@ -147,6 +157,12 @@ pub struct Evaluation<'a> {
     pub graph: &'a Graph,
     /// Answers already known, from `.config/git.tpl.toml` or `--answer`.
     pub supplied: BTreeMap<String, Value>,
+    /// Prompt seeds, by question name, from `default_from`.
+    ///
+    /// Empty whenever nobody is being asked. A seed is a machine value — it
+    /// may become the prompt's pre-filled text and nothing else, because a
+    /// value that varies by machine reaching the tree would end determinism.
+    pub seeds: &'a BTreeMap<String, Value>,
 }
 
 /// Resolve a template's context, prompting where needed.
@@ -162,6 +178,7 @@ pub fn resolve(
         manifest,
         graph,
         supplied,
+        seeds,
     } = evaluation;
 
     let mut context = Context::new().with_template(manifest.metadata());
@@ -223,9 +240,13 @@ pub fn resolve(
 
                 let answer = match supplied.get(&node.key) {
                     Some(value) => coerce(&node.key, question, value)?,
-                    None => {
-                        prompter.ask(&node.key, question, default.as_ref(), choices.as_deref())?
-                    }
+                    None => prompter.ask(
+                        &node.key,
+                        question,
+                        default.as_ref(),
+                        seeds.get(&node.key),
+                        choices.as_deref(),
+                    )?,
                 };
 
                 validate_choice(&node.key, question, &answer, choices.as_deref())?;
@@ -620,6 +641,16 @@ mod tests {
     /// Exercises the whole loop: conditional questions, dynamic defaults and
     /// computed values interleaved in dependency order.
     fn resolve_with(toml: &str, supplied: &[(&str, Value)]) -> Result<Context, EvalError> {
+        resolve_seeded(toml, supplied, &[], &mut DefaultsOnly)
+    }
+
+    /// The same, with prompt seeds and a prompter of the caller's choosing.
+    fn resolve_seeded(
+        toml: &str,
+        supplied: &[(&str, Value)],
+        seeds: &[(&str, Value)],
+        prompter: &mut dyn Prompter,
+    ) -> Result<Context, EvalError> {
         let manifest = Manifest::parse(toml, MANIFEST_NAME).expect("manifest should parse");
         let graph = Graph::build(&manifest).expect("graph should build");
 
@@ -639,6 +670,11 @@ mod tests {
             dir.path(),
         );
 
+        let seeds: BTreeMap<String, Value> = seeds
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), v.clone()))
+            .collect();
+
         resolve(
             Evaluation {
                 manifest: &manifest,
@@ -647,10 +683,36 @@ mod tests {
                     .iter()
                     .map(|(k, v)| ((*k).to_string(), v.clone()))
                     .collect(),
+                seeds: &seeds,
             },
             &mut loader,
-            &mut DefaultsOnly,
+            prompter,
         )
+    }
+
+    /// Records what it was offered, then answers with whatever it would have
+    /// pre-filled. Stands in for a terminal, which the tests do not have.
+    struct Recording {
+        seen: Vec<(String, Option<Value>, Option<Value>)>,
+    }
+
+    impl Prompter for Recording {
+        fn ask(
+            &mut self,
+            name: &str,
+            _question: &Question,
+            default: Option<&Value>,
+            seed: Option<&Value>,
+            _choices: Option<&[Choice]>,
+        ) -> Result<Value, EvalError> {
+            self.seen
+                .push((name.to_string(), default.cloned(), seed.cloned()));
+            seed.or(default)
+                .cloned()
+                .ok_or_else(|| EvalError::Unanswered {
+                    question: name.to_string(),
+                })
+        }
     }
 
     const CONDITIONAL: &str = r#"
@@ -1186,6 +1248,81 @@ mod tests {
         assert_eq!(
             evaluate("{{ version | slugify }}", &context, "test").unwrap(),
             Value::String("2".into())
+        );
+    }
+
+    // --- prompt seeds -------------------------------------------------------
+
+    const SEEDED: &str = r#"
+        name = "t"
+
+        [questions.author]
+        type = "string"
+        default = "anonymous"
+        default_from = "git:user.name"
+    "#;
+
+    /// A seed is what the prompt is pre-filled with, ahead of the template's
+    /// own default — the point of asking the machine at all.
+    #[test]
+    fn a_seed_becomes_the_prompt_default_ahead_of_the_declared_default() {
+        let mut prompter = Recording { seen: Vec::new() };
+        let context = resolve_seeded(
+            SEEDED,
+            &[],
+            &[("author", Value::String("Some One".into()))],
+            &mut prompter,
+        )
+        .unwrap();
+
+        assert_eq!(
+            prompter.seen,
+            vec![(
+                "author".to_string(),
+                Some(Value::String("anonymous".into())),
+                Some(Value::String("Some One".into())),
+            )]
+        );
+        assert_eq!(
+            context.answers().get("author"),
+            Some(&Value::String("Some One".into()))
+        );
+    }
+
+    /// PLAN item 5, stated as a test. Nobody is asked, so the machine's value
+    /// is not an answer — the template's own default is.
+    #[test]
+    fn a_seed_is_ignored_when_questions_are_not_asked() {
+        let context = resolve_seeded(
+            SEEDED,
+            &[],
+            &[("author", Value::String("Some One".into()))],
+            &mut DefaultsOnly,
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.answers().get("author"),
+            Some(&Value::String("anonymous".into()))
+        );
+    }
+
+    /// A supplied answer outranks a seed, as it outranks every default.
+    #[test]
+    fn a_supplied_answer_outranks_a_seed() {
+        let mut prompter = Recording { seen: Vec::new() };
+        let context = resolve_seeded(
+            SEEDED,
+            &[("author", Value::String("From The File".into()))],
+            &[("author", Value::String("Some One".into()))],
+            &mut prompter,
+        )
+        .unwrap();
+
+        assert!(prompter.seen.is_empty(), "the question must not be asked");
+        assert_eq!(
+            context.answers().get("author"),
+            Some(&Value::String("From The File".into()))
         );
     }
 }

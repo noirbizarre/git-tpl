@@ -96,6 +96,12 @@ git config tpl.remote upstream
 git config --global tpl.interactive false
 ```
 
+One key outside `tpl.` is read: a question declaring
+[`default_from = "git:<key>"`](templates/questions.md#git-seeded-defaults) has
+that key read, read-only, to pre-fill its prompt. It is never read when nobody
+is being asked, and its value reaches the project only as an answer you
+accepted.
+
 ### Precedence
 
 Highest wins:

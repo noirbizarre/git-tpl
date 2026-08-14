@@ -18,6 +18,22 @@ mod keys {
     pub const INTERACTIVE: &str = "tpl.interactive";
 }
 
+/// Read an arbitrary Git configuration value, to seed a prompt.
+///
+/// Deliberately outside `tpl.*`: a template asks for `user.name`, and Git's own
+/// precedence — repository, user, system — decides what that is. The result may
+/// only pre-fill a prompt. It never reaches the rendered tree except as an
+/// answer a human accepted, which is recorded in `.config/git.tpl.toml` like
+/// any other. See `docs/adr/006-no-runtime-context.md`.
+///
+/// An empty value counts as unset, so a blank `user.name` falls back to the
+/// template's own default rather than pre-filling a prompt with nothing.
+pub fn seed(repo: &impl GitBackend, key: &str) -> Result<Option<String>, GitError> {
+    Ok(repo
+        .config_string(key)?
+        .filter(|value| !value.trim().is_empty()))
+}
+
 /// Resolved preferences.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preferences {

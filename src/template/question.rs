@@ -90,7 +90,24 @@ pub struct Question {
     /// serialise data into.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choices_from: Option<String>,
+
+    /// Where the *prompt default* comes from. `git:<key>` only.
+    ///
+    /// It seeds the prompt and never the context. A value read from the
+    /// machine's Git configuration reaches the tree only by way of an answer a
+    /// human accepted, which is then recorded like any other answer — so the
+    /// project stays reproducible for someone whose `user.name` differs
+    /// (ADR-006, `docs/concepts/determinism.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_from: Option<String>,
 }
+
+/// The only source `default_from` accepts.
+///
+/// A single prefix rather than an open grammar: every other source anyone
+/// would reach for — the environment, the clock — is the runtime context
+/// ADR-006 refuses.
+pub const GIT_PREFIX: &str = "git:";
 
 impl Question {
     /// The prompt to show, falling back to the question's name.
@@ -107,6 +124,16 @@ impl Question {
             Some(Value::String(s)) if is_expression(s) => Some(s),
             _ => None,
         }
+    }
+
+    /// The Git configuration key seeding this question's prompt, if any.
+    ///
+    /// Never an expression and never evaluated, so it contributes no edge to
+    /// the dependency graph — it references the machine, not the context.
+    pub fn git_config_key(&self) -> Option<&str> {
+        self.default_from
+            .as_deref()
+            .and_then(|source| source.strip_prefix(GIT_PREFIX))
     }
 }
 
@@ -162,7 +189,29 @@ mod tests {
             when: None,
             choices: None,
             choices_from: None,
+            default_from: None,
         };
         assert_eq!(question.default_expression(), None);
+    }
+
+    #[rstest]
+    #[case(Some("git:user.name"), Some("user.name"))]
+    #[case(Some("user.name"), None)]
+    #[case(None, None)]
+    fn default_from_yields_its_git_config_key(
+        #[case] default_from: Option<&str>,
+        #[case] expected: Option<&str>,
+    ) {
+        let question = Question {
+            kind: QuestionKind::String,
+            prompt: None,
+            help: None,
+            default: None,
+            when: None,
+            choices: None,
+            choices_from: None,
+            default_from: default_from.map(str::to_string),
+        };
+        assert_eq!(question.git_config_key(), expected);
     }
 }

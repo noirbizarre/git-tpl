@@ -27,7 +27,8 @@ Each of these is a way the guarantee could be lost, and how it is prevented:
 
 ## No runtime context
 
-git-tpl has no `now()`, no `git.user.name`, no `platform.os`.
+git-tpl has no `now()`, no `git.user.name`, no `platform.os` — no expression can
+read any of them.
 
 This is a deliberate omission, not a gap. Every one of those makes rendering
 depend on *when* and *where* it ran, which means two people running
@@ -39,10 +40,14 @@ The usual motivations have better answers:
 **A copyright year.** Ask for it, or don't render one — `Copyright (c) Acme` is
 correct in every year.
 
-**The author's name and email.** Ask a question. The CLI can offer the value from
-your Git configuration as the *default*, so you press Enter and move on. The
-difference is that the answer is then recorded in `.config/git.tpl.toml`, and the
-next person to render gets your project's author rather than their own.
+**The author's name and email.** Ask a question, with
+[`default_from = "git:user.name"`](../templates/questions.md#git-seeded-defaults),
+which offers the value from your Git configuration as the *prompt default* — you
+press Enter and move on. The difference is that the answer is then recorded in
+`.config/git.tpl.toml`, and the next person to render gets your project's author
+rather than their own. When nobody is asked, the seed is not read at all and the
+question's own `default` applies, so the rule above is not weakened: nothing
+machine-specific ever reaches a tree without a human accepting it first.
 
 That is the general shape of the answer: a value that varies by machine belongs
 in the answers, where it is recorded and shared, not in the context, where it is

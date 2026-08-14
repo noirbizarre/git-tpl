@@ -10,7 +10,7 @@ version of the project is worse than none, because it is believed.
 ## Where things stand
 
 **The core model works end to end.** `init → update → diff → merge` on real
-repositories, with real libgit2 merges and real conflicts. 424 tests pass.
+repositories, with real libgit2 merges and real conflicts. 436 tests pass.
 
 ```
 main:  A ─── M ─── B ─── M'
@@ -34,6 +34,7 @@ main:  A ─── M ─── B ─── M'
 | Answers from a file | ✅ `--answers-from`, TOML/JSON/YAML, repeatable; unknown keys ignored and reported |
 | Conditional questions | ✅ skipped questions are *absent*, not null |
 | Dynamic defaults | ✅ evaluated at prompt time |
+| Git-seeded defaults | ✅ `default_from = "git:<key>"` — seeds the prompt only, never a non-interactive render |
 | `choices_from` | ✅ structured reference into the context |
 | Computed values | ✅ typed, dependency-ordered |
 | Template filters | ✅ MiniJinja's built-ins plus `slugify`; the set is closed, no plugin point |
@@ -81,7 +82,7 @@ access on every run.
 That is a user-side fact — it belongs on the machine of the only party who can
 consent to it, never in `.config/git.tpl.toml`, because a project cannot consent
 on its reader's behalf. So it arrives with the user configuration file, as
-`[trust].templates`, and is described in item 7 rather than duplicated here.
+`[trust].templates`, and is described in item 6 rather than duplicated here.
 
 The gate it plugs into already exists: `TrustGate` in `src/data/`, selected in
 `commands::trust`. A pattern match becomes one more arm alongside `--trust`.
@@ -125,25 +126,7 @@ A bad distribution name is currently caught by the first `uv build` rather than
 at the prompt. `pattern` rather than `validator` on purpose: Copier's validator
 is an arbitrary expression, and that door stays shut.
 
-### 5. Git-seeded question defaults
-
-ADR-006 already promises this and it is not implemented:
-
-> An author name should be a question whose *default* the CLI fills from Git
-> configuration.
-
-```toml
-[questions.author]
-type = "string"
-default_from = "git:user.name"
-```
-
-The value seeds the **prompt default** and never the context. If the question is
-not asked — `--defaults`, `tpl.interactive false` — it must fall back to
-`default` and never to the machine's config, or the tree varies by machine and
-the model breaks. That is the whole design, and it needs the test that says so.
-
-### 6. Distribution: AUR and Homebrew
+### 5. Distribution: AUR and Homebrew
 
 Cheap, because a release already produces six binaries and a `SHA256SUMS`. Both
 packages are consumers of an artefact that exists; neither needs a build change.
@@ -180,7 +163,7 @@ entry in `jdx/mise`'s `registry.toml` is what makes the short
 All of this is downstream of a version somebody else depends on. Packaging
 0.1.x means chasing it.
 
-### 7. A user configuration file
+### 6. A user configuration file
 
 Three unrelated frustrations with one home: retyping your name into every
 project, typing `https://github.com/` twenty times a day, and confirming the
@@ -231,7 +214,8 @@ in `tpl.*`.
 #### `[defaults]` seeds prompts, never the context
 
 This is the whole design, and the only thing that keeps invariant 2 true. It is
-item 5's rule (`default_from = "git:user.name"`) applied to a second source.
+the implemented `default_from = "git:user.name"` rule applied to a second
+source.
 
 - A key matching a question name becomes that question's **prompt default**.
 - The value the user accepts is recorded in `.config/git.tpl.toml` like any
@@ -322,7 +306,7 @@ Two things this is not, so it is not read as a weakening:
 - It does not create a place to record trust *in the project*. Trust lives on
   the machine of the only party who can consent to it.
 
-### 8. Testing a template
+### 7. Testing a template
 
 A template author has no way to say *"given these answers, this is what comes
 out"* except to render into a scratch directory and look. Every template above
@@ -394,7 +378,7 @@ CI without wrapping.
 The fixtures *are* answers files, read by the same parsers — which is why
 `--answers-from` had to come first.
 
-### 9. Template inheritance
+### 8. Template inheritance
 
 The largest template-side feature there is, and the one that decides whether an
 organisation with fifteen templates maintains fifteen copies of its CI workflow.
@@ -463,7 +447,7 @@ Parent-relative source paths, validated: removing a path the parent does not
 have is an **error**. Otherwise a rename upstream silently resurrects a file the
 child spent a release removing, and nobody notices until it ships.
 
-**`{% extends %}` needs the loader that item 10 already wants.** `{% import %}`
+**`{% extends %}` needs the loader that item 9 already wants.** `{% import %}`
 fails today because no loader is registered; inheritance needs the same loader,
 backed by the layered trees, resolving child-first. One trap, and it is the
 obvious one: a child's `base.html.jinja` writing `{% extends "base.html.jinja" %}`
@@ -491,7 +475,7 @@ This changes the manifest, which is a contract, and changes what "the template"
 means for provenance and for `refs/tpl/<id>`. It needs **ADR-013** before it
 needs code.
 
-### 10. Smaller things
+### 9. Smaller things
 
 
 - `git tpl show <path>` — the template's version of one file. Wanted whenever a
@@ -502,7 +486,7 @@ needs code.
 - Shared macros. `{% import "macros.jinja" %}` fails today because no loader is
   registered; a loader backed by the template's own tree reads nothing outside
   the template revision and executes nothing, so it costs no invariant. Wanted
-  by any template much above fifty files, and a prerequisite for item 9.
+  by any template much above fifty files, and a prerequisite for item 8.
 - Named tests for two behaviours that are currently correct but undefended: a
   computed value holding a sequence (`| select`) and one holding a table
   (`dict()`) both keep their type through `evaluate()`. Nothing would catch a
@@ -556,7 +540,7 @@ it or not at all. What the ADR would have to establish:
   and 2 stay literally true, and their tests stay untouched. If either has to be
   relaxed, the feature is declined.
 - Trust is per-invocation and explicit, or it comes from the user's own
-  `[trust]` list (item 7). Never from `.config/git.tpl.toml` — the project
+  `[trust]` list (item 6). Never from `.config/git.tpl.toml` — the project
   cannot consent on the reader's behalf.
 - Tasks run on `init`, not on `update`. `update` being a ref-only operation is
   most of its value.
@@ -580,7 +564,7 @@ correct semantic — it is a tree diff — and it is documented, but the first
 **The template is cloned fresh on every run.** Correct and slow for a large
 remote template. A cache would need invalidation, and a stale cache silently
 rendering an old template is a far worse failure than a slow fetch — so this
-stays until it actually hurts. Inheritance (item 9) is what would make it
+stays until it actually hurts. Inheritance (item 8) is what would make it
 hurt: a three-deep chain is three clones per run.
 
 **A remote data source is fetched on every run.** Once per run, but never

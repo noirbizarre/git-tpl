@@ -21,12 +21,12 @@ use crate::data::{
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Prompter};
 use crate::git::libgit2::LibGit2;
 use crate::git::{AheadBehind, Change, GitBackend, GitError, MergeOutcome, Oid};
-use crate::gitconfig::{Preferences, push_refspec};
+use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
 use crate::provenance::{Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
 use crate::render::{RenderError, render_tree};
-use crate::template::Value;
+use crate::template::{Manifest, Value};
 
 pub use resolve::{Request, ResolveError, Resolved};
 
@@ -136,6 +136,14 @@ impl Answering<'_> {
     /// Take defaults for every unanswered question.
     pub fn defaults() -> Self {
         Answering::Defaults(DefaultsOnly)
+    }
+
+    /// Whether a human is going to be asked anything.
+    ///
+    /// Read before any prompt seed is fetched, so a non-interactive run does
+    /// not so much as read the machine's Git configuration.
+    fn is_interactive(&self) -> bool {
+        matches!(self, Answering::Interactive(_))
     }
 
     fn prompter(&mut self) -> &mut dyn Prompter {
@@ -271,11 +279,21 @@ pub fn render(
     )
     .with_decisions(decisions);
 
+    // Built only when somebody is going to be asked. When nobody is, the map
+    // is empty *and* `DefaultsOnly` ignores it — two guards, because a machine
+    // value reaching the tree would end invariant 2.
+    let seeds = if answering.is_interactive() {
+        git_seeds(project, &template.manifest)?
+    } else {
+        BTreeMap::new()
+    };
+
     let context = crate::eval::resolve(
         Evaluation {
             manifest: &template.manifest,
             graph: &graph,
             supplied,
+            seeds: &seeds,
         },
         &mut loader,
         answering.prompter(),
@@ -304,6 +322,24 @@ pub fn render(
         provenance,
         ignored_answers,
     })
+}
+
+/// Collect the prompt seeds a manifest's `default_from` keys ask for.
+///
+/// A key that is not set is simply absent: a template suggesting `user.name`
+/// must still work for someone who has never set one, and the question's own
+/// `default` covers that case.
+fn git_seeds(project: &LibGit2, manifest: &Manifest) -> Result<BTreeMap<String, Value>, OpError> {
+    let mut seeds = BTreeMap::new();
+    for (name, question) in &manifest.questions {
+        let Some(key) = question.git_config_key() else {
+            continue;
+        };
+        if let Some(value) = seed(project, key)? {
+            seeds.insert(name.clone(), Value::String(value));
+        }
+    }
+    Ok(seeds)
 }
 
 /// The result of an `init`.

@@ -204,6 +204,40 @@ impl Manifest {
                     ),
                 });
             }
+
+            if let Some(source) = &question.default_from {
+                // Rejected here rather than at prompt time: a template author
+                // who wrote `env:USER` must find out on the first render, not
+                // on the machine of the user who has that variable set.
+                let Some(key) = source.strip_prefix(super::question::GIT_PREFIX) else {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: format!(
+                            "`default_from = \"{source}\"` names no known source; the only form is `git:<key>`, as in `git:user.name`"
+                        ),
+                    });
+                };
+
+                if key.trim().is_empty() {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: "`default_from` has no key after `git:`".into(),
+                    });
+                }
+
+                // Git configuration values are strings. Coercing one into a
+                // boolean or a choice would fail at the prompt, on one
+                // machine, for one user — the worst place to discover it.
+                if question.kind != super::QuestionKind::String {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: format!(
+                            "`default_from` only applies to `string` questions, not `{}`",
+                            question.kind.type_name()
+                        ),
+                    });
+                }
+            }
         }
 
         Ok(())
@@ -232,6 +266,7 @@ impl Manifest {
 mod tests {
     use super::*;
     use crate::template::{Choice, QuestionKind};
+    use rstest::rstest;
 
     const FULL: &str = r#"
         name = "rust-library"
@@ -447,6 +482,54 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, ManifestError::Parse { .. }));
+    }
+
+    /// A prompt seed is read from the machine, so the only source is the one
+    /// ADR-006 sanctions. `env:` and friends stay shut.
+    #[rstest]
+    #[case("env:USER", "names no known source")]
+    #[case("git:", "no key after")]
+    fn default_from_must_name_a_supported_source(#[case] source: &str, #[case] expected: &str) {
+        let error = Manifest::parse(
+            &format!(
+                r#"
+                name = "x"
+                [questions.author]
+                type = "string"
+                default_from = "{source}"
+                "#
+            ),
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "author");
+        assert!(reason.contains(expected), "reason was: {reason}");
+    }
+
+    /// Git configuration values are strings. Coercion would fail on one
+    /// machine only, which is the worst place to find out.
+    #[test]
+    fn default_from_is_rejected_on_a_non_string_question() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.ci]
+            type = "boolean"
+            default_from = "git:tpl.ci"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "ci");
+        assert!(reason.contains("only applies to `string` questions"));
     }
 
     #[test]

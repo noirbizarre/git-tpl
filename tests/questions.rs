@@ -651,3 +651,82 @@ default = "nginx"
         "a skipped question records no answer"
     );
 }
+
+// --- git-seeded prompt defaults ---------------------------------------------
+
+/// `default_from` seeds a prompt and nothing else.
+const SEEDED: &str = r#"
+name = "seeded"
+
+[questions.author]
+type = "string"
+default = "anonymous"
+default_from = "git:user.name"
+"#;
+
+fn seeded_world(author: &str) -> World {
+    let world = World::with_template(SEEDED, &[("AUTHORS.jinja", "{{ author }}\n")]);
+    // Per-repository, never global — the harness never touches the developer's
+    // own configuration.
+    world.project.git(&["config", "user.name", author]);
+    world
+}
+
+/// PLAN item 5, and the reason `default_from` is prompt-only. Under
+/// `--defaults` nobody confirms anything, so the machine's `user.name` must not
+/// become an answer.
+#[test]
+fn a_git_seeded_default_is_not_used_when_questions_are_not_asked() {
+    let world = seeded_world("Ada Lovelace");
+
+    let output = world.init(&[]).success();
+
+    assert_eq!(world.project.read("AUTHORS"), "anonymous\n");
+    assert!(
+        world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("author = \"anonymous\""),
+        "the recorded answer must be the template's own default"
+    );
+    output.silent_about("Ada Lovelace");
+}
+
+/// The claim in one assertion: the same template, answered the same way, is the
+/// same tree on two machines whose Git identities differ.
+#[test]
+fn two_machines_render_the_same_tree_from_a_git_seeded_default() {
+    let one = seeded_world("Ada Lovelace");
+    let two = seeded_world("Grace Hopper");
+
+    one.init(&[]).success();
+    two.init(&[]).success();
+
+    assert_eq!(
+        one.project
+            .git(&["rev-parse", &format!("{}^{{tree}}", one.ref_name())]),
+        two.project
+            .git(&["rev-parse", &format!("{}^{{tree}}", two.ref_name())]),
+    );
+}
+
+/// Git configuration values are strings, so the manifest refuses the
+/// combinations that could only fail on one person's machine.
+#[test]
+fn default_from_on_a_non_string_question_is_reported_before_any_prompt() {
+    let world = World::with_template(
+        r#"
+name = "bad"
+
+[questions.ci]
+type = "boolean"
+default_from = "git:tpl.ci"
+"#,
+        &[("out.txt.jinja", "x\n")],
+    );
+
+    world
+        .init(&[])
+        .failure()
+        .says("only applies to `string` questions");
+}

@@ -16,6 +16,7 @@ impl Prompter for Interactive {
         name: &str,
         question: &Question,
         default: Option<&Value>,
+        seed: Option<&Value>,
         choices: Option<&[Choice]>,
     ) -> Result<Value, EvalError> {
         let title = question.prompt_for(name);
@@ -95,7 +96,15 @@ impl Prompter for Interactive {
             }
 
             QuestionKind::String => {
-                let placeholder = default.map(ToString::to_string).unwrap_or_default();
+                // The seed wins where there is one: a `default_from` exists
+                // precisely so the pre-filled text is the one this user would
+                // have typed. Only `string` questions can carry a seed — the
+                // manifest refuses it anywhere else — so no other branch here
+                // looks at it.
+                let placeholder = seed
+                    .or(default)
+                    .map(ToString::to_string)
+                    .unwrap_or_default();
                 Ok(Value::String(text_input(title, help, &placeholder)?))
             }
         }

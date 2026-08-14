@@ -36,6 +36,11 @@ omitted — `Copyright (c) Acme` is correct every year. An author name should be
 question whose *default* the CLI fills from Git configuration: the user presses
 Enter, and the value is then recorded in `.config/git.tpl.toml`, shared with the
 project, and identical for everyone who renders it. Which is what you wanted.
+That is now implemented as
+[`default_from = "git:user.name"`](../templates/questions.md#git-seeded-defaults),
+and it upholds this decision rather than relaxing it: the key is read only when a
+human is going to be asked, it seeds the prompt and never the context, and a
+non-interactive render never reads it at all.
 
 That is the general shape: a value that varies by machine belongs in the answers,
 where it is recorded and reviewed, not in the context, where it is invisible.
