@@ -132,7 +132,9 @@ impl LibGit2 {
         // branch was, which is the correct answer and needs no guessing between
         // `main` and `master`.
         if let Ok(head) = self.repo.head()
-            && let Some(name) = head.shorthand()
+            // `Result` since git2 0.21: a non-UTF-8 name is an error rather
+            // than a silent `None`. Either way we fall through to the guesses.
+            && let Ok(name) = head.shorthand()
         {
             return Ok(name.to_string());
         }
@@ -236,14 +238,18 @@ impl GitBackend for LibGit2 {
 
     fn head_branch(&self) -> Result<Option<String>, GitError> {
         match self.repo.head() {
-            Ok(head) => Ok(head.shorthand().map(str::to_string)),
+            // git2 0.21 reports a non-UTF-8 branch name as an error; a name we
+            // cannot spell is as good as absent to every caller here.
+            Ok(head) => Ok(head.shorthand().ok().map(str::to_string)),
             Err(e) if e.code() == ErrorCode::UnbornBranch => {
                 // An unborn HEAD still names the branch it will create.
                 Ok(self
                     .repo
                     .find_reference("HEAD")
                     .ok()
-                    .and_then(|r| r.symbolic_target().map(str::to_string))
+                    // `Result<Option<&str>>`: `Err` is non-UTF-8, `Ok(None)` is
+                    // a direct rather than a symbolic reference.
+                    .and_then(|r| r.symbolic_target().ok().flatten().map(str::to_string))
                     .and_then(|t| t.strip_prefix("refs/heads/").map(str::to_string)))
             }
             Err(_) => Ok(None),
@@ -284,7 +290,10 @@ impl GitBackend for LibGit2 {
 
         let mut entries = Vec::new();
         tree.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
-            if let (Some(name), Some(mode)) =
+            // `Ok` since git2 0.21. An entry whose name is not UTF-8 is skipped
+            // exactly as before: we cannot render a path we cannot spell, and
+            // silently dropping it keeps the walk deterministic.
+            if let (Ok(name), Some(mode)) =
                 (entry.name(), FileMode::from_u32(entry.filemode() as u32))
                 && (mode.is_blob() || mode == FileMode::Link)
             {
