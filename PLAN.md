@@ -10,7 +10,7 @@ version of the project is worse than none, because it is believed.
 ## Where things stand
 
 **The core model works end to end.** `init → update → diff → merge` on real
-repositories, with real libgit2 merges and real conflicts. 311 tests pass.
+repositories, with real libgit2 merges and real conflicts. 395 tests pass.
 
 ```
 main:  A ─── M ─── B ─── M'
@@ -38,6 +38,8 @@ main:  A ─── M ─── B ─── M'
 | Dependency graph | ✅ static, topologically sorted, cycles and typos rejected up front |
 | Template data sources | ✅ read from the template's Git tree at the resolved revision |
 | Project data sources | ✅ with traversal refused |
+| Remote data sources | ✅ size-limited, timed out, confirmed before the fetch |
+| Data pinning | ✅ `sha256`, and the digest recorded in the trailer either way |
 | TOML, JSON and YAML | ✅ types preserved; YAML 1.2, hostile documents refused |
 | Provenance | ✅ commit trailers, round-tripped |
 | Determinism | ✅ asserted by test; no runtime context exists |
@@ -45,6 +47,7 @@ main:  A ─── M ─── B ─── M'
 | `.config/git.tpl.toml` | ✅ written, committed, hand-editable |
 | Git config (`tpl.*`) | ✅ Git's own precedence |
 | Git backend isolation | ✅ enforced by a prek hook, not by hope |
+| HTTP isolation | ✅ same, confining the client to `src/data/` |
 | Documentation | ✅ full Zensical site, 11 ADRs |
 | Tooling | ✅ mise, prek, git-cliff, gh-ship, CI |
 | Releases | ✅ binaries for six targets, plus crates.io via Trusted Publishing |
@@ -53,15 +56,14 @@ main:  A ─── M ─── B ─── M'
 
 | Area | Why, and what exists instead |
 |---|---|
-| **Remote data sources** | Declaring one produces a clear error naming the source. The `DataSource` abstraction and the `Data-Source` trailer already account for them, so this is additive. Template data is pinned by the template revision and has no equivalent problem. |
-| **Data pinning** (checksums, Git-hosted data) | Designed in `docs/data/reproducibility.md`. Needs remote data first. |
+| **Git-hosted data** (`source` + `ref` + `path`) | Designed in `docs/data/reproducibility.md`. `sha256` pinning covers the reproducibility case; this is about convenience for data that already lives in a repository. |
 | **`gh-tpl`** | Dropped from the bootstrap. Returns as a second `[[bin]]`, or by promoting the package to a workspace member — mechanical, no code movement. See ADR-004. |
 | **SSH integration tests** | The credential path is implemented (agent → default keys → helper) and auth failures are translated into actionable diagnostics. Not exercised against a real host, because CI must not depend on anyone's private credentials. |
 | **`git tpl show`, `git tpl detach`** | No clear semantics yet. Not implemented until there are. |
 | **Adopting an existing project** | `init` assumes a project that does not exist yet (ADR-009). There is no supported way to point an existing repository at a template it already resembles. See *Next*. |
 | **Testing a template** | A template author renders into a scratch directory and looks. There is no `render` command and no test runner, so most templates have no tests. See *Next*. |
 | **Template inheritance** | A template is one repository, standing alone. Fifteen templates in an organisation means fifteen copies of the same CI workflow. See *Next*. |
-| **User configuration** | There is no `~/.config/git-tpl.toml`. Prompt defaults come from the template alone, template sources are written out in full every time, and there is no trust list. See *Next*. |
+| **User configuration** | There is no `~/.config/git-tpl.toml`. Prompt defaults come from the template alone, template sources are written out in full every time, and remote-data trust is per-invocation with no persistent list. See *Next*. |
 | **Distribution beyond crates.io** | `cargo install`, `mise use -g cargo:git-tpl`, `mise use -g github:noirbizarre/git-tpl` and raw release binaries. No AUR package, no Homebrew formula, no mise registry entry. See *Next*. |
 
 ---
@@ -137,21 +139,20 @@ is an error, not a coercion — the existing rule for `--answer`.
 question between tools needs its answers edited, and pretending otherwise
 would mean shipping a mapping language.
 
-### 3. Remote data sources
+### 3. A persistent trust list
 
-The one declared feature that errors rather than working.
+Remote data sources ship, gated by a confirmation shown before any fetch, plus
+`--trust` for one invocation. What is missing is the ability to say "I always
+trust this organisation" once, instead of confirming the same template's network
+access on every run.
 
-- An HTTP client behind the existing `DataSource` abstraction — nothing above
-  `src/data/` should change.
-- Size limits and a timeout. Remote data is untrusted input.
-- The fetch is gated by the trust flow in item 9 — the two land together, or
-  remote data ships prompting for every source on every run.
-- One fetch per source per run; the cache already keys on the resolved source.
-- Then `sha256 = "..."` pinning, and the `Data-Source` trailer records it.
+That is a user-side fact — it belongs on the machine of the only party who can
+consent to it, never in `.config/git.tpl.toml`, because a project cannot consent
+on its reader's behalf. So it arrives with the user configuration file, as
+`[trust].templates`, and is described in item 9 rather than duplicated here.
 
-Everything is already shaped for this. `SourceKind::Remote` exists, the
-provenance format describes it, and `docs/data/remote.md` specifies the
-behaviour including the failure mode.
+The gate it plugs into already exists: `TrustGate` in `src/data/`, selected in
+`commands::trust`. A pattern match becomes one more arm alongside `--trust`.
 
 ### 4. SSH verification
 
@@ -251,7 +252,8 @@ All of this is downstream of a version somebody else depends on. Packaging
 
 Three unrelated frustrations with one home: retyping your name into every
 project, typing `https://github.com/` twenty times a day, and confirming the
-same template's network access on every run.
+same template's network access on every run — the last of which is now a real
+prompt rather than a hypothetical one, because remote data sources ship.
 
 ```
 $XDG_CONFIG_HOME/git-tpl.toml     (default: ~/.config/git-tpl.toml)
@@ -360,7 +362,7 @@ template asks *git-tpl* to do on its behalf, of which there are at most two:
 
 | Capability | Status | Shown in full before it happens |
 |---|---|---|
-| **Remote data fetch** (item 3) | designed, unimplemented | every URL, the source name that declared it, the size limit |
+| **Remote data fetch** | ✅ implemented | every URL, the source name that declared it, the size limit |
 | **Post-render tasks** | *Under review*, ADR-gated | every rendered command, in order |
 
 When the template is **not** trusted:
@@ -643,6 +645,12 @@ rendering an old template is a far worse failure than a slow fetch — so this
 stays until it actually hurts. Inheritance (item 11) is what would make it
 hurt: a three-deep chain is three clones per run.
 
+**A remote data source is fetched on every run.** Once per run, but never
+cached between them — for the same reason the template itself is cloned fresh:
+a stale cache silently rendering old data is a far worse failure than a slow
+fetch, in a tool whose whole premise is reproducibility. `sha256` is the answer
+for anyone who needs the bytes to be the same ones.
+
 **`--stat` reports file counts, not line counts.** Honest but less useful than
 `git diff --stat`.
 
@@ -673,4 +681,5 @@ Enforced, not merely intended. Each fails a hook or a test.
    prek hook.
 
 5. **No code execution from templates.** No subprocess, no shell, no eval, no
-   HTTP outside `src/data/`.
+   HTTP outside `src/data/` — the `http-isolation` prek hook. A template can
+   declare a URL; it cannot construct a request.

@@ -81,6 +81,26 @@ impl Context {
     }
 }
 
+/// Turn `--trust` and the interactivity preferences into what `ops` expects.
+///
+/// Exactly parallel to [`answering`], and for the same reason: `--defaults` and
+/// `tpl.interactive false` both mean there is nobody to ask, and a capability
+/// granted by omission on a CI runner is the worst version of this feature.
+pub fn trust<'a>(
+    args: &AnswerArgs,
+    trusted: bool,
+    interactive_allowed: bool,
+    confirmer: &'a mut dyn tpl::data::TrustGate,
+) -> tpl::ops::Trust<'a> {
+    if trusted {
+        tpl::ops::Trust::always()
+    } else if args.defaults || !interactive_allowed {
+        tpl::ops::Trust::refuse()
+    } else {
+        tpl::ops::Trust::Ask(confirmer)
+    }
+}
+
 /// Turn `--answer` and `--defaults` into what `ops` expects.
 pub fn answering<'a>(
     args: &AnswerArgs,

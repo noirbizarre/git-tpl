@@ -36,8 +36,9 @@ around one, you are about to break the project.
    the `GitBackend` trait — do not import `git2` "just this once".
 
 5. **Templates cannot execute code.** No subprocess, no shell, no eval, no
-   hooks. Network access exists only in `src/data/`. Template repositories and
-   remote data are untrusted input.
+   hooks. Network access exists only in `src/data/` — the `http-isolation` prek
+   hook fails the commit otherwise. Template repositories and remote data are
+   untrusted input.
 
 ## Layout
 

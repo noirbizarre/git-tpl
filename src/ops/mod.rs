@@ -14,7 +14,10 @@ use thiserror::Error;
 
 use crate::config::{CONFIG_PATH, Config, ConfigError};
 use crate::context::Context;
-use crate::data::{Loader, TemplateTree};
+use crate::data::{
+    AlwaysTrust, DataError, Decision, Loader, REMOTE_LIMIT_BYTES, RefuseRemote, TemplateTree,
+    TrustGate, declared_remotes,
+};
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Prompter};
 use crate::git::libgit2::LibGit2;
 use crate::git::{AheadBehind, Change, GitBackend, GitError, MergeOutcome, Oid};
@@ -49,6 +52,14 @@ pub enum OpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Eval(#[from] EvalError),
+
+    /// A data source was refused, or could not be confirmed.
+    ///
+    /// Separate from `Eval` because the trust gate runs before evaluation
+    /// starts, so this failure has no question to attach itself to.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Data(#[from] DataError),
 
     /// Rendering failed.
     #[error(transparent)]
@@ -139,6 +150,41 @@ pub fn describe_revision(reference: &str, commit: Oid) -> String {
     }
 }
 
+/// How a template's remote data sources are authorised.
+///
+/// Per invocation, and nothing is recorded: the next run asks again. A
+/// persistent trust list is a user-side fact and belongs in a user
+/// configuration file, not in the project — a project cannot consent on its
+/// reader's behalf.
+pub enum Trust<'a> {
+    /// Confirm each source with the user before any is fetched.
+    Ask(&'a mut dyn TrustGate),
+    /// Allow everything without asking. `--trust`.
+    Always(AlwaysTrust),
+    /// Refuse everything, because there is nobody to ask.
+    Refuse(RefuseRemote),
+}
+
+impl Trust<'_> {
+    /// Allow every remote source for this run.
+    pub fn always() -> Self {
+        Trust::Always(AlwaysTrust)
+    }
+
+    /// Refuse every remote source, loudly, at the point of use.
+    pub fn refuse() -> Self {
+        Trust::Refuse(RefuseRemote)
+    }
+
+    fn gate(&mut self) -> &mut dyn TrustGate {
+        match self {
+            Trust::Ask(gate) => *gate,
+            Trust::Always(always) => always,
+            Trust::Refuse(refuse) => refuse,
+        }
+    }
+}
+
 /// A rendered state, before it is committed.
 pub struct Render {
     /// The resolved template.
@@ -162,6 +208,7 @@ pub fn render(
     supplied: BTreeMap<String, Value>,
     dirty: bool,
     mut answering: Answering<'_>,
+    mut trust: Trust<'_>,
 ) -> Result<Render, OpError> {
     let template = resolve::resolve(Request {
         source: &config.template.source,
@@ -174,6 +221,20 @@ pub fn render(
     // discovered after six answered questions is the worst possible time.
     let graph = Graph::build(&template.manifest)?;
 
+    // Every remote source is confirmed here, before evaluation, so the user
+    // sees the whole of what the template wants to do on the network in one
+    // place. Loading is lazy and interleaved with the questionnaire, so asking
+    // at fetch time would scatter network prompts through the questions.
+    //
+    // A template with no remote data is never asked about — the overwhelming
+    // majority, and they must not acquire a prompt they have no use for.
+    let requests = declared_remotes(&template.manifest.data);
+    let decisions: BTreeMap<String, Decision> = if requests.is_empty() {
+        BTreeMap::new()
+    } else {
+        trust.gate().confirm(&requests, REMOTE_LIMIT_BYTES)?
+    };
+
     let mut loader = Loader::new(
         TemplateTree {
             repo: &template.repo,
@@ -181,7 +242,8 @@ pub fn render(
             revision: template.revision,
         },
         project_root,
-    );
+    )
+    .with_decisions(decisions);
 
     let context = crate::eval::resolve(
         Evaluation {
@@ -253,6 +315,7 @@ pub fn init(
     dirty: bool,
     merge_after: bool,
     answering: Answering<'_>,
+    trust: Trust<'_>,
 ) -> Result<InitOutcome, OpError> {
     if Config::exists_in(project_root) {
         return Err(OpError::AlreadyInitialised);
@@ -267,7 +330,15 @@ pub fn init(
     let mut config = Config::new(source, reference);
     config.template.id = explicit_id.map(str::to_string);
 
-    let rendered = render(project, project_root, &config, supplied, dirty, answering)?;
+    let rendered = render(
+        project,
+        project_root,
+        &config,
+        supplied,
+        dirty,
+        answering,
+        trust,
+    )?;
 
     let id = TemplateId::resolve(source, explicit_id)?;
     let ref_name = id.ref_name();
@@ -378,6 +449,7 @@ pub fn update(
     overrides: BTreeMap<String, Value>,
     dirty: bool,
     answering: Answering<'_>,
+    trust: Trust<'_>,
 ) -> Result<UpdateOutcome, OpError> {
     let mut config = Config::load(project_root)?;
 
@@ -387,7 +459,15 @@ pub fn update(
     let mut supplied = config.answers.clone();
     supplied.extend(overrides);
 
-    let rendered = render(project, project_root, &config, supplied, dirty, answering)?;
+    let rendered = render(
+        project,
+        project_root,
+        &config,
+        supplied,
+        dirty,
+        answering,
+        trust,
+    )?;
 
     let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
     let ref_name = id.ref_name();

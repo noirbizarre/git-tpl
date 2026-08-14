@@ -64,6 +64,15 @@ package_name = "{{ project_name | lower | replace(' ', '-') }}"
 [Questions](questions.md), [Computed values](computed.md) and
 [Data sources](../data/index.md).
 
+### `[data.<name>]`
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `source` | string | *required* | Where the data comes from. May be an expression. |
+| `kind` | string | inferred | `template`, `local` or `remote`. Required when `source` only becomes a URL after interpolation. |
+| `format` | string | inferred | `toml`, `json` or `yaml`. Inferred from the extension. |
+| `sha256` | string | — | The expected digest of the content, as 64 hex characters. A mismatch stops the render. |
+
 ## Rendering rules
 
 ### `.jinja` files are templates

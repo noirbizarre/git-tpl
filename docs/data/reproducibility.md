@@ -25,12 +25,13 @@ Given those four, a rendering is reproducible — with one exception.
 A remote URL can serve different bytes tomorrow. Nothing about the template
 revision constrains that.
 
-git-tpl's current answer is honesty rather than prevention: every contributing
-source is recorded.
+Every contributing source is recorded, and for a remote source the digest of the
+bytes actually received is recorded with it — whether or not the template pinned
+one.
 
 ```
 Data-Source: licenses = template:data/licenses.toml@8b3e7d1
-Data-Source: registry = remote:https://example.com/registry.json
+Data-Source: registry = remote:https://example.com/registry.json@sha256:9f86d081…
 ```
 
 Read it back from Git:
@@ -39,13 +40,11 @@ Read it back from Git:
 git show --no-patch refs/tpl/rust-library
 ```
 
-So you can determine *which* external sources contributed to a tree, and rule
-them in or out when a rendering changes unexpectedly. You cannot yet guarantee
-they will not change.
+So you can always determine *which* external sources contributed to a tree, and
+whether the bytes changed between two renderings. Guaranteeing they will not
+change is the next section.
 
-## Planned: pinning
-
-The design accommodates these; none is implemented in 0.1.0.
+## Pinning
 
 === "Checksum"
 
@@ -55,8 +54,17 @@ The design accommodates these; none is implemented in 0.1.0.
     sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
     ```
 
-    A mismatch is an error. Exact, verifiable, and the strongest option — at the
-    cost of a manual update whenever the source legitimately changes.
+    A mismatch is an **error**, never a warning: the point of a pin is that the
+    render stops rather than producing a plausible tree from content the template
+    did not vouch for. Both digests are reported, so "the source changed" is
+    distinguishable from "the pin is wrong".
+
+    Exact, verifiable, and the strongest option — at the cost of a manual update
+    whenever the source legitimately changes. It is accepted on any kind of data
+    source, though a template file is already pinned by the template revision.
+
+    The digest of a source you already trust is in the trailers of the last
+    rendering, so recording a pin does not mean computing one by hand.
 
 === "Immutable URL"
 
@@ -65,8 +73,8 @@ The design accommodates these; none is implemented in 0.1.0.
     source = "https://example.com/licenses/v3/licenses.toml"
     ```
 
-    Available today, requires nothing from git-tpl, and is the right answer when
-    you control the host. A version in the path is a pin.
+    Requires nothing from git-tpl, and is the right answer when you control the
+    host. A version in the path is a pin.
 
 === "Git-hosted data"
 
@@ -77,8 +85,9 @@ The design accommodates these; none is implemented in 0.1.0.
     path = "licenses.toml"
     ```
 
-    Reuses the mechanism the template itself uses, so the pin is a commit SHA and
-    the provenance format already describes it.
+    **Not implemented.** It would reuse the mechanism the template itself uses,
+    so the pin is a commit SHA and the provenance format already describes it.
+    Track it in [PLAN.md](https://github.com/noirbizarre/git-tpl/blob/main/PLAN.md).
 
 ## Determinism is the wider property
 

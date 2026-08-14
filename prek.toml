@@ -73,3 +73,16 @@ language = "system"
 entry = "bash -c '! grep -rnP --include=*.rs \"(?<![A-Za-z0-9_])git2::\" src | grep -v \"^src/git/libgit2\\.rs:\"'"
 files = "\\.rs$"
 pass_filenames = false
+
+# Invariant 5 was vacuously true until remote data sources landed: there was no
+# HTTP client to confine. Now there is, and "network access exists only in
+# `src/data/`" needs the same enforcement the Git backend has — a `use ureq` in
+# render.rs would make a template's content able to reach the network, which is
+# the one thing the renderer must never be able to do.
+[[repos.hooks]]
+id = "http-isolation"
+name = "the HTTP client is confined to the data layer"
+language = "system"
+entry = "bash -c '! grep -rnP --include=*.rs \"(?<![A-Za-z0-9_])ureq::\" src | grep -v \"^src/data/\"'"
+files = "\\.rs$"
+pass_filenames = false

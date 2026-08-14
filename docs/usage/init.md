@@ -43,6 +43,7 @@ Use `--no-merge` to stop after step 9 and wire it up yourself.
 | `--ref <ref>` | Branch, tag or commit. Defaults to the remote's default branch. |
 | `--answer k=v` | Supply an answer, skipping its prompt. Repeatable. |
 | `--defaults` | Accept every default without prompting. |
+| `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--id <id>` | Override the derived template id, and so the ref name. |
 | `--no-merge` | Create the ref, do not merge it. |
 | `--dirty` | Render the template's working tree rather than its `HEAD`. |

@@ -1,6 +1,9 @@
 //! The interactive prompter, built on `demand`.
 
+use std::collections::BTreeMap;
+
 use demand::{Confirm, DemandOption, Input, MultiSelect, Select};
+use tpl::data::{DataError, Decision, RemoteRequest, TrustGate};
 use tpl::eval::{EvalError, Prompter};
 use tpl::template::{Choice, Question, QuestionKind, Value};
 
@@ -127,4 +130,61 @@ fn text_input(title: &str, help: Option<&str>, placeholder: &str) -> Result<Stri
 /// user changing their mind.
 fn cancelled(_error: std::io::Error) -> EvalError {
     EvalError::Cancelled
+}
+
+/// Confirms a template's remote data sources on a terminal.
+///
+/// Rendering never requires trust: no template can execute anything, trusted or
+/// not. This gates only what a template asks *git-tpl* to do on its behalf, and
+/// today that is exactly one thing — fetch a URL.
+pub struct Confirmer;
+
+impl TrustGate for Confirmer {
+    fn confirm(
+        &mut self,
+        requests: &[RemoteRequest],
+        limit_bytes: u64,
+    ) -> Result<BTreeMap<String, Decision>, DataError> {
+        // Everything is listed before anything is asked, so the decision is
+        // made against the whole picture rather than one URL at a time with no
+        // idea how many follow.
+        eprintln!();
+        eprintln!(
+            "This template wants to fetch {} remote data source{}:",
+            requests.len(),
+            if requests.len() == 1 { "" } else { "s" }
+        );
+        eprintln!();
+        for request in requests {
+            eprintln!("  {}  {}", request.name, request.source);
+        }
+        eprintln!();
+        eprintln!(
+            "Each response is limited to {} KiB and is parsed as data — never executed.",
+            limit_bytes / 1024
+        );
+        eprintln!();
+
+        let mut decisions = BTreeMap::new();
+        for request in requests {
+            let choice = Select::new(format!("Fetch `{}`?", request.name))
+                .description(&request.source)
+                .option(DemandOption::new("fetch").label("Fetch it"))
+                .option(
+                    DemandOption::new("skip")
+                        .label("Skip it — the render will fail if it is needed"),
+                )
+                .option(DemandOption::new("abort").label("Abort"))
+                .run()
+                .map_err(|_| DataError::Cancelled)?;
+
+            match choice {
+                "fetch" => decisions.insert(request.name.clone(), Decision::Allow),
+                "skip" => decisions.insert(request.name.clone(), Decision::Skip),
+                _ => return Err(DataError::Cancelled),
+            };
+        }
+
+        Ok(decisions)
+    }
 }

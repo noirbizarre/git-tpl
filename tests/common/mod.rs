@@ -7,8 +7,12 @@
 
 #![allow(dead_code)]
 
+use std::io::{BufRead, BufReader, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use assert_cmd::prelude::*;
 
@@ -447,4 +451,134 @@ impl World {
     pub fn ref_name(&self) -> String {
         "refs/tpl/template".to_string()
     }
+}
+
+// --- a real HTTP server -----------------------------------------------------
+
+/// A minimal HTTP/1.1 server, for the remote data source tests.
+///
+/// Hand-rolled rather than `wiremock` or `httpmock`, both of which pull in an
+/// async runtime this project does not otherwise have. It also matches the rest
+/// of this harness: real Git repositories, and now a real socket, because a
+/// test against a stubbed transport tests the stub.
+pub struct TestServer {
+    base: String,
+    routes: Arc<Vec<(String, u16, Vec<u8>)>>,
+    hits: Arc<AtomicUsize>,
+    shutdown: Arc<AtomicBool>,
+}
+
+impl TestServer {
+    /// Serve a fixed set of `path -> (status, body)` routes.
+    ///
+    /// Bound on port 0, so tests run concurrently without agreeing a port.
+    pub fn start(routes: Vec<(&str, u16, Vec<u8>)>) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        // Non-blocking so the accept loop can notice the shutdown flag instead
+        // of parking forever on a port nobody will connect to again.
+        listener.set_nonblocking(true).expect("non-blocking");
+
+        let routes: Arc<Vec<(String, u16, Vec<u8>)>> = Arc::new(
+            routes
+                .into_iter()
+                .map(|(p, s, b)| (p.to_string(), s, b))
+                .collect(),
+        );
+        let hits = Arc::new(AtomicUsize::new(0));
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        let server = Self {
+            base: format!("http://127.0.0.1:{port}"),
+            routes: Arc::clone(&routes),
+            hits: Arc::clone(&hits),
+            shutdown: Arc::clone(&shutdown),
+        };
+
+        std::thread::spawn(move || {
+            while !shutdown.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        let routes = Arc::clone(&routes);
+                        let hits = Arc::clone(&hits);
+                        std::thread::spawn(move || serve_one(stream, &routes, &hits));
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        server
+    }
+
+    /// The server's origin, for a template that builds its own URL.
+    pub fn base_url(&self) -> String {
+        self.base.clone()
+    }
+
+    /// The absolute URL of a served path.
+    pub fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.base)
+    }
+
+    /// How many requests have been served.
+    ///
+    /// The whole point of the "fetched at most once per run" guarantee is that
+    /// this number stays at 1 however many questions use the source.
+    pub fn hits(&self) -> usize {
+        self.hits.load(Ordering::Relaxed)
+    }
+}
+
+impl Drop for TestServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+    }
+}
+
+fn serve_one(mut stream: TcpStream, routes: &[(String, u16, Vec<u8>)], hits: &AtomicUsize) {
+    // Only the request line is needed, and it is the first thing on the wire.
+    // Headers are read and discarded; there is no request body to worry about
+    // because the client only ever issues GETs.
+    let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
+        return;
+    }
+    loop {
+        let mut header = String::new();
+        match reader.read_line(&mut header) {
+            Ok(0) => break,
+            Ok(_) if header.trim().is_empty() => break,
+            Ok(_) => {}
+            Err(_) => return,
+        }
+    }
+
+    let path = request_line.split_whitespace().nth(1).unwrap_or("/");
+    hits.fetch_add(1, Ordering::Relaxed);
+
+    let (status, body) = routes
+        .iter()
+        .find(|(p, _, _)| p == path)
+        .map(|(_, s, b)| (*s, b.clone()))
+        .unwrap_or((404, b"not found".to_vec()));
+
+    let reason = match status {
+        200 => "OK",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        _ => "Status",
+    };
+
+    let head = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(&body);
+    let _ = stream.flush();
 }

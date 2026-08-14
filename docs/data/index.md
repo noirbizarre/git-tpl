@@ -56,15 +56,32 @@ The kind is inferred from `source`:
 | `https://example.com/licenses.toml` | Remote |
 | `./project-data.toml` | LocalFile — relative to the project root |
 
-An explicit `kind` disambiguates when needed:
+An explicit `kind` disambiguates when needed, and is **required** when a `source`
+only becomes a URL after interpolation:
 
 ```toml
 [data.overrides]
 source = "config/tpl-data.toml"
 kind = "local"
+
+[data.registry]
+source = "{{ registry_base }}/languages.json"
+kind = "remote"
 ```
 
 See [Local data](local.md) and [Remote data](remote.md).
+
+## Pinning
+
+Any source may declare the sha256 of its content. A mismatch stops the render.
+
+```toml
+[data.licenses]
+source = "https://example.com/licenses.toml"
+sha256 = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+```
+
+See [Reproducibility](reproducibility.md).
 
 ## Formats
 
@@ -164,12 +181,10 @@ with a partially-loaded context would produce a tree that looks plausible and is
 wrong, and that tree would become a commit.
 
 ```
-Could not load template data source `licenses`.
-
-  Template:  rawtools/rust-library
-  Source:    https://example.com/licenses.toml
-  Kind:      remote
-  Reason:    HTTP request failed: connection timed out
+x could not load template data source `licenses`
+help: source: https://example.com/licenses.toml
+      kind:   remote
+      reason: timed out reading response
 ```
 
 ## Provenance
@@ -179,8 +194,9 @@ commit's trailers:
 
 ```
 Data-Source: licenses = template:data/licenses.toml@8b3e7d1
-Data-Source: registry = remote:https://example.com/registry.json
+Data-Source: registry = remote:https://example.com/registry.json@sha256:9f86d081…
 ```
 
-So you can always answer "what produced this tree?" from Git alone. See
-[Reproducibility](reproducibility.md).
+A template file records the template commit it was read at; a remote source
+records the sha256 of the bytes it returned. Either way you can answer "what
+produced this tree?" from Git alone. See [Reproducibility](reproducibility.md).

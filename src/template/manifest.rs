@@ -84,6 +84,16 @@ pub struct DataSourceDecl {
     /// `toml` or `json`. Inferred from the extension when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+
+    /// The expected sha256 of the raw bytes, as lowercase hex.
+    ///
+    /// A mismatch is an error, never a warning: the point of a pin is that the
+    /// render stops rather than producing a plausible tree from content the
+    /// template did not vouch for. Chiefly for remote sources, but accepted on
+    /// any kind — a rule that applied to only one kind would cost more to
+    /// explain than the check costs to run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 /// The parsed `template.toml`.

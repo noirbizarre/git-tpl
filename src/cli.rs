@@ -109,6 +109,12 @@ pub struct InitArgs {
     #[arg(long)]
     pub init: bool,
 
+    /// Fetch remote data sources without confirming
+    ///
+    /// Per invocation: nothing is recorded, and the next run asks again.
+    #[arg(long)]
+    pub trust: bool,
+
     /// Report what would happen; create nothing
     #[arg(long)]
     pub dry_run: bool,
@@ -135,6 +141,12 @@ pub struct UpdateArgs {
     /// The remote to push to
     #[arg(long, value_name = "NAME")]
     pub remote: Option<String>,
+
+    /// Fetch remote data sources without confirming
+    ///
+    /// Per invocation: nothing is recorded, and the next run asks again.
+    #[arg(long)]
+    pub trust: bool,
 
     /// Report what would change; write nothing
     #[arg(long)]

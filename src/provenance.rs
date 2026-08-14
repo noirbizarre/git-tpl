@@ -206,6 +206,7 @@ mod tests {
                 kind: SourceKind::TemplateFile,
                 location: "data/licenses.toml".into(),
                 revision: Some(oid("4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29")),
+                checksum: None,
             }],
             version: "0.1.0".into(),
             template_name: "rust-library".into(),
@@ -268,12 +269,14 @@ mod tests {
                     kind: SourceKind::TemplateFile,
                     location: "data/licenses.toml".into(),
                     revision: Some(oid("4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29")),
+                    checksum: None,
                 },
                 DataProvenance {
                     name: "overrides".into(),
                     kind: SourceKind::LocalFile,
                     location: "config/tpl.toml".into(),
                     revision: None,
+                    checksum: None,
                 },
             ],
             ..sample()

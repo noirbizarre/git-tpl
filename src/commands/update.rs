@@ -3,9 +3,9 @@
 use tpl::gitconfig::Preferences;
 use tpl::ops::{self, OpError, UpdateOutcome};
 
-use super::{Context, answering};
+use super::{Context, answering, trust};
 use crate::cli::{GlobalArgs, UpdateArgs};
-use crate::prompt::Interactive;
+use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, heading, muted};
 
 pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
@@ -36,16 +36,24 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
             overrides,
             args.dirty,
             preferences.interactive,
+            args.trust,
         );
     }
 
     let mut prompter = Interactive;
+    let mut confirmer = Confirmer;
     let outcome = ops::update(
         &ctx.repo,
         &ctx.root,
         overrides,
         args.dirty,
         answering(&args.answers, preferences.interactive, &mut prompter),
+        trust(
+            &args.answers,
+            args.trust,
+            preferences.interactive,
+            &mut confirmer,
+        ),
     )?;
 
     match outcome {
@@ -121,6 +129,7 @@ fn dry_run(
     overrides: std::collections::BTreeMap<String, tpl::template::Value>,
     dirty: bool,
     interactive: bool,
+    trusted: bool,
 ) -> Result<(), OpError> {
     let mut supplied = config.answers.clone();
     supplied.extend(overrides);
@@ -132,7 +141,20 @@ fn dry_run(
         ops::Answering::defaults()
     };
 
-    let rendered = ops::render(&ctx.repo, &ctx.root, config, supplied, dirty, answering)?;
+    // `--dry-run` still fetches: it reports what *would* change, and a render
+    // that skipped its data would report a different tree than the real one.
+    let mut confirmer = Confirmer;
+    let trust = if trusted {
+        ops::Trust::always()
+    } else if interactive {
+        ops::Trust::Ask(&mut confirmer)
+    } else {
+        ops::Trust::refuse()
+    };
+
+    let rendered = ops::render(
+        &ctx.repo, &ctx.root, config, supplied, dirty, answering, trust,
+    )?;
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
     let tip = tpl::git::GitBackend::resolve_ref(&ctx.repo, &ref_name)?;

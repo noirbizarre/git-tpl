@@ -8,12 +8,29 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use miette::Diagnostic;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::git::{Oid, libgit2::LibGit2};
 use crate::template::{DataSourceDecl, Value};
+
+/// The most a remote response may be, in bytes.
+///
+/// Enforced while reading the body, never taken from `Content-Length` — that
+/// header is a claim made by the party whose input is being bounded.
+pub const REMOTE_LIMIT_BYTES: u64 = 5 * 1024 * 1024;
+
+/// How long a remote source has to produce its whole response.
+///
+/// Global rather than per-read: a server dribbling one byte at a time would
+/// satisfy any read timeout indefinitely.
+const REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How many redirects are followed before the fetch is abandoned.
+const REMOTE_MAX_REDIRECTS: u32 = 5;
 
 /// Where a data source's bytes come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,22 +179,160 @@ pub enum DataError {
         accepted: Option<String>,
     },
 
-    /// Remote data sources are not implemented yet.
-    #[error("data source `{name}` is remote, which is not implemented yet")]
+    /// A remote fetch was not confirmed.
+    ///
+    /// Deliberately an error rather than an empty value: a CI runner is the
+    /// worst possible place to grant a capability by omission, and a render
+    /// that quietly proceeded without the data would produce a plausible tree
+    /// that is wrong — and that tree becomes a commit.
+    #[error("data source `{name}` was not fetched, because the template is not trusted")]
     #[diagnostic(
-        code(tpl::data::remote_unsupported),
+        code(tpl::data::untrusted),
         url("https://noirbizarre.github.io/git-tpl/data/remote/"),
         help(
-            "remote data sources are designed but not implemented in this release. \
-             Move the data into the template repository, where it is also pinned by the template revision."
+            "source: {location}\npass `--trust` to allow this template's remote data sources for this run, or answer the confirmation interactively"
         )
     )]
-    RemoteUnsupported {
+    Untrusted {
         /// The declared name.
         name: String,
-        /// The URL that was declared.
+        /// The URL that would have been fetched.
         location: String,
     },
+
+    /// A source became a URL only after interpolation.
+    ///
+    /// The trust confirmation lists every remote source before any of them is
+    /// fetched, and it can only do that from the declaration. A source whose
+    /// URL appears after an answer is substituted would slip past the list, so
+    /// it is refused rather than fetched unannounced.
+    #[error("data source `{name}` resolved to a URL but is not declared remote")]
+    #[diagnostic(
+        code(tpl::data::undeclared_remote),
+        help(
+            "resolved: {location}\nadd `kind = \"remote\"` to `[data.{name}]` so the fetch can be confirmed before it happens"
+        )
+    )]
+    UndeclaredRemote {
+        /// The declared name.
+        name: String,
+        /// What the source interpolated to.
+        location: String,
+    },
+
+    /// The user declined to decide, at the confirmation prompt.
+    #[error("cancelled")]
+    #[diagnostic(code(tpl::data::cancelled))]
+    Cancelled,
+
+    /// The content does not match the declared `sha256`.
+    #[error("data source `{name}` does not match its recorded checksum")]
+    #[diagnostic(
+        code(tpl::data::checksum),
+        help(
+            "source:   {location}\nexpected: {expected}\nactual:   {actual}\nthe content changed, or is not what the template pinned"
+        )
+    )]
+    ChecksumMismatch {
+        /// The declared name.
+        name: String,
+        /// The resolved source.
+        location: String,
+        /// The declared digest.
+        expected: String,
+        /// What was actually received.
+        actual: String,
+    },
+}
+
+/// A remote source a template wants to fetch, as it was declared.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteRequest {
+    /// The declared name.
+    pub name: String,
+    /// The source string, before interpolation.
+    pub source: String,
+}
+
+/// What to do about one remote source. Per invocation; nothing is remembered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    /// Fetch it.
+    Allow,
+    /// Do not fetch it, and fail when it is needed.
+    Skip,
+}
+
+/// Decides whether a template's remote data sources may be fetched.
+///
+/// Called **once, before evaluation**, with every declared remote source.
+/// Loading is lazy and interleaved with the questionnaire, so confirming at
+/// fetch time would scatter network prompts through the questions; the rule is
+/// that everything is shown in full before any of it happens.
+pub trait TrustGate {
+    /// Decide for each request. `limit_bytes` is shown to the user, because a
+    /// size bound they cannot see is not a bound they can consent to.
+    fn confirm(
+        &mut self,
+        requests: &[RemoteRequest],
+        limit_bytes: u64,
+    ) -> Result<BTreeMap<String, Decision>, DataError>;
+}
+
+/// Allows every remote source without asking. `--trust`.
+///
+/// Per invocation. It writes nothing anywhere, and the next run asks again.
+pub struct AlwaysTrust;
+
+impl TrustGate for AlwaysTrust {
+    fn confirm(
+        &mut self,
+        requests: &[RemoteRequest],
+        _limit_bytes: u64,
+    ) -> Result<BTreeMap<String, Decision>, DataError> {
+        Ok(requests
+            .iter()
+            .map(|r| (r.name.clone(), Decision::Allow))
+            .collect())
+    }
+}
+
+/// Refuses every remote source, for when there is nobody to ask.
+///
+/// `--defaults`, `tpl.interactive false`, CI. The refusal is loud at the point
+/// of use — see [`DataError::Untrusted`] — rather than a silent omission.
+pub struct RefuseRemote;
+
+impl TrustGate for RefuseRemote {
+    fn confirm(
+        &mut self,
+        requests: &[RemoteRequest],
+        _limit_bytes: u64,
+    ) -> Result<BTreeMap<String, Decision>, DataError> {
+        Ok(requests
+            .iter()
+            .map(|r| (r.name.clone(), Decision::Skip))
+            .collect())
+    }
+}
+
+/// Every data source that is declared remote, in declaration order.
+///
+/// From the *declaration*, not from a resolved string: this is what the trust
+/// confirmation lists, and it has to be computable before anything is
+/// evaluated. A source that only becomes a URL after interpolation is refused
+/// at load time instead — see [`DataError::UndeclaredRemote`].
+pub fn declared_remotes(data: &BTreeMap<String, DataSourceDecl>) -> Vec<RemoteRequest> {
+    data.iter()
+        .filter(|(_, decl)| match &decl.kind {
+            Some(explicit) => explicit == "remote",
+            None => SourceKind::infer(&decl.source) == SourceKind::Remote,
+        })
+        .map(|(name, decl)| RemoteRequest {
+            name: name.clone(),
+            source: decl.source.clone(),
+        })
+        .collect()
 }
 
 /// Where a loaded value came from, recorded in the rendered commit's trailers.
@@ -195,14 +350,27 @@ pub struct Provenance {
     /// commit is what makes "which data produced this tree?" answerable from
     /// Git alone.
     pub revision: Option<Oid>,
+    /// The sha256 of the bytes, for remote sources.
+    ///
+    /// Recorded whether or not the template pinned one. Provenance exists to
+    /// answer "which bytes produced this tree", and computing the digest only
+    /// when a pin was declared would answer it precisely for the sources that
+    /// needed it least.
+    pub checksum: Option<String>,
 }
 
 impl Provenance {
-    /// The trailer value, `<kind>:<location>[@<revision>]`.
+    /// The trailer value, `<kind>:<location>[@<revision>|@sha256:<digest>]`.
+    ///
+    /// The `sha256:` prefix is what keeps a digest distinguishable from a short
+    /// oid, so a reader — and the existing parser — never has to guess.
     pub fn trailer(&self) -> String {
-        match &self.revision {
-            Some(oid) => format!("{}:{}@{}", self.kind.label(), self.location, oid.short()),
-            None => format!("{}:{}", self.kind.label(), self.location),
+        match (&self.revision, &self.checksum) {
+            (Some(oid), _) => format!("{}:{}@{}", self.kind.label(), self.location, oid.short()),
+            (None, Some(digest)) => {
+                format!("{}:{}@sha256:{}", self.kind.label(), self.location, digest)
+            }
+            (None, None) => format!("{}:{}", self.kind.label(), self.location),
         }
     }
 }
@@ -229,18 +397,35 @@ pub struct Loader<'a> {
     project_root: PathBuf,
     cache: BTreeMap<String, Value>,
     provenance: Vec<Provenance>,
+    decisions: BTreeMap<String, Decision>,
+    // Built on the first fetch and reused, so a template with several remote
+    // sources opens one connection pool rather than one per source. `None` for
+    // the overwhelmingly common template that has no remote data at all.
+    agent: Option<ureq::Agent>,
 }
 
 impl<'a> Loader<'a> {
     /// A loader reading template files from `template` and local files from
     /// `project_root`.
+    ///
+    /// No remote source is permitted until [`with_decisions`](Self::with_decisions)
+    /// says so. Defaulting to "allowed" would mean every future caller had to
+    /// remember to close the gate.
     pub fn new(template: TemplateTree<'a>, project_root: impl Into<PathBuf>) -> Self {
         Self {
             template,
             project_root: project_root.into(),
             cache: BTreeMap::new(),
             provenance: Vec::new(),
+            decisions: BTreeMap::new(),
+            agent: None,
         }
+    }
+
+    /// Record what the trust gate decided, by source name.
+    pub fn with_decisions(mut self, decisions: BTreeMap<String, Decision>) -> Self {
+        self.decisions = decisions;
+        self
     }
 
     /// What contributed to this run, in load order.
@@ -287,17 +472,26 @@ impl<'a> Loader<'a> {
         let bytes = match kind {
             SourceKind::TemplateFile => self.read_template_file(name, resolved_source)?,
             SourceKind::LocalFile => self.read_local_file(name, resolved_source)?,
-            // Fetching is designed for but not implemented. Failing loudly with
-            // a pointer is better than silently rendering with absent data,
-            // which would produce a plausible tree that is wrong — and that
-            // tree would become a commit.
-            SourceKind::Remote => {
-                return Err(DataError::RemoteUnsupported {
-                    name: name.to_string(),
-                    location: resolved_source.to_string(),
-                });
-            }
+            SourceKind::Remote => self.fetch(name, resolved_source)?,
         };
+
+        // Computed for every remote source, pinned or not, because the digest
+        // is the only thing that makes a remote trailer reproducible. Skipped
+        // for the other kinds unless a pin asked for it: a template file is
+        // already pinned by the template revision.
+        let expected = expected_digest(name, decl)?;
+        let digest = (expected.is_some() || kind == SourceKind::Remote).then(|| digest_of(&bytes));
+
+        if let (Some(expected), Some(actual)) = (&expected, &digest)
+            && expected != actual
+        {
+            return Err(DataError::ChecksumMismatch {
+                name: name.to_string(),
+                location: resolved_source.to_string(),
+                expected: expected.clone(),
+                actual: actual.clone(),
+            });
+        }
 
         let value = parse(name, resolved_source, format, &bytes)?;
 
@@ -310,9 +504,88 @@ impl<'a> Loader<'a> {
                 SourceKind::TemplateFile => Some(self.template.revision),
                 _ => None,
             },
+            checksum: match kind {
+                SourceKind::Remote => digest,
+                _ => None,
+            },
         });
 
         Ok(value)
+    }
+
+    /// Fetch a remote source over HTTP.
+    ///
+    /// The response is untrusted input from a third party: it is bounded, timed
+    /// out, and parsed defensively. Nothing about it can cause execution, and
+    /// there is no fallback — a failure stops the render rather than
+    /// substituting a cached copy, an empty table, or the last known value.
+    fn fetch(&mut self, name: &str, url: &str) -> Result<Vec<u8>, DataError> {
+        // The gate is consulted by name, and a source absent from it was never
+        // shown to the user — which for a URL produced by interpolation is the
+        // whole point of refusing it.
+        match self.decisions.get(name) {
+            Some(Decision::Allow) => {}
+            Some(Decision::Skip) => {
+                return Err(DataError::Untrusted {
+                    name: name.to_string(),
+                    location: url.to_string(),
+                });
+            }
+            None => {
+                return Err(DataError::UndeclaredRemote {
+                    name: name.to_string(),
+                    location: url.to_string(),
+                });
+            }
+        }
+
+        // `kind = "remote"` can be declared on any string, so the scheme is
+        // checked here rather than relying on the inference that a declared
+        // kind bypasses.
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err(DataError::Load {
+                name: name.to_string(),
+                location: url.to_string(),
+                kind: "remote".into(),
+                reason: "unsupported scheme: a remote data source must be http or https".into(),
+            });
+        }
+
+        let agent = self.agent.get_or_insert_with(|| {
+            ureq::Agent::config_builder()
+                .timeout_global(Some(REMOTE_TIMEOUT))
+                .max_redirects(REMOTE_MAX_REDIRECTS)
+                .user_agent(concat!("git-tpl/", env!("CARGO_PKG_VERSION")))
+                .build()
+                .into()
+        });
+
+        // `http_status_as_error` is left on: a 404 body is an error page, and
+        // parsing it as TOML would report a syntax error instead of the status
+        // the user needs to see.
+        let mut response = agent.get(url).call().map_err(|e| DataError::Load {
+            name: name.to_string(),
+            location: url.to_string(),
+            kind: "remote".into(),
+            reason: e.to_string(),
+        })?;
+
+        response
+            .body_mut()
+            .with_config()
+            .limit(REMOTE_LIMIT_BYTES)
+            .read_to_vec()
+            .map_err(|e| DataError::Load {
+                name: name.to_string(),
+                location: url.to_string(),
+                kind: "remote".into(),
+                reason: match e {
+                    ureq::Error::BodyExceedsLimit(limit) => {
+                        format!("the response is larger than the {limit} byte limit")
+                    }
+                    other => other.to_string(),
+                },
+            })
     }
 
     /// Read a file from the template repository at the resolved revision.
@@ -390,6 +663,34 @@ fn within(root: &Path, candidate: &Path) -> bool {
         }
     }
     true
+}
+
+/// The lowercase hex sha256 of some bytes.
+fn digest_of(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
+}
+
+/// The declared `sha256`, validated.
+///
+/// Checked for shape when it is read rather than when it is compared, so a
+/// typo'd pin is reported as a typo instead of as a mismatch against a digest
+/// it could never have equalled.
+fn expected_digest(name: &str, decl: &DataSourceDecl) -> Result<Option<String>, DataError> {
+    let Some(declared) = &decl.sha256 else {
+        return Ok(None);
+    };
+
+    let normalised = declared.trim().to_ascii_lowercase();
+    if normalised.len() != 64 || !normalised.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(DataError::UnknownSetting {
+            name: name.to_string(),
+            what: "sha256",
+            value: declared.clone(),
+            accepted: Some("expected 64 hexadecimal characters".into()),
+        });
+    }
+
+    Ok(Some(normalised))
 }
 
 /// Parse bytes into a structured value.
@@ -664,6 +965,7 @@ mod tests {
             kind: SourceKind::TemplateFile,
             location: "data/licenses.toml".into(),
             revision: Some(oid),
+            checksum: None,
         };
         assert_eq!(provenance.trailer(), "template:data/licenses.toml@4f2c1a9");
     }
@@ -677,7 +979,129 @@ mod tests {
             kind: SourceKind::LocalFile,
             location: "config/tpl-data.toml".into(),
             revision: None,
+            checksum: None,
         };
         assert_eq!(provenance.trailer(), "local:config/tpl-data.toml");
+    }
+
+    /// Nothing pins a remote source except the bytes it returned, so the
+    /// trailer has to carry the digest for the record to mean anything. The
+    /// `sha256:` prefix is what keeps it from being read as a short oid.
+    #[test]
+    fn a_remote_trailer_records_the_digest() {
+        let provenance = Provenance {
+            name: "licenses".into(),
+            kind: SourceKind::Remote,
+            location: "https://example.com/licenses.json".into(),
+            revision: None,
+            checksum: Some("a".repeat(64)),
+        };
+        assert_eq!(
+            provenance.trailer(),
+            format!(
+                "remote:https://example.com/licenses.json@sha256:{}",
+                "a".repeat(64)
+            )
+        );
+    }
+
+    fn decl(sha256: Option<String>) -> DataSourceDecl {
+        DataSourceDecl {
+            source: "https://example.com/x.json".into(),
+            kind: Some("remote".into()),
+            format: None,
+            sha256,
+        }
+    }
+
+    /// A malformed pin is reported as a malformed pin. Comparing it and
+    /// reporting a mismatch would send the author looking at the server.
+    #[rstest]
+    #[case::too_short(Some("abc123".to_string()), false)]
+    #[case::not_hex(Some("z".repeat(64)), false)]
+    #[case::uppercase_is_accepted(Some("A".repeat(64)), true)]
+    #[case::well_formed(Some("a".repeat(64)), true)]
+    #[case::absent(None, true)]
+    fn a_declared_sha256_must_be_hex(#[case] declared: Option<String>, #[case] valid: bool) {
+        assert_eq!(expected_digest("x", &decl(declared)).is_ok(), valid);
+    }
+
+    /// Case is not part of the value, so a pin copied from a tool that emits
+    /// uppercase still matches.
+    #[test]
+    fn a_declared_sha256_is_compared_in_lowercase() {
+        let digest = expected_digest("x", &decl(Some("AB".repeat(32))))
+            .unwrap()
+            .unwrap();
+        assert_eq!(digest, "ab".repeat(32));
+    }
+
+    #[test]
+    fn the_digest_is_the_sha256_of_the_raw_bytes() {
+        // The empty string's sha256, which is worth pinning literally: a
+        // regression that hashed something else would still look plausible.
+        assert_eq!(
+            digest_of(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    /// The confirmation prompt is built from declarations, before anything is
+    /// evaluated, so this is what decides whether a source can be fetched at
+    /// all.
+    #[test]
+    fn declared_remotes_finds_urls_and_explicit_kinds() {
+        let mut data = BTreeMap::new();
+        data.insert(
+            "by_url".to_string(),
+            DataSourceDecl {
+                source: "https://example.com/a.json".into(),
+                kind: None,
+                format: None,
+                sha256: None,
+            },
+        );
+        data.insert(
+            "by_kind".to_string(),
+            DataSourceDecl {
+                source: "{{ registry }}/b.json".into(),
+                kind: Some("remote".into()),
+                format: None,
+                sha256: None,
+            },
+        );
+        data.insert(
+            "local".to_string(),
+            DataSourceDecl {
+                source: "data/c.toml".into(),
+                kind: None,
+                format: None,
+                sha256: None,
+            },
+        );
+
+        let names: Vec<_> = declared_remotes(&data)
+            .into_iter()
+            .map(|r| r.name)
+            .collect();
+        assert_eq!(names, vec!["by_kind", "by_url"]);
+    }
+
+    /// An interpolated source that is not declared remote cannot appear in the
+    /// confirmation list, so it must not be fetchable either — otherwise the
+    /// list is not the whole truth.
+    #[test]
+    fn an_interpolated_url_is_not_a_declared_remote() {
+        let mut data = BTreeMap::new();
+        data.insert(
+            "sneaky".to_string(),
+            DataSourceDecl {
+                source: "{{ base }}/licenses.json".into(),
+                kind: None,
+                format: None,
+                sha256: None,
+            },
+        );
+        assert!(declared_remotes(&data).is_empty());
     }
 }

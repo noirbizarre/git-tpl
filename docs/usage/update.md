@@ -124,6 +124,7 @@ new question with no default is then an error.
 | `--ref <ref>` | Render this revision instead of the configured one. Does not change the configuration. |
 | `--answer k=v` | Override an answer for this run and record it. Repeatable. |
 | `--defaults` | Accept defaults for unanswered questions instead of prompting. |
+| `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--dirty` | Render the template's working tree. Local templates only. |
 | `--push` | Push the ref afterwards. Same as `tpl.autoPush`. |
 | `--dry-run` | Report what would change; write nothing. |

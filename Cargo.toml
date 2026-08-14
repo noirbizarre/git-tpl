@@ -95,6 +95,13 @@ hex = "0.4"
 # old template is a far worse failure than a slow fetch — in a tool whose whole
 # premise is reproducibility.
 tempfile = "3"
+# The remote data source client. Blocking, because everything below `ops` is
+# synchronous and an async runtime would exist solely to be blocked on. Default
+# features give rustls plus the platform verifier, so no release target needs a
+# system TLS library. `ureq` also bounds the response body on the read itself,
+# which is the only trustworthy way to enforce a size limit — `Content-Length`
+# is a claim made by the server.
+ureq = "3"
 
 [dev-dependencies]
 assert_cmd = "2"

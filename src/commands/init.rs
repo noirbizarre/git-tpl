@@ -7,9 +7,9 @@ use tpl::git::{GitBackend, MergeOutcome};
 use tpl::gitconfig::Preferences;
 use tpl::ops::{self, OpError};
 
-use super::{Context, answering};
+use super::{Context, answering, trust};
 use crate::cli::{GlobalArgs, InitArgs};
-use crate::prompt::Interactive;
+use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, heading, muted, warning};
 
 pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
@@ -32,6 +32,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
     }
 
     let mut prompter = Interactive;
+    let mut confirmer = Confirmer;
     let outcome = ops::init(
         &ctx.repo,
         &ctx.root,
@@ -42,6 +43,12 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
         args.dirty,
         !args.no_merge,
         answering(&args.answers, preferences.interactive, &mut prompter),
+        trust(
+            &args.answers,
+            args.trust,
+            preferences.interactive,
+            &mut confirmer,
+        ),
     )?;
 
     ctx.blank();

@@ -1,14 +1,5 @@
 # Remote data
 
-!!! warning "Not yet implemented"
-
-    Remote data sources are designed and specified, but the loader is not
-    implemented in 0.1.0. Declaring one produces a clear error naming the
-    source. The `DataSource` abstraction and the provenance format already
-    account for them, so this is additive rather than a redesign.
-
-    Track it in [PLAN.md](https://github.com/noirbizarre/git-tpl/blob/main/PLAN.md).
-
 Data hosted independently of the template repository.
 
 ```toml
@@ -38,12 +29,12 @@ git-tpl does not pretend otherwise. The rendered commit records every remote
 source that contributed:
 
 ```
-Data-Source: licenses = remote:https://example.com/licenses.toml
+Data-Source: licenses = remote:https://example.com/licenses.toml@sha256:9f86d081…
 ```
 
-so the question "why did this tree change when nothing changed?" is at least
-answerable. Making it *not happen* requires pinning — see
-[Reproducibility](reproducibility.md).
+The digest is recorded whether or not the template pinned one, so the question
+"why did this tree change when nothing changed?" is always answerable. Making it
+*not happen* requires pinning — see [Reproducibility](reproducibility.md).
 
 ## Rules
 
@@ -63,11 +54,79 @@ source; it cannot construct a request.
 a template may offer remote-backed choices on a conditional branch without
 imposing a network round-trip on everyone.
 
+**The URL must be visible in the declaration.** A `source` that only becomes a
+URL once an answer is substituted must say `kind = "remote"`:
+
+```toml
+[data.registry]
+source = "{{ registry_base }}/languages.json"
+kind = "remote"
+format = "json"
+```
+
+Without it the fetch is refused, because the confirmation below lists every
+remote source *before* anything is evaluated, and it can only do that from the
+declaration. A URL that appeared later would slip past the list, which would
+make the list a half-truth.
+
+## Confirmation
+
+Fetching is the one thing a template asks git-tpl to do on its behalf, so it is
+shown in full before it happens. Rendering itself never requires trust: no
+template can execute anything, confirmed or not.
+
+```console
+$ git tpl init https://github.com/org/template
+
+This template wants to fetch 1 remote data source:
+
+  licenses  https://example.com/licenses.toml
+
+Each response is limited to 5120 KiB and is parsed as data — never executed.
+
+? Fetch `licenses`?
+> Fetch it
+  Skip it — the render will fail if it is needed
+  Abort
+```
+
+Nothing is remembered. The next run asks again.
+
+`--trust` accepts every source for one invocation, without prompting and without
+writing anything anywhere:
+
+```sh
+git tpl init https://github.com/org/template --trust
+```
+
+When there is nobody to ask — `--defaults`, `tpl.interactive false`, CI — every
+remote source is **refused**, loudly, naming what was refused:
+
+```
+x data source `licenses` was not fetched, because the template is not trusted
+help: source: https://example.com/licenses.toml
+      pass `--trust` to allow this template's remote data sources for this run,
+      or answer the confirmation interactively
+```
+
+Never silently accepted: a CI runner is the worst possible place to grant a
+capability by omission.
+
 ## Treated as untrusted
 
-Remote data is input from a third party. It is parsed defensively, size-limited,
-and a malformed response is an error that names the source rather than a panic or
-a partial context.
+Remote data is input from a third party. It is parsed defensively, and:
+
+| Bound | Value |
+|---|---|
+| Response size | 5 MiB |
+| Total time per request | 30 seconds |
+| Redirects followed | 5 |
+| Retries | none |
+
+The size limit is enforced while reading the body, never taken from
+`Content-Length` — that header is a claim made by the party being bounded. A
+malformed response is an error that names the source rather than a panic or a
+partial context.
 
 ## Failure stops the render
 
@@ -77,10 +136,8 @@ produces a plausible-looking tree that is quietly wrong, and that tree would be
 committed.
 
 ```
-Could not load template data source `licenses`.
-
-  Template:  rawtools/rust-library
-  Source:    https://example.com/licenses.toml
-  Kind:      remote
-  Reason:    HTTP request failed: connection timed out
+x could not load template data source `licenses`
+help: source: https://example.com/licenses.toml
+      kind:   remote
+      reason: timed out reading response
 ```
