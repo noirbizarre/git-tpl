@@ -46,6 +46,7 @@ main:  A ─── M ─── B ─── M'
 | Git backend isolation | ✅ enforced by a prek hook, not by hope |
 | Documentation | ✅ full Zensical site, 11 ADRs |
 | Tooling | ✅ mise, prek, git-cliff, gh-ship, CI |
+| Releases | ✅ binaries for six targets, plus crates.io via Trusted Publishing |
 
 ### Not implemented
 

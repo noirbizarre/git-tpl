@@ -122,3 +122,75 @@ jobs:
         run: gh release upload "${{ inputs.tag }}" dist/* --clobber
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+
+  # Last, deliberately. Publishing to crates.io cannot be undone — `cargo yank`
+  # hides a version from resolution but never removes it, and the version number
+  # is spent forever. So it happens only once the six targets have proven the
+  # code compiles and the assets are on the release: if this job then fails,
+  # re-running it costs nothing, whereas the reverse ordering could leave a
+  # permanent crates.io release with no binaries behind it.
+  crates:
+    name: 📦 crates.io
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+
+    # Must match the Environment configured under
+    # crates.io -> git-tpl -> Settings -> Trusted Publishing. crates.io checks
+    # the OIDC claim against it, and a mismatch is a 403 at publish time rather
+    # than anything visible earlier.
+    environment:
+      name: release
+
+    permissions:
+      # The only permission Trusted Publishing needs: it mints the OIDC token
+      # that is exchanged for a short-lived crates.io token. No API key is
+      # stored anywhere, and nothing here writes to the repository.
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The tag, not the branch tip. `cargo publish` packages the working
+          # tree, so this is what decides which code reaches crates.io.
+          ref: ${{ inputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # `cargo publish` fails outright on a version that already exists, which
+      # turns an ordinary "re-run failed jobs" into a stuck release: gh-ship
+      # waits on this workflow and only undrafts the release when it succeeds.
+      # A version can be uploaded and the job still fail afterwards, so this
+      # makes the re-run a no-op rather than an error.
+      #
+      # `inputs.tag` is the version: this project tags without a `v` prefix, and
+      # prepare-release derives both from one string.
+      - name: Check whether this version is already published
+        id: existing
+        run: |
+          set -euo pipefail
+          url="https://crates.io/api/v1/crates/git-tpl/${{ inputs.tag }}"
+          if curl -sfL --retry 3 -H "User-Agent: git-tpl-release" "$url" > /dev/null; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::git-tpl ${{ inputs.tag }} is already on crates.io; skipping."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Exchanges the workflow's OIDC identity for a crates.io token that
+      # lives 30 minutes, and revokes it in a post step when the job ends.
+      # Skipped when there is nothing to publish, so no token is minted for a
+      # job that will do nothing with it.
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+        if: steps.existing.outputs.published == 'false'
+
+      # `--locked` so the published build resolves exactly the dependencies
+      # Cargo.lock records. Without it a yanked or newly-broken transitive
+      # dependency could change what is verified here versus what was tested.
+      - name: Publish to crates.io
+        if: steps.existing.outputs.published == 'false'
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

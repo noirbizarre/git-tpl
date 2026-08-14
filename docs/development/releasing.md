@@ -25,6 +25,7 @@ Release PR  (chore(release): X.Y.Z)
      ▼
 📦 Publish Release
      │  cross-compiles six targets, uploads assets + SHA256SUMS
+     │  then publishes to crates.io
      ▼
 the release is made public
 ```
@@ -103,6 +104,48 @@ Plus `SHA256SUMS`.
 
 libgit2 is vendored and built from source on every target, so each binary is
 self-contained and every platform gets identical Git semantics.
+
+## crates.io
+
+The `crates` job publishes with [Trusted
+Publishing](https://crates.io/docs/trusted-publishing): the workflow's OIDC
+identity is exchanged for a token that lives 30 minutes and is revoked when the
+job ends. There is no API key stored in this repository.
+
+It runs **last**, after the binaries have built on all six targets *and* been
+attached to the release. That ordering is deliberate: publishing to crates.io
+cannot be undone. `cargo yank` hides a version from resolution but never removes
+it, and the version number is spent permanently. If the job fails, re-running it
+costs nothing; the reverse ordering could leave a permanent release on crates.io
+with no binaries behind it.
+
+Re-running is safe. The job checks whether the version is already on crates.io
+and skips if it is, so a re-run after a partial failure is a no-op rather than
+an `already exists` error — which would otherwise leave the GitHub release stuck
+as a draft, because gh-ship only undrafts when this workflow succeeds.
+
+### Configuration
+
+Set once, under crates.io → git-tpl → Settings → Trusted Publishing:
+
+| Field | Value |
+|---|---|
+| Repository owner | `noirbizarre` |
+| Repository name | `git-tpl` |
+| Workflow filename | `publish-release.yaml` |
+| Environment | `release` |
+
+crates.io validates the OIDC claim against every one of these. Renaming the
+workflow file, or changing the job's `environment:`, breaks publishing with a
+`403` at the worst possible moment — so if either changes here, change it there
+too.
+
+!!! note "The first publish was manual"
+
+    crates.io has no pending-publisher concept: a trusted publisher can only be
+    configured on a crate that already exists, and the publish endpoint refuses
+    to create new crates. 0.1.0 was therefore published by hand with an API
+    token. Every version since goes through this job.
 
 ## Requirements
 
