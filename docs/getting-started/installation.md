@@ -12,12 +12,12 @@ cargo install git-tpl
 ## From a release
 
 Download the binary for your platform from the
-[releases page](https://github.com/rawtools/git-tpl/releases) and put it
+[releases page](https://github.com/noirbizarre/git-tpl/releases) and put it
 somewhere on your `PATH`.
 
 ```sh
 curl -fsSL -o git-tpl \
-  https://github.com/rawtools/git-tpl/releases/latest/download/git-tpl_0.1.0_linux-amd64
+  https://github.com/noirbizarre/git-tpl/releases/latest/download/git-tpl_0.1.0_linux-amd64
 chmod +x git-tpl
 mv git-tpl ~/.local/bin/
 ```
@@ -45,7 +45,7 @@ binary is either not on your `PATH` or not named `git-tpl`.
 ## Development builds
 
 ```sh
-git clone https://github.com/rawtools/git-tpl
+git clone https://github.com/noirbizarre/git-tpl
 cd git-tpl
 mise run setup    # cargo install --path . --force
 ```

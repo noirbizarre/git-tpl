@@ -6,7 +6,7 @@
 - [mise](https://mise.jdx.dev) — everything else installs itself
 
 ```sh
-git clone https://github.com/rawtools/git-tpl
+git clone https://github.com/noirbizarre/git-tpl
 cd git-tpl
 mise install
 prek install

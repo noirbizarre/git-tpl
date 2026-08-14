@@ -7,7 +7,7 @@
     source. The `DataSource` abstraction and the provenance format already
     account for them, so this is additive rather than a redesign.
 
-    Track it in [PLAN.md](https://github.com/rawtools/git-tpl/blob/main/PLAN.md).
+    Track it in [PLAN.md](https://github.com/noirbizarre/git-tpl/blob/main/PLAN.md).
 
 Data hosted independently of the template repository.
 

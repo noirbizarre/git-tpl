@@ -6,7 +6,7 @@
 # next version from unreleased commits.
 
 [remote.github]
-owner = "rawtools"
+owner = "noirbizarre"
 repo = "git-tpl"
 
 [changelog]
@@ -70,7 +70,7 @@ trim = true
 footer = ""
 postprocessors = [
   { pattern = '\n+\z', replace = "\n" },
-  { pattern = "<REPO>", replace = "https://github.com/rawtools/git-tpl" },
+  { pattern = "<REPO>", replace = "https://github.com/noirbizarre/git-tpl" },
 ]
 
 [git]

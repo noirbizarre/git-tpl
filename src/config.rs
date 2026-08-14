@@ -191,7 +191,7 @@ impl Config {
         // changing an answer and running `git tpl update` is the supported way
         // to change your mind about a choice made at init time.
         Ok(format!(
-            "# git-tpl — https://rawtools.github.io/git-tpl/configuration/\n\
+            "# git-tpl — https://noirbizarre.github.io/git-tpl/configuration/\n\
              #\n\
              # This file is versioned with the project. Edit an answer and run\n\
              # `git tpl update` to re-render the template with it.\n\

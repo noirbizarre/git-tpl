@@ -7,8 +7,8 @@
 <p align="center"><strong>Git-native project templates</strong></p>
 
 <p align="center">
-  <a href="https://github.com/rawtools/git-tpl/actions/workflows/ci.yaml"><img src="https://github.com/rawtools/git-tpl/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
-  <a href="https://rawtools.github.io/git-tpl/"><img src="https://img.shields.io/badge/docs-rawtools.github.io-blue" alt="Documentation"></a>
+  <a href="https://github.com/noirbizarre/git-tpl/actions/workflows/ci.yaml"><img src="https://github.com/noirbizarre/git-tpl/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
+  <a href="https://noirbizarre.github.io/git-tpl/"><img src="https://img.shields.io/badge/docs-noirbizarre.github.io-blue" alt="Documentation"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT"></a>
 </p>
 
@@ -112,12 +112,12 @@ Templates cannot execute code — no hooks, no scripts, no embedded interpreter.
 
 ## Documentation
 
-**[rawtools.github.io/git-tpl](https://rawtools.github.io/git-tpl/)**
+**[noirbizarre.github.io/git-tpl](https://noirbizarre.github.io/git-tpl/)**
 
-- [The Git model](https://rawtools.github.io/git-tpl/concepts/git-model/) — start here
-- [Quick start](https://rawtools.github.io/git-tpl/getting-started/quickstart/)
-- [Template format](https://rawtools.github.io/git-tpl/templates/format/)
-- [Architecture decisions](https://rawtools.github.io/git-tpl/adr/README/)
+- [The Git model](https://noirbizarre.github.io/git-tpl/concepts/git-model/) — start here
+- [Quick start](https://noirbizarre.github.io/git-tpl/getting-started/quickstart/)
+- [Template format](https://noirbizarre.github.io/git-tpl/templates/format/)
+- [Architecture decisions](https://noirbizarre.github.io/git-tpl/adr/README/)
 
 ## Status
 

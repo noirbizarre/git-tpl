@@ -91,10 +91,10 @@ has to be typed. That is the part worth confirming by hand.
 ### 3. `gh-tpl`
 
 `gh extension install` requires a repository named `gh-tpl` shipping a binary
-named `gh-tpl`, and this repository is `rawtools/git-tpl`. Options, in order of
+named `gh-tpl`, and this repository is `noirbizarre/git-tpl`. Options, in order of
 preference:
 
-1. A thin `rawtools/gh-tpl` repository whose release assets are built from this
+1. A thin `noirbizarre/gh-tpl` repository whose release assets are built from this
    one.
 2. Build `gh-tpl` here and attach it to releases; document manual installation.
 

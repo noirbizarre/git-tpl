@@ -162,7 +162,7 @@ pub enum DataError {
     #[error("data source `{name}` is remote, which is not implemented yet")]
     #[diagnostic(
         code(tpl::data::remote_unsupported),
-        url("https://rawtools.github.io/git-tpl/data/remote/"),
+        url("https://noirbizarre.github.io/git-tpl/data/remote/"),
         help(
             "remote data sources are designed but not implemented in this release. \
              Move the data into the template repository, where it is also pinned by the template revision."

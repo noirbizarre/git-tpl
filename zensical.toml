@@ -5,11 +5,11 @@
 
 site_name = "git-tpl"
 site_description = "Git-native project templates — a template update is just a new Git state you merge."
-site_url = "https://rawtools.github.io/git-tpl/"
+site_url = "https://noirbizarre.github.io/git-tpl/"
 site_author = "noirbizarre"
 
-repo_url = "https://github.com/rawtools/git-tpl"
-repo_name = "rawtools/git-tpl"
+repo_url = "https://github.com/noirbizarre/git-tpl"
+repo_name = "noirbizarre/git-tpl"
 edit_uri = "edit/main/docs/"
 
 copyright = """
