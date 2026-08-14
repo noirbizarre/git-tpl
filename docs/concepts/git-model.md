@@ -1,0 +1,149 @@
+# The Git model
+
+Everything git-tpl does rests on one idea: **the rendered state of a template is
+a Git ref.**
+
+## The shape of it
+
+```
+TEMPLATE GIT REPOSITORY
+          │
+          │ fetch / resolve
+          ▼
+     template tree
+          │
+          │ MiniJinja + resolved context
+          ▼
+    rendered template tree
+          │
+          ▼
+    refs/tpl/<template-id>
+          │
+          │ normal Git merge
+          ▼
+     your working branch
+```
+
+Your branch and the template ref are two lines of history that periodically
+meet:
+
+```
+main:
+
+    A ─── B ─── C ─── D ─── M
+         /                 /
+        /                 /
+refs/tpl/foo:            /
+    G0 ─────── G1 ─── G2
+```
+
+`G0`, `G1`, `G2` are successive rendered states of the template. `M` is a
+`git merge` you ran. There is nothing else — no sidecar state, no `.rej` files,
+no lockfile describing what was applied.
+
+## Why the ref, and not the worktree
+
+Because a merge needs a merge base.
+
+If a tool writes rendered files straight into your worktree, it has no record of
+what the *previous* rendering looked like, so it cannot tell your edits apart
+from the template's. Every tool in this space then invents machinery to
+compensate: stored diffs, patch replay, three-way reconstruction from a cached
+copy of the old output.
+
+The ref *is* that record, kept in the only place that already understands
+history. When `G1` and `D` both changed `Cargo.toml`, `git merge` finds `G0` —
+the state both descend from — and does exactly what it does for two humans
+editing the same file.
+
+## The ref is a normal ref
+
+`refs/tpl/<id>` is not special. Every Git command works on it:
+
+```sh
+git show refs/tpl/rust-library
+git log --oneline refs/tpl/rust-library
+git diff HEAD refs/tpl/rust-library
+git merge refs/tpl/rust-library
+```
+
+git-tpl's own `diff` and `merge` commands are conveniences over the last two.
+You are never locked into them.
+
+It lives under `refs/tpl/` rather than `refs/heads/` on purpose: it is not a
+branch you check out, it should not appear in `git branch`, and it should not be
+pushed by a bare `git push`.
+
+## Append-only
+
+`git tpl update` always creates a *new* commit whose parent is the current tip
+of `refs/tpl/<id>`. It never amends, never rebases, never force-updates.
+
+This holds even when the reason for re-rendering is that you changed an answer
+rather than that the template moved. The template ref is history, and history
+that gets rewritten cannot be merged from twice.
+
+The practical consequence: once you have merged `G1`, merging `G2` is cheap and
+conflict-free for everything you did not touch, because `G1` is a genuine common
+ancestor. Rewriting `G1` would destroy that.
+
+If the rendered tree is byte-identical to the current tip, `update` makes no
+commit at all and says so.
+
+## What `init` does to your history
+
+`git tpl init` creates `G0` as an **orphan** commit — no parent, because the
+template has no history in your project before this moment — and then
+**merges it into your current branch**, allowing unrelated histories.
+
+```
+main:  A ─── M
+            /
+           /
+       G0 ┘
+```
+
+That merge is the load-bearing step. Without it, `G0` is not an ancestor of
+`main`, so the *first* `git tpl update` would have no merge base and would
+conflict on every line of every file. Which is exactly the failure mode this
+whole design exists to avoid.
+
+If you would rather wire it up yourself, `git tpl init --no-merge` stops after
+creating the ref.
+
+## What is in the commit
+
+The tree is exactly the rendered output. Nothing else — no manifest, no lockfile,
+no `.git-tpl/` directory. A `git diff HEAD refs/tpl/<id>` shows real file
+differences and nothing you would have to learn to ignore.
+
+Provenance lives in the commit message, as trailers:
+
+```
+tpl: render rawtools/rust-library at v1.4.0
+
+Template-Source: https://github.com/rawtools/rust-library
+Template-Ref: v1.4.0
+Template-Commit: 4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29
+Answers-Digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+Tpl-Version: 0.1.0
+```
+
+`git tpl status` reads them back. So can you:
+
+```sh
+git show --no-patch refs/tpl/rust-library
+```
+
+## Sharing, or not
+
+Rendered refs are never pushed implicitly. Both modes are first-class:
+
+**Local-only.** The ref exists in your clone. Nobody else needs it. Nothing to
+configure — this is the default.
+
+**Shared.** `git tpl push` publishes `refs/tpl/*` to the remote; collaborators
+run `git tpl fetch`. Useful when several people run updates, or when CI does.
+
+`git push` and `git pull` never touch `refs/tpl/*`, in either mode. A contributor
+who clones the project and never runs git-tpl is unaffected by its existence.
