@@ -1,0 +1,305 @@
+//! Sharing rendered refs: `fetch`, `push`, and what plain Git must not do.
+
+mod common;
+
+use common::{Repo, World, tpl};
+
+/// Give a world a bare remote and publish `main` to it.
+fn with_remote(world: &World) -> Repo {
+    let remote_path = world.dir.path().join("remote.git");
+    std::process::Command::new("git")
+        .args(["init", "-q", "--bare", "-b", "main"])
+        .arg(&remote_path)
+        .status()
+        .expect("init bare remote");
+
+    world
+        .project
+        .git(&["remote", "add", "origin", &remote_path.to_string_lossy()]);
+    world.project.git(&["push", "-q", "origin", "main"]);
+
+    Repo {
+        path: remote_path,
+        _dir: None,
+    }
+}
+
+fn remote_refs(remote: &Repo) -> Vec<String> {
+    let listing = std::process::Command::new("git")
+        .args(["--git-dir", &remote.path.to_string_lossy()])
+        .args(["for-each-ref", "--format=%(refname)", "refs/tpl/"])
+        .output()
+        .expect("list remote refs");
+    String::from_utf8_lossy(&listing.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// A contributor who clones the project to fix a typo must not download
+/// template state to do it, and must not have to know what a template ref is.
+#[test]
+fn a_plain_git_push_does_not_carry_template_refs() {
+    let world = World::new();
+    world.init(&[]).success();
+    let remote = with_remote(&world);
+
+    world.project.git(&["push", "origin", "main"]);
+
+    assert!(
+        remote_refs(&remote).is_empty(),
+        "refs/tpl/* leaked into a plain push"
+    );
+}
+
+#[test]
+fn push_publishes_the_rendered_ref() {
+    let world = World::new();
+    world.init(&[]).success();
+    let remote = with_remote(&world);
+
+    tpl(&world.project, &["push"]).success();
+
+    assert_eq!(remote_refs(&remote), [world.ref_name()]);
+}
+
+/// The refspec is passed per-invocation rather than written into `.git/config`,
+/// so a plain `git fetch` stays plain for everyone who clones.
+#[test]
+fn pushing_does_not_rewrite_the_remotes_configuration() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    let before = world
+        .project
+        .git(&["config", "--get-all", "remote.origin.fetch"]);
+
+    tpl(&world.project, &["push"]).success();
+
+    let after = world
+        .project
+        .git(&["config", "--get-all", "remote.origin.fetch"]);
+    assert_eq!(before, after, "the user's refspecs were modified");
+}
+
+#[test]
+fn fetch_retrieves_a_shared_ref_into_the_remote_namespace() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+
+    // A second clone of the same project, standing in for a collaborator.
+    let other = Repo::init_in(world.dir.path(), "other");
+    other.git(&[
+        "remote",
+        "add",
+        "origin",
+        &world.dir.path().join("remote.git").to_string_lossy(),
+    ]);
+    other.git(&["fetch", "-q", "origin"]);
+    other.git(&["checkout", "-q", "-b", "main", "origin/main"]);
+
+    tpl(&other, &["fetch"]).success();
+
+    assert!(
+        other.has_ref("refs/remotes/origin/tpl/template"),
+        "the shared ref should land under the remote's namespace"
+    );
+}
+
+/// Fetching never moves the local ref. What to do about a newer remote copy is
+/// a decision, and adopting someone else's rendering silently would be a
+/// surprising thing for a fetch to do.
+#[test]
+fn fetch_does_not_move_the_local_ref() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+
+    tpl(&world.project, &["fetch"]).success();
+
+    assert_eq!(world.project.rev_parse(&world.ref_name()), before);
+}
+
+#[test]
+fn fetch_reports_that_the_ref_is_in_sync() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+
+    tpl(&world.project, &["fetch"]).success().says("in sync");
+}
+
+#[test]
+fn status_reports_how_the_local_ref_compares_to_the_remote() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+    tpl(&world.project, &["fetch"]).success();
+
+    tpl(&world.project, &["status"]).success().says("in sync");
+}
+
+#[test]
+fn status_reports_being_ahead_of_the_remote() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+    tpl(&world.project, &["fetch"]).success();
+
+    world
+        .template
+        .repo
+        .write("template/NEW.md.jinja", "# {{ project_name }}\n");
+    world.template.repo.commit_all("feat: add a file");
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    tpl(&world.project, &["status"]).code(2).says("1 ahead");
+}
+
+/// A rendered ref is history others may have merged from; overwriting it
+/// destroys the merge base their next update depends on.
+#[test]
+fn push_refuses_a_diverged_ref_and_says_how_to_reconcile() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+    tpl(&world.project, &["fetch"]).success();
+
+    // Someone else renders and publishes.
+    let shared = world.project.rev_parse(&world.ref_name());
+    let other = Repo::init_in(world.dir.path(), "other");
+    other.git(&[
+        "remote",
+        "add",
+        "origin",
+        &world.dir.path().join("remote.git").to_string_lossy(),
+    ]);
+    other.git(&["fetch", "-q", "origin", "refs/tpl/*:refs/tpl/*"]);
+    other.write("x.txt", "theirs\n");
+    other.git(&["add", "-A"]);
+    let their_tree = other.git(&["write-tree"]);
+    let their_commit = other.git(&[
+        "commit-tree",
+        &their_tree,
+        "-p",
+        &shared,
+        "-m",
+        "tpl: their render",
+    ]);
+    other.git(&["update-ref", &world.ref_name(), &their_commit]);
+    other.git(&[
+        "push",
+        "-q",
+        "origin",
+        &format!("{}:{}", world.ref_name(), world.ref_name()),
+    ]);
+
+    // Meanwhile we render locally.
+    world
+        .template
+        .repo
+        .write("template/NEW.md.jinja", "# {{ project_name }}\n");
+    world.template.repo.commit_all("feat: add a file");
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    tpl(&world.project, &["fetch"]).success();
+    tpl(&world.project, &["push"])
+        .failure()
+        .says("diverged")
+        .says("git tpl fetch");
+}
+
+/// The default. Nothing has to be configured for it to work, and the
+/// attachment is still fully described by the committed configuration.
+#[test]
+fn local_only_mode_needs_no_remote_at_all() {
+    let world = World::new();
+
+    world.init(&[]).success();
+
+    assert!(world.project.has_ref(&world.ref_name()));
+    tpl(&world.project, &["status"])
+        .success()
+        .silent_about("Remote:");
+}
+
+#[test]
+fn push_without_a_remote_is_reported_clearly() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    tpl(&world.project, &["push"]).failure().says("origin");
+}
+
+#[test]
+fn a_configured_remote_is_used() {
+    let world = World::new();
+    world.init(&[]).success();
+    let remote = with_remote(&world);
+    world
+        .project
+        .git(&["remote", "rename", "origin", "upstream"]);
+    world.project.git(&["config", "tpl.remote", "upstream"]);
+
+    tpl(&world.project, &["push"]).success().says("upstream");
+
+    assert_eq!(remote_refs(&remote), [world.ref_name()]);
+}
+
+#[test]
+fn a_command_line_remote_beats_the_configured_one() {
+    let world = World::new();
+    world.init(&[]).success();
+    let remote = with_remote(&world);
+    world
+        .project
+        .git(&["remote", "rename", "origin", "elsewhere"]);
+    world
+        .project
+        .git(&["config", "tpl.remote", "does-not-exist"]);
+
+    tpl(&world.project, &["push", "--remote", "elsewhere"]).success();
+
+    assert_eq!(remote_refs(&remote), [world.ref_name()]);
+}
+
+#[test]
+fn auto_push_publishes_after_an_update() {
+    let world = World::new();
+    world.init(&[]).success();
+    let remote = with_remote(&world);
+    world.project.git(&["config", "tpl.autoPush", "true"]);
+
+    world
+        .template
+        .repo
+        .write("template/NEW.md.jinja", "# {{ project_name }}\n");
+    world.template.repo.commit_all("feat: add a file");
+
+    tpl(&world.project, &["update", "--defaults"])
+        .success()
+        .says("Pushed");
+
+    assert_eq!(remote_refs(&remote), [world.ref_name()]);
+}
+
+#[test]
+fn a_dry_run_transfers_nothing() {
+    let world = World::new();
+    world.init(&[]).success();
+    let remote = with_remote(&world);
+
+    tpl(&world.project, &["push", "--dry-run"])
+        .success()
+        .says("Would push");
+
+    assert!(remote_refs(&remote).is_empty());
+}
