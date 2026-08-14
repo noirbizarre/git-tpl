@@ -72,7 +72,7 @@ indexmap = { version = "2", features = ["serde"] }
 # The answers digest recorded in the provenance trailers. `sha2` rather than a
 # faster non-cryptographic hash because the digest is written into Git history
 # and read back to decide whether a re-render is needed.
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 # A remote template is cloned into a fresh temporary directory per run.
 # Caching between runs would be faster, but a stale cache silently rendering an
@@ -86,7 +86,7 @@ predicates = "3"
 insta = { version = "1", features = ["filters"] }
 # The integration harness fingerprints the worktree to prove `update` does not
 # touch it. Already a runtime dependency; listed for the tests' own use.
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 rstest = "0.26"
 pretty_assertions = "1"
