@@ -499,6 +499,17 @@ impl TestServer {
             while !shutdown.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        // BSD/macOS propagate the listener's O_NONBLOCK to the
+                        // accepted socket; Linux does not. Left set, a body
+                        // larger than the send buffer is truncated by a
+                        // WouldBlock, and the size-limit test sees a short
+                        // response instead of an oversized one.
+                        stream.set_nonblocking(false).expect("blocking stream");
+                        // A client that dies mid-request must not park a worker
+                        // thread until nextest's terminate-after kills the run.
+                        stream
+                            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                            .expect("read timeout");
                         let routes = Arc::clone(&routes);
                         let hits = Arc::clone(&hits);
                         std::thread::spawn(move || serve_one(stream, &routes, &hits));
@@ -578,7 +589,25 @@ fn serve_one(mut stream: TcpStream, routes: &[(String, u16, Vec<u8>)], hits: &At
         "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()
     );
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(&body);
+    write_response(&mut stream, head.as_bytes());
+    write_response(&mut stream, &body);
     let _ = stream.flush();
+}
+
+/// Write a whole response part, or panic.
+///
+/// Only a client that hung up is tolerated: the size-limit test deliberately
+/// aborts once it has read enough. Every other error means the response reached
+/// the client truncated, which a test would otherwise read as a legitimately
+/// short body — the exact way the macOS non-blocking bug hid itself.
+fn write_response(stream: &mut TcpStream, bytes: &[u8]) {
+    match stream.write_all(bytes) {
+        Ok(()) => {}
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset
+            ) => {}
+        Err(e) => panic!("test server failed to write a response: {e}"),
+    }
 }
