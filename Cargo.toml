@@ -45,7 +45,7 @@ miette = { version = "7", features = ["fancy"] }
 # Git. libgit2 bindings. `vendored-libgit2` builds libgit2 from source rather
 # than linking whatever the host happens to ship, so the six release targets and
 # every developer machine get identical Git semantics.
-git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+git2 = { version = "0.21", default-features = false, features = ["vendored-libgit2"] }
 
 # Templating. The only rendering engine, deliberately.
 # `builtins` provides the filters templates actually reach for (lower, replace,
