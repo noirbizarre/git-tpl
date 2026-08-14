@@ -34,6 +34,7 @@ main:  A ─── M ─── B ─── M'
 | Dynamic defaults | ✅ evaluated at prompt time |
 | `choices_from` | ✅ structured reference into the context |
 | Computed values | ✅ typed, dependency-ordered |
+| Template filters | ✅ MiniJinja's built-ins plus `slugify`; the set is closed, no plugin point |
 | Dependency graph | ✅ static, topologically sorted, cycles and typos rejected up front |
 | Template data sources | ✅ read from the template's Git tree at the resolved revision |
 | Project data sources | ✅ with traversal refused |
@@ -143,7 +144,7 @@ The one declared feature that errors rather than working.
 - An HTTP client behind the existing `DataSource` abstraction — nothing above
   `src/data/` should change.
 - Size limits and a timeout. Remote data is untrusted input.
-- The fetch is gated by the trust flow in item 10 — the two land together, or
+- The fetch is gated by the trust flow in item 9 — the two land together, or
   remote data ships prompting for every source on every run.
 - One fetch per source per run; the cache already keys on the resolved source.
 - Then `sha256 = "..."` pinning, and the `Data-Source` trailer records it.
@@ -178,18 +179,7 @@ preference:
 The CLI layer is already thin enough that the second binary is a `main.rs` and
 a different `bin_name`.
 
-### 6. A `slugify` filter
-
-The only filter a real template needs that cannot be written with MiniJinja's
-built-ins. `project_name → project_slug` is in every project template there is,
-and `lower | replace(' ', '-')` is wrong for unicode and for punctuation.
-
-Deterministic, closed set, no plugin point — ADR-003 stands, and should gain a
-line recording that built-ins are the sanctioned answer to "I need a filter" and
-that the set is closed by review. The pressure will be to ship a *useful set*;
-resist it. Every filter added is a compatibility surface that cannot be removed.
-
-### 7. Question validation
+### 6. Question validation
 
 ```toml
 [questions.project_name]
@@ -202,7 +192,7 @@ A bad distribution name is currently caught by the first `uv build` rather than
 at the prompt. `pattern` rather than `validator` on purpose: Copier's validator
 is an arbitrary expression, and that door stays shut.
 
-### 8. Git-seeded question defaults
+### 7. Git-seeded question defaults
 
 ADR-006 already promises this and it is not implemented:
 
@@ -220,7 +210,7 @@ not asked — `--defaults`, `tpl.interactive false` — it must fall back to
 `default` and never to the machine's config, or the tree varies by machine and
 the model breaks. That is the whole design, and it needs the test that says so.
 
-### 9. Distribution: AUR and Homebrew
+### 8. Distribution: AUR and Homebrew
 
 Cheap, because a release already produces six binaries and a `SHA256SUMS`. Both
 packages are consumers of an artefact that exists; neither needs a build change.
@@ -257,7 +247,7 @@ entry in `jdx/mise`'s `registry.toml` is what makes the short
 All of this is downstream of a version somebody else depends on. Packaging
 0.1.x means chasing it.
 
-### 10. A user configuration file
+### 9. A user configuration file
 
 Three unrelated frustrations with one home: retyping your name into every
 project, typing `https://github.com/` twenty times a day, and confirming the
@@ -307,7 +297,7 @@ in `tpl.*`.
 #### `[defaults]` seeds prompts, never the context
 
 This is the whole design, and the only thing that keeps invariant 2 true. It is
-item 8's rule (`default_from = "git:user.name"`) applied to a second source.
+item 7's rule (`default_from = "git:user.name"`) applied to a second source.
 
 - A key matching a question name becomes that question's **prompt default**.
 - The value the user accepts is recorded in `.config/git.tpl.toml` like any
@@ -398,7 +388,7 @@ Two things this is not, so it is not read as a weakening:
 - It does not create a place to record trust *in the project*. Trust lives on
   the machine of the only party who can consent to it.
 
-### 11. Testing a template
+### 10. Testing a template
 
 A template author has no way to say *"given these answers, this is what comes
 out"* except to render into a scratch directory and look. Every template above
@@ -471,7 +461,7 @@ This is downstream of item 2: the fixtures *are* answers files, read by the same
 parsers, and building the test runner first would mean building a second way to
 supply answers.
 
-### 12. Template inheritance
+### 11. Template inheritance
 
 The largest template-side feature there is, and the one that decides whether an
 organisation with fifteen templates maintains fifteen copies of its CI workflow.
@@ -540,7 +530,7 @@ Parent-relative source paths, validated: removing a path the parent does not
 have is an **error**. Otherwise a rename upstream silently resurrects a file the
 child spent a release removing, and nobody notices until it ships.
 
-**`{% extends %}` needs the loader that item 13 already wants.** `{% import %}`
+**`{% extends %}` needs the loader that item 12 already wants.** `{% import %}`
 fails today because no loader is registered; inheritance needs the same loader,
 backed by the layered trees, resolving child-first. One trap, and it is the
 obvious one: a child's `base.html.jinja` writing `{% extends "base.html.jinja" %}`
@@ -568,7 +558,7 @@ This changes the manifest, which is a contract, and changes what "the template"
 means for provenance and for `refs/tpl/<id>`. It needs **ADR-013** before it
 needs code.
 
-### 13. Smaller things
+### 12. Smaller things
 
 
 - `git tpl show <path>` — the template's version of one file. Wanted whenever a
@@ -579,7 +569,7 @@ needs code.
 - Shared macros. `{% import "macros.jinja" %}` fails today because no loader is
   registered; a loader backed by the template's own tree reads nothing outside
   the template revision and executes nothing, so it costs no invariant. Wanted
-  by any template much above fifty files, and a prerequisite for item 12.
+  by any template much above fifty files, and a prerequisite for item 11.
 - Named tests for two behaviours that are currently correct but undefended: a
   computed value holding a sequence (`| select`) and one holding a table
   (`dict()`) both keep their type through `evaluate()`. Nothing would catch a
@@ -626,7 +616,7 @@ it or not at all. What the ADR would have to establish:
   and 2 stay literally true, and their tests stay untouched. If either has to be
   relaxed, the feature is declined.
 - Trust is per-invocation and explicit, or it comes from the user's own
-  `[trust]` list (item 10). Never from `.config/git.tpl.toml` — the project
+  `[trust]` list (item 9). Never from `.config/git.tpl.toml` — the project
   cannot consent on the reader's behalf.
 - Tasks run on `init`, not on `update`. `update` being a ref-only operation is
   most of its value.
@@ -650,7 +640,7 @@ correct semantic — it is a tree diff — and it is documented, but the first
 **The template is cloned fresh on every run.** Correct and slow for a large
 remote template. A cache would need invalidation, and a stale cache silently
 rendering an old template is a far worse failure than a slow fetch — so this
-stays until it actually hurts. Inheritance (item 12) is what would make it
+stays until it actually hurts. Inheritance (item 11) is what would make it
 hurt: a three-deep chain is three clones per run.
 
 **`--stat` reports file counts, not line counts.** Honest but less useful than

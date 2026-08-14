@@ -41,3 +41,24 @@ any attempt at compatibility, which is explicitly not a goal.
 
 No Python is embedded, and no arbitrary code executes. MiniJinja evaluates
 expressions over a context we construct; it cannot reach outside it.
+
+## Filters
+
+The corollary, recorded here because it is the question this decision is
+actually asked in practice: *"I need a filter — where is the extension point?"*
+
+**The built-ins are the answer, and there is no extension point.** A template
+cannot register a filter, and no configuration key will ever let it. A filter is
+code, and code from a template is the one thing this project does not run.
+
+git-tpl itself registers exactly one filter beyond MiniJinja's own —
+[`slugify`](../templates/context.md#slugify) — because `project_name →
+project_slug` appears in every project template and `lower | replace(' ', '-')`
+is wrong for unicode and for punctuation.
+
+**The set is closed by review.** A candidate qualifies only if it is pure,
+deterministic, and reaches nothing outside its own argument; and even then, the
+bar is that templates cannot reasonably express it with the built-ins. The
+pressure will be to ship a *useful set*. It should be resisted: every filter
+added is a compatibility surface that cannot be removed, and a template that
+depends on one cannot render with an older git-tpl.

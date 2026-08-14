@@ -202,6 +202,13 @@ fn is_local_path(source: &str) -> bool {
 }
 
 /// Lowercase, collapse every run of non-alphanumerics to a single `-`, trim.
+///
+/// ASCII-only and lossy on purpose. This derives `refs/tpl/<id>` from a URL,
+/// where the input is a host and a path and the output must never change:
+/// a different slug is a different ref, and invariant 3 says refs are
+/// append-only. `eval::slugify` — the template filter — transliterates instead,
+/// and the two are kept separate so that improving the filter cannot rename
+/// anybody's template ref.
 fn slugify(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut pending_sep = false;

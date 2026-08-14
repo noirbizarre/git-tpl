@@ -96,3 +96,42 @@ No custom functions are registered. Anything that would reach outside the
 context — reading a file, making a request, running a command — is not, and will
 not be, available to expressions. Fetching belongs to the
 [data-source subsystem](../data/index.md), which owns it explicitly.
+
+### `slugify`
+
+One filter is added to the built-ins, because it is the one a real template
+cannot write for itself:
+
+```jinja
+{{ project_name | slugify }}
+```
+
+It transliterates to ASCII, lowercases, and joins the remaining alphanumeric
+runs with a single `-`:
+
+| Input | Result |
+|---|---|
+| `My Project` | `my-project` |
+| `Hello, World!` | `hello-world` |
+| `Café Déjà-Vu` | `cafe-deja-vu` |
+| `Größe` | `grosse` |
+| `Москва` | `moskva` |
+| `北京` | `bei-jing` |
+
+`lower | replace(' ', '-')` is the usual substitute and it is wrong twice: it
+leaves accents and punctuation in the result, and it produces something that is
+not a valid module name, package name or path segment for anyone whose project
+is not named in ASCII.
+
+Input that slugs to nothing — `!!!`, or an empty string — yields an empty
+string rather than an error. A filter that raised inside a `when` condition
+would abort the whole render; an empty value is visible immediately.
+
+The filter is available everywhere any other expression is: in a `default`, in a
+`when`, in a computed value, in a file body, and in a templated path.
+
+**The set of filters is closed.** There is no plugin point, and there will not
+be one — see [ADR-003](../adr/003-minijinja-only.md). A filter is only
+considered if it is pure, deterministic, and reaches nothing outside its own
+argument, and every one added is a compatibility surface that cannot later be
+removed.

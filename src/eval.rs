@@ -388,12 +388,56 @@ pub fn environment() -> minijinja::Environment<'static> {
     // hooks and `git diff`'s "\ No newline at end of file".
     env.set_keep_trailing_newline(true);
 
-    // No functions, filters or globals are registered beyond MiniJinja's own.
-    // Anything that would reach outside the context — reading a file, making a
-    // request, running a command — is not available to templates, and will not
-    // be. See docs/concepts/determinism.md#security.
+    // The set of registered filters is closed, and `slugify` is the only member.
+    // A candidate qualifies only if it is pure, deterministic, and reaches
+    // nothing outside its own argument. Anything that would reach outside the
+    // context — reading a file, making a request, running a command — is not
+    // available to templates, and will not be. There is no plugin point.
+    // See docs/adr/003-minijinja-only.md and docs/concepts/determinism.md#security.
+    env.add_filter("slugify", slugify_filter);
 
     env
+}
+
+/// `{{ project_name | slugify }}`.
+///
+/// Takes the value's string form, so an integer or a boolean slugs rather than
+/// raising — a filter that fails inside a `when` condition is a worse failure
+/// than a surprising string.
+fn slugify_filter(value: minijinja::Value) -> String {
+    slugify(&value.to_string())
+}
+
+/// Transliterate to ASCII, lowercase, and join the alphanumeric runs with `-`.
+///
+/// Transliterated rather than folded: dropping what does not fold would slug
+/// `Москва` to the empty string, and a Cyrillic or CJK project name is not an
+/// error. `-` is the tofu replacement so an untransliterable codepoint becomes
+/// a separator instead of the literal `[?]` deunicode would otherwise emit.
+///
+/// Not to be confused with `refs::slugify`, which derives `refs/tpl/<id>` from
+/// a URL. That one is deliberately ASCII-only and is *not* shared with this:
+/// changing its output would rename the template ref of every existing project,
+/// which invariant 3 exists to prevent.
+fn slugify(s: &str) -> String {
+    let ascii = deunicode::deunicode_with_tofu(s, "-");
+
+    let mut out = String::with_capacity(ascii.len());
+    let mut pending_sep = false;
+    for c in ascii.chars() {
+        if c.is_ascii_alphanumeric() {
+            // Only emit the separator once a keeper follows it, which trims
+            // both ends and collapses runs without a second pass.
+            if pending_sep && !out.is_empty() {
+                out.push('-');
+            }
+            pending_sep = false;
+            out.push(c.to_ascii_lowercase());
+        } else {
+            pending_sep = true;
+        }
+    }
+    out
 }
 
 /// Evaluate an expression, preserving the type of a single-value result.
@@ -477,6 +521,8 @@ fn describe(error: &minijinja::Error) -> String {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
     use crate::template::MANIFEST_NAME;
 
@@ -1063,6 +1109,83 @@ mod tests {
         assert!(
             !context.answers().contains_key("package_name"),
             "a computed value must not be recorded as an answer"
+        );
+    }
+
+    /// The reason `slugify` exists: `lower | replace(' ', '-')` leaves the
+    /// accents in place, and folding to ASCII would erase a Cyrillic or CJK
+    /// name entirely.
+    #[rstest]
+    #[case("Café Déjà-Vu", "cafe-deja-vu")]
+    #[case("Größe", "grosse")]
+    #[case("Москва", "moskva")]
+    #[case("北京", "bei-jing")]
+    #[case("Ångström", "angstrom")]
+    fn slugify_transliterates_non_ascii_letters(#[case] input: &str, #[case] expected: &str) {
+        assert_eq!(slugify(input), expected);
+    }
+
+    #[rstest]
+    #[case("Hello, World!", "hello-world")]
+    #[case("a  --  b", "a-b")]
+    #[case("  spaced  ", "spaced")]
+    #[case("My Project 2", "my-project-2")]
+    #[case("under_score", "under-score")]
+    fn slugify_collapses_runs_of_punctuation_to_one_separator(
+        #[case] input: &str,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(slugify(input), expected);
+    }
+
+    /// An empty result rather than an error. A filter that fails inside a `when`
+    /// condition aborts the whole render; an empty string is visible at the
+    /// prompt and fixable by the template author.
+    #[rstest]
+    #[case("")]
+    #[case("!!!")]
+    #[case("   ")]
+    fn slugify_of_nothing_sluggable_is_empty(#[case] input: &str) {
+        assert_eq!(slugify(input), "");
+    }
+
+    /// The whole point of the single `environment()` constructor: a filter
+    /// available in a `default` behaves identically inside a `.jinja` file.
+    #[test]
+    fn slugify_is_available_in_an_expression_and_in_a_rendered_file() {
+        let context = context_with(&[("project_name", Value::String("Café Déjà-Vu".into()))]);
+
+        assert_eq!(
+            evaluate("{{ project_name | slugify }}", &context, "test").unwrap(),
+            Value::String("cafe-deja-vu".into())
+        );
+        assert_eq!(
+            render_string("src/{{ project_name | slugify }}/mod.rs", &context, "test").unwrap(),
+            "src/cafe-deja-vu/mod.rs"
+        );
+    }
+
+    /// Invariant 2. `slugify` reads a table and nothing else, so two runs of the
+    /// same input cannot differ — the property the whole ref model rests on.
+    #[test]
+    fn slugify_is_deterministic() {
+        let context = context_with(&[("project_name", Value::String("Ünïcödé Prôjèct".into()))]);
+        let once = evaluate("{{ project_name | slugify }}", &context, "test").unwrap();
+        let twice = evaluate("{{ project_name | slugify }}", &context, "test").unwrap();
+
+        assert_eq!(once, twice);
+        assert_eq!(once, Value::String("unicode-project".into()));
+    }
+
+    /// A non-string argument slugs rather than raising, so a `slugify` in a
+    /// condition cannot abort a render over a type.
+    #[test]
+    fn slugify_accepts_a_non_string_value() {
+        let context = context_with(&[("version", Value::Integer(2))]);
+
+        assert_eq!(
+            evaluate("{{ version | slugify }}", &context, "test").unwrap(),
+            Value::String("2".into())
         );
     }
 }

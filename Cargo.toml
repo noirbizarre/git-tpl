@@ -57,6 +57,11 @@ git2 = { version = "0.21", default-features = false, features = [
 # trim). `loader` lets the renderer resolve `{% include %}` within the template
 # tree rather than the filesystem.
 minijinja = { version = "2", features = ["builtins", "loader"] }
+# Transliteration for the `slugify` filter. A pure lookup table: no locale, no
+# I/O, no allocation of behaviour that varies by machine, so it cannot break
+# determinism. It is here rather than a hand-rolled ASCII fold because folding
+# drops non-Latin scripts entirely — `Москва` would slug to the empty string.
+deunicode = "1.6"
 
 # CLI
 clap = { version = "4", features = ["derive", "env", "wrap_help"] }
