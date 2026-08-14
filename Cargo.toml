@@ -64,7 +64,7 @@ serde = { version = "1", features = ["derive"] }
 # `choices_from`, and a choice list whose order changes between runs would make
 # rendering non-deterministic for no reason. See ADR-006.
 serde_json = { version = "1", features = ["preserve_order"] }
-toml = { version = "0.9", features = ["preserve_order"] }
+toml = { version = "1.1", features = ["preserve_order"] }
 # Question declaration order breaks ties in the dependency sort (ADR-007), so
 # it is the only ordering a template author controls and must survive parsing.
 # A plain map would lose it.
