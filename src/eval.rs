@@ -14,7 +14,7 @@ use thiserror::Error;
 use crate::context::Context;
 use crate::data::{DataError, Loader};
 use crate::graph::{Graph, NodeKind};
-use crate::template::{Manifest, Question, QuestionKind, Value, is_expression};
+use crate::template::{Choice, Manifest, Question, QuestionKind, Value, is_expression};
 
 /// Errors from evaluating a template.
 #[derive(Debug, Error, Diagnostic)]
@@ -65,7 +65,12 @@ pub enum EvalError {
 
     /// An answer is not one of the offered choices.
     #[error("`{value}` is not a valid choice for `{question}`")]
-    #[diagnostic(code(tpl::eval::invalid_choice), help("choose one of: {choices}"))]
+    #[diagnostic(
+        code(tpl::eval::invalid_choice),
+        help(
+            "choose one of: {choices}\nif this answer was recorded by an earlier render, the template no longer offers it — edit `{question}` in `.config/git.tpl.toml`"
+        )
+    )]
     InvalidChoice {
         /// The question.
         question: String,
@@ -110,7 +115,7 @@ pub trait Prompter {
         name: &str,
         question: &Question,
         default: Option<&Value>,
-        choices: Option<&[Value]>,
+        choices: Option<&[Choice]>,
     ) -> Result<Value, EvalError>;
 }
 
@@ -126,7 +131,7 @@ impl Prompter for DefaultsOnly {
         name: &str,
         _question: &Question,
         default: Option<&Value>,
-        _choices: Option<&[Value]>,
+        _choices: Option<&[Choice]>,
     ) -> Result<Value, EvalError> {
         default.cloned().ok_or_else(|| EvalError::Unanswered {
             question: name.to_string(),
@@ -202,6 +207,18 @@ pub fn resolve(
                 }
 
                 let choices = resolve_choices(&node.key, question, &context)?;
+
+                // Nothing left to offer. Treated exactly as a false `when`:
+                // the question is not asked and gets no value, so `x is
+                // defined` still separates "not applicable" from "declined".
+                // A filter that narrows to nothing is a legitimate state —
+                // `[computed]` is how choices are filtered — and erroring here
+                // would make a template unable to express "this does not apply
+                // to your answers".
+                if choices.as_ref().is_some_and(Vec::is_empty) {
+                    continue;
+                }
+
                 let default = resolve_default(&node.key, question, &context)?;
 
                 let answer = match supplied.get(&node.key) {
@@ -221,11 +238,14 @@ pub fn resolve(
 }
 
 /// Resolve a question's choices, from `choices` or `choices_from`.
+///
+/// Both spellings end up as [`Choice`] through one reader, so a list moved from
+/// the manifest into a data file behaves identically.
 fn resolve_choices(
     name: &str,
     question: &Question,
     context: &Context,
-) -> Result<Option<Vec<Value>>, EvalError> {
+) -> Result<Option<Vec<Choice>>, EvalError> {
     if let Some(choices) = &question.choices {
         return Ok(Some(choices.clone()));
     }
@@ -243,7 +263,17 @@ fn resolve_choices(
         })?;
 
     match value {
-        Value::Array(items) => Ok(Some(items.clone())),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| {
+                Choice::from_value(item).map_err(|error| EvalError::BadChoices {
+                    question: name.to_string(),
+                    reference: reference.clone(),
+                    found: error.to_string(),
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(Some),
         // A table is the likeliest mistake — pointing at `data.licenses`
         // instead of `data.licenses.ids` — so name what was found rather than
         // reporting a generic type error.
@@ -299,40 +329,42 @@ fn validate_choice(
     name: &str,
     question: &Question,
     answer: &Value,
-    choices: Option<&[Value]>,
+    choices: Option<&[Choice]>,
 ) -> Result<(), EvalError> {
     let Some(choices) = choices else {
         return Ok(());
     };
 
-    let describe = || {
-        choices
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ")
+    // Membership is on the choice's *value*. A label is presentation, and an
+    // answer recorded as `MIT` must keep matching when the label changes.
+    let offered = |value: &Value| match value {
+        Value::String(s) => choices.iter().any(|c| &c.value == s),
+        _ => false,
+    };
+
+    let reject = |value: &Value| EvalError::InvalidChoice {
+        question: name.to_string(),
+        value: value.to_string(),
+        choices: Choice::describe(choices),
     };
 
     match question.kind {
         QuestionKind::Choice => {
-            if !choices.contains(answer) {
-                return Err(EvalError::InvalidChoice {
-                    question: name.to_string(),
-                    value: answer.to_string(),
-                    choices: describe(),
-                });
+            if !offered(answer) {
+                return Err(reject(answer));
             }
         }
         QuestionKind::MultiChoice => {
-            if let Value::Array(items) = answer {
-                for item in items {
-                    if !choices.contains(item) {
-                        return Err(EvalError::InvalidChoice {
-                            question: name.to_string(),
-                            value: item.to_string(),
-                            choices: describe(),
-                        });
-                    }
+            // A multi-choice answer that is not an array cannot be checked
+            // element by element, and letting it through unvalidated is how a
+            // bad `--answer` would reach the context. `coerce` normally catches
+            // it first; this is the backstop.
+            let Value::Array(items) = answer else {
+                return Err(reject(answer));
+            };
+            for item in items {
+                if !offered(item) {
+                    return Err(reject(item));
                 }
             }
         }
@@ -694,6 +726,272 @@ mod tests {
             matches!(error, EvalError::InvalidChoice { .. }),
             "{error:?}"
         );
+    }
+
+    /// The rejection has to name the values, not the labels: a value is what
+    /// `--answer` and `.config/git.tpl.toml` take, so offering "MIT License"
+    /// would be telling the user to type something that does not work.
+    #[test]
+    fn a_rejected_answer_lists_the_offered_values_not_the_labels() {
+        let error = resolve_with(
+            r#"
+            name = "t"
+            [questions.license]
+            type = "choice"
+            choices = [
+              { value = "MIT", label = "MIT License" },
+              { value = "Apache-2.0", label = "Apache License 2.0" },
+            ]
+            "#,
+            &[("license", Value::String("GPL-3.0".into()))],
+        )
+        .unwrap_err();
+
+        match error {
+            EvalError::InvalidChoice { choices, .. } => {
+                assert_eq!(choices, "MIT, Apache-2.0");
+            }
+            other => panic!("expected an invalid choice, got {other:?}"),
+        }
+    }
+
+    /// A label is presentation. It must not affect which answers are accepted,
+    /// or a template could not rename one without breaking every project.
+    #[test]
+    fn a_labelled_choice_is_answered_by_its_value() {
+        let context = resolve_with(
+            r#"
+            name = "t"
+            [questions.license]
+            type = "choice"
+            choices = [{ value = "MIT", label = "MIT License" }]
+            "#,
+            &[("license", Value::String("MIT".into()))],
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.get_path("license"),
+            Some(&Value::String("MIT".into()))
+        );
+    }
+
+    /// Answering with the label rather than the value is a mistake worth
+    /// catching, not a second accepted spelling.
+    #[test]
+    fn a_labelled_choice_is_not_answered_by_its_label() {
+        let error = resolve_with(
+            r#"
+            name = "t"
+            [questions.license]
+            type = "choice"
+            choices = [{ value = "MIT", label = "MIT License" }]
+            "#,
+            &[("license", Value::String("MIT License".into()))],
+        )
+        .unwrap_err();
+
+        assert!(
+            matches!(error, EvalError::InvalidChoice { .. }),
+            "{error:?}"
+        );
+    }
+
+    /// Every element is checked, not just the array as a whole.
+    #[test]
+    fn one_bad_element_rejects_a_multi_choice_answer() {
+        let error = resolve_with(
+            r#"
+            name = "t"
+            [questions.features]
+            type = "multi_choice"
+            choices = ["serde", "async"]
+            "#,
+            &[(
+                "features",
+                Value::Array(vec![
+                    Value::String("serde".into()),
+                    Value::String("nope".into()),
+                ]),
+            )],
+        )
+        .unwrap_err();
+
+        match error {
+            EvalError::InvalidChoice { value, .. } => assert_eq!(value, "nope"),
+            other => panic!("expected an invalid choice, got {other:?}"),
+        }
+    }
+
+    /// `type` and the source of the choices are independent axes. This is the
+    /// combination that looked as though it needed a `multi_choice_from` key.
+    #[test]
+    fn a_multi_choice_may_draw_its_choices_from_a_computed_list() {
+        let context = resolve_with(
+            r#"
+            name = "t"
+
+            [computed]
+            available = "{{ ['serde', 'async', 'cli'] }}"
+
+            [questions.features]
+            type = "multi_choice"
+            choices_from = "available"
+            "#,
+            &[("features", Value::String("serde,cli".into()))],
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.get_path("features"),
+            Some(&Value::Array(vec![
+                Value::String("serde".into()),
+                Value::String("cli".into()),
+            ]))
+        );
+    }
+
+    /// Choices are filtered with `[computed]`, and a filter that narrows to
+    /// nothing is a legitimate state — it means "this does not apply". The
+    /// question is then absent, exactly as a false `when` leaves it, so
+    /// `is defined` still separates the two cases.
+    #[test]
+    fn a_question_whose_choices_all_filtered_out_is_absent_rather_than_null() {
+        let context = resolve_with(
+            r#"
+            name = "t"
+
+            [questions.kind]
+            type = "choice"
+            choices = ["library", "application"]
+            default = "library"
+
+            [computed]
+            servers = "{{ ['nginx', 'caddy'] if kind == 'application' else [] }}"
+
+            [questions.server]
+            type = "choice"
+            choices_from = "servers"
+            "#,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(context.get_path("server"), None);
+    }
+
+    /// The same template with the other answer must ask the question, or the
+    /// test above would pass just as well against a permanently broken filter.
+    #[test]
+    fn a_question_keeps_the_choices_a_filter_leaves() {
+        let context = resolve_with(
+            r#"
+            name = "t"
+
+            [questions.kind]
+            type = "choice"
+            choices = ["library", "application"]
+            default = "application"
+
+            [computed]
+            servers = "{{ ['nginx', 'caddy'] if kind == 'application' else [] }}"
+
+            [questions.server]
+            type = "choice"
+            choices_from = "servers"
+            default = "caddy"
+            "#,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.get_path("server"),
+            Some(&Value::String("caddy".into()))
+        );
+    }
+
+    /// A data source may carry labels, in the same shape the manifest uses.
+    #[test]
+    fn choices_from_a_reference_may_be_labelled() {
+        let context = resolve_with(
+            r#"
+            name = "t"
+
+            [computed]
+            licenses = "{{ [dict(value='MIT', label='MIT License')] }}"
+
+            [questions.license]
+            type = "choice"
+            choices_from = "licenses"
+            "#,
+            &[("license", Value::String("MIT".into()))],
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.get_path("license"),
+            Some(&Value::String("MIT".into()))
+        );
+    }
+
+    /// Pointing `choices_from` at something whose entries are not choices must
+    /// name the problem rather than producing a prompt full of debug output.
+    #[test]
+    fn a_reference_to_unusable_choices_is_reported() {
+        let error = resolve_with(
+            r#"
+            name = "t"
+
+            [computed]
+            broken = "{{ [dict(label='no value here')] }}"
+
+            [questions.license]
+            type = "choice"
+            choices_from = "broken"
+            "#,
+            &[],
+        )
+        .unwrap_err();
+
+        match error {
+            EvalError::BadChoices { found, .. } => assert!(
+                found.contains("`value`"),
+                "the reason should name the missing key: {found}"
+            ),
+            other => panic!("expected bad choices, got {other:?}"),
+        }
+    }
+
+    /// The invariant the whole label design rests on. The digest goes into the
+    /// `Answers-Digest` trailer, and the rendered tree is built from answers —
+    /// so if a label reached either, editing presentation text in a template
+    /// would produce a commit in every project that uses it.
+    #[test]
+    fn renaming_a_choice_label_does_not_change_the_answers_digest() {
+        let before = resolve_with(
+            r#"
+            name = "t"
+            [questions.license]
+            type = "choice"
+            choices = [{ value = "MIT", label = "MIT License" }]
+            "#,
+            &[("license", Value::String("MIT".into()))],
+        )
+        .unwrap();
+
+        let after = resolve_with(
+            r#"
+            name = "t"
+            [questions.license]
+            type = "choice"
+            choices = [{ value = "MIT", label = "The MIT Licence", help = "Permissive" }]
+            "#,
+            &[("license", Value::String("MIT".into()))],
+        )
+        .unwrap();
+
+        assert_eq!(before.answers_digest(), after.answers_digest());
     }
 
     #[test]

@@ -458,3 +458,196 @@ package_name = "{{ project_name | lower }}"
     world.init(&[]).success();
     assert_eq!(world.project.read("src/demo/mod.rs"), "//! demo\n");
 }
+
+/// A label is presentation, so editing one must not change the rendered tree.
+/// If it did, every project using the template would get a commit — and a merge
+/// to perform — because somebody improved the wording of a prompt.
+#[test]
+fn renaming_a_choice_label_produces_no_commit() {
+    let world = World::with_template(
+        r#"
+name = "labelled"
+[questions.license]
+type = "choice"
+choices = [
+  { value = "MIT", label = "MIT License", help = "Permissive" },
+  { value = "Apache-2.0", label = "Apache License 2.0" },
+]
+default = "MIT"
+"#,
+        &[("LICENSE.jinja", "{{ license }}\n")],
+    );
+
+    world.init(&[]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+    assert_eq!(world.project.read("LICENSE"), "MIT\n");
+
+    world.template.repo.write(
+        "template.toml",
+        r#"
+name = "labelled"
+[questions.license]
+type = "choice"
+choices = [
+  { value = "MIT", label = "The MIT Licence", help = "Short and permissive" },
+  { value = "Apache-2.0", label = "Apache 2.0" },
+]
+default = "MIT"
+"#,
+    );
+    world
+        .template
+        .repo
+        .commit_all("docs: reword the licence labels");
+
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    assert_eq!(
+        world.project.rev_parse(&world.ref_name()),
+        before,
+        "a label is not part of the rendered tree, so the ref must not move"
+    );
+}
+
+/// Choices are filtered with `[computed]`. When a template narrows a filter, a
+/// previously recorded answer can fall outside it — and that must be reported,
+/// not silently dropped, because dropping it would change the rendered tree
+/// and commit without anyone asking.
+#[test]
+fn an_answer_a_narrowed_filter_no_longer_offers_is_reported() {
+    let manifest = |extra: &str| {
+        format!(
+            r#"
+name = "filtered"
+
+[questions.tier]
+type = "choice"
+choices = ["free", "pro"]
+default = "pro"
+
+[computed]
+regions = "{{{{ ['eu', 'us'{extra}] }}}}"
+
+[questions.region]
+type = "choice"
+choices_from = "regions"
+default = "eu"
+"#
+        )
+    };
+
+    let world = World::with_template(
+        &manifest(", 'ap'"),
+        &[("region.txt.jinja", "{{ region }}\n")],
+    );
+
+    world.init(&["--answer", "region=ap"]).success();
+    assert_eq!(world.project.read("region.txt"), "ap\n");
+
+    // The template drops `ap`, which this project is using.
+    world.template.repo.write("template.toml", &manifest(""));
+    world
+        .template
+        .repo
+        .commit_all("feat: withdraw the ap region");
+
+    tpl(&world.project, &["update", "--defaults"])
+        .failure()
+        .says("region")
+        .says("eu, us")
+        .says(".config/git.tpl.toml");
+
+    assert_eq!(
+        world.project.read("region.txt"),
+        "ap\n",
+        "a failed update must leave the worktree alone"
+    );
+}
+
+/// The combination that looked as though it needed a `multi_choice_from` key:
+/// `type` and the source of the choices are independent.
+#[test]
+fn a_multi_choice_draws_labelled_choices_from_a_data_source() {
+    let world = World::with_template(
+        r#"
+name = "features"
+
+[data.catalogue]
+source = "data/features.toml"
+
+[questions.features]
+type = "multi_choice"
+choices_from = "data.catalogue.all"
+default = ["serde"]
+"#,
+        &[("features.txt.jinja", "{{ features | join(',') }}\n")],
+    );
+
+    world.template.repo.write(
+        "data/features.toml",
+        r#"
+[[all]]
+value = "serde"
+label = "Serialisation"
+help = "Derive Serialize and Deserialize"
+
+[[all]]
+value = "async"
+label = "Async runtime"
+"#,
+    );
+    world
+        .template
+        .repo
+        .commit_all("feat: add the feature catalogue");
+
+    world.init(&["--answer", "features=serde,async"]).success();
+
+    assert_eq!(world.project.read("features.txt"), "serde,async\n");
+    assert!(
+        world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains(r#""serde""#),
+        "the value is recorded, never the label"
+    );
+}
+
+/// A filter that narrows to nothing means "this does not apply", so the
+/// question is absent rather than empty — `is defined` still tells the two
+/// apart, exactly as it does for a false `when`.
+#[test]
+fn a_question_with_no_remaining_choices_is_skipped() {
+    let world = World::with_template(
+        r#"
+name = "narrowing"
+
+[questions.kind]
+type = "choice"
+choices = ["library", "application"]
+default = "library"
+
+[computed]
+servers = "{{ ['nginx', 'caddy'] if kind == 'application' else [] }}"
+
+[questions.server]
+type = "choice"
+choices_from = "servers"
+default = "nginx"
+"#,
+        &[(
+            "out.txt.jinja",
+            "{% if server is defined %}server={{ server }}{% else %}no server{% endif %}\n",
+        )],
+    );
+
+    world.init(&[]).success();
+    assert_eq!(world.project.read("out.txt"), "no server\n");
+    assert!(
+        !world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("server"),
+        "a skipped question records no answer"
+    );
+}

@@ -2,7 +2,7 @@
 
 use demand::{Confirm, DemandOption, Input, MultiSelect, Select};
 use tpl::eval::{EvalError, Prompter};
-use tpl::template::{Question, QuestionKind, Value};
+use tpl::template::{Choice, Question, QuestionKind, Value};
 
 /// Asks questions on a terminal.
 pub struct Interactive;
@@ -13,7 +13,7 @@ impl Prompter for Interactive {
         name: &str,
         question: &Question,
         default: Option<&Value>,
-        choices: Option<&[Value]>,
+        choices: Option<&[Choice]>,
     ) -> Result<Value, EvalError> {
         let title = question.prompt_for(name);
         let help = question.help.as_deref();
@@ -42,12 +42,14 @@ impl Prompter for Interactive {
                 // back the typed value rather than a label we would have to
                 // match back — which would go wrong the moment two choices
                 // rendered to the same text.
-                for option in options {
-                    let is_default = Some(option) == default;
-                    select = select.option(
-                        DemandOption::with_label(option.to_string(), option.clone())
-                            .selected(is_default),
-                    );
+                for choice in options {
+                    let value = Value::String(choice.value.clone());
+                    let mut option = DemandOption::with_label(choice.label(), value.clone())
+                        .selected(default == Some(&value));
+                    if let Some(help) = &choice.help {
+                        option = option.description(help);
+                    }
+                    select = select.option(option);
                 }
                 select.run().map_err(cancelled)
             }
@@ -63,11 +65,14 @@ impl Prompter for Interactive {
                 if let Some(help) = help {
                     select = select.description(help);
                 }
-                for option in options {
-                    select = select.option(
-                        DemandOption::with_label(option.to_string(), option.clone())
-                            .selected(preselected.contains(option)),
-                    );
+                for choice in options {
+                    let value = Value::String(choice.value.clone());
+                    let mut option = DemandOption::with_label(choice.label(), value.clone())
+                        .selected(preselected.contains(&value));
+                    if let Some(help) = &choice.help {
+                        option = option.description(help);
+                    }
+                    select = select.option(option);
                 }
 
                 Ok(Value::Array(select.run().map_err(cancelled)?))

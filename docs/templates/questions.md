@@ -17,8 +17,8 @@ help = "Used for the package name and the README title"
 | `help` | string | A line of explanation under the prompt. |
 | `default` | any / expression | The pre-filled value. |
 | `when` | expression | Ask only if this evaluates truthy. |
-| `choices` | array | For `choice` and `multi_choice`. |
-| `choices_from` | string | A data reference, instead of `choices`. |
+| `choices` | array | The offered choices, for `choice` and `multi_choice`. |
+| `choices_from` | string | A reference to a list, instead of `choices`. |
 
 ## Types
 
@@ -56,6 +56,9 @@ help = "Used for the package name and the README title"
     prompt = "License"
     choices = ["MIT", "Apache-2.0"]
     ```
+
+    Choices can carry labels and come from a data source — see
+    [Choices](#choices).
 
 === "multi_choice"
 
@@ -120,23 +123,159 @@ default = "{{ project_name | lower | replace(' ', '-') }}"
 It is evaluated at prompt time, after everything it references has been resolved.
 You see the computed value pre-filled and can accept or replace it.
 
-## Dynamic choices
+## Choices
 
-`choices_from` points at a data source rather than listing choices inline:
+Two things are chosen independently: **how many** answers a question takes, and
+**where** its choices come from.
+
+|  | `choices` — written inline | `choices_from` — a reference |
+|---|---|---|
+| `type = "choice"` | one answer, fixed list | one answer, resolved list |
+| `type = "multi_choice"` | several answers, fixed list | several answers, resolved list |
+
+All four combinations work. There is no `multi_choice_from`, because
+`type = "multi_choice"` with `choices_from` already *is* that:
 
 ```toml
-[data.licenses]
-source = "data/licenses.toml"
+[data.catalogue]
+source = "data/features.toml"
 
+[questions.features]
+type = "multi_choice"
+prompt = "Features"
+choices_from = "data.catalogue.all"
+default = ["serde"]
+```
+
+Use `choices` or `choices_from`, not both.
+
+### Labels
+
+A choice is a bare string, or a table:
+
+```toml
 [questions.license]
 type = "choice"
 prompt = "License"
-choices_from = "data.licenses.ids"
+choices = [
+  "Unlicense",
+  { value = "MIT", label = "MIT License", help = "Short and permissive" },
+  { value = "Apache-2.0", label = "Apache License 2.0", help = "Patent grant" },
+]
+default = "MIT"
 ```
 
-The reference is a dotted path into the context and must resolve to an array of
-scalars. If it resolves to a map or a string, the error says so, names the
-question, and shows the path:
+| Key | Meaning |
+|---|---|
+| `value` | What is recorded as the answer. Required, and must be a string. |
+| `label` | What is shown. Defaults to the value. |
+| `help` | Shown beside the label, for a choice that needs explaining. |
+
+**Only the value is ever an answer.** It is what appears in
+`.config/git.tpl.toml`, what `--answer license=MIT` takes, and what a template
+sees in `{{ license }}`. A label is presentation and nothing else — so rewording
+one changes no rendered file, produces no commit, and gives nobody a merge to
+perform. Answering with the label is an error, not a second spelling.
+
+A data source uses the same shape, so a list can move from the manifest into a
+data file without being rewritten:
+
+```toml
+# data/features.toml
+[[all]]
+value = "serde"
+label = "Serialisation"
+help = "Derive Serialize and Deserialize"
+
+[[all]]
+value = "async"
+label = "Async runtime"
+```
+
+Extra keys in a data file are ignored — a licence list carrying `url` and
+`osi_approved` beside `value` is normal. In the manifest they are an error,
+because there an unrecognised key is a typo.
+
+### Filtering choices
+
+Choices are filtered with [computed values](computed.md), which are evaluated
+before the question that uses them. There is no per-choice `when`: `[computed]`
+already does this, for both inline and referenced lists, and one mechanism is
+easier to reason about than two.
+
+A list that depends on an earlier answer:
+
+```toml
+[questions.kind]
+type = "choice"
+prompt = "Project kind"
+choices = ["library", "application"]
+
+[computed]
+servers = "{{ ['nginx', 'caddy'] if kind == 'application' else [] }}"
+
+[questions.server]
+type = "choice"
+prompt = "Web server"
+choices_from = "servers"
+```
+
+Filtering a data source on an earlier answer:
+
+```toml
+[data.pythons]
+source = "data/python.toml"
+
+[computed]
+usable = "{{ data.pythons.versions | selectattr('value', 'ge', minimum) | list }}"
+
+[questions.max_python]
+type = "choice"
+choices_from = "usable"
+```
+
+Reshaping data that does not use `value` and `label`:
+
+```toml
+[computed]
+licences = "{{ data.licences.all | map(attribute='id') | list }}"
+
+[questions.license]
+type = "choice"
+choices_from = "licences"
+```
+
+Keeping expressions in `template.toml` rather than in data files is deliberate.
+A data file supplies values; it never supplies logic. That matters most for
+[remote data](../data/remote.md), which is not pinned by the template revision.
+
+**A filter that leaves nothing skips the question.** An empty list means "this
+does not apply", so the question is not asked and has no value — exactly as a
+false `when` leaves it, and `server is defined` still tells the two apart. A
+literal `choices = []` is a different thing: it can never be answered, so it is
+rejected when the manifest loads.
+
+### When a choice is withdrawn
+
+Narrowing a filter can leave a project holding an answer the template no longer
+offers. That is reported, not silently discarded:
+
+```
+`ap` is not a valid choice for `region`
+
+  help: choose one of: eu, us
+        if this answer was recorded by an earlier render, the template no
+        longer offers it — edit `region` in `.config/git.tpl.toml`
+```
+
+Dropping it quietly would change the rendered tree and commit without anyone
+having asked for it.
+
+### Referencing a list
+
+`choices_from` is a dotted path into the context — a data source, a computed
+value or an earlier answer — and must resolve to an array. If it resolves to a
+map or a string, the error says so and names the path:
 
 ```
 Failed to evaluate question `license`.
@@ -145,8 +284,6 @@ Failed to evaluate question `license`.
   Reference:   data.licenses.ids
   Reason:      expected an array of choices, got a table
 ```
-
-Use `choices` or `choices_from`, not both.
 
 ## Evaluation order
 

@@ -119,3 +119,25 @@ Only *answers* are written to `.config/git.tpl.toml`. Computed values are
 recomputed on every render, by design: they are a function of the answers and the
 template, and a template that changes how `package_name` is derived should change
 it for existing projects too.
+
+## Filtering choices
+
+A computed value that resolves to a list can be pointed at by `choices_from`,
+which is how a question's choices are filtered:
+
+```toml
+[questions.kind]
+type = "choice"
+choices = ["library", "application"]
+
+[computed]
+servers = "{{ ['nginx', 'caddy'] if kind == 'application' else [] }}"
+
+[questions.server]
+type = "choice"
+choices_from = "servers"
+```
+
+The graph guarantees `kind` is answered before `servers` is computed, and
+`servers` before `server` is asked. If the list comes out empty the question is
+skipped entirely. See [Choices](questions.md#choices).

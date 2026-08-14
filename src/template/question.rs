@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::Value;
+use super::{Choice, Value};
 
 /// What a question asks for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,8 +77,12 @@ pub struct Question {
     pub when: Option<String>,
 
     /// The choices, for `choice` and `multi_choice`.
+    ///
+    /// A choice is a bare string, or a table carrying a `label` and `help`
+    /// beside its `value`. Both `choice` and `multi_choice` take either these
+    /// or `choices_from`; the two axes are independent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub choices: Option<Vec<Value>>,
+    pub choices: Option<Vec<Choice>>,
 
     /// A dotted path into the context yielding the choices.
     ///

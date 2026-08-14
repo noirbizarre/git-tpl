@@ -174,6 +174,17 @@ impl Manifest {
                 });
             }
 
+            // An empty list can never produce a prompt, and unlike an empty
+            // list arriving from `choices_from` it is knowable now. A dynamic
+            // list that resolves to nothing is a legitimate runtime state and
+            // skips the question; a literal `choices = []` is a mistake.
+            if question.choices.as_ref().is_some_and(Vec::is_empty) {
+                return Err(ManifestError::InvalidQuestion {
+                    name: name.clone(),
+                    reason: "`choices` is empty, so the question could never be answered".into(),
+                });
+            }
+
             if !question.kind.is_choice() && (has_choices || has_choices_from) {
                 return Err(ManifestError::InvalidQuestion {
                     name: name.clone(),
@@ -210,7 +221,7 @@ impl Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::template::QuestionKind;
+    use crate::template::{Choice, QuestionKind};
 
     const FULL: &str = r#"
         name = "rust-library"
@@ -344,6 +355,88 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, ManifestError::InvalidQuestion { .. }));
+    }
+
+    /// A dynamic list that resolves to nothing skips the question, but a
+    /// literal empty list is knowable at load time and can only be a mistake.
+    #[test]
+    fn an_empty_literal_choices_list_is_rejected() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.license]
+            type = "choice"
+            choices = []
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ManifestError::InvalidQuestion { ref reason, .. } if reason.contains("empty")
+        ));
+    }
+
+    #[test]
+    fn a_labelled_choice_parses_inline() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.license]
+            type = "choice"
+            choices = [
+              "Apache-2.0",
+              { value = "MIT", label = "MIT License", help = "Permissive" },
+            ]
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+
+        let choices = manifest.questions["license"].choices.as_ref().unwrap();
+        assert_eq!(choices[0], Choice::bare("Apache-2.0"));
+        assert_eq!(choices[1].value, "MIT");
+        assert_eq!(choices[1].label(), "MIT License");
+        assert_eq!(choices[1].help.as_deref(), Some("Permissive"));
+    }
+
+    /// The combination that was thought to need a `multi_choice_from` key. It
+    /// is `type` and the source being independent, and it already worked.
+    #[test]
+    fn a_multi_choice_may_draw_its_choices_from_a_reference() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+            [data.features]
+            source = "data/features.toml"
+            [questions.features]
+            type = "multi_choice"
+            choices_from = "data.features.all"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.questions["features"].choices_from.as_deref(),
+            Some("data.features.all")
+        );
+    }
+
+    /// A choice value has to survive `--answer x=v`, which parses as a string.
+    #[test]
+    fn a_non_string_choice_value_is_rejected_at_load_time() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.port]
+            type = "choice"
+            choices = [8080, 9090]
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ManifestError::Parse { .. }));
     }
 
     #[test]
