@@ -7,6 +7,7 @@
 //! afterwards.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use miette::Diagnostic;
 use thiserror::Error;
@@ -163,6 +164,11 @@ pub struct Evaluation<'a> {
     /// may become the prompt's pre-filled text and nothing else, because a
     /// value that varies by machine reaching the tree would end determinism.
     pub seeds: &'a BTreeMap<String, Value>,
+    /// The template's shared partials, importable from manifest expressions.
+    ///
+    /// Present so a `computed` value can `{% import %}` the same macro a
+    /// `.jinja` file does. One environment, one set of names, no divergence.
+    pub partials: &'a Arc<Partials>,
 }
 
 /// Resolve a template's context, prompting where needed.
@@ -179,6 +185,7 @@ pub fn resolve(
         graph,
         supplied,
         seeds,
+        partials,
     } = evaluation;
 
     let mut context = Context::new().with_template(manifest.metadata());
@@ -192,8 +199,12 @@ pub fn resolve(
                 // The source may itself be an expression, so it is rendered
                 // against the context as it stands. The graph guarantees
                 // everything it references is already resolved.
-                let resolved =
-                    render_string(&decl.source, &context, &format!("data.{}", node.key))?;
+                let resolved = render_string(
+                    &decl.source,
+                    &context,
+                    &format!("data.{}", node.key),
+                    partials,
+                )?;
                 let value = loader.load(&node.key, decl, &resolved)?;
                 context.set_data(&node.key, value);
             }
@@ -202,7 +213,12 @@ pub fn resolve(
                 let Some(expression) = manifest.computed.get(&node.key) else {
                     continue;
                 };
-                let value = evaluate(expression, &context, &format!("computed.{}", node.key))?;
+                let value = evaluate(
+                    expression,
+                    &context,
+                    &format!("computed.{}", node.key),
+                    partials,
+                )?;
                 context.set_computed(&node.key, value);
             }
 
@@ -216,8 +232,12 @@ pub fn resolve(
                 // a template distinguish "not applicable" from "declined" with
                 // `cli is defined`.
                 if let Some(when) = &question.when {
-                    let condition =
-                        evaluate(when, &context, &format!("questions.{}.when", node.key))?;
+                    let condition = evaluate(
+                        when,
+                        &context,
+                        &format!("questions.{}.when", node.key),
+                        partials,
+                    )?;
                     if !condition.is_truthy() {
                         continue;
                     }
@@ -236,7 +256,7 @@ pub fn resolve(
                     continue;
                 }
 
-                let default = resolve_default(&node.key, question, &context)?;
+                let default = resolve_default(&node.key, question, &context, partials)?;
 
                 let answer = match supplied.get(&node.key) {
                     Some(value) => coerce(&node.key, question, value)?,
@@ -311,10 +331,16 @@ fn resolve_default(
     name: &str,
     question: &Question,
     context: &Context,
+    partials: &Arc<Partials>,
 ) -> Result<Option<Value>, EvalError> {
     match question.default_expression() {
         Some(expression) => {
-            let value = evaluate(expression, context, &format!("questions.{name}.default"))?;
+            let value = evaluate(
+                expression,
+                context,
+                &format!("questions.{name}.default"),
+                partials,
+            )?;
             Ok(Some(value))
         }
         None => Ok(question.default.clone()),
@@ -395,12 +421,71 @@ fn validate_choice(
     Ok(())
 }
 
+/// The templates a `{% import %}` or `{% include %}` may resolve to.
+///
+/// A partial is any `.jinja` blob in the template repository that lives outside
+/// the render root, keyed by its repository-root-relative path. Living outside
+/// the root is what makes it a partial rather than an output file: the tree walk
+/// never sees it, so there is no skip rule to get wrong and no way for a macro
+/// definition to leak into the rendered project.
+///
+/// Owned rather than borrowed, and deliberately so. [`environment`] returns an
+/// `Environment<'static>` and MiniJinja's loader must be `Send + Sync + 'static`,
+/// which the libgit2 backend's repository handle is not. The bytes are therefore
+/// read out of the tree once, up front, by
+/// [`Resolved::partials`](crate::ops::Resolved::partials).
+///
+/// A `BTreeMap` rather than a `HashMap` because invariant 2 forbids iteration
+/// order that varies between runs — here it decides the order of the names
+/// listed when a lookup fails.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Partials(BTreeMap<String, String>);
+
+impl Partials {
+    /// Collect partials from `name -> source` pairs.
+    pub fn new(entries: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self(entries.into_iter().collect())
+    }
+
+    /// No partials at all — the common case, and every call site's fallback.
+    pub fn empty() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    /// The names a template may import, in sorted order.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
+    /// Whether there is nothing to load.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The source of one partial.
+    pub fn get(&self, name: &str) -> Option<&str> {
+        self.0.get(name).map(String::as_str)
+    }
+}
+
+/// A shared empty partial set.
+///
+/// For the callers that legitimately have none — the static graph analysis, and
+/// most tests. A `LazyLock` rather than an allocation per call because
+/// [`environment`] is built for every rendered file and every path segment.
+pub fn no_partials() -> &'static Arc<Partials> {
+    static NONE: std::sync::LazyLock<Arc<Partials>> =
+        std::sync::LazyLock::new(|| Arc::new(Partials::empty()));
+    &NONE
+}
+
 /// The MiniJinja environment used everywhere in git-tpl.
 ///
 /// Built through one constructor so that expression evaluation and file
 /// rendering cannot diverge: a filter available in a `default` must behave
-/// identically inside a `.jinja` file.
-pub fn environment() -> minijinja::Environment<'static> {
+/// identically inside a `.jinja` file, and a macro importable from a `.jinja`
+/// file must be importable from a `computed` expression.
+pub fn environment(partials: &Arc<Partials>) -> minijinja::Environment<'static> {
     let mut env = minijinja::Environment::new();
 
     // MiniJinja strips a template's final newline by default. For a file that
@@ -417,7 +502,75 @@ pub fn environment() -> minijinja::Environment<'static> {
     // See docs/adr/003-minijinja-only.md and docs/concepts/determinism.md#security.
     env.add_filter("slugify", slugify_filter);
 
+    // A loader, not an extension point. It resolves a name to bytes already
+    // committed at the pinned template revision — it executes nothing and
+    // reaches nothing outside the tree, so invariant 5 is untouched.
+    // See docs/adr/012-template-loader.md.
+    //
+    // Lazy rather than `add_template_owned` in a loop: `environment()` is
+    // rebuilt for every rendered file *and* every path segment, so eager
+    // registration would cost O(files x partials) parses for partials that
+    // nothing imports. The closure captures an `Arc` clone, which is the whole
+    // per-call price.
+    //
+    // A miss returns `Ok(None)` rather than an error carrying a better
+    // message, because MiniJinja discards a loader's `TemplateNotFound` and
+    // substitutes its own — and because `Ok(None)` is what `{% include ...
+    // ignore missing %}` is defined against. The names that *do* exist are
+    // added to the diagnostic instead, by `describe_lookup` below.
+    let loadable = Arc::clone(partials);
+    env.set_loader(move |name| Ok(loadable.get(name).map(str::to_string)));
+
     env
+}
+
+/// MiniJinja's message, plus the partials that exist when one could not be found.
+///
+/// A "template not found" tells the author the name they wrote. What they do
+/// not know is which names are correct — and the failure is nearly always a
+/// typo, or a path written relative to the render root instead of the
+/// repository root.
+fn describe_lookup(error: &minijinja::Error, partials: &Partials) -> String {
+    let mut message = describe(error);
+
+    if !is_template_not_found(error) {
+        return message;
+    }
+
+    if partials.is_empty() {
+        message.push_str(
+            "\nthis template repository defines no partials \
+             (a partial is a `.jinja` file outside the render root)",
+        );
+    } else {
+        message.push_str("\navailable partials: ");
+        message.push_str(&partials.names().collect::<Vec<_>>().join(", "));
+    }
+
+    message
+}
+
+/// Whether a lookup failure is anywhere in the error's cause chain.
+///
+/// Not just the top: `{% include %}` inside an imported macro wraps the miss in
+/// a `BadInclude`, and the hint is just as wanted there.
+fn is_template_not_found(error: &minijinja::Error) -> bool {
+    if error.kind() == minijinja::ErrorKind::TemplateNotFound {
+        return true;
+    }
+
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        if cause
+            .downcast_ref::<minijinja::Error>()
+            .is_some_and(|error| error.kind() == minijinja::ErrorKind::TemplateNotFound)
+        {
+            return true;
+        }
+        source = std::error::Error::source(cause);
+    }
+
+    false
 }
 
 /// `{{ project_name | slugify }}`.
@@ -465,12 +618,17 @@ fn slugify(s: &str) -> String {
 ///
 /// A bare `{{ expr }}` yields the value itself, so a computed boolean stays a
 /// boolean. An expression with surrounding text is a string, as expected.
-pub fn evaluate(expression: &str, context: &Context, location: &str) -> Result<Value, EvalError> {
+pub fn evaluate(
+    expression: &str,
+    context: &Context,
+    location: &str,
+    partials: &Arc<Partials>,
+) -> Result<Value, EvalError> {
     if !is_expression(expression) {
         return Ok(Value::String(expression.to_string()));
     }
 
-    let env = environment();
+    let env = environment(partials);
 
     // A whole-expression template such as `{{ data.features }}` is evaluated
     // through `eval_expr` rather than rendered, because rendering would
@@ -482,7 +640,7 @@ pub fn evaluate(expression: &str, context: &Context, location: &str) -> Result<V
             .map_err(|error| EvalError::Expression {
                 location: location.to_string(),
                 expression: expression.to_string(),
-                reason: describe(&error),
+                reason: describe_lookup(&error, partials),
             })?;
         return Value::from_minijinja(&value).map_err(|error| EvalError::Expression {
             location: location.to_string(),
@@ -491,7 +649,7 @@ pub fn evaluate(expression: &str, context: &Context, location: &str) -> Result<V
         });
     }
 
-    render_string(expression, context, location).map(Value::String)
+    render_string(expression, context, location, partials).map(Value::String)
 }
 
 /// Render a template to a string.
@@ -499,17 +657,18 @@ pub fn render_string(
     template: &str,
     context: &Context,
     location: &str,
+    partials: &Arc<Partials>,
 ) -> Result<String, EvalError> {
     if !is_expression(template) {
         return Ok(template.to_string());
     }
 
-    let env = environment();
+    let env = environment(partials);
     env.render_str(template, context.to_minijinja())
         .map_err(|error| EvalError::Expression {
             location: location.to_string(),
             expression: template.to_string(),
-            reason: describe(&error),
+            reason: describe_lookup(&error, partials),
         })
 }
 
@@ -559,7 +718,7 @@ mod tests {
     fn a_literal_is_returned_unchanged() {
         let context = Context::new();
         assert_eq!(
-            evaluate("MIT", &context, "test").unwrap(),
+            evaluate("MIT", &context, "test", no_partials()).unwrap(),
             Value::String("MIT".into())
         );
     }
@@ -568,7 +727,7 @@ mod tests {
     fn an_expression_with_surrounding_text_is_a_string() {
         let context = context_with(&[("name", Value::String("demo".into()))]);
         assert_eq!(
-            evaluate("{{ name }}-suffix", &context, "test").unwrap(),
+            evaluate("{{ name }}-suffix", &context, "test", no_partials()).unwrap(),
             Value::String("demo-suffix".into())
         );
     }
@@ -588,19 +747,19 @@ mod tests {
         ]);
 
         assert_eq!(
-            evaluate("{{ cli }}", &context, "test").unwrap(),
+            evaluate("{{ cli }}", &context, "test", no_partials()).unwrap(),
             Value::Bool(false)
         );
         assert_eq!(
-            evaluate("{{ count + 1 }}", &context, "test").unwrap(),
+            evaluate("{{ count + 1 }}", &context, "test", no_partials()).unwrap(),
             Value::Integer(4)
         );
         assert_eq!(
-            evaluate("{{ features }}", &context, "test").unwrap(),
+            evaluate("{{ features }}", &context, "test", no_partials()).unwrap(),
             Value::Array(vec![Value::String("serde".into())])
         );
         assert_eq!(
-            evaluate("{{ cli and count > 0 }}", &context, "test").unwrap(),
+            evaluate("{{ cli and count > 0 }}", &context, "test", no_partials()).unwrap(),
             Value::Bool(false)
         );
     }
@@ -609,7 +768,7 @@ mod tests {
     fn two_expressions_in_one_string_render_as_a_string() {
         let context = context_with(&[("a", Value::Integer(1)), ("b", Value::Integer(2))]);
         assert_eq!(
-            evaluate("{{ a }}{{ b }}", &context, "test").unwrap(),
+            evaluate("{{ a }}{{ b }}", &context, "test", no_partials()).unwrap(),
             Value::String("12".into())
         );
     }
@@ -620,7 +779,13 @@ mod tests {
         // An unknown filter, not `1 / 0`: MiniJinja evaluates that to `inf`
         // rather than failing, which is a fine choice but makes it useless as a
         // test of the error path.
-        let error = evaluate("{{ 'x' | no_such_filter }}", &context, "computed.oops").unwrap_err();
+        let error = evaluate(
+            "{{ 'x' | no_such_filter }}",
+            &context,
+            "computed.oops",
+            no_partials(),
+        )
+        .unwrap_err();
 
         match error {
             EvalError::Expression {
@@ -642,6 +807,45 @@ mod tests {
     /// computed values interleaved in dependency order.
     fn resolve_with(toml: &str, supplied: &[(&str, Value)]) -> Result<Context, EvalError> {
         resolve_seeded(toml, supplied, &[], &mut DefaultsOnly)
+    }
+
+    /// Resolve a manifest whose expressions may import shared partials.
+    fn resolve_with_partials(toml: &str, partials: &[(&str, &str)]) -> Result<Context, EvalError> {
+        let manifest = Manifest::parse(toml, MANIFEST_NAME).expect("manifest should parse");
+        let graph = Graph::build(&manifest).expect("graph should build");
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = crate::git::libgit2::LibGit2::init(dir.path()).unwrap();
+        let tree = {
+            use crate::git::GitBackend;
+            repo.build_tree(&[]).unwrap()
+        };
+        let mut loader = Loader::new(
+            crate::data::TemplateTree {
+                repo: &repo,
+                tree,
+                revision: tree,
+            },
+            dir.path(),
+        );
+
+        let partials =
+            Arc::new(Partials::new(partials.iter().map(|(name, source)| {
+                ((*name).to_string(), (*source).to_string())
+            })));
+        let seeds = BTreeMap::new();
+
+        resolve(
+            Evaluation {
+                manifest: &manifest,
+                graph: &graph,
+                supplied: BTreeMap::new(),
+                seeds: &seeds,
+                partials: &partials,
+            },
+            &mut loader,
+            &mut DefaultsOnly,
+        )
     }
 
     /// The same, with prompt seeds and a prompter of the caller's choosing.
@@ -684,6 +888,7 @@ mod tests {
                     .map(|(k, v)| ((*k).to_string(), v.clone()))
                     .collect(),
                 seeds: &seeds,
+                partials: no_partials(),
             },
             &mut loader,
             prompter,
@@ -1218,11 +1423,23 @@ mod tests {
         let context = context_with(&[("project_name", Value::String("Café Déjà-Vu".into()))]);
 
         assert_eq!(
-            evaluate("{{ project_name | slugify }}", &context, "test").unwrap(),
+            evaluate(
+                "{{ project_name | slugify }}",
+                &context,
+                "test",
+                no_partials()
+            )
+            .unwrap(),
             Value::String("cafe-deja-vu".into())
         );
         assert_eq!(
-            render_string("src/{{ project_name | slugify }}/mod.rs", &context, "test").unwrap(),
+            render_string(
+                "src/{{ project_name | slugify }}/mod.rs",
+                &context,
+                "test",
+                no_partials()
+            )
+            .unwrap(),
             "src/cafe-deja-vu/mod.rs"
         );
     }
@@ -1232,8 +1449,20 @@ mod tests {
     #[test]
     fn slugify_is_deterministic() {
         let context = context_with(&[("project_name", Value::String("Ünïcödé Prôjèct".into()))]);
-        let once = evaluate("{{ project_name | slugify }}", &context, "test").unwrap();
-        let twice = evaluate("{{ project_name | slugify }}", &context, "test").unwrap();
+        let once = evaluate(
+            "{{ project_name | slugify }}",
+            &context,
+            "test",
+            no_partials(),
+        )
+        .unwrap();
+        let twice = evaluate(
+            "{{ project_name | slugify }}",
+            &context,
+            "test",
+            no_partials(),
+        )
+        .unwrap();
 
         assert_eq!(once, twice);
         assert_eq!(once, Value::String("unicode-project".into()));
@@ -1246,8 +1475,101 @@ mod tests {
         let context = context_with(&[("version", Value::Integer(2))]);
 
         assert_eq!(
-            evaluate("{{ version | slugify }}", &context, "test").unwrap(),
+            evaluate("{{ version | slugify }}", &context, "test", no_partials()).unwrap(),
             Value::String("2".into())
+        );
+    }
+
+    // --- shared partials ----------------------------------------------------
+
+    /// The same principle as the `slugify` test above, for the loader: a macro
+    /// importable from a `.jinja` file must be importable from a `computed`,
+    /// because both go through the one `environment()` constructor.
+    #[test]
+    fn a_macro_is_importable_from_a_computed_expression() {
+        let context = resolve_with_partials(
+            r#"
+                name = "t"
+
+                [questions.project_name]
+                type = "string"
+                default = "Demo"
+
+                [computed]
+                package_name = "{% import 'macros.jinja' as m %}{{ m.pkg(project_name) }}"
+            "#,
+            &[(
+                "macros.jinja",
+                "{% macro pkg(n) %}{{ n | slugify }}-rs{% endmacro %}",
+            )],
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.get_path("package_name"),
+            Some(&Value::String("demo-rs".into()))
+        );
+    }
+
+    /// A miss inside a manifest expression gets the same hint a file does.
+    #[test]
+    fn a_missing_partial_in_a_computed_expression_lists_the_available_names() {
+        let error = resolve_with_partials(
+            r#"
+                name = "t"
+
+                [computed]
+                oops = "{% import 'marcos.jinja' as m %}{{ m.pkg() }}"
+            "#,
+            &[("macros.jinja", "{% macro pkg() %}x{% endmacro %}")],
+        )
+        .unwrap_err();
+
+        let EvalError::Expression { reason, .. } = &error else {
+            panic!("expected an expression failure, got {error:?}");
+        };
+        assert!(
+            reason.contains("available partials: macros.jinja"),
+            "{reason}"
+        );
+    }
+
+    /// Without a loader an unknown name would be a bare MiniJinja message. The
+    /// hint has to say that the concept exists at all.
+    #[test]
+    fn importing_when_a_template_has_no_partials_says_there_are_none() {
+        let error = resolve_with_partials(
+            r#"
+                name = "t"
+
+                [computed]
+                oops = "{% import 'macros.jinja' as m %}{{ m.pkg() }}"
+            "#,
+            &[],
+        )
+        .unwrap_err();
+
+        let EvalError::Expression { reason, .. } = &error else {
+            panic!("expected an expression failure, got {error:?}");
+        };
+        assert!(reason.contains("defines no partials"), "{reason}");
+    }
+
+    /// `ignore missing` is MiniJinja's contract for an optional include, and
+    /// the loader returns `Ok(None)` on a miss specifically so it still holds.
+    #[test]
+    fn an_optional_include_of_a_missing_partial_is_not_an_error() {
+        let context = context_with(&[]);
+
+        assert_eq!(
+            render_string(
+                "{% include 'absent.jinja' ignore missing %}ok",
+                &context,
+                "test",
+                no_partials(),
+            )
+            .unwrap(),
+            "ok"
         );
     }
 

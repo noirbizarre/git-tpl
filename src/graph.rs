@@ -199,8 +199,11 @@ fn references(
     }
 
     // The same environment used to evaluate, so an expression that parses here
-    // is one that will run there.
-    let env = crate::eval::environment();
+    // is one that will run there. Without partials, deliberately: this analysis
+    // is a parse, and `undeclared_variables` never follows an `{% import %}`.
+    // A missing partial is a render-time failure with a render-time diagnostic,
+    // not a graph edge.
+    let env = crate::eval::environment(crate::eval::no_partials());
     let template =
         env.template_from_str(expression)
             .map_err(|error| GraphError::InvalidExpression {

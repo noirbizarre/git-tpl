@@ -86,6 +86,24 @@ This is [not an omission](../concepts/determinism.md#no-runtime-context). A valu
 that varies by machine belongs in the answers, where it is recorded and shared —
 not in the context, where it is invisible and different for everyone.
 
+## Imported names
+
+A `{% import %}` brings a [shared partial](format.md#shared-partials)'s macros
+into scope for the file that imports it, and for that file only. Nothing is
+implicitly available: a macro must be imported where it is used.
+
+```jinja
+{% import "macros.jinja" as m %}
+{{ m.badge(project_name) }}
+```
+
+A partial is any `.jinja` file outside the rendered subdirectory, named by its
+path from the repository root. It is read from the same pinned template revision
+as everything else — the loader cannot name a path on your machine.
+
+The same imports work in manifest expressions, so a `computed` value can use the
+macros a file uses.
+
 ## Filters and functions
 
 MiniJinja's [built-in filters](https://docs.rs/minijinja/latest/minijinja/filters/index.html)

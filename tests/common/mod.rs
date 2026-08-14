@@ -375,10 +375,28 @@ MIT = "MIT License"
 
     /// A template with only a manifest and one file.
     pub fn minimal(parent: &Path, manifest: &str, files: &[(&str, &str)]) -> Self {
+        Self::with_shared(parent, manifest, files, &[])
+    }
+
+    /// The same, plus files written *outside* the render root.
+    ///
+    /// `files` are relative to `template/` and get rendered; `shared` are
+    /// relative to the repository root and do not. That distinction is the
+    /// whole of the partial rule, so the harness makes it explicit rather than
+    /// leaving each test to spell out a `../`.
+    pub fn with_shared(
+        parent: &Path,
+        manifest: &str,
+        files: &[(&str, &str)],
+        shared: &[(&str, &str)],
+    ) -> Self {
         let repo = Repo::init_in(parent, "template");
         repo.write("template.toml", manifest);
         for (path, content) in files {
             repo.write(&format!("template/{path}"), content);
+        }
+        for (path, content) in shared {
+            repo.write(path, content);
         }
         repo.commit_all("feat: initial template");
         Self { repo }
@@ -427,8 +445,18 @@ impl World {
 
     /// A world with a custom template.
     pub fn with_template(manifest: &str, files: &[(&str, &str)]) -> Self {
+        Self::with_shared_template(manifest, files, &[])
+    }
+
+    /// A world with a custom template that also has files outside the render
+    /// root — the partials an `{% import %}` may resolve to.
+    pub fn with_shared_template(
+        manifest: &str,
+        files: &[(&str, &str)],
+        shared: &[(&str, &str)],
+    ) -> Self {
         let dir = tempfile::tempdir().expect("temp dir");
-        let template = Template::minimal(dir.path(), manifest, files);
+        let template = Template::with_shared(dir.path(), manifest, files, shared);
         let project = Repo::init_in(dir.path(), "project");
         project.write("NOTES.md", "notes\n");
         project.commit_all("chore: initial commit");

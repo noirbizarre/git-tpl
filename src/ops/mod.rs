@@ -288,12 +288,18 @@ pub fn render(
         BTreeMap::new()
     };
 
+    // Read once, up front, and shared by the manifest expressions below and the
+    // file rendering further down — one environment, one set of importable
+    // names, so a macro usable in a `.jinja` file is usable in a `computed`.
+    let partials = template.partials()?;
+
     let context = crate::eval::resolve(
         Evaluation {
             manifest: &template.manifest,
             graph: &graph,
             supplied,
             seeds: &seeds,
+            partials: &partials,
         },
         &mut loader,
         answering.prompter(),
@@ -302,7 +308,7 @@ pub fn render(
     let entries = template.entries()?;
     // Blobs are read from the template repository — often a temporary clone —
     // and written into the project, which is where the ref will point.
-    let tree = render_tree(&template.repo, project, &entries, &context)?;
+    let tree = render_tree(&template.repo, project, &entries, &context, &partials)?;
 
     let provenance = Provenance {
         source: config.template.source.clone(),

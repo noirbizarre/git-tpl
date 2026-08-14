@@ -38,6 +38,7 @@ main:  A ─── M ─── B ─── M'
 | `choices_from` | ✅ structured reference into the context |
 | Computed values | ✅ typed, dependency-ordered |
 | Template filters | ✅ MiniJinja's built-ins plus `slugify`; the set is closed, no plugin point |
+| Shared macros | ✅ `{% import %}` and `{% include %}` against the template tree; a partial is a `.jinja` file outside the render root (ADR-012) |
 | Dependency graph | ✅ static, topologically sorted, cycles and typos rejected up front |
 | Template data sources | ✅ read from the template's Git tree at the resolved revision |
 | Project data sources | ✅ with traversal refused |
@@ -51,7 +52,7 @@ main:  A ─── M ─── B ─── M'
 | Git config (`tpl.*`) | ✅ Git's own precedence |
 | Git backend isolation | ✅ enforced by a prek hook, not by hope |
 | HTTP isolation | ✅ same, confining the client to `src/data/` |
-| Documentation | ✅ full Zensical site, 11 ADRs |
+| Documentation | ✅ full Zensical site, 12 ADRs |
 | Tooling | ✅ mise, prek, git-cliff, gh-ship, CI |
 | Releases | ✅ binaries for six targets, plus crates.io via Trusted Publishing |
 
@@ -187,7 +188,7 @@ The naming difference is deliberate rather than an oversight: the project file
 is Git-shaped and lives in `.config/` (ADR-010), the user file is named after
 the binary and follows XDG. Two names means a stray copy of one is never
 mistaken for the other. This is a new on-disk format, which is to say a
-contract, so it needs **ADR-012** before it needs code.
+contract, so it needs **ADR-013** before it needs code.
 
 ```toml
 [defaults]
@@ -447,9 +448,10 @@ Parent-relative source paths, validated: removing a path the parent does not
 have is an **error**. Otherwise a rename upstream silently resurrects a file the
 child spent a release removing, and nobody notices until it ships.
 
-**`{% extends %}` needs the loader that item 9 already wants.** `{% import %}`
-fails today because no loader is registered; inheritance needs the same loader,
-backed by the layered trees, resolving child-first. One trap, and it is the
+**`{% extends %}` needs the loader, which now exists.** ADR-012 registered one,
+backed by the template's own tree: a partial is a `.jinja` file outside the
+render root, named by its path from the repository root. Inheritance needs the
+same loader, backed by the *layered* trees, resolving child-first. One trap, and it is the
 obvious one: a child's `base.html.jinja` writing `{% extends "base.html.jinja" %}`
 must find the *parent's* file, not itself. Magic here produces infinite
 recursion or, worse, silence — so the parent is named explicitly:
@@ -467,12 +469,15 @@ that has no obvious right answer, and neither is needed by the case that
 motivates this. Cycles are detected the way `graph.rs` detects them, up front
 and by name, and the chain has a depth limit.
 
+ADR-012 deliberately left the `<prefix>:` namespace free for exactly this, so
+`parent:` costs no format change.
+
 **It multiplies a known rough edge.** Every ancestor is cloned on every run, so
 a three-deep chain is three clones. That makes the template cache — currently
 "stays until it actually hurts" — start to hurt.
 
 This changes the manifest, which is a contract, and changes what "the template"
-means for provenance and for `refs/tpl/<id>`. It needs **ADR-013** before it
+means for provenance and for `refs/tpl/<id>`. It needs **ADR-014** before it
 needs code.
 
 ### 9. Smaller things
@@ -483,10 +488,6 @@ needs code.
 - `--stat` should count lines, not just files. Needs a line-level diff summary
   from libgit2.
 - Snapshot tests over CLI output. The harness and `insta` are already wired.
-- Shared macros. `{% import "macros.jinja" %}` fails today because no loader is
-  registered; a loader backed by the template's own tree reads nothing outside
-  the template revision and executes nothing, so it costs no invariant. Wanted
-  by any template much above fifty files, and a prerequisite for item 8.
 - Named tests for two behaviours that are currently correct but undefended: a
   computed value holding a sequence (`| select`) and one holding a table
   (`dict()`) both keep their type through `evaluate()`. Nothing would catch a

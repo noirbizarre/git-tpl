@@ -8,11 +8,13 @@
 //! Rendering is deterministic — see `docs/concepts/determinism.md` for the
 //! full list of hazards and how each is handled.
 
+use std::sync::Arc;
+
 use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::context::Context;
-use crate::eval::{EvalError, render_string};
+use crate::eval::{EvalError, Partials, render_string};
 use crate::git::{FileMode, GitBackend, Oid, TreeEntry};
 
 /// The suffix marking a file as a template.
@@ -86,6 +88,66 @@ pub enum RenderError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Git(#[from] crate::git::GitError),
+
+    /// A partial's bytes are not valid UTF-8.
+    #[error("the partial `{path}` is not valid UTF-8")]
+    #[diagnostic(
+        code(tpl::render::partial_not_utf8),
+        help(
+            "a `{TEMPLATE_SUFFIX}` file outside the render root is a partial, and a partial \
+             must be text. Move it inside the render root if it is meant to be rendered and \
+             copied as-is."
+        )
+    )]
+    PartialNotUtf8 {
+        /// The path in the template repository.
+        path: String,
+    },
+}
+
+/// Collect the partials a template makes importable.
+///
+/// A partial is any `TEMPLATE_SUFFIX` blob **outside** the render root, named
+/// by its repository-root-relative path. Outside the root is what makes it a
+/// partial: the tree walk only ever sees the root subtree, so a macro
+/// definition cannot leak into the rendered project and no skip rule is needed
+/// to keep it out. Restricting to `.jinja` bounds what is read eagerly and
+/// keeps data files the business of `[data]`, which knows how to parse them.
+///
+/// Lossy decoding is deliberately not used. A binary `.jinja` outside the root
+/// is an authoring mistake, and silently importing replacement characters would
+/// surface later as an incomprehensible parse error.
+pub fn collect_partials(
+    template: &impl GitBackend,
+    tree: Oid,
+    root: &str,
+) -> Result<Partials, RenderError> {
+    // `list_tree` is already in Git-canonical sorted order, and `Partials` is a
+    // `BTreeMap`, so the resulting name order does not vary between runs.
+    let entries = template.list_tree(tree)?;
+
+    let prefix = format!("{}/", root.trim_end_matches('/'));
+    let mut out = Vec::new();
+
+    for entry in entries {
+        if !entry.mode.is_blob() || entry.mode == FileMode::Link {
+            continue;
+        }
+        if entry.path.starts_with(&prefix) || entry.path == root {
+            continue;
+        }
+        if !entry.path.ends_with(TEMPLATE_SUFFIX) {
+            continue;
+        }
+
+        let bytes = template.read_blob(entry.oid)?;
+        let source = String::from_utf8(bytes).map_err(|_| RenderError::PartialNotUtf8 {
+            path: entry.path.clone(),
+        })?;
+        out.push((entry.path, source));
+    }
+
+    Ok(Partials::new(out))
 }
 
 /// A rendered file, before it becomes a tree.
@@ -115,8 +177,9 @@ pub fn render_tree(
     project: &impl GitBackend,
     entries: &[TreeEntry],
     context: &Context,
+    partials: &Arc<Partials>,
 ) -> Result<Oid, RenderError> {
-    let rendered = render_entries(template, entries, context)?;
+    let rendered = render_entries(template, entries, context, partials)?;
 
     let mut tree_entries = Vec::with_capacity(rendered.len());
     for file in rendered {
@@ -142,6 +205,7 @@ pub fn render_entries(
     template: &impl GitBackend,
     entries: &[TreeEntry],
     context: &Context,
+    partials: &Arc<Partials>,
 ) -> Result<Vec<Rendered>, RenderError> {
     // Sorted input in, sorted output out. Rendering can reorder paths — a
     // templated segment may render to anything — so the result is re-sorted
@@ -159,7 +223,7 @@ pub fn render_entries(
             continue;
         }
 
-        let Some(path) = render_path(&entry.path, context)? else {
+        let Some(path) = render_path(&entry.path, context, partials)? else {
             // A segment rendered empty, so this entry — and, for a directory,
             // everything beneath it — is skipped. That is how a template makes
             // a whole subtree conditional.
@@ -171,7 +235,7 @@ pub fn render_entries(
 
         let content = if is_template && !is_binary(&source) {
             let text = String::from_utf8_lossy(&source);
-            render_string(&text, context, &entry.path)
+            render_string(&text, context, &entry.path, partials)
                 .map_err(|source| RenderError::Content {
                     path: entry.path.clone(),
                     source,
@@ -209,18 +273,23 @@ pub fn render_entries(
 /// Render a path, stripping `.jinja` and evaluating each segment.
 ///
 /// Returns `None` when a segment renders empty, meaning the entry is skipped.
-fn render_path(path: &str, context: &Context) -> Result<Option<String>, RenderError> {
+fn render_path(
+    path: &str,
+    context: &Context,
+    partials: &Arc<Partials>,
+) -> Result<Option<String>, RenderError> {
     // Strip the suffix before rendering, so a templated directory name ending
     // in `.jinja` is not mistaken for a template file.
     let stripped = path.strip_suffix(TEMPLATE_SUFFIX).unwrap_or(path);
 
     let mut segments = Vec::new();
     for segment in stripped.split('/') {
-        let rendered =
-            render_string(segment, context, path).map_err(|source| RenderError::Path {
+        let rendered = render_string(segment, context, path, partials).map_err(|source| {
+            RenderError::Path {
                 path: path.to_string(),
                 source,
-            })?;
+            }
+        })?;
         let rendered = rendered.trim().to_string();
 
         if rendered.is_empty() {
@@ -257,6 +326,7 @@ fn is_binary(content: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::eval::no_partials;
     use crate::git::libgit2::LibGit2;
     use crate::template::Value;
 
@@ -288,11 +358,11 @@ mod tests {
         }
 
         fn render(&self, entries: &[TreeEntry], context: &Context) -> Vec<Rendered> {
-            render_entries(&self.repo, entries, context).unwrap()
+            render_entries(&self.repo, entries, context, no_partials()).unwrap()
         }
 
         fn tree(&self, entries: &[TreeEntry], context: &Context) -> Oid {
-            render_tree(&self.repo, &self.repo, entries, context).unwrap()
+            render_tree(&self.repo, &self.repo, entries, context, no_partials()).unwrap()
         }
     }
 
@@ -388,8 +458,13 @@ mod tests {
         let mut context = Context::new();
         context.set_answer("evil", Value::String("..".into()));
 
-        let error =
-            render_entries(&f.repo, &[f.entry("{{ evil }}/x", b"x")], &context).unwrap_err();
+        let error = render_entries(
+            &f.repo,
+            &[f.entry("{{ evil }}/x", b"x")],
+            &context,
+            no_partials(),
+        )
+        .unwrap_err();
 
         assert!(
             matches!(error, RenderError::EscapesTree { .. }),
@@ -403,8 +478,13 @@ mod tests {
         let mut context = Context::new();
         context.set_answer("evil", Value::String("a/b".into()));
 
-        let error =
-            render_entries(&f.repo, &[f.entry("{{ evil }}/x", b"x")], &context).unwrap_err();
+        let error = render_entries(
+            &f.repo,
+            &[f.entry("{{ evil }}/x", b"x")],
+            &context,
+            no_partials(),
+        )
+        .unwrap_err();
 
         assert!(
             matches!(error, RenderError::EscapesTree { .. }),
@@ -457,10 +537,10 @@ mod tests {
             f.entry("crlf.txt.jinja", b"{{ project_name }}\r\nx\r\n"),
         ];
 
-        let rendered = render_entries(&f.repo, &entries[..1], &context());
+        let rendered = render_entries(&f.repo, &entries[..1], &context(), no_partials());
         assert_eq!(rendered.unwrap()[0].content, b"a\r\nb\r\n");
 
-        let rendered = render_entries(&f.repo, &entries[1..], &context());
+        let rendered = render_entries(&f.repo, &entries[1..], &context(), no_partials());
         assert_eq!(rendered.unwrap()[0].content, b"Demo\r\nx\r\n");
     }
 
@@ -492,6 +572,7 @@ mod tests {
             &f.repo,
             &[f.entry("{{ name }}.txt", b"a"), f.entry("same.txt", b"b")],
             &context,
+            no_partials(),
         )
         .unwrap_err();
 
@@ -505,6 +586,7 @@ mod tests {
             &f.repo,
             &[f.entry("bad.md.jinja", b"{{ 'x' | no_such_filter }}")],
             &context(),
+            no_partials(),
         )
         .unwrap_err();
 
@@ -565,5 +647,273 @@ mod tests {
         let mut late = vec![b'a'; BINARY_SNIFF_LEN + 10];
         late.push(0);
         assert!(!is_binary(&late));
+    }
+
+    /// Fixture helpers for the loader: a template tree with files both inside
+    /// and outside the render root.
+    impl Fixture {
+        /// Build a tree from `path -> content` pairs and collect its partials.
+        fn partials(&self, root: &str, files: &[(&str, &[u8])]) -> Partials {
+            let entries: Vec<TreeEntry> = files
+                .iter()
+                .map(|(path, content)| self.entry(path, content))
+                .collect();
+            let tree = self.repo.build_tree(&entries).unwrap();
+            collect_partials(&self.repo, tree, root).unwrap()
+        }
+
+        fn render_with(
+            &self,
+            entries: &[TreeEntry],
+            context: &Context,
+            partials: &Arc<Partials>,
+        ) -> Result<Vec<Rendered>, RenderError> {
+            render_entries(&self.repo, entries, context, partials)
+        }
+    }
+
+    #[test]
+    fn a_macro_imported_from_outside_the_root_is_expanded() {
+        let f = Fixture::new();
+        let partials = Arc::new(f.partials(
+            "template",
+            &[
+                (
+                    "macros.jinja",
+                    b"{% macro title(name) %}# {{ name }}{% endmacro %}",
+                ),
+                ("template/README.md.jinja", b"unused"),
+            ],
+        ));
+
+        let rendered = f
+            .render_with(
+                &[f.entry(
+                    "README.md.jinja",
+                    b"{% import 'macros.jinja' as m %}{{ m.title(project_name) }}\n",
+                )],
+                &context(),
+                &partials,
+            )
+            .unwrap();
+
+        assert_eq!(rendered[0].path, "README.md");
+        assert_eq!(rendered[0].content, b"# Demo\n");
+    }
+
+    #[test]
+    fn a_partial_in_a_subdirectory_is_named_by_its_full_path() {
+        let f = Fixture::new();
+        let partials = Arc::new(f.partials(
+            "template",
+            &[(
+                "macros/rust.jinja",
+                b"{% macro crate_name(n) %}{{ n }}-rs{% endmacro %}",
+            )],
+        ));
+
+        let rendered = f
+            .render_with(
+                &[f.entry(
+                    "Cargo.toml.jinja",
+                    b"{% import 'macros/rust.jinja' as m %}{{ m.crate_name(package_name) }}",
+                )],
+                &context(),
+                &partials,
+            )
+            .unwrap();
+
+        assert_eq!(rendered[0].content, b"demo-rs");
+    }
+
+    /// Partials live outside the render root, so the tree walk — which only
+    /// ever sees the root subtree — cannot emit one. This pins the property
+    /// that makes the whole design need no skip rule.
+    #[test]
+    fn a_partial_is_not_written_into_the_rendered_tree() {
+        let f = Fixture::new();
+        let partials = Arc::new(f.partials(
+            "template",
+            &[
+                ("macros.jinja", b"{% macro x() %}x{% endmacro %}"),
+                ("template/README.md.jinja", b"hello"),
+            ],
+        ));
+        assert_eq!(partials.names().collect::<Vec<_>>(), ["macros.jinja"]);
+
+        // The entries the walk is given are the *root subtree*, already
+        // relative to the root — `macros.jinja` is simply not among them.
+        let rendered = f
+            .render_with(
+                &[f.entry("README.md.jinja", b"hello")],
+                &context(),
+                &partials,
+            )
+            .unwrap();
+
+        assert_eq!(
+            rendered.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+            ["README.md"]
+        );
+    }
+
+    #[test]
+    fn a_jinja_file_inside_the_root_is_not_a_partial() {
+        let f = Fixture::new();
+        let partials = f.partials(
+            "template",
+            &[
+                ("macros.jinja", b"outside"),
+                ("template/nested.jinja", b"inside"),
+                ("template/deep/nested.jinja", b"inside"),
+            ],
+        );
+
+        assert_eq!(partials.names().collect::<Vec<_>>(), ["macros.jinja"]);
+    }
+
+    /// A non-`.jinja` file outside the root is not loadable. Reading data files
+    /// is what `[data]` is for, and it knows how to parse them.
+    #[test]
+    fn a_non_jinja_file_outside_the_root_is_not_a_partial() {
+        let f = Fixture::new();
+        let partials = f.partials(
+            "template",
+            &[
+                ("template.toml", b"name = 'demo'"),
+                ("data/licenses.toml", b"ids = []"),
+                ("README.md", b"the template's own readme"),
+            ],
+        );
+
+        assert!(partials.is_empty());
+    }
+
+    /// What the author does not already know is which names *do* exist —
+    /// nearly always a typo, or a path written relative to the render root.
+    #[test]
+    fn an_unknown_import_names_the_partials_that_do_exist() {
+        let f = Fixture::new();
+        let partials = Arc::new(f.partials(
+            "template",
+            &[("macros.jinja", b"x"), ("macros/rust.jinja", b"y")],
+        ));
+
+        let error = f
+            .render_with(
+                &[f.entry("README.md.jinja", b"{% import 'marcos.jinja' as m %}")],
+                &context(),
+                &partials,
+            )
+            .unwrap_err();
+
+        let message = format!("{:?}", miette::Report::new(error));
+        assert!(message.contains("marcos.jinja"), "{message}");
+        assert!(
+            message.contains("macros.jinja, macros/rust.jinja"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn importing_from_a_template_with_no_partials_says_so() {
+        let f = Fixture::new();
+        let error = f
+            .render_with(
+                &[f.entry("README.md.jinja", b"{% import 'macros.jinja' as m %}")],
+                &context(),
+                no_partials(),
+            )
+            .unwrap_err();
+
+        let message = format!("{:?}", miette::Report::new(error));
+        assert!(message.contains("defines no partials"), "{message}");
+    }
+
+    #[test]
+    fn a_partial_that_is_not_utf8_is_rejected_by_name() {
+        let f = Fixture::new();
+        let entries = [f.entry("macros.jinja", b"\xff\xfe not text")];
+        let tree = f.repo.build_tree(&entries).unwrap();
+
+        let error = collect_partials(&f.repo, tree, "template").unwrap_err();
+
+        assert!(matches!(
+            error,
+            RenderError::PartialNotUtf8 { ref path } if path == "macros.jinja"
+        ));
+    }
+
+    /// Invariant 2. A loader is a new source of inputs, so it gets its own
+    /// determinism test rather than relying on the one above.
+    #[test]
+    fn rendering_with_the_same_partials_twice_produces_the_same_tree() {
+        let f = Fixture::new();
+        let partials = Arc::new(f.partials(
+            "template",
+            &[(
+                "macros.jinja",
+                b"{% macro title(name) %}# {{ name }}{% endmacro %}",
+            )],
+        ));
+        let entries = [f.entry(
+            "README.md.jinja",
+            b"{% import 'macros.jinja' as m %}{{ m.title(project_name) }}\n",
+        )];
+
+        let first = render_tree(&f.repo, &f.repo, &entries, &context(), &partials).unwrap();
+        let second = render_tree(&f.repo, &f.repo, &entries, &context(), &partials).unwrap();
+
+        assert_eq!(first, second);
+    }
+
+    /// Changing a partial must change the tree, or `update` would produce no
+    /// commit for a real change to the template.
+    #[test]
+    fn changing_a_partial_changes_the_rendered_tree() {
+        let f = Fixture::new();
+        let entries = [f.entry(
+            "README.md.jinja",
+            b"{% import 'macros.jinja' as m %}{{ m.title(project_name) }}\n",
+        )];
+
+        let before = Arc::new(f.partials(
+            "template",
+            &[(
+                "macros.jinja",
+                b"{% macro title(name) %}# {{ name }}{% endmacro %}",
+            )],
+        ));
+        let after = Arc::new(f.partials(
+            "template",
+            &[(
+                "macros.jinja",
+                b"{% macro title(name) %}## {{ name }}{% endmacro %}",
+            )],
+        ));
+
+        assert_ne!(
+            render_tree(&f.repo, &f.repo, &entries, &context(), &before).unwrap(),
+            render_tree(&f.repo, &f.repo, &entries, &context(), &after).unwrap(),
+        );
+    }
+
+    /// `{% include %}` shares the loader with `{% import %}`, so it resolves
+    /// against the same set and needs no separate machinery.
+    #[test]
+    fn include_resolves_against_the_same_partials_as_import() {
+        let f = Fixture::new();
+        let partials =
+            Arc::new(f.partials("template", &[("header.jinja", b"# {{ project_name }}")]));
+
+        let rendered = f
+            .render_with(
+                &[f.entry("README.md.jinja", b"{% include 'header.jinja' %}\n")],
+                &context(),
+                &partials,
+            )
+            .unwrap();
+
+        assert_eq!(rendered[0].content, b"# Demo\n");
     }
 }

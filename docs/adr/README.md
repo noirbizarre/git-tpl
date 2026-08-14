@@ -21,3 +21,4 @@ existed.
 | [009](009-init-merges-unrelated-histories.md) | `init` merges the template commit into the branch |
 | [010](010-config-location.md) | Project configuration lives at `.config/git.tpl.toml` |
 | [011](011-git-backend-isolation.md) | `git2` is confined to one module, enforced by a hook |
+| [012](012-template-loader.md) | Partials are `.jinja` files outside the render root |

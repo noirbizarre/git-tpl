@@ -11,6 +11,9 @@ rust-library-template/
 ├── data/                  ← optional structured data
 │   ├── licenses.toml
 │   └── defaults.toml
+├── macros.jinja           ← a shared partial, not rendered
+├── macros/
+│   └── rust.jinja         ← likewise
 ├── template/              ← everything here is rendered
 │   ├── Cargo.toml.jinja
 │   ├── README.md.jinja
@@ -25,6 +28,10 @@ rust-library-template/
 
 Only `template/` is rendered. The rest of the repository — the template's own
 README, its CI, its license — is invisible to the projects that use it.
+
+The exception, and the only one, is a `.jinja` file outside `template/`: it is
+still never rendered into a project, but it *is* importable as a
+[shared partial](#shared-partials).
 
 The rendered subdirectory is configurable:
 
@@ -112,6 +119,46 @@ That is how you make a whole subtree conditional.
     containing a `/` is an error, not a traversal. The rendered tree is built
     directly as a Git tree, so this is caught before anything is written, but it
     is rejected explicitly rather than left to chance.
+
+### Shared partials
+
+A `.jinja` file **outside** the rendered subdirectory is a partial. It is never
+written into a project, and it can be imported by name from any file that is:
+
+```
+macros.jinja                             ← the partial
+template/README.md.jinja                 ← imports it
+```
+
+```jinja
+{% import "macros.jinja" as m %}
+{{ m.badge(project_name) }}
+```
+
+`{% include %}` works the same way. A partial is named by its path relative to
+the **repository root**, not to the rendered subdirectory, so a partial in a
+directory is `{% import "macros/rust.jinja" %}`.
+
+Being outside the rendered subdirectory is the whole rule, and it is what keeps
+a macro definition from landing in every generated project. There is no manifest
+key and no reserved filename.
+
+Two consequences worth stating:
+
+- A `.jinja` file **inside** the rendered subdirectory is an output file and is
+  *not* importable. One file, one meaning.
+- Only `.jinja` files are loadable. `{% include "data/licenses.toml" %}` does not
+  work; declare a [data source](../data/index.md) instead, which knows how to parse it.
+
+Partials are read from the same pinned revision as everything else, so editing
+one changes the rendered tree and advances the ref. They are available to
+manifest expressions too — a `computed` value may `{% import %}` the same macro
+a file does.
+
+!!! tip "Getting the name wrong"
+
+    A failed import lists the partials that do exist. The usual cause is a path
+    written relative to `template/` instead of the repository root.
 
 ### Binary files
 

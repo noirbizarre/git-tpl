@@ -2,13 +2,16 @@
 //! manifest at a chosen revision.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use miette::Diagnostic;
 use thiserror::Error;
 
+use crate::eval::Partials;
 use crate::git::libgit2::LibGit2;
 use crate::git::{GitBackend, GitError, Oid, TreeEntry};
 use crate::provenance::WORKTREE_REF;
+use crate::render::{RenderError, collect_partials};
 use crate::template::{MANIFEST_NAME, Manifest, ManifestError};
 
 /// Errors from resolving a template.
@@ -72,6 +75,9 @@ pub struct Resolved {
     pub tree: Oid,
     /// The subtree that gets rendered.
     pub root_tree: Oid,
+    /// The render root, as resolved. Kept because it is what separates an
+    /// output file from a partial, and the manifest's value may be overridden.
+    pub root: String,
     /// The commit the revision resolved to.
     pub revision: Oid,
     /// The revision as configured — a branch, tag, SHA, or `<worktree>`.
@@ -86,6 +92,16 @@ impl Resolved {
     /// The flattened entries of the rendered subtree, in Git tree order.
     pub fn entries(&self) -> Result<Vec<TreeEntry>, GitError> {
         self.repo.list_tree(self.root_tree)
+    }
+
+    /// The templates an `{% import %}` or `{% include %}` may resolve to.
+    ///
+    /// Read from the whole template tree rather than the rendered subtree, so
+    /// the set is exactly the `.jinja` files that are *not* output. Read from
+    /// the tree — including the synthetic `--dirty` one — so a partial is
+    /// pinned to the same revision as everything else it renders with.
+    pub fn partials(&self) -> Result<Arc<Partials>, RenderError> {
+        collect_partials(&self.repo, self.tree, &self.root).map(Arc::new)
     }
 }
 
@@ -162,13 +178,14 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
     let root = request.root.unwrap_or(&manifest.root).to_string();
     let root_tree = repo
         .subtree(tree, &root)?
-        .ok_or(ResolveError::MissingRoot { root })?;
+        .ok_or_else(|| ResolveError::MissingRoot { root: root.clone() })?;
 
     Ok(Resolved {
         repo,
         manifest,
         tree,
         root_tree,
+        root,
         revision,
         reference,
         dirty,

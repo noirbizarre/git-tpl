@@ -62,3 +62,12 @@ bar is that templates cannot reasonably express it with the built-ins. The
 pressure will be to ship a *useful set*. It should be resisted: every filter
 added is a compatibility surface that cannot be removed, and a template that
 depends on one cannot render with an older git-tpl.
+
+## Partials
+
+A loader is *not* a filter, and [ADR-012](012-template-loader.md) admits one.
+The distinction is that a loader resolves a name to bytes already committed in
+the template repository and hands them to the same parser that reads every other
+`.jinja` file. It executes nothing, and it reaches nothing a template could not
+already achieve by pasting the text into each file. The closed filter set above
+is untouched.
