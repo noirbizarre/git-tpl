@@ -40,7 +40,8 @@ The digest is recorded whether or not the template pinned one, so the question
 
 **Only `http` and `https`.** No `file://`, no `git://`, no arbitrary transport.
 
-**Never executable.** The response is parsed as TOML or JSON into plain values.
+**Never executable.** The response is parsed as TOML, JSON or YAML into plain
+values.
 There is no code path by which remote content is evaluated, rendered as a
 template, or otherwise given meaning beyond "data".
 

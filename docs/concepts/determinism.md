@@ -95,5 +95,5 @@ data-source subsystem, which owns *all* fetching. A template declares what data
 it wants; it cannot reach out and take it.
 
 Remote data is untrusted input too, and is never executable — it is parsed as
-TOML or JSON into plain values, and that is the only thing that ever happens
-to it.
+TOML, JSON or YAML into plain values, and that is the only thing that ever
+happens to it.

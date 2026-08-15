@@ -427,7 +427,7 @@ impl<'a> Loader<'a> {
                 name: name.to_string(),
                 what: "format",
                 value: explicit.clone(),
-                accepted: Some("expected `toml` or `json`".into()),
+                accepted: Some("expected `toml`, `json` or `yaml`".into()),
             })?,
             None => Format::infer(resolved_source),
         };
