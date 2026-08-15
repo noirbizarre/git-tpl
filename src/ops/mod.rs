@@ -873,7 +873,21 @@ pub fn identify(project_root: &Path) -> Result<(TemplateId, String), OpError> {
     Ok((id, ref_name))
 }
 
-/// The two trees a diff runs between, oriented.
+/// A diff of what merging the template would change, in whichever shape was
+/// asked for, together with the paths that would conflict.
+pub struct DiffPreview<T> {
+    /// The changes themselves: a patch, a path list, or a diffstat.
+    pub changes: T,
+    /// The paths the merge could not resolve, shown with conflict markers.
+    pub conflicts: Vec<String>,
+}
+
+/// The two trees a diff runs between, oriented, and the conflicts on the way.
+///
+/// The second endpoint is the tree a *merge* would produce, not the rendered
+/// ref's tree. Diffing `HEAD` against the ref directly reports every file the
+/// project owns and the template never produced as a deletion — a merge deletes
+/// none of them, because they are in the merge base.
 ///
 /// Every diff mode resolves the same pair and applies the same `--reverse`
 /// swap; doing it once is what keeps `--stat` from disagreeing with the patch
@@ -882,56 +896,72 @@ fn diff_endpoints(
     project: &dyn GitBackend,
     project_root: &Path,
     reverse: bool,
-) -> Result<(Option<Oid>, Oid), OpError> {
+) -> Result<(Option<Oid>, Oid, Vec<String>), OpError> {
     let (_, ref_name) = identify(project_root)?;
     let tip = require_tip(project, &ref_name)?;
 
-    let head_tree = match project.head_commit()? {
-        Some(oid) => Some(project.commit(oid)?.tree),
-        None => None,
+    let Some(head) = project.head_commit()? else {
+        // No commits yet: the merge is the fast-forward that creates them, so
+        // the whole rendering is an addition. Reversed, there is nothing to
+        // diff against, and the empty answer is the truth.
+        let template_tree = project.commit(tip)?.tree;
+        return Ok(if reverse {
+            (Some(template_tree), template_tree, Vec::new())
+        } else {
+            (None, template_tree, Vec::new())
+        });
     };
-    let template_tree = project.commit(tip)?.tree;
+
+    let head_tree = project.commit(head)?.tree;
+    let preview = project.merge_preview(head, tip)?;
 
     Ok(if reverse {
-        // With no HEAD there is nothing to diff against, so the reversed diff
-        // is the template against itself: empty, which is the truth.
-        (Some(template_tree), head_tree.unwrap_or(template_tree))
+        (Some(preview.tree), head_tree, preview.conflicts)
     } else {
-        (head_tree, template_tree)
+        (Some(head_tree), preview.tree, preview.conflicts)
     })
 }
 
-/// The difference between `HEAD` and the rendered ref.
+/// The patch merging the template would apply.
 pub fn diff(
     project: &dyn GitBackend,
     project_root: &Path,
     paths: &[String],
     reverse: bool,
-) -> Result<String, OpError> {
-    let (from, to) = diff_endpoints(project, project_root, reverse)?;
-    Ok(project.diff_patch(from, to, paths)?)
+) -> Result<DiffPreview<String>, OpError> {
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    Ok(DiffPreview {
+        changes: project.diff_patch(from, to, paths)?,
+        conflicts,
+    })
 }
 
-/// The changes between `HEAD` and the rendered ref.
+/// The changes merging the template would make.
 pub fn diff_changes(
     project: &dyn GitBackend,
     project_root: &Path,
     paths: &[String],
     reverse: bool,
-) -> Result<Vec<Change>, OpError> {
-    let (from, to) = diff_endpoints(project, project_root, reverse)?;
-    Ok(project.diff_trees(from, to, paths)?)
+) -> Result<DiffPreview<Vec<Change>>, OpError> {
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    Ok(DiffPreview {
+        changes: project.diff_trees(from, to, paths)?,
+        conflicts,
+    })
 }
 
-/// The changes between `HEAD` and the rendered ref, with their line counts.
+/// The changes merging the template would make, with their line counts.
 pub fn diff_stat(
     project: &dyn GitBackend,
     project_root: &Path,
     paths: &[String],
     reverse: bool,
-) -> Result<Vec<FileStat>, OpError> {
-    let (from, to) = diff_endpoints(project, project_root, reverse)?;
-    Ok(project.diff_stat(from, to, paths)?)
+) -> Result<DiffPreview<Vec<FileStat>>, OpError> {
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    Ok(DiffPreview {
+        changes: project.diff_stat(from, to, paths)?,
+        conflicts,
+    })
 }
 
 /// What [`show`] found at a path.

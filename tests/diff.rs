@@ -45,22 +45,75 @@ fn stat_counts_the_lines_a_merge_would_insert() {
 }
 
 #[test]
-fn stat_reports_a_deleted_file_as_deletions_only() {
+fn diff_does_not_report_project_only_files_as_deletions() {
     let world = pending();
+
+    let output = tpl(&world.project, &["diff", "--name-only"]).success();
+
+    // `NOTES.md` predates the template and `.config/git.tpl.toml` is git-tpl's
+    // own; both are in the merge base, so merging deletes neither. A plain
+    // `HEAD`-to-ref tree diff used to call them deletions, which buried the one
+    // real change under every file the project owns.
+    assert!(
+        !output.stdout.contains("NOTES.md"),
+        "a project-only file was reported:\n{}",
+        output.stdout
+    );
+    assert!(
+        !output.stdout.contains("git.tpl.toml"),
+        "git-tpl's own config was reported as changing:\n{}",
+        output.stdout
+    );
+    assert!(output.stdout.contains("README.md"), "{}", output.stdout);
+}
+
+#[test]
+fn diff_names_match_git_merge_tree() {
+    let world = pending();
+
+    let ours = tpl(&world.project, &["diff", "--name-only"]).success();
+
+    // The plain-Git equivalent, spelled out: the tree a merge would produce,
+    // diffed against HEAD. If these ever disagree, the command is lying about
+    // what merging would do.
+    let merged = world
+        .project
+        .git(&["merge-tree", "--write-tree", "HEAD", &world.ref_name()]);
+    let theirs = world
+        .project
+        .git(&["diff", "--name-only", "HEAD", merged.trim()]);
+
+    let mut mine: Vec<&str> = ours.stdout.lines().collect();
+    let mut git: Vec<&str> = theirs.lines().filter(|l| !l.is_empty()).collect();
+    mine.sort_unstable();
+    git.sort_unstable();
+    assert_eq!(mine, git);
+}
+
+#[test]
+fn stat_reports_a_deleted_file_as_deletions_only() {
+    // A file the template genuinely stopped producing. That is a deletion a
+    // merge would really make, and it must still be reported as one.
+    let world = World::new();
+    world.init(&[]).success();
+    world.template.repo.remove("template/ci.yml");
+    world.template.repo.commit_all("feat: drop the CI workflow");
+    tpl(&world.project, &["update", "--defaults"]).success();
 
     let output = tpl(&world.project, &["diff", "--stat"]).success();
 
-    // The project's own file: the template does not produce it, so a tree diff
-    // reports it as a deletion. Documented, and the count must reflect it.
-    assert_eq!(
-        stat_line(&output.all(), "NOTES.md"),
-        "deleted NOTES.md +0 -1"
-    );
+    assert_eq!(stat_line(&output.all(), "ci.yml"), "deleted ci.yml +0 -5");
 }
 
 #[test]
 fn stat_summarises_the_totals_the_way_git_does() {
-    let world = pending();
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    // A removal as well, so the summary has all three terms to word.
+    world.template.repo.remove("template/ci.yml");
+    world.template.repo.commit_all("feat: drop the CI workflow");
+    tpl(&world.project, &["update", "--defaults"]).success();
 
     tpl(&world.project, &["diff", "--stat"])
         .success()
@@ -85,9 +138,12 @@ fn stat_totals_agree_with_git_diff_stat() {
     // The premise of the project is that Git's behaviour is the behaviour, so
     // the numbers are checked against Git's own rather than against a literal
     // somebody would have to recompute by hand.
+    let merged = world
+        .project
+        .git(&["merge-tree", "--write-tree", "HEAD", &world.ref_name()]);
     let theirs = world
         .project
-        .git(&["diff", "--stat", "HEAD", &world.ref_name()]);
+        .git(&["diff", "--stat", "HEAD", merged.trim()]);
     let git_summary = theirs.lines().next_back().expect("a summary line").trim();
 
     assert_eq!(summary, git_summary);
@@ -144,11 +200,44 @@ fn stat_says_nothing_when_the_rendering_is_merged() {
     let world = World::new();
     world.init(&[]).success();
 
-    // Only the template's own files can be asserted on: a tree diff also
-    // reports every file the project has and the template does not.
-    let output = tpl(&world.project, &["diff", "--stat", "--", "Cargo.toml"]).success();
+    // Nothing narrowed: a merged rendering changes nothing at all, project-only
+    // files included.
+    let output = tpl(&world.project, &["diff", "--stat"]).success();
 
     assert!(output.all().contains("No differences."), "{}", output.all());
+}
+
+#[test]
+fn diff_touches_nothing() {
+    let world = pending();
+
+    let before = world.project.working_state();
+    tpl(&world.project, &["diff"]).success();
+    let after = world.project.working_state();
+
+    // The preview merges in memory. If it ever merged for real, this is the
+    // test that would say so.
+    assert_eq!(before, after);
+}
+
+#[test]
+fn a_conflicting_preview_warns_and_still_exits_zero() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    // Both sides change the same line of `README.md`: the project's edit and
+    // the template's cannot both stand.
+    world.project.write("README.md", "# Mine, entirely\n");
+    world.project.commit_all("docs: rewrite the readme");
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let output = tpl(&world.project, &["diff"]).success();
+
+    assert!(output.all().contains("would conflict"), "{}", output.all());
+    assert!(output.all().contains("README.md"), "{}", output.all());
+    // Markers, because that is what a merge would leave in the worktree.
+    assert!(output.stdout.contains("<<<<<<<"), "{}", output.stdout);
 }
 
 #[test]
@@ -172,5 +261,23 @@ fn name_only_wins_over_stat_so_a_pipe_stays_clean() {
         !output.all().contains("changed,"),
         "a summary reached a caller asking for paths:\n{}",
         output.all()
+    );
+}
+
+/// `--no-merge` leaves the project and the rendering with no common ancestor.
+/// Git merges unrelated histories by content, and so must the preview — this is
+/// the "look before you merge" step `git tpl init --no-merge` exists for.
+#[test]
+fn diff_previews_a_merge_of_unrelated_histories() {
+    let world = World::new();
+    world.init(&["--no-merge"]).success();
+
+    let output = tpl(&world.project, &["diff", "--name-only"]).success();
+
+    assert!(output.stdout.contains("Cargo.toml"), "{}", output.stdout);
+    assert!(
+        !output.stdout.contains("NOTES.md"),
+        "the project's own file is not a deletion:\n{}",
+        output.stdout
     );
 }

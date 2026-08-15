@@ -16,7 +16,7 @@ use git2::{
 
 use super::{
     AheadBehind, Change, ChangeKind, Commit, FileMode, FileStat, GitBackend, GitError,
-    MergeOutcome, Oid, TreeEntry,
+    MergeOutcome, MergePreview, Oid, TreeEntry,
 };
 
 /// A repository opened through libgit2.
@@ -563,6 +563,134 @@ impl GitBackend for LibGit2 {
         })
     }
 
+    fn merge_preview(&self, ours: Oid, theirs: Oid) -> Result<MergePreview, GitError> {
+        let our_commit = self
+            .repo
+            .find_commit(from_oid(ours))
+            .map_err(|e| backend("read the commit to merge into", &e))?;
+        let their_commit = self
+            .repo
+            .find_commit(from_oid(theirs))
+            .map_err(|e| backend("read the commit to merge", &e))?;
+
+        // `merge_commits` produces an index of its own rather than the
+        // repository's. Nothing on disk moves, which is what lets `git tpl diff`
+        // preview a merge without touching HEAD, the index or the worktree.
+        let mut index = self
+            .repo
+            .merge_commits(&our_commit, &their_commit, None)
+            .map_err(|e| backend("merge in memory", &e))?;
+
+        let mut conflicts: Vec<String> = Vec::new();
+
+        if index.has_conflicts() {
+            // Collected before resolving: `conflicts()` borrows the index, and
+            // the loop below has to mutate it.
+            let pending: Vec<git2::IndexConflict> = index
+                .conflicts()
+                .map_err(|e| backend("read the conflicts", &e))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| backend("read the conflicts", &e))?;
+
+            for conflict in pending {
+                let entry = conflict
+                    .our
+                    .as_ref()
+                    .or(conflict.their.as_ref())
+                    .or(conflict.ancestor.as_ref())
+                    .ok_or_else(|| GitError::Backend {
+                        context: "resolve a conflict for the preview".into(),
+                        reason: "the conflict names no file on any side".into(),
+                    })?;
+                let path = String::from_utf8_lossy(&entry.path).into_owned();
+                conflicts.push(path.clone());
+
+                // Conflict markers rather than a resolution: this mirrors
+                // `git merge-tree --write-tree`, and a preview that quietly
+                // picked a side would understate the work a merge leaves.
+                let (mode, content) = match (&conflict.ancestor, &conflict.our, &conflict.their) {
+                    (Some(ancestor), Some(our), Some(their)) => {
+                        let merged = self
+                            .repo
+                            .merge_file_from_index(ancestor, our, their, None)
+                            .map_err(|e| backend("merge a conflicting file", &e))?;
+                        (merged.mode(), merged.content().to_vec())
+                    }
+                    (None, Some(our), Some(their)) => {
+                        // Both sides added the file, so there is no ancestor to
+                        // diff against. An empty one gives the same markers Git
+                        // writes for an add/add conflict.
+                        let empty = self
+                            .repo
+                            .blob(&[])
+                            .map_err(|e| backend("write the empty ancestor blob", &e))?;
+                        let mut ancestor = copy_entry(our);
+                        ancestor.id = empty;
+                        let merged = self
+                            .repo
+                            .merge_file_from_index(&ancestor, our, their, None)
+                            .map_err(|e| backend("merge a conflicting file", &e))?;
+                        (merged.mode(), merged.content().to_vec())
+                    }
+                    _ => {
+                        // One side deleted what the other changed. Git keeps the
+                        // surviving content and leaves the decision to the user;
+                        // so does the preview.
+                        let blob = self
+                            .repo
+                            .find_blob(entry.id)
+                            .map_err(|e| backend("read a conflicting file", &e))?;
+                        (entry.mode, blob.content().to_vec())
+                    }
+                };
+
+                index
+                    .conflict_remove(Path::new(&path))
+                    .map_err(|e| backend("clear a conflict", &e))?;
+                // The blob is written to the repository first, and the entry
+                // added by id: the index `merge_commits` hands back is
+                // free-standing, so it cannot write content itself.
+                let blob = self
+                    .repo
+                    .blob(&content)
+                    .map_err(|e| backend("write the conflicted file", &e))?;
+                index
+                    .add(&git2::IndexEntry {
+                        ctime: git2::IndexTime::new(0, 0),
+                        mtime: git2::IndexTime::new(0, 0),
+                        dev: 0,
+                        ino: 0,
+                        // libgit2 leaves the mode at zero when it cannot agree
+                        // on one; a regular file is the only sane fallback for
+                        // content it just produced.
+                        mode: if mode == 0 { 0o100644 } else { mode },
+                        uid: 0,
+                        gid: 0,
+                        file_size: content.len() as u32,
+                        id: blob,
+                        // Stage zero: an entry still at a conflict stage cannot
+                        // be written into a tree.
+                        flags: 0,
+                        flags_extended: 0,
+                        path: path.clone().into_bytes(),
+                    })
+                    .map_err(|e| backend("record the conflicted file", &e))?;
+            }
+
+            conflicts.sort();
+            conflicts.dedup();
+        }
+
+        let tree = index
+            .write_tree_to(&self.repo)
+            .map_err(|e| backend("write the merged tree", &e))?;
+
+        Ok(MergePreview {
+            tree: to_oid(tree),
+            conflicts,
+        })
+    }
+
     fn fetch_refspec(&self, remote: &str, refspec: &str) -> Result<(), GitError> {
         let mut remote_handle = self
             .repo
@@ -857,6 +985,27 @@ fn to_filemode(mode: FileMode) -> git2::FileMode {
 ///
 /// A copy is an addition: the path is new, and where its content came from is
 /// not something the reader of a change list can act on.
+/// A field-by-field copy of an index entry.
+///
+/// `git2::IndexEntry` is not `Clone`, and the merge preview needs a modifiable
+/// copy of one side to stand in for a missing ancestor.
+fn copy_entry(entry: &git2::IndexEntry) -> git2::IndexEntry {
+    git2::IndexEntry {
+        ctime: entry.ctime,
+        mtime: entry.mtime,
+        dev: entry.dev,
+        ino: entry.ino,
+        mode: entry.mode,
+        uid: entry.uid,
+        gid: entry.gid,
+        file_size: entry.file_size,
+        id: entry.id,
+        flags: entry.flags,
+        flags_extended: entry.flags_extended,
+        path: entry.path.clone(),
+    }
+}
+
 fn change_kind(status: Delta) -> ChangeKind {
     match status {
         Delta::Added | Delta::Copied => ChangeKind::Added,
@@ -1289,6 +1438,105 @@ mod tests {
         assert_eq!(stats.len(), 1, "{stats:?}");
         assert!(stats[0].binary, "{stats:?}");
         assert_eq!((stats[0].insertions, stats[0].deletions), (0, 0));
+    }
+
+    /// A commit whose tree holds exactly these files.
+    fn commit_files(repo: &LibGit2, parents: &[Oid], files: &[(&str, &str)]) -> Oid {
+        let entries: Vec<TreeEntry> = files
+            .iter()
+            .map(|(path, content)| TreeEntry {
+                path: (*path).to_string(),
+                oid: repo.write_blob(content.as_bytes()).unwrap(),
+                mode: FileMode::Blob,
+            })
+            .collect();
+        let tree = repo.build_tree(&entries).unwrap();
+        repo.create_commit(tree, parents, "test").unwrap()
+    }
+
+    /// The bug this whole preview exists for: a file only one side has is not a
+    /// deletion, because the merge base has it too.
+    #[test]
+    fn a_merge_preview_keeps_files_only_one_side_has() {
+        let (_dir, repo) = scratch();
+
+        let base = commit_files(&repo, &[], &[("shared", "one\n")]);
+        let ours = commit_files(
+            &repo,
+            &[base],
+            &[("shared", "one\n"), ("mine.md", "notes\n")],
+        );
+        let theirs = commit_files(&repo, &[base], &[("shared", "two\n")]);
+
+        let preview = repo.merge_preview(ours, theirs).unwrap();
+
+        assert!(preview.conflicts.is_empty(), "{preview:?}");
+        let changes = repo
+            .diff_trees(Some(repo.commit(ours).unwrap().tree), preview.tree, &[])
+            .unwrap();
+        let described: Vec<_> = changes.iter().map(|c| (c.kind, c.path.as_str())).collect();
+        assert_eq!(
+            described,
+            [(ChangeKind::Modified, "shared")],
+            "only the template's own change should show"
+        );
+    }
+
+    /// Markers rather than a resolution: the preview shows what a merge would
+    /// leave in the worktree, and `git merge-tree --write-tree` does the same.
+    #[test]
+    fn a_conflicting_merge_preview_writes_markers_and_names_the_path() {
+        let (_dir, repo) = scratch();
+
+        let base = commit_files(&repo, &[], &[("f", "base\n")]);
+        let ours = commit_files(&repo, &[base], &[("f", "mine\n")]);
+        let theirs = commit_files(&repo, &[base], &[("f", "theirs\n")]);
+
+        let preview = repo.merge_preview(ours, theirs).unwrap();
+
+        assert_eq!(preview.conflicts, ["f"]);
+        let entries = repo.list_tree(preview.tree).unwrap();
+        let content = String::from_utf8(repo.read_blob(entries[0].oid).unwrap()).unwrap();
+        assert!(content.contains("<<<<<<<"), "{content}");
+        assert!(content.contains("mine"), "{content}");
+        assert!(content.contains("theirs"), "{content}");
+    }
+
+    /// One side deleted what the other changed. Git keeps the surviving
+    /// content and leaves the decision to the user; so must the preview, and it
+    /// must still produce a writable tree.
+    #[test]
+    fn a_delete_modify_conflict_keeps_the_surviving_content() {
+        let (_dir, repo) = scratch();
+
+        let base = commit_files(&repo, &[], &[("f", "base\n"), ("other", "x\n")]);
+        let ours = commit_files(&repo, &[base], &[("f", "mine\n"), ("other", "x\n")]);
+        let theirs = commit_files(&repo, &[base], &[("other", "x\n")]);
+
+        let preview = repo.merge_preview(ours, theirs).unwrap();
+
+        assert_eq!(preview.conflicts, ["f"]);
+        let entries = repo.list_tree(preview.tree).unwrap();
+        let f = entries.iter().find(|e| e.path == "f").expect("f is kept");
+        assert_eq!(repo.read_blob(f.oid).unwrap(), b"mine\n");
+    }
+
+    #[test]
+    fn a_merge_preview_moves_nothing() {
+        let (_dir, repo) = scratch();
+
+        let base = commit_files(&repo, &[], &[("f", "base\n")]);
+        repo.set_ref("refs/heads/main", base, "test").unwrap();
+        let ours = commit_files(&repo, &[base], &[("f", "mine\n")]);
+        let theirs = commit_files(&repo, &[base], &[("f", "theirs\n")]);
+
+        repo.merge_preview(ours, theirs).unwrap();
+
+        assert_eq!(repo.resolve_ref("refs/heads/main").unwrap(), Some(base));
+        assert!(
+            !repo.repo.index().unwrap().has_conflicts(),
+            "the repository index must be untouched"
+        );
     }
 
     #[test]

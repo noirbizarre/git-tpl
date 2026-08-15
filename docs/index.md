@@ -26,7 +26,7 @@ template  →  rendered Git ref  →  normal Git merge  →  updated project
 ```
 
 What that buys you is not subtle. `git log refs/tpl/<id>` is the template's
-history. `git diff HEAD refs/tpl/<id>` is what the template would change.
+history. `git tpl diff` is what the template would change.
 `git merge refs/tpl/<id>` is the update, with the same three-way merge, the same
 conflict markers, the same `git rerere`, the same `--abort` you already know.
 

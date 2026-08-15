@@ -231,7 +231,7 @@ pub struct DiffArgs {
     #[arg(long)]
     pub name_only: bool,
 
-    /// Diff the other way, template to HEAD
+    /// Diff the other way, merged to HEAD
     #[arg(long)]
     pub reverse: bool,
 

@@ -67,8 +67,9 @@ git diff HEAD refs/tpl/github-com-noirbizarre-rust-library-template
 git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
-git-tpl's own `diff` and `merge` commands are conveniences over the last two.
-You are never locked into them.
+git-tpl's own `merge` command is a convenience over the last one, and `diff`
+over the merge preview described in [`git tpl diff`](../usage/diff.md). You are
+never locked into them.
 
 It lives under `refs/tpl/` rather than `refs/heads/` on purpose: it is not a
 branch you check out, it should not appear in `git branch`, and it should not be
@@ -122,8 +123,8 @@ file the template adds is staged for you. See
 ## What is in the commit
 
 The tree is exactly the rendered output. Nothing else — no manifest, no lockfile,
-no `.git-tpl/` directory. A `git diff HEAD refs/tpl/<id>` shows real file
-differences and nothing you would have to learn to ignore.
+no `.git-tpl/` directory. A `git tpl diff` shows real file differences and
+nothing you would have to learn to ignore.
 
 Provenance lives in the commit message, as trailers:
 

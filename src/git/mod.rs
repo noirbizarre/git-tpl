@@ -232,6 +232,19 @@ pub enum MergeOutcome {
     Staged,
 }
 
+/// The tree a merge would produce, without performing it.
+///
+/// `git merge-tree --write-tree`: conflicted files are present in the tree with
+/// conflict markers, because that is what a merge would leave in the worktree,
+/// and a preview that hid them would understate the work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergePreview {
+    /// The merged tree.
+    pub tree: Oid,
+    /// The paths that conflicted, sorted and deduplicated.
+    pub conflicts: Vec<String>,
+}
+
 /// A commit, as the domain needs to see it.
 #[derive(Debug, Clone)]
 pub struct Commit {
@@ -454,6 +467,14 @@ pub trait GitBackend {
         message: &str,
         commit_result: bool,
     ) -> Result<MergeOutcome, GitError>;
+
+    /// The tree merging `theirs` into `ours` would produce.
+    ///
+    /// The merge runs in memory: no ref, no index and no worktree file is
+    /// touched. This is what `git tpl diff` compares against, because a plain
+    /// `HEAD`-to-template tree diff reports every project-owned file as a
+    /// deletion that a merge would never make.
+    fn merge_preview(&self, ours: Oid, theirs: Oid) -> Result<MergePreview, GitError>;
 
     /// Fetch refs matching a refspec from a remote.
     fn fetch_refspec(&self, remote: &str, refspec: &str) -> Result<(), GitError>;

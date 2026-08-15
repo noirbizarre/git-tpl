@@ -6,13 +6,14 @@ What merging the template would change.
 git tpl diff [--stat] [--name-only] [--reverse] [-- <path>...]
 ```
 
-It is a diff between `HEAD` and `refs/tpl/<id>`, computed by libgit2 — the same
-machinery `git diff` uses, so the output is a diff you already know how to read.
+It merges `refs/tpl/<id>` into `HEAD` in memory — no ref, no index and no
+worktree file is touched — and diffs `HEAD` against the result. What you see is
+what `git tpl merge` would do, before you do it.
 
 ```console
 $ git tpl diff --stat
   added     .github/workflows/release.yml    +48    -0
-  deleted   NOTES.md                          +0   -12
+  deleted   .travis.yml                       +0   -12
   modified  README.md                         +9    -3
   modified  docs/logo.png                    Bin
 
@@ -26,31 +27,47 @@ prints. A binary file shows `Bin`: two zeroes would read as "nothing changed".
 ## The plain Git equivalent
 
 ```sh
-git diff HEAD refs/tpl/github-com-noirbizarre-rust-library-template
+git diff HEAD "$(git merge-tree --write-tree HEAD refs/tpl/rust-library-template)"
 ```
 
-Identical. `git tpl diff` looks up the ref name for you; that is the whole of
-what it adds. Both compare the entire tree, so files you have that the template
-does not — including `.config/git.tpl.toml` — appear as deletions. Pass
-`-- <path>` to narrow. Use whichever you prefer; nothing about git-tpl requires
-its own diff command.
+Identical. `git tpl diff` looks up the ref name and runs the merge for you; that
+is the whole of what it adds. Pass `-- <path>` to narrow. Use whichever you
+prefer; nothing about git-tpl requires its own diff command.
+
+Note that a plain `git diff HEAD refs/tpl/<id>` is *not* the same thing. It
+compares the two trees directly, so every file your project has and the template
+never produced — your own sources, your `CHANGELOG.md`, git-tpl's own
+`.config/git.tpl.toml` — appears as a deletion. Merging deletes none of them:
+they are in the merge base.
 
 ## Reading it
 
-The direction is `HEAD` → template, so:
+The direction is `HEAD` → merged, so:
 
-- **added** — the template has a file your project does not
-- **deleted** — your project has a file the template no longer produces, *or*
-  never produced. A file you created yourself shows here.
-- **modified** — both have it, and they differ. Could be your edit, the
-  template's, or both.
+- **added** — the template produces a file your project does not have
+- **deleted** — the template stopped producing a file it once did, and merging
+  would remove it
+- **modified** — merging would change the file. Could be the template's change
+  applied cleanly, or a conflict.
 
-!!! note "A large diff at first is normal"
+## Conflicts
 
-    Before the first merge, everything the template produces that you have since
-    changed appears as a difference. That is what it is telling you. After a
-    merge the diff is empty, and thereafter it shows only what has genuinely
-    accumulated.
+When the merge cannot reconcile a file on its own, the preview shows it with
+`<<<<<<<` markers — exactly what a merge would leave in your worktree — and says
+which files:
+
+```console
+$ git tpl diff --stat
+warning: 1 file would conflict; shown with conflict markers
+         README.md
+
+  modified  README.md                        +12    -3
+
+1 file changed, 12 insertions(+), 3 deletions(-)
+```
+
+The exit code is still `0`. A conflicting preview is a correct answer, and
+knowing about it in advance is the point of looking.
 
 ## Narrowing
 
@@ -69,5 +86,5 @@ git tpl diff --name-only
 |---|---|
 | `--stat` | A per-file summary with line counts, instead of the full patch. |
 | `--name-only` | Paths only, on stdout. Wins if `--stat` is also given. |
-| `--reverse` | Diff the other way, template → `HEAD`. |
+| `--reverse` | Diff the other way, merged → `HEAD`: the inverse patch. |
 | `-- <path>...` | Limit to these paths. |
