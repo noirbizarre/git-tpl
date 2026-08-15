@@ -36,12 +36,7 @@ impl Repo {
             _dir: Some(dir),
         };
         repo.git(&["init", "-q", "-b", "main"]);
-        // libgit2 refuses to build a signature without an identity, and a
-        // fresh CI runner has none. Set per-repository rather than globally so
-        // the tests cannot depend on — or disturb — the developer's own config.
-        repo.git(&["config", "user.name", "Test"]);
-        repo.git(&["config", "user.email", "test@example.invalid"]);
-        repo.git(&["config", "commit.gpgsign", "false"]);
+        repo.configure();
         repo
     }
 
@@ -51,10 +46,29 @@ impl Repo {
         std::fs::create_dir_all(&path).expect("create repo dir");
         let repo = Self { path, _dir: None };
         repo.git(&["init", "-q", "-b", "main"]);
-        repo.git(&["config", "user.name", "Test"]);
-        repo.git(&["config", "user.email", "test@example.invalid"]);
-        repo.git(&["config", "commit.gpgsign", "false"]);
+        repo.configure();
         repo
+    }
+
+    /// The configuration every test repository needs, in one place so the two
+    /// constructors cannot drift apart. Set per-repository rather than
+    /// globally so the tests cannot depend on — or disturb — the developer's
+    /// own config.
+    fn configure(&self) {
+        // libgit2 refuses to build a signature without an identity, and a
+        // fresh CI runner has none.
+        self.git(&["config", "user.name", "Test"]);
+        self.git(&["config", "user.email", "test@example.invalid"]);
+        self.git(&["config", "commit.gpgsign", "false"]);
+        // Windows runners ship `core.autocrlf=true` globally. Rendering is
+        // deterministic, but the checkout that materialises the merge applies
+        // the repository's line-ending filters, so an inherited `autocrlf`
+        // rewrites LF to CRLF on the way into the worktree and every assertion
+        // comparing a rendered file against an LF literal fails — on Windows
+        // and nowhere else. Pin the repository rather than teach those
+        // assertions about the host's Git configuration.
+        self.git(&["config", "core.autocrlf", "false"]);
+        self.git(&["config", "core.eol", "lf"]);
     }
 
     /// Write a file, creating parent directories.
