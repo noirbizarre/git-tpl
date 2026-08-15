@@ -56,13 +56,15 @@ license = "{{ license }}"
 Licensed under {{ license }}.
 ```
 
-And a file rendered only when asked for — `template/.github/workflows/ci.yml`
-would always be created, so make its *directory* conditional instead by putting
-the condition in the path:
+And a file rendered only when asked for. Path segments are rendered too, and a
+segment that comes out empty skips that entry — and, for a directory,
+everything beneath it. So put the condition in the path:
 
 ```
-template/{{ 'src' }}/lib.rs.jinja
+template/{% if ci %}.github{% endif %}/workflows/ci.yml
 ```
+
+Answer `Enable CI?` with no and the whole `.github` subtree is left out.
 
 Commit it:
 
