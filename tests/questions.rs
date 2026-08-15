@@ -672,9 +672,8 @@ fn seeded_world(author: &str) -> World {
     world
 }
 
-/// PLAN item 5, and the reason `default_from` is prompt-only. Under
-/// `--defaults` nobody confirms anything, so the machine's `user.name` must not
-/// become an answer.
+/// The reason `default_from` is prompt-only. Under `--defaults` nobody
+/// confirms anything, so the machine's `user.name` must not become an answer.
 #[test]
 fn a_git_seeded_default_is_not_used_when_questions_are_not_asked() {
     let world = seeded_world("Ada Lovelace");

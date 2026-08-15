@@ -87,7 +87,7 @@ change is the next section.
 
     **Not implemented.** It would reuse the mechanism the template itself uses,
     so the pin is a commit SHA and the provenance format already describes it.
-    Track it in [PLAN.md](https://github.com/noirbizarre/git-tpl/blob/main/PLAN.md).
+    Tracked in [issue #18](https://github.com/noirbizarre/git-tpl/issues/18).
 
 ## Determinism is the wider property
 
