@@ -41,6 +41,22 @@ the exit status to decide *whether* it did are different jobs.
 Every payload carries `"ok": true`, so a caller can check one field without
 first knowing which command it ran.
 
+### `render`
+
+```json
+{ "ok": true,
+  "template": { "name": "rust", "description": "…" },
+  "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
+  "output": "/tmp/out",
+  "files": [{ "path": "Cargo.toml", "bytes": 412, "executable": false, "templated": true }],
+  "ignoredAnswers": [],
+  "skippedByGitignore": [] }
+```
+
+`templated` says whether the file went through MiniJinja or was copied
+byte-for-byte. It is the only way to tell, from the output, that a workflow
+full of `${{ }}` was copied rather than rendered-and-survived.
+
 ### `status`
 
 Documented in [status](../usage/status.md). `--format json` is deprecated in

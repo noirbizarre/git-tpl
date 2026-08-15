@@ -5,6 +5,7 @@ mod fetch;
 mod init;
 mod merge;
 mod push;
+mod render;
 mod show;
 mod status;
 mod update;
@@ -14,6 +15,7 @@ pub use fetch::run as fetch;
 pub use init::run as init;
 pub use merge::run as merge;
 pub use push::run as push;
+pub use render::run as render;
 pub use show::run as show;
 pub use status::run as status;
 pub use update::run as update;
@@ -28,6 +30,82 @@ use tpl::userconfig::UserConfig;
 
 use crate::cli::{AnswerArgs, GlobalArgs};
 use crate::theme::Theme;
+
+/// How a command talks, without any assumption that a repository exists.
+///
+/// `Session` is this plus the repository. The split is what lets `render`,
+/// `lint`, `questions` and `context` run against a template alone: they answer
+/// questions *about a template*, and requiring a project to ask would be the
+/// scaffolding tax those commands exist to remove.
+pub struct Reporter {
+    /// How to present output.
+    pub theme: Theme,
+    /// Global flags.
+    pub global: GlobalArgs,
+}
+
+impl Reporter {
+    /// Whether to print anything beyond errors.
+    ///
+    /// `--json` silences the prose as well as `--quiet` does: a caller asking
+    /// for a machine-readable answer did not also ask for a narration of how it
+    /// was reached, and warnings still get through via [`warn`](Self::warn).
+    pub fn speaks(&self) -> bool {
+        !self.global.quiet && !self.global.json
+    }
+
+    /// Print a line to stderr, unless quiet.
+    ///
+    /// Human output goes to stderr so that `--json` keeps stdout
+    /// machine-readable.
+    pub fn say(&self, line: impl AsRef<str>) {
+        if self.speaks() {
+            eprintln!("{}", line.as_ref());
+        }
+    }
+
+    /// Print a warning to stderr, whatever the verbosity.
+    ///
+    /// Deliberately louder than [`say`](Self::say). A warning that `--quiet` or
+    /// `--json` swallows is a warning nobody reads, and the cases that use this
+    /// — a deprecated flag, answers that name no question, files a `.gitignore`
+    /// removed from a render — are all things a caller is getting wrong right
+    /// now. stderr, so a JSON payload on stdout stays parseable.
+    pub fn warn(&self, line: impl AsRef<str>) {
+        eprintln!("{}", line.as_ref());
+    }
+
+    /// Print a blank line, unless quiet.
+    pub fn blank(&self) {
+        if self.speaks() {
+            eprintln!();
+        }
+    }
+}
+
+/// A command that needs no repository.
+///
+/// The user configuration is still read: `[defaults]`, `[shortcuts]` and
+/// `[trust]` all apply to a template resolved on its own.
+pub struct Standalone {
+    /// How to talk.
+    pub out: Reporter,
+    /// The user's own preferences, read once per command.
+    pub user: UserConfig,
+}
+
+impl Standalone {
+    /// Everything a project-free command needs.
+    pub fn new(global: &GlobalArgs) -> Result<Self, OpError> {
+        Ok(Self {
+            out: Reporter {
+                theme: Theme::resolve(global.color),
+                global: global.clone(),
+            },
+            user: UserConfig::load()?,
+        })
+    }
+}
 
 /// What every command needs: the repository, where it is, and how to talk.
 ///
@@ -69,6 +147,17 @@ impl Session {
             global: global.clone(),
             user: UserConfig::load()?,
         })
+    }
+
+    /// How this session talks, without the repository.
+    ///
+    /// So that a helper shared with the project-free commands takes one type
+    /// rather than being written twice.
+    pub fn reporter(&self) -> Reporter {
+        Reporter {
+            theme: self.theme.clone(),
+            global: self.global.clone(),
+        }
     }
 
     /// Whether to print anything beyond errors.
@@ -163,17 +252,24 @@ pub fn answering<'a>(
 /// either, because that is how a typo'd key becomes an afternoon spent
 /// wondering why an answer had no effect.
 pub fn report_ignored(ctx: &Session, ignored: &[String]) {
+    report_ignored_to(&ctx.reporter(), ignored);
+}
+
+/// [`report_ignored`], for a command with no repository.
+pub fn report_ignored_to(out: &Reporter, ignored: &[String]) {
     if ignored.is_empty() {
         return;
     }
 
-    ctx.blank();
-    ctx.say(crate::theme::warning(
-        &ctx.theme,
+    // `warn`, not `say`: under `--json` this is the difference between a caller
+    // discovering their typo now and discovering it when the rendered file is
+    // wrong. The JSON payload carries it too, in `ignoredAnswers`.
+    out.warn(crate::theme::warning(
+        &out.theme,
         "answers ignored: they name no question in this template",
     ));
     for key in ignored {
-        ctx.say(format!("  {key}"));
+        out.warn(format!("  {key}"));
     }
 }
 

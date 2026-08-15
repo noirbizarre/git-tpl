@@ -159,6 +159,13 @@ pub struct Rendered {
     pub content: Vec<u8>,
     /// Whether the executable bit is set.
     pub executable: bool,
+    /// Whether the file went through MiniJinja, or was copied byte-for-byte.
+    ///
+    /// Reported because it is the one thing about a rendering an author cannot
+    /// see in the output: a workflow full of `${{ }}` that survived intact and
+    /// one that was never rendered look identical, and only the second is
+    /// correct by construction.
+    pub templated: bool,
 }
 
 /// Render a template tree against a context, producing a Git tree.
@@ -239,9 +246,12 @@ pub fn render_entries(
         };
 
         let source = template.read_blob(entry.oid)?;
-        let is_template = entry.path.ends_with(TEMPLATE_SUFFIX);
+        // A binary blob is copied even when it is named `.jinja`, so
+        // "was it rendered" is not the same question as "is it named like a
+        // template". This is the answer to the first.
+        let templated = entry.path.ends_with(TEMPLATE_SUFFIX) && !is_binary(&source);
 
-        let content = if is_template && !is_binary(&source) {
+        let content = if templated {
             let text = String::from_utf8_lossy(&source);
             render_string(&text, context, &entry.path, partials)
                 .map_err(|source| RenderError::Content {
@@ -268,6 +278,7 @@ pub fn render_entries(
         out.push(Rendered {
             path,
             content,
+            templated,
             // Git records nothing about permissions except the executable bit,
             // so it is the only one that can be carried.
             executable: entry.mode == FileMode::BlobExecutable,

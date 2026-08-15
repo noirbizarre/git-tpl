@@ -74,6 +74,9 @@ pub enum Command {
     /// Re-render the template and advance refs/tpl/<id>
     Update(UpdateArgs),
 
+    /// Render a template into a directory, with no project and no ref
+    Render(RenderArgs),
+
     /// Show the template, the rendered ref, and what is pending
     Status(StatusArgs),
 
@@ -211,10 +214,45 @@ impl AnswerArgs {
     }
 }
 
+/// `git tpl render`
+#[derive(Debug, clap::Args)]
+pub struct RenderArgs {
+    /// The template to render: a path, a URL, or a `[shortcuts]` name
+    #[arg(value_name = "TEMPLATE")]
+    pub template: String,
+
+    /// Where to write the rendered files
+    #[arg(long, short, value_name = "DIR")]
+    pub output: PathBuf,
+
+    /// The branch, tag or commit to render
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Render this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Render the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+
+    /// Replace the contents of a non-empty output directory
+    #[arg(long)]
+    pub force: bool,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
+    /// Allow the template's remote data sources without asking
+    #[arg(long)]
+    pub trust: bool,
+}
+
 /// `git tpl status`
 #[derive(Debug, clap::Args)]
 pub struct StatusArgs {
-    /// Deprecated: use the global `--json`
+    // Deprecated: use the global `--json`.
     //
     // Kept for one minor so that a CI job pinned to `--format json` does not
     // break on upgrade without being told why. It is hidden, so it stops being

@@ -29,6 +29,7 @@ nav = [
   { "Usage" = [
     { "init" = "usage/init.md" },
     { "update" = "usage/update.md" },
+    { "render" = "usage/render.md" },
     { "Answers from a file" = "usage/answers.md" },
     { "status" = "usage/status.md" },
     { "diff" = "usage/diff.md" },
