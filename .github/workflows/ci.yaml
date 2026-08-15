@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+# GitHub defaults Windows steps to pwsh, which neither stops at the first
+# failing command nor reports anything but the last one's exit status — a
+# multi-command step there fails silently and the job goes green. bash is
+# present on all three runners and is invoked with `-e -o pipefail`.
+defaults:
+  run:
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
@@ -150,9 +158,14 @@ jobs:
           git-tpl --help > /dev/null
           # Reaching one of our own diagnostics proves Git dispatched to the
           # binary and the binary ran. The repository has no template attached,
-          # so "no git-tpl configuration" is the expected outcome.
-          if ! git tpl status 2>&1 | grep -q "no git-tpl configuration"; then
+          # so "no git-tpl configuration" is the expected outcome — and so is
+          # the non-zero exit that carries it, which is why the output is
+          # captured before it is matched rather than piped: under `pipefail`
+          # the pipeline would report that expected failure as this step's.
+          status=$(git tpl status 2>&1 || true)
+          if ! grep -q "no git-tpl configuration" <<<"$status"; then
             echo "::error::git tpl status did not reach git-tpl"
+            echo "$status"
             exit 1
           fi
 
