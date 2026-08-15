@@ -39,6 +39,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         &ctx.root,
         overrides,
         args.dirty,
+        &ctx.user,
         answering(&args.answers, preferences.interactive, &mut prompter),
         trust(
             &args.answers,
@@ -142,6 +143,7 @@ fn dry_run(
         config,
         answers,
         args.dirty,
+        &ctx.user,
         answering(&args.answers, interactive, &mut prompter),
         trust(&args.answers, args.trust, interactive, &mut confirmer),
     )?;

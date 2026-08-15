@@ -180,8 +180,7 @@ user-side file later is not a move of a path people have written down. This is a
 new on-disk format, which is to say a contract, and **ADR-013** records it.
 
 **Landed so far:** the file, its XDG resolution, parsing, validation and
-diagnostics, plus `$XDG_CONFIG_HOME` isolation in the test harness. The three
-sections are read in the three commits that follow.
+diagnostics, `$XDG_CONFIG_HOME` isolation in the test harness, and `[defaults]`.
 
 ```toml
 [defaults]
@@ -220,8 +219,14 @@ source.
   the same template renders two different trees on two machines and the model
   breaks. This needs the test that says so, named for the claim:
   `user_defaults_do_not_apply_when_questions_are_not_asked`.
-- Keys matching no question are ignored and reported, exactly as for
-  `--answers-from`.
+- Keys matching no question — or matching one of another type — are skipped in
+  **silence**, and this is where the shipped behaviour deviates from the
+  paragraph above. Reporting them, "exactly as for `--answers-from`", was the
+  wrong instinct: an answers file is supplied for *this* template, so a key it
+  does not recognise is a typo, whereas `[defaults]` is written once for every
+  template the user will ever generate and is expected to overshoot. Warning
+  about `author` on every template that has no `author` question is how a
+  warning stops being read. Recorded in ADR-013.
 - Precedence, stated once and tested, extending the chain `--answers-from` established:
 
   ```

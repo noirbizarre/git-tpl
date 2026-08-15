@@ -22,6 +22,14 @@ impl Prompter for Interactive {
         let title = question.prompt_for(name);
         let help = question.help.as_deref();
 
+        // The seed wins where there is one. Both of its sources — a question's
+        // `default_from`, and the user's own `[defaults]` — exist precisely so
+        // the pre-filled answer is the one this person would have given. It is
+        // a separate parameter rather than folded into `default` so that a
+        // prompter which never asks, `DefaultsOnly`, cannot reach it: a value
+        // from this machine must never render without a human accepting it.
+        let default = seed.or(default);
+
         match question.kind {
             QuestionKind::Boolean => {
                 let mut confirm = Confirm::new(title)
@@ -96,15 +104,7 @@ impl Prompter for Interactive {
             }
 
             QuestionKind::String => {
-                // The seed wins where there is one: a `default_from` exists
-                // precisely so the pre-filled text is the one this user would
-                // have typed. Only `string` questions can carry a seed — the
-                // manifest refuses it anywhere else — so no other branch here
-                // looks at it.
-                let placeholder = seed
-                    .or(default)
-                    .map(ToString::to_string)
-                    .unwrap_or_default();
+                let placeholder = default.map(ToString::to_string).unwrap_or_default();
 
                 loop {
                     let value = Value::String(text_input(title, help, &placeholder)?);

@@ -121,6 +121,48 @@ Three sections, and deliberately nothing else.
 | `[shortcuts]` | Expands a leading `<name>:` in a template URL you type. |
 | `[trust]` | Templates whose remote data is fetched without a confirmation. |
 
+### `[defaults]`
+
+A key matching a question's name pre-fills that question's prompt. Press Enter
+and it becomes your answer, recorded in `.config/git.tpl.toml` like any other.
+
+```toml
+[defaults]
+author = "Axel Haustant"
+email = "axel@example.com"
+license = "MIT"
+```
+
+**It seeds a prompt and nothing else.** If the question is not asked —
+`--defaults`, `tpl.interactive false`, CI — this file is ignored entirely and
+the template's own `default` applies. Anything else would mean the same template
+rendered two different trees on two machines, and then an unchanged template
+would no longer produce no commit. It is the same rule
+[`default_from`](templates/questions.md#git-seeded-defaults) already follows.
+
+Any question type may be seeded, not only `string`.
+
+Precedence, highest first:
+
+```
+1.  --answer
+2.  --answers-from                    (the last file given wins)
+3.  answers in .config/git.tpl.toml
+4.  [defaults]                        ← this file
+5.  default_from
+6.  the question's own default
+```
+
+`[defaults]` sits above `default_from` because the two are different kinds of
+statement: `default_from` is the *template author* guessing where the answer
+usually comes from, and `[defaults]` is you saying it outright.
+
+A key naming no question — or naming one of another type — is skipped in
+silence. That is deliberate, and differs from `--answers-from`: you write this
+file once for every template you will ever generate, so it is *expected* to
+overshoot, and warning about `author` on every template that has no `author`
+question is how a warning stops being read.
+
 Note the name: the project file is `git.tpl.toml`, mirroring `git tpl`; this one
 is named after the binary. Two shapes, so a stray copy of one is never mistaken
 for the other.

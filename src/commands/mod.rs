@@ -49,10 +49,6 @@ pub struct Session {
     /// environment, and so that the four call sites — `init`, `init --dry-run`,
     /// `update`, `update --dry-run` — cannot come to disagree about which file
     /// they read.
-    // Loaded but not yet consulted: this commit lands the file, its validation
-    // and its diagnostics; `[defaults]`, `[shortcuts]` and `[trust]` read it in
-    // the three that follow.
-    #[allow(dead_code)]
     pub user: UserConfig,
 }
 

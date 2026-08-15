@@ -66,3 +66,79 @@ fn a_shortcut_named_like_a_scheme_is_refused_when_the_file_is_read() {
     .says("tpl::userconfig::shortcut")
     .says("https");
 }
+
+// --- [defaults] -------------------------------------------------------------
+
+/// A template whose only question has an answer the user would rather state
+/// once than retype in every project.
+const SEEDED: &str = r#"
+name = "seeded"
+
+[questions.author]
+type = "string"
+default = "anonymous"
+default_from = "git:user.name"
+"#;
+
+/// The claim the whole design rests on, and the reason `[defaults]` is a seed
+/// rather than an answer.
+///
+/// Under `--defaults` nobody confirms anything, so a value from this machine
+/// must not reach the tree. If it did, the same template revision with the same
+/// recorded answers would render two different trees on two machines, and
+/// "an unchanged template produces no commit" would stop being true.
+#[test]
+fn user_defaults_do_not_apply_when_questions_are_not_asked() {
+    let world = World::with_template(SEEDED, &[("AUTHORS.jinja", "{{ author }}\n")]);
+    world
+        .project
+        .user_config("[defaults]\nauthor = \"Axel Haustant\"\n");
+
+    let output = world.init(&[]).success();
+
+    assert_eq!(world.project.read("AUTHORS"), "anonymous\n");
+    assert!(
+        world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("author = \"anonymous\""),
+        "the recorded answer must be the template's own default"
+    );
+    output.silent_about("Axel Haustant");
+}
+
+/// Two machines, two `[defaults]` files, one tree. The observable form of the
+/// same claim.
+#[test]
+fn two_machines_with_different_user_defaults_render_the_same_tree() {
+    let one = World::with_template(SEEDED, &[("AUTHORS.jinja", "{{ author }}\n")]);
+    let two = World::with_template(SEEDED, &[("AUTHORS.jinja", "{{ author }}\n")]);
+    one.project
+        .user_config("[defaults]\nauthor = \"Ada Lovelace\"\n");
+    two.project
+        .user_config("[defaults]\nauthor = \"Grace Hopper\"\n");
+
+    one.init(&[]).success();
+    two.init(&[]).success();
+
+    assert_eq!(
+        one.project
+            .git(&["rev-parse", &format!("{}^{{tree}}", one.ref_name())]),
+        two.project
+            .git(&["rev-parse", &format!("{}^{{tree}}", two.ref_name())]),
+    );
+}
+
+/// This file is written once for every template the user will ever generate, so
+/// it is *expected* to name questions a given template does not have. Reporting
+/// that on every run would be noise — unlike an `--answers-from` key, which was
+/// supplied for this template and is therefore a typo.
+#[test]
+fn a_user_default_naming_no_question_is_neither_fatal_nor_reported() {
+    let world = World::with_template(SEEDED, &[("AUTHORS.jinja", "{{ author }}\n")]);
+    world
+        .project
+        .user_config("[defaults]\nauthor = \"Axel\"\nlicence = \"MIT\"\n");
+
+    world.init(&[]).success().silent_about("licence");
+}
