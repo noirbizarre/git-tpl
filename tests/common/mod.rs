@@ -16,6 +16,49 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use assert_cmd::prelude::*;
 
+/// Detach a child process from the Git environment of the process that ran the
+/// suite.
+///
+/// Under `git rebase --exec`, `git bisect run`, or any hook, Git exports
+/// `GIT_DIR`, `GIT_WORK_TREE` and `GIT_INDEX_FILE`. They take precedence over
+/// `current_dir`, so without this every `git` the harness spawns operates on
+/// the git-tpl repository rather than on its own temporary directory: the
+/// identity `Repo::configure` sets lands in the developer's own config, and
+/// `LibGit2::init` clears `core.bare` from a worktree's config. Loud, wrong,
+/// and it outlives the run.
+///
+/// The config sources are pinned for the same reason `XDG_CONFIG_HOME` is: a
+/// test must not read — or be changed by — the developer's `~/.gitconfig`.
+/// `config_home` only needs to name a directory; the file inside it is never
+/// created, and Git treats a missing `GIT_CONFIG_GLOBAL` as empty.
+pub fn scrub_git_env(command: &mut Command, config_home: &Path) {
+    for name in [
+        // Repository discovery: each one overrides `current_dir`.
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CEILING_DIRECTORIES",
+        "GIT_PREFIX",
+        "GIT_NAMESPACE",
+        // Identity: `rebase` and `commit` export these, and a test asserting on
+        // authorship would silently pick up the ambient commit's identity
+        // instead of the one `configure` set.
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_AUTHOR_DATE",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+        "GIT_COMMITTER_DATE",
+    ] {
+        command.env_remove(name);
+    }
+    command.env("GIT_CONFIG_NOSYSTEM", "1");
+    command.env("GIT_CONFIG_GLOBAL", config_home.join("absent.gitconfig"));
+}
+
 /// A Git repository under test.
 pub struct Repo {
     pub path: PathBuf,
@@ -160,11 +203,10 @@ impl Repo {
 
     /// Run a Git command, asserting it succeeded.
     pub fn git(&self, args: &[&str]) -> String {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(&self.path)
-            .output()
-            .expect("run git");
+        let mut command = Command::new("git");
+        command.args(args).current_dir(&self.path);
+        scrub_git_env(&mut command, self.config_home());
+        let output = command.output().expect("run git");
         assert!(
             output.status.success(),
             "git {args:?} failed in {}:\n{}",
@@ -176,11 +218,10 @@ impl Repo {
 
     /// Run a Git command, returning success and output whatever happens.
     pub fn try_git(&self, args: &[&str]) -> (bool, String) {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(&self.path)
-            .output()
-            .expect("run git");
+        let mut command = Command::new("git");
+        command.args(args).current_dir(&self.path);
+        scrub_git_env(&mut command, self.config_home());
+        let output = command.output().expect("run git");
         let combined = format!(
             "{}{}",
             String::from_utf8_lossy(&output.stdout),
@@ -299,6 +340,9 @@ fn run_tpl(cwd: &Path, config_home: &Path, args: &[&str]) -> Output {
     // `HOME` goes too, since it is the fallback the resolution uses.
     command.env("XDG_CONFIG_HOME", config_home);
     command.env_remove("HOME");
+    // The binary opens the repository at `cwd`; an inherited `GIT_DIR` from a
+    // `git rebase --exec` or a hook would point it somewhere else entirely.
+    scrub_git_env(&mut command, config_home);
 
     let output = command.output().expect("run git-tpl");
     Output {

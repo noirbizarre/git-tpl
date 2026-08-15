@@ -2,16 +2,17 @@
 
 mod common;
 
-use common::{Repo, World, tpl};
+use common::{Repo, World, scrub_git_env, tpl};
 
 /// Give a world a bare remote and publish `main` to it.
 fn with_remote(world: &World) -> Repo {
     let remote_path = world.dir.path().join("remote.git");
-    std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    command
         .args(["init", "-q", "--bare", "-b", "main"])
-        .arg(&remote_path)
-        .status()
-        .expect("init bare remote");
+        .arg(&remote_path);
+    scrub_git_env(&mut command, world.project.config_home());
+    command.status().expect("init bare remote");
 
     world
         .project
@@ -22,11 +23,12 @@ fn with_remote(world: &World) -> Repo {
 }
 
 fn remote_refs(remote: &Repo) -> Vec<String> {
-    let listing = std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    command
         .args(["--git-dir", &remote.path.to_string_lossy()])
-        .args(["for-each-ref", "--format=%(refname)", "refs/tpl/"])
-        .output()
-        .expect("list remote refs");
+        .args(["for-each-ref", "--format=%(refname)", "refs/tpl/"]);
+    scrub_git_env(&mut command, remote.config_home());
+    let listing = command.output().expect("list remote refs");
     String::from_utf8_lossy(&listing.stdout)
         .lines()
         .map(str::to_string)
