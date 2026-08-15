@@ -4,6 +4,8 @@
 //! `git-backend-isolation` prek hook fails the commit if `git2::` appears
 //! anywhere else under `src/`. See `docs/adr/011-git-backend-isolation.md`.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use git2::build::TreeUpdateBuilder;
@@ -13,8 +15,8 @@ use git2::{
 };
 
 use super::{
-    AheadBehind, Change, ChangeKind, Commit, FileMode, GitBackend, GitError, MergeOutcome, Oid,
-    TreeEntry,
+    AheadBehind, Change, ChangeKind, Commit, FileMode, FileStat, GitBackend, GitError,
+    MergeOutcome, Oid, TreeEntry,
 };
 
 /// A repository opened through libgit2.
@@ -23,6 +25,36 @@ pub struct LibGit2 {
 }
 
 impl LibGit2 {
+    /// The diff between two trees, limited to `paths`.
+    ///
+    /// The three diff methods below differ only in how they read the result;
+    /// building it in one place is what keeps their pathspec handling and their
+    /// tree resolution from drifting apart.
+    fn tree_diff(
+        &self,
+        from: Option<Oid>,
+        to: Oid,
+        paths: &[String],
+    ) -> Result<git2::Diff<'_>, GitError> {
+        let old = from
+            .map(|oid| self.repo.find_tree(from_oid(oid)))
+            .transpose()
+            .map_err(|e| backend("read the old tree", &e))?;
+        let new = self
+            .repo
+            .find_tree(from_oid(to))
+            .map_err(|e| backend("read the new tree", &e))?;
+
+        let mut options = DiffOptions::new();
+        for path in paths {
+            options.pathspec(path);
+        }
+
+        self.repo
+            .diff_tree_to_tree(old.as_ref(), Some(&new), Some(&mut options))
+            .map_err(|e| backend("diff the trees", &e))
+    }
+
     /// Open the repository containing `path`, searching upwards.
     pub fn discover(path: &Path) -> Result<Self, GitError> {
         // `open_ext` with no ceiling directories searches upwards, which is
@@ -273,60 +305,101 @@ impl GitBackend for LibGit2 {
         Ok(())
     }
 
-    fn diff_trees(&self, from: Option<Oid>, to: Oid) -> Result<Vec<Change>, GitError> {
-        let old = from
-            .map(|oid| self.repo.find_tree(from_oid(oid)))
-            .transpose()
-            .map_err(|e| backend("read the old tree", &e))?;
-        let new = self
-            .repo
-            .find_tree(from_oid(to))
-            .map_err(|e| backend("read the new tree", &e))?;
-
-        let diff = self
-            .repo
-            .diff_tree_to_tree(old.as_ref(), Some(&new), None)
-            .map_err(|e| backend("diff the trees", &e))?;
+    fn diff_trees(
+        &self,
+        from: Option<Oid>,
+        to: Oid,
+        paths: &[String],
+    ) -> Result<Vec<Change>, GitError> {
+        let diff = self.tree_diff(from, to, paths)?;
 
         let mut changes = Vec::new();
         for delta in diff.deltas() {
-            let kind = match delta.status() {
-                Delta::Added | Delta::Copied => ChangeKind::Added,
-                Delta::Deleted => ChangeKind::Deleted,
-                _ => ChangeKind::Modified,
-            };
-            let path = delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default();
-            changes.push(Change { kind, path });
+            changes.push(Change {
+                kind: change_kind(delta.status()),
+                path: delta_path(&delta),
+            });
         }
 
         changes.sort_by(|a, b| a.path.cmp(&b.path));
         Ok(changes)
     }
 
-    fn diff_patch(&self, from: Option<Oid>, to: Oid, paths: &[String]) -> Result<String, GitError> {
-        let old = from
-            .map(|oid| self.repo.find_tree(from_oid(oid)))
-            .transpose()
-            .map_err(|e| backend("read the old tree", &e))?;
-        let new = self
-            .repo
-            .find_tree(from_oid(to))
-            .map_err(|e| backend("read the new tree", &e))?;
+    fn diff_stat(
+        &self,
+        from: Option<Oid>,
+        to: Oid,
+        paths: &[String],
+    ) -> Result<Vec<FileStat>, GitError> {
+        let diff = self.tree_diff(from, to, paths)?;
 
-        let mut options = DiffOptions::new();
-        for path in paths {
-            options.pathspec(path);
+        // The counts are accumulated by path, because the line callback is
+        // handed a delta rather than its index and the two must be joined
+        // somehow. Order is imposed by the sort at the end, never by the map.
+        let mut order: HashMap<String, usize> = HashMap::new();
+        let mut stats: Vec<FileStat> = Vec::new();
+        for delta in diff.deltas() {
+            let path = delta_path(&delta);
+            order.insert(path.clone(), stats.len());
+            stats.push(FileStat {
+                kind: change_kind(delta.status()),
+                path,
+                insertions: 0,
+                deletions: 0,
+                binary: false,
+            });
         }
 
-        let diff = self
-            .repo
-            .diff_tree_to_tree(old.as_ref(), Some(&new), Some(&mut options))
-            .map_err(|e| backend("diff the trees", &e))?;
+        let counted = RefCell::new(stats);
+        diff.foreach(
+            &mut |_, _| true,
+            None,
+            None,
+            Some(&mut |delta, _hunk, line| {
+                // `>` and `<` mark a missing trailing newline. `git diff --stat`
+                // does not count them, and counting them would report "a
+                // newline was added" as a changed line.
+                let counter = match line.origin() {
+                    '+' => 0,
+                    '-' => 1,
+                    _ => return true,
+                };
+                if let Some(&i) = order.get(&delta_path(&delta)) {
+                    let mut stats = counted.borrow_mut();
+                    if counter == 0 {
+                        stats[i].insertions += 1;
+                    } else {
+                        stats[i].deletions += 1;
+                    }
+                }
+                true
+            }),
+        )
+        .map_err(|e| backend("summarise the diff", &e))?;
+
+        let mut stats = counted.into_inner();
+
+        // Read after the walk, not before: libgit2 only sets the binary flag on
+        // a delta once it has loaded the file's contents, which `foreach` is
+        // what causes. Asked earlier, every file claims to be text.
+        for delta in diff.deltas() {
+            if delta.flags().is_binary()
+                && let Some(&i) = order.get(&delta_path(&delta))
+            {
+                stats[i].binary = true;
+                // A binary delta produces no lines, so any count here would be
+                // a leftover, not a measurement.
+                stats[i].insertions = 0;
+                stats[i].deletions = 0;
+            }
+        }
+
+        stats.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(stats)
+    }
+
+    fn diff_patch(&self, from: Option<Oid>, to: Oid, paths: &[String]) -> Result<String, GitError> {
+        let diff = self.tree_diff(from, to, paths)?;
 
         let mut out = String::new();
         diff.print(DiffFormat::Patch, |_, _, line| {
@@ -780,6 +853,31 @@ fn to_filemode(mode: FileMode) -> git2::FileMode {
     }
 }
 
+/// How a delta reads in our own vocabulary.
+///
+/// A copy is an addition: the path is new, and where its content came from is
+/// not something the reader of a change list can act on.
+fn change_kind(status: Delta) -> ChangeKind {
+    match status {
+        Delta::Added | Delta::Copied => ChangeKind::Added,
+        Delta::Deleted => ChangeKind::Deleted,
+        _ => ChangeKind::Modified,
+    }
+}
+
+/// The path a delta is about, with `/` separators on every platform.
+///
+/// The new side first, so a rename is reported at its destination; the old side
+/// is all a deletion has.
+fn delta_path(delta: &git2::DiffDelta<'_>) -> String {
+    delta
+        .new_file()
+        .path()
+        .or_else(|| delta.old_file().path())
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default()
+}
+
 fn backend(context: &str, error: &git2::Error) -> GitError {
     GitError::Backend {
         context: format!("could not {context}"),
@@ -1116,7 +1214,7 @@ mod tests {
             ])
             .unwrap();
 
-        let changes = repo.diff_trees(Some(old), new).unwrap();
+        let changes = repo.diff_trees(Some(old), new, &[]).unwrap();
         let described: Vec<_> = changes.iter().map(|c| (c.kind, c.path.as_str())).collect();
 
         assert_eq!(
@@ -1127,6 +1225,70 @@ mod tests {
                 (ChangeKind::Deleted, "gone"),
             ]
         );
+
+        // The same diff, narrowed. A pathspec that matches one file must leave
+        // the other two out rather than merely un-highlighted.
+        let narrowed = repo
+            .diff_trees(Some(old), new, &["fresh".to_string()])
+            .unwrap();
+        assert_eq!(narrowed.len(), 1, "{narrowed:?}");
+        assert_eq!(narrowed[0].path, "fresh");
+    }
+
+    #[test]
+    fn a_diff_stat_counts_the_lines_of_each_change() {
+        let (_dir, repo) = scratch();
+        let one = repo.write_blob(b"a\nb\n").unwrap();
+        let two = repo.write_blob(b"a\nB\nc\n").unwrap();
+
+        let old = repo
+            .build_tree(&[TreeEntry {
+                path: "f".into(),
+                oid: one,
+                mode: FileMode::Blob,
+            }])
+            .unwrap();
+        let new = repo
+            .build_tree(&[TreeEntry {
+                path: "f".into(),
+                oid: two,
+                mode: FileMode::Blob,
+            }])
+            .unwrap();
+
+        let stats = repo.diff_stat(Some(old), new, &[]).unwrap();
+
+        assert_eq!(stats.len(), 1, "{stats:?}");
+        assert_eq!(stats[0].path, "f");
+        assert_eq!(stats[0].kind, ChangeKind::Modified);
+        // `b` became `B` and `c` appeared: two lines in, one out.
+        assert_eq!((stats[0].insertions, stats[0].deletions), (2, 1));
+        assert!(!stats[0].binary);
+    }
+
+    /// A binary file has no lines to count, and saying so is the point: two
+    /// zeroes would read as "nothing changed" for a replaced image.
+    #[test]
+    fn a_binary_change_is_reported_without_counts() {
+        let (_dir, repo) = scratch();
+        let blob = repo
+            .write_blob(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0d")
+            .unwrap();
+
+        let empty = repo.build_tree(&[]).unwrap();
+        let new = repo
+            .build_tree(&[TreeEntry {
+                path: "logo.png".into(),
+                oid: blob,
+                mode: FileMode::Blob,
+            }])
+            .unwrap();
+
+        let stats = repo.diff_stat(Some(empty), new, &[]).unwrap();
+
+        assert_eq!(stats.len(), 1, "{stats:?}");
+        assert!(stats[0].binary, "{stats:?}");
+        assert_eq!((stats[0].insertions, stats[0].deletions), (0, 0));
     }
 
     #[test]

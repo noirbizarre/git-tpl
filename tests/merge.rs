@@ -346,7 +346,9 @@ fn a_project_keeps_its_own_files_through_a_template_add_change_and_delete() {
         "update touched the project"
     );
 
-    tpl(&world.project, &["diff", "--stat"]).success();
+    tpl(&world.project, &["diff", "--stat"])
+        .success()
+        .says("insertions(+)");
     tpl(&world.project, &["merge"]).success();
 
     assert!(
