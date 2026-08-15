@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use tpl::git::libgit2::LibGit2;
 use tpl::git::{GitBackend, MergeOutcome};
-use tpl::gitconfig::Preferences;
+use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError};
 
 use super::{Context, answering, report_ignored, supplied, trust};
@@ -23,7 +23,13 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
     }
 
     let ctx = Context::discover(global)?;
-    let preferences = Preferences::load(&ctx.repo)?;
+    let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
+        // `init` has no `--remote` and no `--push`; `--defaults` is the only
+        // preference it can override, and it must, or `tpl.interactive true`
+        // would keep `--defaults` from meaning what it says.
+        non_interactive: args.answers.defaults,
+        ..Default::default()
+    });
 
     let answers = supplied(&args.answers)?;
 

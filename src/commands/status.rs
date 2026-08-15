@@ -9,6 +9,10 @@ use crate::theme::{command, field, muted};
 
 pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Context::discover(global)?;
+    // No overrides: `status` reports against the configured remote on purpose.
+    // It prompts for nothing and pushes nothing, and a `--remote` that changed
+    // only which remote a report compared against would be a flag whose effect
+    // is invisible in the output it produces.
     let preferences = Preferences::load(&ctx.repo)?;
     let status = ops::status(&ctx.repo, &ctx.root, &preferences)?;
 

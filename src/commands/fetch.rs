@@ -1,6 +1,6 @@
 //! `git tpl fetch`
 
-use tpl::gitconfig::Preferences;
+use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError};
 
 use super::Context;
@@ -10,7 +10,10 @@ use crate::theme::{command, muted};
 pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<(), OpError> {
     let ctx = Context::discover(global)?;
     let preferences =
-        Preferences::load(&ctx.repo)?.with_overrides(args.remote.as_deref(), false, false);
+        Preferences::load(&ctx.repo)?.with_overrides(Overrides {
+            remote: args.remote.as_deref(),
+            ..Default::default()
+        });
 
     let (_, ref_name) = ops::identify(&ctx.root)?;
 

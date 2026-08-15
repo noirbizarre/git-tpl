@@ -1,6 +1,6 @@
 //! `git tpl update`
 
-use tpl::gitconfig::Preferences;
+use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError, UpdateOutcome};
 
 use super::{Context, answering, report_ignored, supplied, trust};
@@ -10,11 +10,11 @@ use crate::theme::{change, command, field, heading, muted};
 
 pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
     let ctx = Context::discover(global)?;
-    let preferences = Preferences::load(&ctx.repo)?.with_overrides(
-        args.remote.as_deref(),
-        args.push,
-        args.answers.defaults,
-    );
+    let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
+        remote: args.remote.as_deref(),
+        push: args.push,
+        non_interactive: args.answers.defaults,
+    });
 
     let mut config = tpl::config::Config::load(&ctx.root)?;
     // `--ref` renders a different revision for this run only. It deliberately

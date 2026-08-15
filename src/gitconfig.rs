@@ -81,22 +81,17 @@ impl Preferences {
     }
 
     /// Apply command-line overrides, which win over everything.
-    pub fn with_overrides(
-        mut self,
-        remote: Option<&str>,
-        push: bool,
-        non_interactive: bool,
-    ) -> Self {
-        if let Some(remote) = remote {
+    pub fn with_overrides(mut self, overrides: Overrides<'_>) -> Self {
+        if let Some(remote) = overrides.remote {
             self.remote = remote.to_string();
         }
         // `--push` can only turn pushing on. There is no `--no-push`, because
         // `tpl.autoPush` is opt-in, so the only way to reach here with it set
         // is to have asked for it.
-        if push {
+        if overrides.push {
             self.auto_push = true;
         }
-        if non_interactive {
+        if overrides.non_interactive {
             self.interactive = false;
         }
         self
@@ -110,6 +105,22 @@ impl Preferences {
     pub fn fetch_refspec(&self) -> String {
         format!("+refs/tpl/*:refs/remotes/{}/tpl/*", self.remote)
     }
+}
+
+/// What the command line said, for the preferences it can override.
+///
+/// A struct rather than three positional booleans: `fetch` and `push` accept
+/// neither `--push` nor `--defaults`, and were passing `false, false` for
+/// parameters that mean nothing to them — which reads as a decision when it is
+/// an absence. `..Default::default()` says the absence out loud.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Overrides<'a> {
+    /// `--remote <name>`.
+    pub remote: Option<&'a str>,
+    /// `--push`.
+    pub push: bool,
+    /// `--defaults`: there is nobody to prompt.
+    pub non_interactive: bool,
 }
 
 /// The refspec that pushes one template ref.
@@ -164,7 +175,10 @@ mod tests {
         let preferences =
             Preferences::load(&repo)
                 .unwrap()
-                .with_overrides(Some("fork"), false, false);
+                .with_overrides(Overrides {
+                    remote: Some("fork"),
+                    ..Default::default()
+                });
 
         assert_eq!(preferences.remote, "fork");
     }
