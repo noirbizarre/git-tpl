@@ -3,7 +3,8 @@
 Merge `refs/tpl/<id>` into the current branch.
 
 ```sh
-git tpl merge [--no-commit] [--message <msg>]
+git tpl merge [--no-commit] [-m <msg>]
+git tpl merge --abort
 ```
 
 ## It is a normal merge
@@ -80,6 +81,5 @@ ambiguous, and genuinely wants a human.
 | Option | Meaning |
 |---|---|
 | `--no-commit` | Merge and stage, but do not commit. |
-| `--message <msg>` | Override the merge commit message. |
-| `--no-ff` | Always create a merge commit. |
+| `-m`, `--message <msg>` | Override the merge commit message. |
 | `--abort` | Abort an in-progress merge. Same as `git merge --abort`. |

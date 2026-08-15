@@ -3,7 +3,7 @@
 Retrieve template refs from a remote.
 
 ```sh
-git tpl fetch [--remote <name>]
+git tpl fetch [--remote <name>] [--dry-run]
 ```
 
 Fetches `refs/tpl/*` into `refs/remotes/<remote>/tpl/*`, using an explicit
@@ -33,18 +33,21 @@ $ git tpl fetch
 From github.com:acme/my-project
  * [new ref]  refs/tpl/github-com-noirbizarre-rust-library-template -> origin/tpl/github-com-noirbizarre-rust-library-template
 
-The remote copy is 2 commits ahead of your local ref.
-Run `git tpl merge --from-remote` to use it, or `git tpl update` to render your own.
+The remote copy is 2 commit(s) ahead of your local ref.
+
+Adopt it, or render your own:
+  git merge refs/remotes/origin/tpl/github-com-noirbizarre-rust-library-template
+  git tpl update
 ```
 
 Fetching **never** moves your local `refs/tpl/<id>`. It brings the remote copy
 into a remote-tracking ref and tells you how they relate. What to do about it is
 your decision:
 
-- **The remote is ahead** — someone else rendered a newer state. Merge from the
-  remote copy to adopt it, or run `git tpl update` to render it yourself. Both
-  are valid; rendering yourself is safest if you do not trust the other party's
-  answers.
+- **The remote is ahead** — someone else rendered a newer state. `git merge` the
+  remote-tracking ref to adopt it, or run `git tpl update` to render it
+  yourself. Both are valid; rendering yourself is safest if you do not trust the
+  other party's answers.
 - **The remote is behind** — you have renderings they do not. `git tpl push`.
 - **Diverged** — you both rendered independently. See
   [`git tpl push`](push.md#divergence).
@@ -54,4 +57,4 @@ your decision:
 | Option | Meaning |
 |---|---|
 | `--remote <name>` | Default `origin`, or `tpl.remote`. |
-| `--all` | Fetch every `refs/tpl/*`, not just this project's. |
+| `--dry-run` | Report the refspec and remote; transfer nothing. |

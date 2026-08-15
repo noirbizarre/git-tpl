@@ -3,7 +3,7 @@
 Publish template refs to a remote.
 
 ```sh
-git tpl push [--remote <name>]
+git tpl push [--remote <name>] [--dry-run]
 ```
 
 Pushes `refs/tpl/<id>` explicitly:
@@ -81,7 +81,6 @@ differ and that is worth seeing.
 | Option | Meaning |
 |---|---|
 | `--remote <name>` | Default `origin`, or `tpl.remote`. |
-| `--all` | Push every `refs/tpl/*`. |
 | `--dry-run` | Report what would be pushed. |
 
 ## Pushing automatically after an update
