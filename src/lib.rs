@@ -42,6 +42,7 @@ pub mod ops;
 pub mod provenance;
 pub mod refs;
 pub mod render;
+pub mod suggest;
 pub mod template;
 pub mod userconfig;
 

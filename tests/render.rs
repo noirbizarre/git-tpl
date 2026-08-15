@@ -328,3 +328,99 @@ fn a_failure_reports_its_diagnostic_code_as_json() {
         output.error_code()
     );
 }
+
+/// Lenient is still the default, so an upgrade does not break a template that
+/// renders today. The lint reports the same name as a warning meanwhile.
+#[test]
+fn an_undeclared_name_renders_empty_by_default() {
+    let world = World::with_template(
+        r#"
+name = "lenient"
+
+[questions.project_name]
+type = "string"
+default = "demo"
+"#,
+        &[("Cargo.toml.jinja", "name = \"{{ projct_name }}\"\n")],
+    );
+    let scratch = Scratch::new();
+
+    scratch
+        .run(&[
+            "render",
+            &world.template.source(),
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .success();
+
+    // The failure this is all about: valid TOML, an empty name, exit zero.
+    assert_eq!(scratch.read("Cargo.toml"), "name = \"\"\n");
+}
+
+#[test]
+fn strict_makes_an_undeclared_name_fail_the_render() {
+    let world = World::with_template(
+        r#"
+name = "strict"
+strict = true
+
+[questions.project_name]
+type = "string"
+default = "demo"
+"#,
+        &[("Cargo.toml.jinja", "name = \"{{ projct_name }}\"\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .run(&[
+            "--json",
+            "render",
+            &world.template.source(),
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .failure();
+
+    assert_eq!(output.error_code(), "tpl::render::content");
+    // The cause chain is the point: the outer error names the file, and only
+    // the one beneath it names the expression.
+    let json = output.json();
+    assert_eq!(json["error"]["causes"][0]["code"], "tpl::eval::expression");
+}
+
+/// `| default('')` is how a template says a name is optional on purpose, and
+/// it has to keep working under `strict`.
+#[test]
+fn strict_allows_an_explicit_default() {
+    let world = World::with_template(
+        r#"
+name = "strict-optional"
+strict = true
+
+[questions.project_name]
+type = "string"
+default = "demo"
+"#,
+        &[(
+            "Cargo.toml.jinja",
+            "name = \"{{ project_name }}\"\nextra = \"{{ maybe | default('') }}\"\n",
+        )],
+    );
+    let scratch = Scratch::new();
+
+    scratch
+        .run(&[
+            "render",
+            &world.template.source(),
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .success();
+
+    assert!(scratch.read("Cargo.toml").contains("name = \"demo\""));
+}

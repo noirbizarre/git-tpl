@@ -63,6 +63,7 @@ Only `severity: "error"` fails the command.
 | `tpl::lint::collision` | error | Two paths can collapse to the same name for some answer set. |
 | `tpl::lint::syntax` | error | A `.jinja` file does not parse, including in branches no answer set reaches. |
 | `tpl::lint::foreign_expression` | warning | A `${{ ... }}` MiniJinja will consume, rendering it to `$`. |
+| `tpl::lint::undeclared` | warning | A file body uses a name the template does not declare. Renders empty unless `strict = true`. |
 
 ## Answers and evaluation
 

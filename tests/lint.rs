@@ -383,3 +383,73 @@ default = true
         codes(&output)
     );
 }
+
+/// The asymmetry this closes: the same typo in a `computed` expression is a
+/// hard error before the first prompt, with a suggestion. In a file body it
+/// rendered to an empty string and exited zero — leaving a `Cargo.toml` with
+/// `name = ""`, which parses.
+#[test]
+fn an_undeclared_name_in_a_file_body_is_reported_with_a_suggestion() {
+    let world = World::with_template(
+        r#"
+name = "typo"
+
+[questions.project_name]
+type = "string"
+default = "demo"
+"#,
+        &[("Cargo.toml.jinja", "name = \"{{ projct_name }}\"\n")],
+    );
+    let scratch = Scratch::new();
+
+    // A warning, not an error: the renderer is still lenient by default, and
+    // failing on something that renders today would be the flag day this
+    // staging exists to avoid.
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert_eq!(codes(&output), ["tpl::lint::undeclared"]);
+
+    let json = output.json();
+    let help = json["diagnostics"][0]["help"].as_str().expect("help");
+    assert!(help.contains("project_name"), "no suggestion in: {help}");
+}
+
+#[test]
+fn a_declared_name_and_a_builtin_are_not_reported() {
+    let world = World::with_template(
+        r#"
+name = "fine"
+
+[questions.project_name]
+type = "string"
+default = "demo"
+
+[computed]
+slug = "{{ project_name | lower }}"
+"#,
+        &[(
+            "out.txt.jinja",
+            // `loop` is MiniJinja's; `data` and `template` are namespaces.
+            "{{ project_name }} {{ slug }} {{ template.name }}\n\
+             {% for x in [1, 2] %}{{ loop.index }}{% endfor %}\n",
+        )],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
+/// `matrix` belongs to GitHub Actions, not to the template. Reporting it as
+/// undeclared would advise declaring a name the author must not declare — so
+/// the leaked-expression finding suppresses it.
+#[test]
+fn a_github_expression_is_not_also_reported_as_undeclared() {
+    let world = World::with_template(
+        r#"name = "leaky""#,
+        &[("ci.yaml.jinja", "runs-on: ${{ matrix.os }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert_eq!(codes(&output), ["tpl::lint::foreign_expression"]);
+}

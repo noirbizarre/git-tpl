@@ -324,45 +324,17 @@ fn is_minijinja_builtin(name: &str) -> bool {
 
 /// The closest known name, for a "did you mean?" suggestion.
 ///
-/// A plain prefix/edit-distance heuristic rather than a dependency: the whole
-/// job is to turn a typo into a pointer, and a near-miss suggestion is no worse
-/// than none.
+/// Data sources are excluded: they are namespaced under `data.`, so suggesting
+/// a bare one for an unqualified typo would send the reader to a name that
+/// would not work if they used it.
 fn closest(unknown: &str, known: &BTreeSet<Name>) -> Option<String> {
-    let unknown_lower = unknown.to_lowercase();
-    known
-        .iter()
-        .filter(|name| name.namespace != Namespace::Data)
-        .map(|name| {
-            (
-                edit_distance(&unknown_lower, &name.key.to_lowercase()),
-                &name.key,
-            )
-        })
-        // A suggestion further away than a third of the name's length is not a
-        // typo, it is a different word, and offering it is worse than silence.
-        .filter(|(distance, key)| *distance <= (key.len() / 3).max(1))
-        .min_by_key(|(distance, _)| *distance)
-        .map(|(_, key)| key.clone())
-}
-
-/// Levenshtein distance.
-fn edit_distance(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
-    let mut previous: Vec<usize> = (0..=b.len()).collect();
-    let mut current = vec![0; b.len() + 1];
-
-    for (i, ca) in a.iter().enumerate() {
-        current[0] = i + 1;
-        for (j, cb) in b.iter().enumerate() {
-            let cost = usize::from(ca != cb);
-            current[j + 1] = (previous[j] + cost)
-                .min(previous[j + 1] + 1)
-                .min(current[j] + 1);
-        }
-        std::mem::swap(&mut previous, &mut current);
-    }
-    previous[b.len()]
+    crate::suggest::closest(
+        unknown,
+        known
+            .iter()
+            .filter(|name| name.namespace != Namespace::Data)
+            .map(|name| name.key.as_str()),
+    )
 }
 
 /// Topologically sort, breaking ties by declaration order.

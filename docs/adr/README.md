@@ -23,4 +23,5 @@ existed.
 | [011](011-git-backend-isolation.md) | `git2` is confined to one module, enforced by a hook |
 | [012](012-template-loader.md) | Partials are `.jinja` files outside the render root |
 | [013](013-user-configuration.md) | User preferences live in `~/.config/git-tpl/config.toml` |
+| [014](014-strict-undefined.md) | An undefined name in a rendered file may be an error |
 | [015](015-machine-readable-output.md) | `--json` carries a stable diagnostic code on every failure |

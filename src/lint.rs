@@ -127,7 +127,21 @@ pub fn lint(
         }
         let text = String::from_utf8_lossy(&source);
         findings.extend(check_syntax(&entry.path, &text, partials));
+
+        // The roots of every `${{ ... }}` MiniJinja would eat. They are
+        // undeclared *by construction* — `matrix` and `github` belong to
+        // GitHub, not to the template — so reporting them again under
+        // `undeclared` would be the same bug twice, and the second report
+        // would advise declaring a name the author must not declare.
+        let foreign = foreign_expression_roots(&text);
         findings.extend(check_foreign_expressions(&entry.path, &text));
+        findings.extend(check_undeclared(
+            &entry.path,
+            &text,
+            manifest,
+            partials,
+            &foreign,
+        ));
     }
 
     findings.extend(check_path_collisions(entries));
@@ -334,6 +348,27 @@ fn foreign_expressions(text: &str) -> Vec<String> {
     out
 }
 
+/// The root name of every `${{ ... }}` MiniJinja would consume.
+///
+/// `${{ matrix.os }}` yields `matrix`. Used to suppress the `undeclared`
+/// finding for the same text, which would otherwise advise declaring a name
+/// that belongs to GitHub Actions.
+fn foreign_expression_roots(text: &str) -> std::collections::BTreeSet<String> {
+    foreign_expressions(text)
+        .into_iter()
+        .filter_map(|expression| {
+            let inner = expression
+                .trim_start_matches("${{")
+                .trim_end_matches("}}")
+                .trim();
+            let root = inner
+                .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+                .next()?;
+            (!root.is_empty()).then(|| root.to_string())
+        })
+        .collect()
+}
+
 /// Whether an expression body is a bare quoted string.
 fn is_string_literal(inner: &str) -> bool {
     let inner = inner.trim();
@@ -363,6 +398,85 @@ fn find_tag(text: &str, tag: &str) -> Option<usize> {
         from = start + 2 + end + 2;
     }
     None
+}
+
+/// A name a file body uses that the manifest never declares.
+///
+/// This is the asymmetry the lint exists to close. In a manifest expression an
+/// unknown name is a hard error before the first prompt, with a suggestion
+/// attached. In a file body MiniJinja is lenient, so `{{ typo }}` renders to
+/// the empty string and the command exits 0 — leaving a `Cargo.toml` with
+/// `name = ""`, which parses, or a workflow with `runs-on: `, which is valid
+/// YAML. Nothing fails until a human reads it.
+///
+/// A warning rather than an error for now, so that flipping the renderer to
+/// strict later is a change people have already been told about. See ADR-014.
+fn check_undeclared(
+    path: &str,
+    text: &str,
+    manifest: &Manifest,
+    partials: &std::sync::Arc<Partials>,
+    foreign: &std::collections::BTreeSet<String>,
+) -> Vec<Finding> {
+    let known = declared_names(manifest);
+
+    let env = environment(partials);
+    let Ok(template) = env.template_from_str(text) else {
+        // `check_syntax` already reported it, and a file that does not parse has no
+        // meaningful variable set.
+        return Vec::new();
+    };
+
+    // `nested: false`: root names only. A dotted path like `data.licenses.ids`
+    // arrives as `data`, which is what the manifest declares.
+    let mut unknown: Vec<String> = template
+        .undeclared_variables(false)
+        .into_iter()
+        .filter(|name| {
+            !known.contains(name.as_str()) && !is_builtin(name) && !foreign.contains(name)
+        })
+        .collect();
+    unknown.sort();
+    unknown.dedup();
+
+    unknown
+        .into_iter()
+        .map(|name| {
+            let suggestion = crate::suggest::closest(&name, known.iter().copied())
+                .map(|close| format!(" Did you mean `{close}`?"))
+                .unwrap_or_default();
+            Finding::warning(
+                "tpl::lint::undeclared",
+                path,
+                format!("`{path}` uses `{name}`, which the template does not declare"),
+                format!(
+                    "MiniJinja is lenient, so this renders to an empty string and nothing \
+                     fails.{suggestion} Declare it as a question or a computed value, or \
+                     write `{{{{ {name} | default('') }}}}` if it is meant to be optional."
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Every name a template body may legitimately use.
+fn declared_names(manifest: &Manifest) -> std::collections::BTreeSet<&str> {
+    manifest
+        .questions
+        .keys()
+        .map(String::as_str)
+        .chain(manifest.computed.keys().map(String::as_str))
+        // Namespaces, always present in the context.
+        .chain(["data", "template"])
+        .collect()
+}
+
+/// Names MiniJinja itself provides, which no manifest declares.
+fn is_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "loop" | "self" | "range" | "dict" | "namespace" | "debug" | "true" | "false" | "none"
+    )
 }
 
 /// Two template files that can render to one path.

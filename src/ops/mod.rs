@@ -415,7 +415,22 @@ pub fn render_files(
     let entries = template.entries()?;
     // Bytes, not blobs. Turning them into Git objects is `render`'s job, and it
     // is the only part of a rendering that needs a repository to write into.
-    let files = render_entries(template.repo.as_ref(), &entries, &context, &partials)?;
+    // `strict` is the template's own choice. Lenient is still the default, so
+    // that turning it on is a decision an author makes rather than one an
+    // upgrade makes for them; `git tpl lint` reports the same names as
+    // warnings meanwhile. See ADR-014.
+    let undefined = if template.manifest.strict.unwrap_or(false) {
+        crate::eval::Undefined::Strict
+    } else {
+        crate::eval::Undefined::Lenient
+    };
+    let files = render_entries(
+        template.repo.as_ref(),
+        &entries,
+        &context,
+        &partials,
+        undefined,
+    )?;
 
     let provenance = Provenance {
         source: target.source.to_string(),
