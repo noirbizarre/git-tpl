@@ -885,7 +885,7 @@ mod tests {
                 tree,
                 revision: tree,
             },
-            dir.path(),
+            Some(dir.path().to_path_buf()),
         );
 
         let partials =
@@ -930,7 +930,7 @@ mod tests {
                 tree,
                 revision: tree,
             },
-            dir.path(),
+            Some(dir.path().to_path_buf()),
         );
 
         let seeds: BTreeMap<String, Value> = seeds

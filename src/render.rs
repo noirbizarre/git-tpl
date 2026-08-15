@@ -180,12 +180,20 @@ pub fn render_tree(
     partials: &Arc<Partials>,
 ) -> Result<Oid, RenderError> {
     let rendered = render_entries(template, entries, context, partials)?;
+    write_tree(project, &rendered)
+}
 
+/// Write already-rendered files into `project` as a tree.
+///
+/// Split from [`render_tree`] because it is the only part of a rendering that
+/// needs a repository to write into: `git tpl render --output` produces the
+/// same `Rendered` values and writes them to a directory instead.
+pub fn write_tree(project: &dyn GitBackend, rendered: &[Rendered]) -> Result<Oid, RenderError> {
     let mut tree_entries = Vec::with_capacity(rendered.len());
     for file in rendered {
         let oid = project.write_blob(&file.content)?;
         tree_entries.push(TreeEntry {
-            path: file.path,
+            path: file.path.clone(),
             oid,
             mode: if file.executable {
                 FileMode::BlobExecutable

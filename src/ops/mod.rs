@@ -24,7 +24,7 @@ use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
 use crate::provenance::{Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
-use crate::render::{RenderError, render_tree};
+use crate::render::{RenderError, Rendered, render_entries, write_tree};
 use crate::template::{Manifest, Value};
 use crate::userconfig::UserConfig;
 
@@ -228,6 +228,24 @@ impl Trust<'_> {
     }
 }
 
+/// A rendered state, as bytes, before any Git object exists.
+///
+/// This is what a project-free render produces: `git tpl render --output` and
+/// `git tpl lint` need the files and the context, and have no repository to
+/// write blobs into. [`Render`] is this plus the tree.
+pub struct RenderedFiles {
+    /// The resolved template.
+    pub template: Resolved,
+    /// The resolved context.
+    pub context: Context,
+    /// The rendered files, sorted by output path.
+    pub files: Vec<Rendered>,
+    /// What produced them.
+    pub provenance: Provenance,
+    /// Supplied answers that name no question in this template.
+    pub ignored_answers: Vec<String>,
+}
+
 /// A rendered state, before it is committed.
 pub struct Render {
     /// The resolved template.
@@ -245,29 +263,61 @@ pub struct Render {
     pub ignored_answers: Vec<String>,
 }
 
-/// Resolve, evaluate and render — everything short of touching a ref.
+/// What a rendering needs to know about the template it is rendering.
 ///
-/// Shared by `init`, `update` and `--dry-run`, so all three cannot disagree
-/// about what a rendering is.
+/// A struct rather than loose arguments here, because unlike the decisions in
+/// [`render_files`] these four travel together: they are one template
+/// reference, and a caller that has one has all of them.
+pub struct Target<'a> {
+    /// Where the template comes from.
+    pub source: &'a str,
+    /// The branch, tag or SHA to render, or `None` for the default branch.
+    pub reference: Option<&'a str>,
+    /// A render root overriding the manifest's, or `None`.
+    pub root: Option<&'a str>,
+    /// Render the template's working tree rather than a committed revision.
+    pub dirty: bool,
+}
+
+impl<'a> Target<'a> {
+    /// The template a project has recorded.
+    pub fn from_config(config: &'a Config, dirty: bool) -> Self {
+        Self {
+            source: &config.template.source,
+            reference: config.template.r#ref.as_deref(),
+            root: config.template.root.as_deref(),
+            dirty,
+        }
+    }
+}
+
+/// Resolve, evaluate and render — to bytes, with no repository required.
+///
+/// `project` is `None` for a project-free render. Two things depend on it, and
+/// both degrade honestly rather than guessing: prompt seeds are not collected
+/// (there is no `git config` to read, and nobody to prompt), and a `local` data
+/// source becomes [`DataError::NeedsProject`](crate::data::DataError::NeedsProject)
+/// rather than being resolved against the process's working directory.
+///
+/// Everything short of writing a Git object happens here, so `render` and a
+/// project-free render cannot come to disagree about what a rendering is.
 // Every argument is a distinct decision the caller has already made, and
 // bundling them into a struct would only move the list somewhere a reader has
 // to go and find it.
 #[allow(clippy::too_many_arguments)]
-pub fn render(
-    project: &dyn GitBackend,
-    project_root: &Path,
-    config: &Config,
+pub fn render_files(
+    target: Target<'_>,
+    project: Option<(&dyn GitBackend, &Path)>,
     supplied: BTreeMap<String, Value>,
-    dirty: bool,
     user: &UserConfig,
     mut answering: Answering<'_>,
     trust: Trust<'_>,
-) -> Result<Render, OpError> {
+) -> Result<RenderedFiles, OpError> {
     let template = resolve::resolve(Request {
-        source: &config.template.source,
-        reference: config.template.r#ref.as_deref(),
-        root: config.template.root.as_deref(),
-        dirty,
+        source: target.source,
+        reference: target.reference,
+        root: target.root,
+        dirty: target.dirty,
     })?;
 
     // Built and validated before anything is prompted: a cycle or a typo
@@ -308,7 +358,7 @@ pub fn render(
     //
     // An *unmatched* template is untouched, and `Trust::Refuse` still refuses
     // it loudly. Nothing is granted by omission.
-    let mut trust = if user.trust.allows(&config.template.source) {
+    let mut trust = if user.trust.allows(target.source) {
         Trust::always()
     } else {
         trust
@@ -326,17 +376,18 @@ pub fn render(
             tree: template.tree,
             revision: template.revision,
         },
-        project_root,
+        project.map(|(_, root)| root.to_path_buf()),
     )
     .with_decisions(decisions);
 
     // Built only when somebody is going to be asked. When nobody is, the map
     // is empty *and* `DefaultsOnly` ignores it — two guards, because a machine
     // value reaching the tree would end invariant 2.
-    let seeds = if answering.is_interactive() {
-        prompt_seeds(project, &template.manifest, user)?
-    } else {
-        BTreeMap::new()
+    let seeds = match project {
+        Some((repo, _)) if answering.is_interactive() => {
+            prompt_seeds(repo, &template.manifest, user)?
+        }
+        _ => BTreeMap::new(),
     };
 
     // Read once, up front, and shared by the manifest expressions below and the
@@ -357,18 +408,12 @@ pub fn render(
     )?;
 
     let entries = template.entries()?;
-    // Blobs are read from the template repository — often a temporary clone —
-    // and written into the project, which is where the ref will point.
-    let tree = render_tree(
-        template.repo.as_ref(),
-        project,
-        &entries,
-        &context,
-        &partials,
-    )?;
+    // Bytes, not blobs. Turning them into Git objects is `render`'s job, and it
+    // is the only part of a rendering that needs a repository to write into.
+    let files = render_entries(template.repo.as_ref(), &entries, &context, &partials)?;
 
     let provenance = Provenance {
-        source: config.template.source.clone(),
+        source: target.source.to_string(),
         reference: template.reference.clone(),
         commit: template.revision,
         dirty: template.dirty,
@@ -378,12 +423,50 @@ pub fn render(
         template_name: template.manifest.name.clone(),
     };
 
-    Ok(Render {
+    Ok(RenderedFiles {
         template,
         context,
-        tree,
+        files,
         provenance,
         ignored_answers,
+    })
+}
+
+/// Resolve, evaluate and render — everything short of touching a ref.
+///
+/// Shared by `init`, `update` and `--dry-run`, so all three cannot disagree
+/// about what a rendering is. A thin wrapper over [`render_files`]: the only
+/// thing it adds is writing the bytes into the project as Git objects.
+#[allow(clippy::too_many_arguments)]
+pub fn render(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    config: &Config,
+    supplied: BTreeMap<String, Value>,
+    dirty: bool,
+    user: &UserConfig,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+) -> Result<Render, OpError> {
+    let rendered = render_files(
+        Target::from_config(config, dirty),
+        Some((project, project_root)),
+        supplied,
+        user,
+        answering,
+        trust,
+    )?;
+
+    // Blobs are read from the template repository — often a temporary clone —
+    // and written into the project, which is where the ref will point.
+    let tree = write_tree(project, &rendered.files)?;
+
+    Ok(Render {
+        template: rendered.template,
+        context: rendered.context,
+        tree,
+        provenance: rendered.provenance,
+        ignored_answers: rendered.ignored_answers,
     })
 }
 
