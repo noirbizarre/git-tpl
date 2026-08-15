@@ -3,6 +3,22 @@
 git-tpl is a single binary with no runtime dependencies. libgit2 is compiled
 into it, so there is nothing to install alongside.
 
+## With Homebrew
+
+```sh
+brew install noirbizarre/tap/git-tpl
+```
+
+The formula lives in [noirbizarre/homebrew-tap][tap] rather than homebrew-core,
+and installs the prebuilt release binary — no Rust toolchain involved.
+
+macOS on Apple silicon and on Intel, and Linux on x86-64. Homebrew on Linux
+arm64 is not covered: there is no statically linked aarch64 build yet, and a
+glibc-linked one would fail to load on the distributions Homebrew is most used
+on.
+
+[tap]: https://github.com/noirbizarre/homebrew-tap
+
 ## From source
 
 === "Compiled"
