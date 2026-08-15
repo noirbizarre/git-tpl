@@ -36,9 +36,13 @@ the release is made public
 publish workflow, making it public.
 
 **git-cliff versions.** The next version comes from the unreleased Conventional
-Commits, via `git cliff --bumped-version`. `feat` bumps the minor, a breaking
-change bumps the major (`breaking_always_bump_major = true` — this project's
-on-disk format and ref layout are contracts).
+Commits, via `git cliff --bumped-version`. `feat` bumps the minor
+(`features_always_bump_minor = true`).
+
+Before 1.0, a breaking change bumps the *minor* too
+(`breaking_always_bump_major = false`), so `0.1.x` → `0.2.0` is how a break is
+signalled. This project's on-disk format and ref layout are contracts, and once
+1.0 is out that setting flips and a break bumps the major.
 
 **The workflows do the work.** Bumping `Cargo.toml`, writing `CHANGELOG.md`,
 compiling. gh-ship never edits a source file.
