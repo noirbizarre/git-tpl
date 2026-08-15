@@ -127,6 +127,10 @@ package_name = "{{ project_name | lower | replace(' ', '-') }}"
 Rendering is [MiniJinja](https://docs.rs/minijinja), and only MiniJinja.
 Templates cannot execute code — no hooks, no scripts, no embedded interpreter.
 
+Templates published on GitHub carry the
+[`git-tpl`](https://github.com/topics/git-tpl) topic — add it to yours so others
+can find it.
+
 ## Documentation
 
 **[noirbizarre.github.io/git-tpl](https://noirbizarre.github.io/git-tpl/)**

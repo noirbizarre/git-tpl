@@ -193,3 +193,28 @@ namespace, and a computed value may not reuse an answer's name — that is an
 error at load time, not a silent shadow.
 
 Full detail: [Template context](context.md).
+
+## Publishing
+
+There is nothing to package and nowhere to register. Publishing a template is
+`git push`, and sharing it is sharing the URL someone passes to `git tpl init`.
+
+What a visitor lands on is the repository itself, so the template's own
+`README.md` and `LICENSE` — the files outside `template/` that are never
+rendered — are the ones worth writing. They are the only description anyone
+gets before cloning.
+
+On GitHub, add the `git-tpl` repository topic:
+
+```sh
+gh repo edit --add-topic git-tpl
+```
+
+or Settings → *About* → *Topics*. The template then appears at
+[github.com/topics/git-tpl](https://github.com/topics/git-tpl), which is how
+templates are found.
+
+The topic is a discovery convention between humans, nothing more. git-tpl never
+queries GitHub, has no registry and resolves no names: `git tpl init` takes a
+Git URL and clones it. A template without the topic works exactly as well — it
+is just harder to come across.

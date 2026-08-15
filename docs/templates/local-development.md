@@ -129,3 +129,7 @@ Without the `id` line, the new `source` would derive
 `github-com-noirbizarre-rust-library-template` and the ref would start over.
 
 See [Configuration](../configuration.md#template).
+
+## When the template is ready to share
+
+See [Publishing](format.md#publishing).
