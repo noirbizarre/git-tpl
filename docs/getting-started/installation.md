@@ -49,12 +49,15 @@ Download the binary for your platform from the
 somewhere on your `PATH`.
 
 ```sh
+VERSION=0.2.0
 curl -fsSL -o git-tpl \
-  https://github.com/noirbizarre/git-tpl/releases/latest/download/git-tpl_0.1.0_linux-amd64
+  https://github.com/noirbizarre/git-tpl/releases/download/$VERSION/git-tpl_${VERSION}_linux-amd64
 chmod +x git-tpl
 mv git-tpl ~/.local/bin/
 ```
 
+Assets are named `git-tpl_<version>_<platform>`, so `latest/download/` cannot
+be used without knowing the version — set `VERSION` to the release you want.
 Each release also carries a `SHA256SUMS` file.
 
 ## Verify

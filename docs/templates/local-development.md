@@ -41,7 +41,10 @@ While iterating, that is exactly the wrong default, so:
 git tpl update --dirty
 ```
 
-reads the template's **working tree** instead. The resulting commit is marked:
+reads the template's **working tree** instead. Local templates only — a remote
+has no working tree to read, and `--dirty` on one is refused up front rather
+than failing later with something about a missing directory. The resulting
+commit is marked:
 
 ```
 Template-Ref: <worktree>
@@ -53,8 +56,12 @@ Template-Dirty: true
 
 ```console
 Template:  ../my-template
-Revision:  8b3e7d1 (+ uncommitted changes)
 Ref:       refs/tpl/my-template
+
+Revision:  8b3e7d1 (+ uncommitted changes)
+Rendered:  3 renderings
+Merged:    yes
+Worktree:  clean
 ```
 
 !!! warning "`--dirty` renderings are not reproducible"

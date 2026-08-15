@@ -128,14 +128,19 @@ differences and nothing you would have to learn to ignore.
 Provenance lives in the commit message, as trailers:
 
 ```
-tpl: render noirbizarre/rust-library-template at v1.4.0
+tpl: render rust-library at v1.4.0
 
 Template-Source: https://github.com/noirbizarre/rust-library-template
 Template-Ref: v1.4.0
 Template-Commit: 4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29
 Answers-Digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
-Tpl-Version: 0.1.0
+Data-Source: licenses = template:data/licenses.toml@4f2c1a9
+Tpl-Version: 0.2.0
 ```
+
+The subject names the template's manifest `name` and the revision asked for.
+`Data-Source` appears once per data source the rendering actually used — see
+[Data sources](../data/index.md#provenance).
 
 `git tpl status` reads them back. So can you:
 

@@ -88,8 +88,8 @@ This works on a project that already has files too — the merge reconciles the
 two sides. See [an existing project](../usage/init.md#an-existing-project).
 
 ```console
-Template: rust-library-template
-Revision: 4f2c1a9
+Template:  ../rust-library-template
+Revision:  main (4f2c1a9)
 
 Created refs/tpl/rust-library-template
 
@@ -98,6 +98,8 @@ Created refs/tpl/rust-library-template
   added     src/lib.rs
 
 Merged into main.
+
+Answers recorded in .config/git.tpl.toml and committed.
 ```
 
 Look at what happened:
@@ -119,9 +121,15 @@ git tpl status
 
 ```console
 Template:  ../rust-library-template
-Revision:  4f2c1a9 → 8b3e7d1  (template has moved)
 Ref:       refs/tpl/rust-library-template
+
+Revision:  main (4f2c1a9) → main (8b3e7d1)   template has moved
+Rendered:  1 rendering
+Merged:    yes
 Worktree:  clean
+
+The template has moved. Run:
+  git tpl update
 ```
 
 ```sh
@@ -129,8 +137,8 @@ git tpl update
 ```
 
 ```console
-Template: rust-library-template
-Revision: 4f2c1a9 → 8b3e7d1
+Template:  ../rust-library-template
+Revision:  main (4f2c1a9) → main (8b3e7d1)
 
 Updated refs/tpl/rust-library-template
 
@@ -143,8 +151,8 @@ Run:
   git tpl merge
 ```
 
-Note the third line. `update` moved a ref and nothing else — `git status` is
-still clean, `HEAD` has not moved.
+Note "Your working tree was not modified." `update` moved a ref and nothing
+else — `git status` is still clean, `HEAD` has not moved.
 
 ```sh
 git tpl diff     # exactly what merging would bring in

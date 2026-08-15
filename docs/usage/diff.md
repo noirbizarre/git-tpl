@@ -11,11 +11,15 @@ machinery `git diff` uses, so the output is a diff you already know how to read.
 
 ```console
 $ git tpl diff --stat
- Cargo.toml                        |  4 ++--
- README.md                         |  7 ++++++-
- .github/workflows/release.yml     | 42 ++++++++++++++++++++++++++++++++++
- 3 files changed, 50 insertions(+), 3 deletions(-)
+  added     .github/workflows/release.yml
+  deleted   NOTES.md
+  modified  README.md
+
+3 file(s) differ
 ```
+
+`--stat` lists what changed, not how much: there are no insertion or deletion
+counts. Run the plain-Git equivalent below for a `git diff --stat` diffstat.
 
 ## The plain Git equivalent
 

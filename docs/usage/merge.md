@@ -34,28 +34,28 @@ reimplementing them is the mistake this design exists to avoid.
 
 ```console
 $ git tpl merge
-
-Merging refs/tpl/github-com-noirbizarre-rust-library-template into main
-
-  modified  Cargo.toml
-  modified  README.md
-  added     .github/workflows/release.yml
-
-Merge made by the 'ort' strategy.
+Merged refs/tpl/github-com-noirbizarre-rust-library-template into the current branch
+Merge commit 2fff441.
 ```
 
-Fast-forwards when it can.
+Fast-forwards when it can, and says so:
+
+```console
+$ git tpl merge
+Fast-forwarded refs/tpl/github-com-noirbizarre-rust-library-template into the current branch
+Now at 15b50a5.
+```
+
+With `--no-commit`, the merge is staged and left for you to commit.
 
 ## Conflicts
 
 ```console
 $ git tpl merge
 
-Merging refs/tpl/github-com-noirbizarre-rust-library-template into main
+CONFLICT (content): Merge conflict in README.md
 
-CONFLICT (content): Merge conflict in Cargo.toml
-
-Automatic merge failed; fix conflicts and then commit the result.
+warning: automatic merge failed; fix conflicts and then commit the result.
 
   git status              see what conflicted
   git mergetool           resolve interactively

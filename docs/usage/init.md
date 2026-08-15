@@ -14,8 +14,10 @@ git tpl init <template> [--ref <ref>] [--answer k=v]... [options]
 4. Builds the dependency graph and validates it.
 5. Asks the questions, in dependency order.
 6. Resolves computed values.
-7. Writes `.config/git.tpl.toml`.
-8. Renders the template.
+7. Renders the template.
+8. Writes `.config/git.tpl.toml`, and stages it. A template that fails to
+   render leaves no half-initialised project behind, which is why this comes
+   after the rendering rather than before it.
 9. Creates `refs/tpl/<id>` as an **orphan commit**.
 10. Merges that commit into the current branch, allowing unrelated histories.
 
@@ -43,13 +45,14 @@ Use `--no-merge` to stop after step 9 and wire it up yourself.
 | Option | Meaning |
 |---|---|
 | `--ref <ref>` | Branch, tag or commit. Defaults to the remote's default branch. |
+| `--init` | Create the repository if there is not one here. |
 | `--answer k=v` | Supply an answer, skipping its prompt. Repeatable. |
 | `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
 | `--defaults` | Accept every default without prompting. |
 | `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--id <id>` | Override the derived template id, and so the ref name. |
 | `--no-merge` | Create the ref, do not merge it. |
-| `--dirty` | Render the template's working tree rather than its `HEAD`. |
+| `--dirty` | Render the template's working tree rather than its `HEAD`. Local templates only. |
 | `--dry-run` | Report what would be asked and rendered; create nothing. |
 
 ## Example
@@ -57,15 +60,12 @@ Use `--no-merge` to stop after step 9 and wire it up yourself.
 ```console
 $ git tpl init https://github.com/noirbizarre/rust-library-template
 
-Template: rust-library
-  A small Rust library
-
 ? Project name › my-project
 ? License › MIT
 ? Enable CI? › yes
 
-Template: noirbizarre/rust-library-template
-Revision: v1.4.0 (8b3e7d1)
+Template:  https://github.com/noirbizarre/rust-library-template
+Revision:  v1.4.0 (8b3e7d1)
 
 Created refs/tpl/github-com-noirbizarre-rust-library-template
 
@@ -75,7 +75,13 @@ Created refs/tpl/github-com-noirbizarre-rust-library-template
   added     .github/workflows/ci.yml
 
 Merged into main.
+
+Answers recorded in .config/git.tpl.toml and committed.
 ```
+
+**Template** is the source exactly as you typed it, not the manifest's `name`:
+it is what `.config/git.tpl.toml` will record, and what a later `--ref` or
+`--id` will be resolved against.
 
 ## Preconditions
 
@@ -132,6 +138,9 @@ contributes no conflict resolution of its own ([ADR-002](../adr/002-no-custom-re
 ```console
 $ git tpl init ../rust-library-template --defaults
 
+Template:  ../rust-library-template
+Revision:  main (7fa834c)
+
 Created refs/tpl/rust-library-template
 
   added     Cargo.toml
@@ -144,6 +153,8 @@ warning: the merge left conflicts. Resolve them and commit:
 
   git status
   git commit
+
+Answers recorded in .config/git.tpl.toml and staged.
 
 $ git mergetool          # or edit the markers by hand
 $ git commit
