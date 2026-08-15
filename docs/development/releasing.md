@@ -93,18 +93,24 @@ so a release cannot break at the moment you need it.
 
 ## Assets
 
-Six targets, named `git-tpl_<tag>_<platform>`:
+Six targets, named `git-tpl_<tag>_<platform>.<ext>`:
 
 | Target | Asset |
 |---|---|
-| `x86_64-unknown-linux-gnu` | `linux-amd64` |
-| `aarch64-unknown-linux-gnu` | `linux-arm64` |
-| `x86_64-unknown-linux-musl` | `linux-amd64-musl` |
-| `x86_64-apple-darwin` | `darwin-amd64` |
-| `aarch64-apple-darwin` | `darwin-arm64` |
-| `x86_64-pc-windows-msvc` | `windows-amd64.exe` |
+| `x86_64-unknown-linux-gnu` | `linux-amd64.tar.gz` |
+| `aarch64-unknown-linux-gnu` | `linux-arm64.tar.gz` |
+| `x86_64-unknown-linux-musl` | `linux-amd64-musl.tar.gz` |
+| `x86_64-apple-darwin` | `darwin-amd64.tar.gz` |
+| `aarch64-apple-darwin` | `darwin-arm64.tar.gz` |
+| `x86_64-pc-windows-msvc` | `windows-amd64.zip` |
 
-Plus `SHA256SUMS`.
+Plus `SHA256SUMS`, which covers the archives.
+
+Each archive holds one entry at its root: `git-tpl`, or `git-tpl.exe` on
+Windows. That plain name is the point of archiving at all — a bare versioned
+asset forces every packaging format that consumes a release to rename the file
+it downloaded, and Git only resolves `git tpl` through an executable called
+exactly `git-tpl`.
 
 libgit2 is vendored and built from source on every target, so each binary is
 self-contained and every platform gets identical Git semantics.

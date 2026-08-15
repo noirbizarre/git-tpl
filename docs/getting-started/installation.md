@@ -5,9 +5,21 @@ into it, so there is nothing to install alongside.
 
 ## From source
 
-```sh
-cargo install git-tpl
-```
+=== "Compiled"
+
+    ```sh
+    cargo install git-tpl
+    ```
+
+=== "Prebuilt"
+
+    ```sh
+    cargo binstall git-tpl
+    ```
+
+    [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) downloads the
+    release archive for your platform instead of compiling. Falls back to
+    `cargo install` on a target with no published binary.
 
 ## With mise
 
@@ -44,21 +56,37 @@ shims, which is all Git needs to resolve `git tpl`.
 
 ## From a release
 
-Download the binary for your platform from the
-[releases page](https://github.com/noirbizarre/git-tpl/releases) and put it
-somewhere on your `PATH`.
+Download the archive for your platform from the
+[releases page](https://github.com/noirbizarre/git-tpl/releases), extract it and
+put the binary somewhere on your `PATH`.
 
 ```sh
-VERSION=0.2.0
-curl -fsSL -o git-tpl \
-  https://github.com/noirbizarre/git-tpl/releases/download/$VERSION/git-tpl_${VERSION}_linux-amd64
-chmod +x git-tpl
+VERSION=0.4.0
+curl -fsSLO \
+  https://github.com/noirbizarre/git-tpl/releases/download/$VERSION/git-tpl_${VERSION}_linux-amd64.tar.gz
+tar xzf git-tpl_${VERSION}_linux-amd64.tar.gz
 mv git-tpl ~/.local/bin/
 ```
 
-Assets are named `git-tpl_<version>_<platform>`, so `latest/download/` cannot
+The archive contains a single executable named `git-tpl`, already marked
+executable — nothing to rename and no `chmod` to remember.
+
+Assets are named `git-tpl_<version>_<platform>.tar.gz`, and
+`git-tpl_<version>_windows-amd64.zip` on Windows, so `latest/download/` cannot
 be used without knowing the version — set `VERSION` to the release you want.
-Each release also carries a `SHA256SUMS` file.
+
+Each release also carries a `SHA256SUMS` file covering the archives:
+
+```sh
+curl -fsSLO https://github.com/noirbizarre/git-tpl/releases/download/$VERSION/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS
+```
+
+!!! warning "Releases before 0.4.0"
+
+    Up to 0.3.0 the assets were bare binaries named `git-tpl_<version>_<platform>`,
+    with no archive and no extension. Anything pinned to those names needs
+    updating.
 
 ## Verify
 

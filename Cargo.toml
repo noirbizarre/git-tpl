@@ -23,6 +23,37 @@ readme = "README.md"
 keywords = ["git", "template", "scaffolding", "minijinja", "project"]
 categories = ["command-line-utilities", "development-tools"]
 
+# cargo-binstall otherwise derives an asset name from the target triple, and
+# our assets carry short platform suffixes instead. A wrong guess is not an
+# error: binstall silently falls back to building from source, which is the
+# slow path this exists to avoid. So every published target is mapped by hand.
+#
+# `{ version }` and not `v{ version }`: this project tags without a prefix.
+[package.metadata.binstall]
+pkg-fmt = "tgz"
+# The archives hold the binary at their root, so there is no directory to
+# descend into.
+bin-dir = "git-tpl{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/{ version }/git-tpl_{ version }_linux-amd64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-unknown-linux-gnu]
+pkg-url = "{ repo }/releases/download/{ version }/git-tpl_{ version }_linux-arm64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-unknown-linux-musl]
+pkg-url = "{ repo }/releases/download/{ version }/git-tpl_{ version }_linux-amd64-musl.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-apple-darwin]
+pkg-url = "{ repo }/releases/download/{ version }/git-tpl_{ version }_darwin-amd64.tar.gz"
+
+[package.metadata.binstall.overrides.aarch64-apple-darwin]
+pkg-url = "{ repo }/releases/download/{ version }/git-tpl_{ version }_darwin-arm64.tar.gz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/{ version }/git-tpl_{ version }_windows-amd64.zip"
+pkg-fmt = "zip"
+
 # The binary name is mandated by Git: `git tpl ...` resolves to an executable
 # named `git-tpl` on PATH. It is not a stylistic choice, and renaming it breaks
 # the only invocation the project is named after.
