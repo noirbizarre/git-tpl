@@ -30,12 +30,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-unknown-linux-gnu,   runner: ubuntu-latest,  asset: linux-amd64,   cross: true }
-          - { target: aarch64-unknown-linux-gnu,  runner: ubuntu-latest,  asset: linux-arm64,   cross: true }
-          - { target: x86_64-unknown-linux-musl,  runner: ubuntu-latest,  asset: linux-amd64-musl, cross: true }
-          - { target: x86_64-apple-darwin,        runner: macos-latest,   asset: darwin-amd64,  cross: false }
-          - { target: aarch64-apple-darwin,       runner: macos-latest,   asset: darwin-arm64,  cross: false }
-          - { target: x86_64-pc-windows-msvc,     runner: windows-latest, asset: windows-amd64, cross: false, ext: .exe }
+          - { target: x86_64-unknown-linux-gnu,   runner: ubuntu-latest,  asset: linux-amd64,      cross: true,  archive: tar.gz }
+          - { target: aarch64-unknown-linux-gnu,  runner: ubuntu-latest,  asset: linux-arm64,      cross: true,  archive: tar.gz }
+          - { target: x86_64-unknown-linux-musl,  runner: ubuntu-latest,  asset: linux-amd64-musl, cross: true,  archive: tar.gz }
+          - { target: x86_64-apple-darwin,        runner: macos-latest,   asset: darwin-amd64,     cross: false, archive: tar.gz }
+          - { target: aarch64-apple-darwin,       runner: macos-latest,   asset: darwin-arm64,     cross: false, archive: tar.gz }
+          - { target: x86_64-pc-windows-msvc,     runner: windows-latest, asset: windows-amd64,    cross: false, archive: zip, ext: .exe }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -63,12 +63,27 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
 
-      - name: Stage the asset
+      # The archive member is always the plain `git-tpl`, never the versioned
+      # asset name. A bare binary asset forces every packaging format — AUR,
+      # Homebrew, ubi, cargo-binstall, a mise registry entry — to rename the
+      # file it downloads, and Git only resolves `git tpl` through an
+      # executable called exactly `git-tpl`.
+      - name: Package the asset
         shell: bash
         run: |
-          mkdir -p dist
-          cp "target/${{ matrix.target }}/release/git-tpl${{ matrix.ext }}" \
-             "dist/git-tpl_${{ inputs.tag }}_${{ matrix.asset }}${{ matrix.ext }}"
+          set -euo pipefail
+          mkdir -p dist staging
+          cp "target/${{ matrix.target }}/release/git-tpl${{ matrix.ext }}" staging/
+          name="git-tpl_${{ inputs.tag }}_${{ matrix.asset }}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            # `zip` is absent from the Windows runners; 7-Zip is preinstalled.
+            # `-tzip` because the default format would be .7z despite the name.
+            (cd staging && 7z a -tzip "../dist/$name.zip" "git-tpl${{ matrix.ext }}")
+          else
+            # `-C staging` so the archive holds `git-tpl` at its root rather
+            # than `staging/git-tpl`, which extractors would recreate.
+            tar -C staging -czf "dist/$name.tar.gz" "git-tpl${{ matrix.ext }}"
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
