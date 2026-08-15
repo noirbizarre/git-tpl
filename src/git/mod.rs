@@ -229,14 +229,6 @@ pub enum GitError {
         path: PathBuf,
     },
 
-    /// A ref does not exist.
-    #[error("`{name}` does not exist")]
-    #[diagnostic(code(tpl::git::no_such_ref))]
-    NoSuchRef {
-        /// The ref that was looked for.
-        name: String,
-    },
-
     /// A revision could not be resolved.
     #[error("could not resolve `{revision}` in `{origin}`")]
     #[diagnostic(

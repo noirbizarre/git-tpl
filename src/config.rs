@@ -33,20 +33,6 @@ pub enum ConfigError {
         path: PathBuf,
     },
 
-    /// A configuration file already exists where one was about to be created.
-    #[error("this repository already has a template attached")]
-    #[diagnostic(
-        code(tpl::config::exists),
-        help(
-            "`{}` already exists. Run `git tpl update` to re-render, or edit the answers there and update.",
-            CONFIG_PATH
-        )
-    )]
-    AlreadyExists {
-        /// The existing path.
-        path: PathBuf,
-    },
-
     /// The file could not be parsed as TOML, or does not match the schema.
     #[error("invalid configuration in `{name}`: {message}")]
     #[diagnostic(code(tpl::config::parse))]
