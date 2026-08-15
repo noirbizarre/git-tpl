@@ -88,6 +88,13 @@ pub struct Resolved {
     pub reference: String,
     /// Whether an uncommitted working tree was read.
     pub dirty: bool,
+    /// Paths a `.gitignore` kept out of a `--dirty` render.
+    ///
+    /// Empty for a committed revision. Surfaced because the ignore stack
+    /// includes `core.excludesFile`: a global rule set years ago on an
+    /// unrelated project can remove a file the author can see on disk, and an
+    /// unexplained absence in a rendering is the hardest kind of bug to find.
+    pub ignored: Vec<String>,
     /// Kept so the temporary clone outlives the resolution.
     _cache: Option<tempfile::TempDir>,
 }
@@ -150,7 +157,7 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
         }
     };
 
-    let (revision, tree, reference, dirty) = if request.dirty {
+    let (revision, tree, reference, dirty, ignored) = if request.dirty {
         let path = local.as_ref().expect("checked above");
         // The HEAD it is based on, recorded so the rendering is at least
         // attributable even though it is not reproducible.
@@ -159,8 +166,8 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
             // working tree is still meaningful; there is simply no base.
             Oid::from_bytes([0; 20])
         });
-        let tree = repo.tree_from_workdir(path)?;
-        (base, tree, WORKTREE_REF.to_string(), true)
+        let (tree, ignored) = repo.tree_from_workdir(path)?;
+        (base, tree, WORKTREE_REF.to_string(), true, ignored)
     } else {
         let reference = match request.reference {
             Some(reference) => reference.to_string(),
@@ -168,7 +175,7 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
         };
         let revision = repo.resolve_revision(&reference, request.source)?;
         let tree = repo.commit_tree(revision)?;
-        (revision, tree, reference, false)
+        (revision, tree, reference, false, Vec::new())
     };
 
     let manifest_bytes =
@@ -193,6 +200,7 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
         revision,
         reference,
         dirty,
+        ignored,
         _cache: cache,
     })
 }

@@ -200,6 +200,37 @@ fn dry_run(
         ctx.say(muted(&ctx.theme, "  (none)"));
     }
 
+    // The file list, when the answers are complete enough to render without
+    // asking. `update --dry-run` has always shown what would change, and a
+    // flag that meant "list the questions" on one command and "list the files"
+    // on another is a flag with two meanings.
+    //
+    // Only under `--defaults`: otherwise producing the list would mean asking
+    // the whole questionnaire, which is precisely what a dry run is avoiding.
+    if args.answers.defaults {
+        let mut prompter = tpl::eval::DefaultsOnly;
+        let mut confirmer = crate::prompt::Confirmer;
+        if let Ok(rendered) = ops::render_files(
+            ops::Target {
+                source,
+                reference: args.r#ref.as_deref(),
+                root: None,
+                dirty: args.dirty,
+            },
+            Some((&ctx.repo, &ctx.root)),
+            answers.clone(),
+            &ctx.user,
+            tpl::ops::Answering::Interactive(&mut prompter),
+            trust(&args.answers, args.trust, false, &mut confirmer),
+        ) {
+            ctx.blank();
+            ctx.say(heading(&ctx.theme, "Files it would render"));
+            for file in &rendered.files {
+                ctx.say(muted(&ctx.theme, &format!("  {}", file.path)));
+            }
+        }
+    }
+
     ctx.blank();
     ctx.say(muted(&ctx.theme, "Nothing was created."));
     Ok(())

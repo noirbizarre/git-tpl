@@ -491,3 +491,83 @@ fn strict_answers_accepts_an_answer_set_that_names_only_real_questions() {
 
     assert!(scratch.read("Cargo.toml").contains("strictly"));
 }
+
+/// The ignore stack includes `core.excludesFile`, so a global rule set years
+/// ago on an unrelated project can remove a file the author can see on disk.
+/// Inside a render there is no `git status` to explain the absence.
+#[test]
+fn dirty_reports_what_gitignore_removed_from_the_render() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+
+    template.repo.write(".gitignore", "*.local\n");
+    template.repo.write("template/secret.local", "hidden\n");
+    template.repo.commit_all("chore: ignore local files");
+
+    let output = scratch
+        .run(&[
+            "--json",
+            "render",
+            &template.source(),
+            "--dirty",
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .success();
+
+    assert!(!scratch.out().join("secret.local").exists());
+    let json = output.json();
+    let skipped = json["skippedByGitignore"].as_array().expect("skipped");
+    assert!(
+        skipped.iter().any(|p| p == "template/secret.local"),
+        "the absence went unexplained: {skipped:?}"
+    );
+    // And loudly enough to be seen, since it is stderr a human reads.
+    output.says("skipped by .gitignore");
+}
+
+/// The count alone tells the author something vanished; only the paths tell
+/// them *what*, and a template with a dozen ignored files is exactly when the
+/// count stops being enough.
+#[test]
+fn verbose_lists_the_files_gitignore_removed() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+
+    template.repo.write(".gitignore", "*.local\n");
+    template.repo.write("template/secret.local", "hidden\n");
+    template.repo.commit_all("chore: ignore local files");
+
+    let out = scratch.out();
+    let out = out.to_str().unwrap();
+
+    // Without `-v`, the path is withheld and the way to get it is offered.
+    scratch
+        .run(&[
+            "render",
+            &template.source(),
+            "--dirty",
+            "--output",
+            out,
+            "--defaults",
+            "--force",
+        ])
+        .success()
+        .silent_about("template/secret.local")
+        .says("run with -v to list them");
+
+    scratch
+        .run(&[
+            "render",
+            &template.source(),
+            "--dirty",
+            "--output",
+            out,
+            "--defaults",
+            "--force",
+            "-v",
+        ])
+        .success()
+        .says("template/secret.local");
+}

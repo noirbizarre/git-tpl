@@ -54,6 +54,7 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         rendered.template.manifest.questions.keys().cloned(),
     )?;
     report_ignored_to(&ctx.out, &rendered.ignored_answers);
+    report_ignored_paths(&ctx, &rendered.template.ignored);
 
     prepare_output(&args.output, args.force)?;
     for file in &rendered.files {
@@ -84,6 +85,7 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     "templated": f.templated,
                 })).collect::<Vec<_>>(),
                 "ignoredAnswers": rendered.ignored_answers,
+                "skippedByGitignore": rendered.template.ignored,
             }))
         );
         return Ok(crate::exit::SUCCESS);
@@ -177,4 +179,32 @@ fn io(path: &Path, verb: &str, error: &std::io::Error) -> OpError {
         context: format!("{verb} `{}`", path.display()),
         reason: error.to_string(),
     })
+}
+
+/// Say what `.gitignore` removed from a `--dirty` render.
+///
+/// A count always, the paths under `-v`. The ignore stack includes
+/// `core.excludesFile`, so this is regularly a global rule the author forgot
+/// they wrote — and inside a render there is no `git status` to reveal it.
+fn report_ignored_paths(ctx: &Standalone, ignored: &[String]) {
+    if ignored.is_empty() {
+        return;
+    }
+    ctx.out.warn(crate::theme::warning(
+        &ctx.out.theme,
+        &format!(
+            "{} file(s) skipped by .gitignore and absent from the rendering",
+            ignored.len()
+        ),
+    ));
+    if ctx.out.global.verbose > 0 {
+        for path in ignored {
+            ctx.out.warn(muted(&ctx.out.theme, &format!("  {path}")));
+        }
+    } else {
+        ctx.out.warn(muted(
+            &ctx.out.theme,
+            "  run with -v to list them, or `git check-ignore -v <path>` to find the rule",
+        ));
+    }
 }

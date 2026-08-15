@@ -645,3 +645,24 @@ fn force_re_renders_over_an_existing_attachment() {
 
     assert!(world.project.read("README.md").contains("second"));
 }
+
+/// `update --dry-run` has always listed what would change. A flag meaning
+/// "the questions" on one command and "the files" on another is a flag with
+/// two meanings.
+#[test]
+fn a_dry_run_lists_the_files_it_would_render() {
+    let world = World::new();
+
+    tpl(
+        &world.project,
+        &["init", &world.template.source(), "--defaults", "--dry-run"],
+    )
+    .success()
+    .says("Files it would render")
+    .says("Cargo.toml")
+    .says("Nothing was created.");
+
+    // Still nothing written, which is the whole contract of the flag.
+    assert!(!world.project.exists(".config/git.tpl.toml"));
+    assert!(!world.project.has_ref(&world.ref_name()));
+}

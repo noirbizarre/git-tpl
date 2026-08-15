@@ -517,7 +517,13 @@ pub trait GitBackend {
     ///
     /// Reads a working tree rather than a commit, honouring `.gitignore`, so
     /// the result matches what `git add -A` would have staged.
-    fn tree_from_workdir(&self, root: &Path) -> Result<Oid, GitError>;
+    /// Build a tree from a working directory.
+    ///
+    /// Returns the tree and the paths `.gitignore` removed from it. The second
+    /// half is reported rather than discarded: the ignore stack includes
+    /// `core.excludesFile`, so a global rule can silently drop a file the
+    /// author can see, and a render has no `git status` to explain it with.
+    fn tree_from_workdir(&self, root: &Path) -> Result<(Oid, Vec<String>), GitError>;
 
     /// Read a file from a tree by path.
     fn read_path(&self, tree: Oid, path: &str) -> Result<Option<Vec<u8>>, GitError>;
