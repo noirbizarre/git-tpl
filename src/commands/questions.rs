@@ -86,7 +86,7 @@ pub fn run(args: QuestionsArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         ctx.out.say(muted(&ctx.out.theme, "  (none)"));
     }
     for (_, name, question) in &ordered {
-        let mut line = format!("  {name} ({})", question.kind.type_name());
+        let mut line = format!("  {name} ({})", question.kind.declared_name());
         if let Some(when) = &question.when {
             line.push_str(&format!(" when {when}"));
         }
