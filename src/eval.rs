@@ -154,7 +154,7 @@ impl Prompter for DefaultsOnly {
         name: &str,
         _question: &Question,
         default: Option<&Value>,
-        // Ignored, and this is the whole of PLAN item 5. A `default_from`
+        // Ignored, deliberately: a seed is prompt-only. A `default_from`
         // value comes from the machine's Git configuration; using it where no
         // human confirms it would make the same template render two different
         // trees on two machines.
@@ -1716,8 +1716,8 @@ mod tests {
         );
     }
 
-    /// PLAN item 5, stated as a test. Nobody is asked, so the machine's value
-    /// is not an answer — the template's own default is.
+    /// A seed is prompt-only, stated as a test. Nobody is asked, so the
+    /// machine's value is not an answer — the template's own default is.
     #[test]
     fn a_seed_is_ignored_when_questions_are_not_asked() {
         let context = resolve_seeded(

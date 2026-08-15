@@ -142,8 +142,11 @@ can find it.
 
 ## Status
 
-Early. The core model works end to end; see
-[PLAN.md](PLAN.md) for what is implemented and what is not.
+Early. The core model works end to end; the documentation describes what is
+implemented, and the [issue tracker](https://github.com/noirbizarre/git-tpl/issues)
+holds what is not. See the
+[roadmap](https://noirbizarre.github.io/git-tpl/development/roadmap/) for how it
+is organised.
 
 ## License
 

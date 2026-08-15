@@ -40,7 +40,7 @@ shims, which is all Git needs to resolve `git tpl`.
     `mise use git-tpl` on its own fails: there is no entry for git-tpl in mise's
     registry yet, so the tool has to be named by its backend — `cargo:` or
     `github:`. Getting the short name is tracked in
-    [PLAN.md](https://github.com/noirbizarre/git-tpl/blob/main/PLAN.md).
+    [issue #25](https://github.com/noirbizarre/git-tpl/issues/25).
 
 ## From a release
 
