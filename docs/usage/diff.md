@@ -3,7 +3,7 @@
 What merging the template would change.
 
 ```sh
-git tpl diff [--stat] [--name-only] [--reverse] [-- <path>...]
+git tpl diff [--stat] [--name-only] [--reverse] [--exit-code] [--dirty] [-- <path>...]
 ```
 
 It merges `refs/tpl/<id>` into `HEAD` in memory — no ref, no index and no
@@ -87,4 +87,6 @@ git tpl diff --name-only
 | `--stat` | A per-file summary with line counts, instead of the full patch. |
 | `--name-only` | Paths only, on stdout. Wins if `--stat` is also given. |
 | `--reverse` | Diff the other way, merged → `HEAD`: the inverse patch. |
+| `--exit-code` | Exit `1` when the preview shows a **difference**. Conflicts still exit `0` — a conflicting preview is a correct answer, not a failure, so CI can treat "would change something" separately from "would conflict". |
+| `--dirty` | Preview against the template's **working tree** instead of the rendered ref (`ops::render_preview`). Answers come from the recorded ones; `--answer` overrides them for the preview only. Writes nothing: the preview commit is a loose object no ref points at. |
 | `-- <path>...` | Limit to these paths. |
