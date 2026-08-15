@@ -2,8 +2,9 @@
 
 use tpl::ops::{self, OpError};
 
-use super::Session;
+use super::{Session, answering, supplied, trust};
 use crate::cli::{DiffArgs, GlobalArgs};
+use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change_stat, diff_summary, muted, warning};
 
 /// Announce the paths a merge could not resolve on its own.
@@ -35,6 +36,7 @@ fn report_conflicts(ctx: &Session, conflicts: &[String]) {
 
 pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
+    let against = preview(&ctx, args.dirty, &args.answers)?;
 
     // JSON first: it subsumes every other mode, and it is the one that carries
     // the conflicts as *data*. In text output they are chrome on stderr, which
@@ -42,7 +44,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // "which files would conflict" is the single most valuable thing to know
     // before merging.
     if global.json {
-        let preview = ops::diff_stat(&ctx.repo, &ctx.root, &args.paths, args.reverse)?;
+        let preview = ops::diff_stat(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
         let stats = &preview.changes;
         println!(
             "{}",
@@ -65,7 +67,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // `--name-only` wins when both are given: it is the machine-readable mode,
     // and a caller piping it should never receive a summary.
     if args.name_only {
-        let preview = ops::diff_changes(&ctx.repo, &ctx.root, &args.paths, args.reverse)?;
+        let preview = ops::diff_changes(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
         if preview.changes.is_empty() {
             ctx.say(muted(&ctx.theme, "No differences."));
             return Ok(crate::exit::SUCCESS);
@@ -80,7 +82,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     }
 
     if args.stat {
-        let preview = ops::diff_stat(&ctx.repo, &ctx.root, &args.paths, args.reverse)?;
+        let preview = ops::diff_stat(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
         let stats = &preview.changes;
         if stats.is_empty() {
             ctx.say(muted(&ctx.theme, "No differences."));
@@ -104,7 +106,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         return Ok(crate::exit::SUCCESS);
     }
 
-    let preview = ops::diff(&ctx.repo, &ctx.root, &args.paths, args.reverse)?;
+    let preview = ops::diff(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
     if preview.changes.is_empty() {
         ctx.say(muted(&ctx.theme, "No differences."));
     } else {
@@ -113,4 +115,31 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         print!("{}", preview.changes);
     }
     Ok(crate::exit::SUCCESS)
+}
+
+/// Render the template now, when `--dirty` asks for a preview of it.
+///
+/// The result is a commit no ref points at, so nothing is written that a later
+/// `update` would have to reconcile with.
+fn preview(
+    ctx: &Session,
+    dirty: bool,
+    answers: &crate::cli::AnswerArgs,
+) -> Result<Option<tpl::git::Oid>, OpError> {
+    if !dirty {
+        return Ok(None);
+    }
+    let preferences = tpl::gitconfig::Preferences::load(&ctx.repo)?;
+    let mut prompter = Interactive;
+    let mut confirmer = Confirmer;
+    ops::render_preview(
+        &ctx.repo,
+        &ctx.root,
+        supplied(answers)?,
+        true,
+        &ctx.user,
+        answering(answers, preferences.interactive, &mut prompter),
+        trust(answers, false, preferences.interactive, &mut confirmer),
+    )
+    .map(Some)
 }

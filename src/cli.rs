@@ -298,6 +298,10 @@ pub struct QuestionsArgs {
 /// `git tpl status`
 #[derive(Debug, clap::Args)]
 pub struct StatusArgs {
+    /// Compare against the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+
     // Deprecated: use the global `--json`.
     //
     // Kept for one minor so that a CI job pinned to `--format json` does not
@@ -332,6 +336,17 @@ pub struct DiffArgs {
     #[arg(long)]
     pub reverse: bool,
 
+    /// Preview the template's working tree rather than the rendered ref
+    //
+    // This renders, which nothing else in `diff` does. Answers come from the
+    // recorded ones; `--answer` overrides them for the preview only, and
+    // nothing is written anywhere.
+    #[arg(long)]
+    pub dirty: bool,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
     /// Limit to these paths
     #[arg(last = true, value_name = "PATH")]
     pub paths: Vec<String>,
@@ -340,6 +355,13 @@ pub struct DiffArgs {
 /// `git tpl show`
 #[derive(Debug, clap::Args)]
 pub struct ShowArgs {
+    /// Read from the template's working tree rather than the rendered ref
+    #[arg(long)]
+    pub dirty: bool,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
     /// The path, relative to the repository root
     ///
     /// A plain positional rather than `last = true`: `diff` needs `--` only
@@ -463,14 +485,25 @@ mod tests {
         );
     }
 
-    /// `--answer` is meaningless to `diff`, and a silently ignored flag is
-    /// worse than a refused one.
+    /// A silently ignored flag is worse than a refused one.
+    ///
+    /// `diff` and `show` gained `--answer` when they gained `--dirty`: both
+    /// now render, and a preview has to be answerable. The commands that still
+    /// never render still refuse it.
     #[test]
     fn answer_flags_are_refused_where_they_would_be_ignored() {
-        assert!(Cli::try_parse_from(["git-tpl", "diff", "--answer", "a=b"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "push", "--defaults"]).is_err());
-        assert!(Cli::try_parse_from(["git-tpl", "diff", "--answers-from", "a.toml"]).is_err());
-        assert!(Cli::try_parse_from(["git-tpl", "show", "x", "--defaults"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "fetch", "--answer", "a=b"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "merge", "--answers-from", "a.toml"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "status", "--defaults"]).is_err());
+    }
+
+    /// The other half of the same rule: a command that renders accepts them.
+    #[test]
+    fn answer_flags_are_accepted_where_a_preview_renders() {
+        assert!(Cli::try_parse_from(["git-tpl", "diff", "--dirty", "--answer", "a=b"]).is_ok());
+        assert!(Cli::try_parse_from(["git-tpl", "show", "x", "--dirty", "--defaults"]).is_ok());
+        assert!(Cli::try_parse_from(["git-tpl", "render", "t", "-o", "out", "--defaults"]).is_ok());
     }
 
     /// `show` reads one path. A second one is a typo — most likely a `--`

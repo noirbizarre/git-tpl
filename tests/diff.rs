@@ -377,3 +377,120 @@ fn diff_json_names_the_files_that_would_conflict() {
         output.stdout
     );
 }
+
+// ---------------------------------------------------------------------------
+// `--dirty`: previewing an uncommitted template edit.
+//
+// Everything above diffs the rendered ref. These render the template's working
+// tree on the fly, which is the loop a template author is actually in — and
+// the reason `diff` had to learn to render at all.
+// ---------------------------------------------------------------------------
+
+/// The point of the flag: an edit that is not committed anywhere still shows up.
+#[test]
+fn dirty_previews_an_uncommitted_template_edit() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world.template.repo.write(
+        "template/README.md.jinja",
+        "# {{ project_name }}\n\nnew line\n",
+    );
+
+    tpl(&world.project, &["diff", "--stat"])
+        .success()
+        .says("No differences.");
+
+    tpl(&world.project, &["diff", "--dirty", "--stat"])
+        .success()
+        .says("README.md");
+}
+
+/// A preview is a rendering, and a rendering that moved the ref would be an
+/// `update` nobody asked for — and one a later real update would have to
+/// reconcile with.
+#[test]
+fn a_dirty_preview_does_not_move_the_rendered_ref() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let before = world.project.rev_parse(&world.ref_name());
+    let head_before = world.project.rev_parse("HEAD");
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# changed\n");
+
+    tpl(&world.project, &["diff", "--dirty"]).success();
+
+    assert_eq!(
+        world.project.rev_parse(&world.ref_name()),
+        before,
+        "the preview advanced the rendered ref"
+    );
+    assert_eq!(
+        world.project.rev_parse("HEAD"),
+        head_before,
+        "the preview moved HEAD"
+    );
+    assert!(
+        world.project.status().is_empty(),
+        "the worktree was touched"
+    );
+}
+
+/// A preview answers the recorded questions, not a fresh questionnaire.
+/// Without this it would hang for a non-interactive caller and re-ask an
+/// interactive one just to look at a diff.
+#[test]
+fn a_dirty_preview_reuses_the_recorded_answers() {
+    let world = World::new();
+    world.init(&["--answer", "project_name=recorded"]).success();
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# {{ project_name }} edited\n");
+
+    tpl(&world.project, &["show", "--dirty", "README.md"])
+        .success()
+        .says("recorded");
+}
+
+/// `show --dirty` reads one file out of the same preview.
+#[test]
+fn show_dirty_reads_from_the_uncommitted_template() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# uncommitted marker\n");
+
+    tpl(&world.project, &["show", "README.md"])
+        .success()
+        .silent_about("uncommitted marker");
+
+    tpl(&world.project, &["show", "--dirty", "README.md"])
+        .success()
+        .says("uncommitted marker");
+}
+
+/// `status --dirty` is the cheap half: it reports against the working tree
+/// rather than the committed revision, so an uncommitted edit reads as pending.
+#[test]
+fn status_dirty_reports_an_uncommitted_template_as_pending() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    tpl(&world.project, &["status"]).code(0);
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# changed\n");
+
+    tpl(&world.project, &["status", "--dirty"]).code(2);
+}

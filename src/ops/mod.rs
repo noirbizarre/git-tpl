@@ -852,6 +852,7 @@ pub fn status(
     project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
+    dirty: bool,
 ) -> Result<Status, OpError> {
     let config = Config::load(project_root)?;
     let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
@@ -866,11 +867,15 @@ pub fn status(
     // Resolving the template is a network operation, so a failure here is
     // reported as "unknown" rather than aborting the whole status. Being
     // offline should not stop you learning what is attached.
+    //
+    // `dirty` compares against the template's working tree instead of its
+    // committed revision, which is how an author asks "does my uncommitted
+    // edit change anything here?" without committing it first.
     let resolved = resolve::resolve(Request {
         source: &config.template.source,
         reference: config.template.r#ref.as_deref(),
         root: config.template.root.as_deref(),
-        dirty: false,
+        dirty,
     })
     .ok();
 
@@ -879,6 +884,13 @@ pub fn status(
         .map(|r| describe_revision(&r.reference, r.revision));
 
     let template_moved = match (&resolved, &recorded) {
+        // A `--dirty` resolution reports the *base* commit, so comparing
+        // revisions would say "unmoved" whenever the working tree sits on the
+        // rendered commit — which is the common case and the one the flag was
+        // asked about. The honest answer is that an uncommitted template is
+        // always something to re-render, because nothing recorded what it
+        // contained.
+        (Some(resolved), _) if resolved.dirty => true,
         (Some(resolved), Some(recorded)) => recorded
             .commit
             .is_some_and(|commit| commit != resolved.revision),
@@ -944,6 +956,55 @@ fn count_renderings(project: &dyn GitBackend, tip: Oid) -> Result<usize, GitErro
     Ok(count)
 }
 
+/// Render the configured template now, as a commit nothing points at.
+///
+/// This is what `diff --dirty` and `show --dirty` preview against. The commit
+/// is a loose object: no ref is created or moved, so the append-only guarantee
+/// is untouched and `git gc` reclaims it. It exists at all only because
+/// [`GitBackend::merge_preview`] merges *commits*, and a rendering is a tree.
+///
+/// Answers come from `.config/git.tpl.toml`, so the preview asks nothing: the
+/// question being answered is "what would my template edit do to this
+/// project?", not "what would a different set of answers do?".
+pub fn render_preview(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    overrides: BTreeMap<String, Value>,
+    dirty: bool,
+    user: &UserConfig,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+) -> Result<Oid, OpError> {
+    let config = Config::load(project_root)?;
+
+    // Recorded answers first, then command-line overrides — the same order
+    // `update` uses. Without the recorded ones a preview would prompt for
+    // every question the project already answered, which for a
+    // non-interactive caller means hanging and for an interactive one means
+    // answering the questionnaire again to look at a diff.
+    let mut supplied = config.answers.clone();
+    supplied.extend(overrides);
+
+    let rendered = render(
+        project,
+        project_root,
+        &config,
+        supplied,
+        dirty,
+        user,
+        answering,
+        trust,
+    )?;
+
+    // Parented on the rendered ref's tip when there is one, so the merge base
+    // is the same one a real update would produce and the preview matches what
+    // merging would actually do.
+    let (_, ref_name) = identify(project_root)?;
+    let parents: Vec<Oid> = project.resolve_ref(&ref_name)?.into_iter().collect();
+
+    Ok(project.create_commit(rendered.tree, &parents, "preview: uncommitted template\n")?)
+}
+
 /// The rendered ref's tip, or a helpful error.
 fn require_tip(project: &dyn GitBackend, ref_name: &str) -> Result<Oid, OpError> {
     project
@@ -984,9 +1045,18 @@ fn diff_endpoints(
     project: &dyn GitBackend,
     project_root: &Path,
     reverse: bool,
+    against: Option<Oid>,
 ) -> Result<(Option<Oid>, Oid, Vec<String>), OpError> {
-    let (_, ref_name) = identify(project_root)?;
-    let tip = require_tip(project, &ref_name)?;
+    // `against` is a commit to preview instead of the rendered ref's tip — a
+    // rendering that exists only as an object, never as a ref, which is how
+    // `--dirty` previews an uncommitted template without writing anything.
+    let tip = match against {
+        Some(commit) => commit,
+        None => {
+            let (_, ref_name) = identify(project_root)?;
+            require_tip(project, &ref_name)?
+        }
+    };
 
     let Some(head) = project.head_commit()? else {
         // No commits yet: the merge is the fast-forward that creates them, so
@@ -1016,8 +1086,9 @@ pub fn diff(
     project_root: &Path,
     paths: &[String],
     reverse: bool,
+    against: Option<Oid>,
 ) -> Result<DiffPreview<String>, OpError> {
-    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse, against)?;
     Ok(DiffPreview {
         changes: project.diff_patch(from, to, paths)?,
         conflicts,
@@ -1030,8 +1101,9 @@ pub fn diff_changes(
     project_root: &Path,
     paths: &[String],
     reverse: bool,
+    against: Option<Oid>,
 ) -> Result<DiffPreview<Vec<Change>>, OpError> {
-    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse, against)?;
     Ok(DiffPreview {
         changes: project.diff_trees(from, to, paths)?,
         conflicts,
@@ -1044,8 +1116,9 @@ pub fn diff_stat(
     project_root: &Path,
     paths: &[String],
     reverse: bool,
+    against: Option<Oid>,
 ) -> Result<DiffPreview<Vec<FileStat>>, OpError> {
-    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse, against)?;
     Ok(DiffPreview {
         changes: project.diff_stat(from, to, paths)?,
         conflicts,
@@ -1099,10 +1172,27 @@ fn normalise_shown_path(path: &str) -> Result<String, OpError> {
 /// merge, where the tip is the side being read and the machine may be offline —
 /// so this never resolves the template repository and never touches the
 /// network.
-pub fn show(project: &dyn GitBackend, project_root: &Path, path: &str) -> Result<Shown, OpError> {
+pub fn show(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    path: &str,
+    against: Option<Oid>,
+) -> Result<Shown, OpError> {
+    // Resolved even when `against` supplies the tree, because the
+    // "no such path" diagnostic names the ref the reader was looking in, and a
+    // preview is still a rendering *of* that template.
     let (_, ref_name) = identify(project_root)?;
-    let tip = require_tip(project, &ref_name)?;
-    let tree = project.commit(tip)?.tree;
+
+    // As in `diff_endpoints`: `against` is a rendering that exists as an
+    // object but not as a ref, so `--dirty` can show a file from an
+    // uncommitted template without writing anything.
+    let tree = match against {
+        Some(commit) => project.commit(commit)?.tree,
+        None => {
+            let tip = require_tip(project, &ref_name)?;
+            project.commit(tip)?.tree
+        }
+    };
 
     let path = normalise_shown_path(path)?;
 
