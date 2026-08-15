@@ -1471,6 +1471,76 @@ mod tests {
         );
     }
 
+    /// A stringified sequence and a real one render identically in the easy
+    /// cases, so a regression that started collapsing computed values to text
+    /// would show up only when a later expression indexed or iterated one.
+    /// Assert the variant, and then use it downstream.
+    #[test]
+    fn a_computed_sequence_stays_a_sequence_through_evaluate() {
+        let context = resolve_with(
+            r#"
+            name = "t"
+            [computed]
+            available = "{{ ['serde', 'clap', 'tokio'] }}"
+            selected = "{{ available | select('ne', 'clap') | list }}"
+            first = "{{ selected[0] }}"
+            count = "{{ selected | length }}"
+            "#,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.get_path("selected"),
+            Some(&Value::Array(vec![
+                Value::String("serde".into()),
+                Value::String("tokio".into()),
+            ]))
+        );
+        assert_eq!(
+            context.get_path("first"),
+            Some(&Value::String("serde".into()))
+        );
+        assert_eq!(context.get_path("count"), Some(&Value::Integer(2)));
+    }
+
+    /// The same defence for a table. `dictsort` keeps the iteration assertion
+    /// independent of map ordering, so it cannot become a source of
+    /// non-determinism itself.
+    #[test]
+    fn a_computed_table_stays_a_table_through_evaluate() {
+        let context = resolve_with(
+            r#"
+            name = "t"
+            [questions.project_name]
+            type = "string"
+            default = "My Project"
+            [computed]
+            meta = "{{ dict(name=project_name, slug=project_name | lower | replace(' ', '-')) }}"
+            slug = "{{ meta.slug }}"
+            keys = "{{ meta | dictsort | map(attribute=0) | join(',') }}"
+            "#,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.get_path("meta"),
+            Some(&Value::Table(BTreeMap::from([
+                ("name".to_string(), Value::String("My Project".into())),
+                ("slug".to_string(), Value::String("my-project".into())),
+            ])))
+        );
+        assert_eq!(
+            context.get_path("slug"),
+            Some(&Value::String("my-project".into()))
+        );
+        assert_eq!(
+            context.get_path("keys"),
+            Some(&Value::String("name,slug".into()))
+        );
+    }
+
     /// Only answers are recorded in `.config/git.tpl.toml`; computed values are
     /// a function of them and are recomputed every render.
     #[test]
