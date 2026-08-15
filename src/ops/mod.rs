@@ -24,7 +24,7 @@ use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
 use crate::provenance::{Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
-use crate::render::{RenderError, render_tree};
+use crate::render::{RenderError, Rendered, render_entries, write_tree};
 use crate::template::{Manifest, Value};
 use crate::userconfig::UserConfig;
 
@@ -84,6 +84,11 @@ pub enum OpError {
     #[diagnostic(transparent)]
     Render(#[from] RenderError),
 
+    /// A template failed its static checks.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Lint(#[from] crate::lint::LintError),
+
     /// A Git operation failed.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -126,6 +131,19 @@ pub enum OpError {
     NoRenderedRef {
         /// The ref that was looked for.
         ref_name: String,
+    },
+
+    /// A supplied answer names no question, under `--strict-answers`.
+    #[error("`{key}` names no question in this template")]
+    #[diagnostic(
+        code(tpl::answers::unknown_key),
+        help("{suggestion}Remove it, or drop --strict-answers to ignore it.")
+    )]
+    UnknownAnswer {
+        /// The offending key.
+        key: String,
+        /// A "did you mean?" prefix, or empty.
+        suggestion: String,
     },
 
     /// The path is not in the rendering.
@@ -228,6 +246,24 @@ impl Trust<'_> {
     }
 }
 
+/// A rendered state, as bytes, before any Git object exists.
+///
+/// This is what a project-free render produces: `git tpl render --output` and
+/// `git tpl lint` need the files and the context, and have no repository to
+/// write blobs into. [`Render`] is this plus the tree.
+pub struct RenderedFiles {
+    /// The resolved template.
+    pub template: Resolved,
+    /// The resolved context.
+    pub context: Context,
+    /// The rendered files, sorted by output path.
+    pub files: Vec<Rendered>,
+    /// What produced them.
+    pub provenance: Provenance,
+    /// Supplied answers that name no question in this template.
+    pub ignored_answers: Vec<String>,
+}
+
 /// A rendered state, before it is committed.
 pub struct Render {
     /// The resolved template.
@@ -245,29 +281,61 @@ pub struct Render {
     pub ignored_answers: Vec<String>,
 }
 
-/// Resolve, evaluate and render — everything short of touching a ref.
+/// What a rendering needs to know about the template it is rendering.
 ///
-/// Shared by `init`, `update` and `--dry-run`, so all three cannot disagree
-/// about what a rendering is.
+/// A struct rather than loose arguments here, because unlike the decisions in
+/// [`render_files`] these four travel together: they are one template
+/// reference, and a caller that has one has all of them.
+pub struct Target<'a> {
+    /// Where the template comes from.
+    pub source: &'a str,
+    /// The branch, tag or SHA to render, or `None` for the default branch.
+    pub reference: Option<&'a str>,
+    /// A render root overriding the manifest's, or `None`.
+    pub root: Option<&'a str>,
+    /// Render the template's working tree rather than a committed revision.
+    pub dirty: bool,
+}
+
+impl<'a> Target<'a> {
+    /// The template a project has recorded.
+    pub fn from_config(config: &'a Config, dirty: bool) -> Self {
+        Self {
+            source: &config.template.source,
+            reference: config.template.r#ref.as_deref(),
+            root: config.template.root.as_deref(),
+            dirty,
+        }
+    }
+}
+
+/// Resolve, evaluate and render — to bytes, with no repository required.
+///
+/// `project` is `None` for a project-free render. Two things depend on it, and
+/// both degrade honestly rather than guessing: prompt seeds are not collected
+/// (there is no `git config` to read, and nobody to prompt), and a `local` data
+/// source becomes [`DataError::NeedsProject`](crate::data::DataError::NeedsProject)
+/// rather than being resolved against the process's working directory.
+///
+/// Everything short of writing a Git object happens here, so `render` and a
+/// project-free render cannot come to disagree about what a rendering is.
 // Every argument is a distinct decision the caller has already made, and
 // bundling them into a struct would only move the list somewhere a reader has
 // to go and find it.
 #[allow(clippy::too_many_arguments)]
-pub fn render(
-    project: &dyn GitBackend,
-    project_root: &Path,
-    config: &Config,
+pub fn render_files(
+    target: Target<'_>,
+    project: Option<(&dyn GitBackend, &Path)>,
     supplied: BTreeMap<String, Value>,
-    dirty: bool,
     user: &UserConfig,
     mut answering: Answering<'_>,
     trust: Trust<'_>,
-) -> Result<Render, OpError> {
+) -> Result<RenderedFiles, OpError> {
     let template = resolve::resolve(Request {
-        source: &config.template.source,
-        reference: config.template.r#ref.as_deref(),
-        root: config.template.root.as_deref(),
-        dirty,
+        source: target.source,
+        reference: target.reference,
+        root: target.root,
+        dirty: target.dirty,
     })?;
 
     // Built and validated before anything is prompted: a cycle or a typo
@@ -308,7 +376,7 @@ pub fn render(
     //
     // An *unmatched* template is untouched, and `Trust::Refuse` still refuses
     // it loudly. Nothing is granted by omission.
-    let mut trust = if user.trust.allows(&config.template.source) {
+    let mut trust = if user.trust.allows(target.source) {
         Trust::always()
     } else {
         trust
@@ -326,17 +394,18 @@ pub fn render(
             tree: template.tree,
             revision: template.revision,
         },
-        project_root,
+        project.map(|(_, root)| root.to_path_buf()),
     )
     .with_decisions(decisions);
 
     // Built only when somebody is going to be asked. When nobody is, the map
     // is empty *and* `DefaultsOnly` ignores it — two guards, because a machine
     // value reaching the tree would end invariant 2.
-    let seeds = if answering.is_interactive() {
-        prompt_seeds(project, &template.manifest, user)?
-    } else {
-        BTreeMap::new()
+    let seeds = match project {
+        Some((repo, _)) if answering.is_interactive() => {
+            prompt_seeds(repo, &template.manifest, user)?
+        }
+        _ => BTreeMap::new(),
     };
 
     // Read once, up front, and shared by the manifest expressions below and the
@@ -357,18 +426,27 @@ pub fn render(
     )?;
 
     let entries = template.entries()?;
-    // Blobs are read from the template repository — often a temporary clone —
-    // and written into the project, which is where the ref will point.
-    let tree = render_tree(
+    // Bytes, not blobs. Turning them into Git objects is `render`'s job, and it
+    // is the only part of a rendering that needs a repository to write into.
+    // `strict` is the template's own choice. Lenient is still the default, so
+    // that turning it on is a decision an author makes rather than one an
+    // upgrade makes for them; `git tpl lint` reports the same names as
+    // warnings meanwhile. See ADR-014.
+    let undefined = if template.manifest.strict.unwrap_or(false) {
+        crate::eval::Undefined::Strict
+    } else {
+        crate::eval::Undefined::Lenient
+    };
+    let files = render_entries(
         template.repo.as_ref(),
-        project,
         &entries,
         &context,
         &partials,
+        undefined,
     )?;
 
     let provenance = Provenance {
-        source: config.template.source.clone(),
+        source: target.source.to_string(),
         reference: template.reference.clone(),
         commit: template.revision,
         dirty: template.dirty,
@@ -378,12 +456,50 @@ pub fn render(
         template_name: template.manifest.name.clone(),
     };
 
-    Ok(Render {
+    Ok(RenderedFiles {
         template,
         context,
-        tree,
+        files,
         provenance,
         ignored_answers,
+    })
+}
+
+/// Resolve, evaluate and render — everything short of touching a ref.
+///
+/// Shared by `init`, `update` and `--dry-run`, so all three cannot disagree
+/// about what a rendering is. A thin wrapper over [`render_files`]: the only
+/// thing it adds is writing the bytes into the project as Git objects.
+#[allow(clippy::too_many_arguments)]
+pub fn render(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    config: &Config,
+    supplied: BTreeMap<String, Value>,
+    dirty: bool,
+    user: &UserConfig,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+) -> Result<Render, OpError> {
+    let rendered = render_files(
+        Target::from_config(config, dirty),
+        Some((project, project_root)),
+        supplied,
+        user,
+        answering,
+        trust,
+    )?;
+
+    // Blobs are read from the template repository — often a temporary clone —
+    // and written into the project, which is where the ref will point.
+    let tree = write_tree(project, &rendered.files)?;
+
+    Ok(Render {
+        template: rendered.template,
+        context: rendered.context,
+        tree,
+        provenance: rendered.provenance,
+        ignored_answers: rendered.ignored_answers,
     })
 }
 
@@ -494,11 +610,16 @@ pub fn init(
     supplied: BTreeMap<String, Value>,
     dirty: bool,
     merge_after: bool,
+    force: bool,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<InitOutcome, OpError> {
-    if Config::exists_in(project_root) {
+    // `--force` re-asks the questions and renders onto the existing ref, which
+    // is not a new operation: the ref is append-only, so another rendering on
+    // it is exactly what `update` writes. The only thing `force` adds is
+    // asking again, which `update` has no way to do.
+    if !force && Config::exists_in(project_root) {
         return Err(OpError::AlreadyInitialised);
     }
 
@@ -764,6 +885,7 @@ pub fn status(
     project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
+    dirty: bool,
 ) -> Result<Status, OpError> {
     let config = Config::load(project_root)?;
     let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
@@ -778,11 +900,15 @@ pub fn status(
     // Resolving the template is a network operation, so a failure here is
     // reported as "unknown" rather than aborting the whole status. Being
     // offline should not stop you learning what is attached.
+    //
+    // `dirty` compares against the template's working tree instead of its
+    // committed revision, which is how an author asks "does my uncommitted
+    // edit change anything here?" without committing it first.
     let resolved = resolve::resolve(Request {
         source: &config.template.source,
         reference: config.template.r#ref.as_deref(),
         root: config.template.root.as_deref(),
-        dirty: false,
+        dirty,
     })
     .ok();
 
@@ -791,6 +917,13 @@ pub fn status(
         .map(|r| describe_revision(&r.reference, r.revision));
 
     let template_moved = match (&resolved, &recorded) {
+        // A `--dirty` resolution reports the *base* commit, so comparing
+        // revisions would say "unmoved" whenever the working tree sits on the
+        // rendered commit — which is the common case and the one the flag was
+        // asked about. The honest answer is that an uncommitted template is
+        // always something to re-render, because nothing recorded what it
+        // contained.
+        (Some(resolved), _) if resolved.dirty => true,
         (Some(resolved), Some(recorded)) => recorded
             .commit
             .is_some_and(|commit| commit != resolved.revision),
@@ -856,6 +989,55 @@ fn count_renderings(project: &dyn GitBackend, tip: Oid) -> Result<usize, GitErro
     Ok(count)
 }
 
+/// Render the configured template now, as a commit nothing points at.
+///
+/// This is what `diff --dirty` and `show --dirty` preview against. The commit
+/// is a loose object: no ref is created or moved, so the append-only guarantee
+/// is untouched and `git gc` reclaims it. It exists at all only because
+/// [`GitBackend::merge_preview`] merges *commits*, and a rendering is a tree.
+///
+/// Answers come from `.config/git.tpl.toml`, so the preview asks nothing: the
+/// question being answered is "what would my template edit do to this
+/// project?", not "what would a different set of answers do?".
+pub fn render_preview(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    overrides: BTreeMap<String, Value>,
+    dirty: bool,
+    user: &UserConfig,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+) -> Result<Oid, OpError> {
+    let config = Config::load(project_root)?;
+
+    // Recorded answers first, then command-line overrides — the same order
+    // `update` uses. Without the recorded ones a preview would prompt for
+    // every question the project already answered, which for a
+    // non-interactive caller means hanging and for an interactive one means
+    // answering the questionnaire again to look at a diff.
+    let mut supplied = config.answers.clone();
+    supplied.extend(overrides);
+
+    let rendered = render(
+        project,
+        project_root,
+        &config,
+        supplied,
+        dirty,
+        user,
+        answering,
+        trust,
+    )?;
+
+    // Parented on the rendered ref's tip when there is one, so the merge base
+    // is the same one a real update would produce and the preview matches what
+    // merging would actually do.
+    let (_, ref_name) = identify(project_root)?;
+    let parents: Vec<Oid> = project.resolve_ref(&ref_name)?.into_iter().collect();
+
+    Ok(project.create_commit(rendered.tree, &parents, "preview: uncommitted template\n")?)
+}
+
 /// The rendered ref's tip, or a helpful error.
 fn require_tip(project: &dyn GitBackend, ref_name: &str) -> Result<Oid, OpError> {
     project
@@ -896,9 +1078,18 @@ fn diff_endpoints(
     project: &dyn GitBackend,
     project_root: &Path,
     reverse: bool,
+    against: Option<Oid>,
 ) -> Result<(Option<Oid>, Oid, Vec<String>), OpError> {
-    let (_, ref_name) = identify(project_root)?;
-    let tip = require_tip(project, &ref_name)?;
+    // `against` is a commit to preview instead of the rendered ref's tip — a
+    // rendering that exists only as an object, never as a ref, which is how
+    // `--dirty` previews an uncommitted template without writing anything.
+    let tip = match against {
+        Some(commit) => commit,
+        None => {
+            let (_, ref_name) = identify(project_root)?;
+            require_tip(project, &ref_name)?
+        }
+    };
 
     let Some(head) = project.head_commit()? else {
         // No commits yet: the merge is the fast-forward that creates them, so
@@ -928,8 +1119,9 @@ pub fn diff(
     project_root: &Path,
     paths: &[String],
     reverse: bool,
+    against: Option<Oid>,
 ) -> Result<DiffPreview<String>, OpError> {
-    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse, against)?;
     Ok(DiffPreview {
         changes: project.diff_patch(from, to, paths)?,
         conflicts,
@@ -942,8 +1134,9 @@ pub fn diff_changes(
     project_root: &Path,
     paths: &[String],
     reverse: bool,
+    against: Option<Oid>,
 ) -> Result<DiffPreview<Vec<Change>>, OpError> {
-    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse, against)?;
     Ok(DiffPreview {
         changes: project.diff_trees(from, to, paths)?,
         conflicts,
@@ -956,8 +1149,9 @@ pub fn diff_stat(
     project_root: &Path,
     paths: &[String],
     reverse: bool,
+    against: Option<Oid>,
 ) -> Result<DiffPreview<Vec<FileStat>>, OpError> {
-    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse)?;
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse, against)?;
     Ok(DiffPreview {
         changes: project.diff_stat(from, to, paths)?,
         conflicts,
@@ -1011,10 +1205,27 @@ fn normalise_shown_path(path: &str) -> Result<String, OpError> {
 /// merge, where the tip is the side being read and the machine may be offline —
 /// so this never resolves the template repository and never touches the
 /// network.
-pub fn show(project: &dyn GitBackend, project_root: &Path, path: &str) -> Result<Shown, OpError> {
+pub fn show(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    path: &str,
+    against: Option<Oid>,
+) -> Result<Shown, OpError> {
+    // Resolved even when `against` supplies the tree, because the
+    // "no such path" diagnostic names the ref the reader was looking in, and a
+    // preview is still a rendering *of* that template.
     let (_, ref_name) = identify(project_root)?;
-    let tip = require_tip(project, &ref_name)?;
-    let tree = project.commit(tip)?.tree;
+
+    // As in `diff_endpoints`: `against` is a rendering that exists as an
+    // object but not as a ref, so `--dirty` can show a file from an
+    // uncommitted template without writing anything.
+    let tree = match against {
+        Some(commit) => project.commit(commit)?.tree,
+        None => {
+            let tip = require_tip(project, &ref_name)?;
+            project.commit(tip)?.tree
+        }
+    };
 
     let path = normalise_shown_path(path)?;
 

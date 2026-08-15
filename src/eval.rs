@@ -545,7 +545,37 @@ pub fn no_partials() -> &'static Arc<Partials> {
 /// identically inside a `.jinja` file, and a macro importable from a `.jinja`
 /// file must be importable from a `computed` expression.
 pub fn environment(partials: &Arc<Partials>) -> minijinja::Environment<'static> {
+    environment_with(partials, Undefined::Lenient)
+}
+
+/// How an undeclared name behaves in a rendered template.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Undefined {
+    /// Renders to the empty string. MiniJinja's default, and what every
+    /// rendered file has always done.
+    Lenient,
+    /// Fails the render, naming the file and the missing name.
+    ///
+    /// Opt-in per manifest via `strict = true`. The asymmetry it closes: the
+    /// same typo in a `computed` expression is caught before the first prompt,
+    /// with a suggestion, while in a file body it produced `name = ""` and an
+    /// exit code of zero.
+    Strict,
+}
+
+/// [`environment`], with the undefined behaviour chosen.
+///
+/// Still the one constructor: everything that decides how a template behaves
+/// lives here, so expression evaluation and file rendering cannot drift apart.
+pub fn environment_with(
+    partials: &Arc<Partials>,
+    undefined: Undefined,
+) -> minijinja::Environment<'static> {
     let mut env = minijinja::Environment::new();
+
+    if undefined == Undefined::Strict {
+        env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+    }
 
     // MiniJinja strips a template's final newline by default. For a file that
     // is wrong in a way that shows up everywhere: every rendered file would
@@ -718,11 +748,27 @@ pub fn render_string(
     location: &str,
     partials: &Arc<Partials>,
 ) -> Result<String, EvalError> {
+    render_string_with(template, context, location, partials, Undefined::Lenient)
+}
+
+/// [`render_string`], with the undefined behaviour chosen.
+///
+/// Manifest expressions stay lenient because the graph has already rejected an
+/// unknown name in one, with a suggestion, before any prompt. It is file bodies
+/// that had no such check, and `strict = true` in the manifest is what turns it
+/// on for them.
+pub fn render_string_with(
+    template: &str,
+    context: &Context,
+    location: &str,
+    partials: &Arc<Partials>,
+    undefined: Undefined,
+) -> Result<String, EvalError> {
     if !is_expression(template) {
         return Ok(template.to_string());
     }
 
-    let env = environment(partials);
+    let env = environment_with(partials, undefined);
     env.render_str(template, context.to_minijinja())
         .map_err(|error| EvalError::Expression {
             location: location.to_string(),
@@ -885,7 +931,7 @@ mod tests {
                 tree,
                 revision: tree,
             },
-            dir.path(),
+            Some(dir.path().to_path_buf()),
         );
 
         let partials =
@@ -930,7 +976,7 @@ mod tests {
                 tree,
                 revision: tree,
             },
-            dir.path(),
+            Some(dir.path().to_path_buf()),
         );
 
         let seeds: BTreeMap<String, Value> = seeds

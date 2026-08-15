@@ -139,6 +139,24 @@ pub enum DataError {
         location: String,
     },
 
+    /// A `local` source was reached with no project to resolve it against.
+    #[error("data source `{name}` needs a project")]
+    #[diagnostic(
+        code(tpl::data::needs_project),
+        help(
+            "`{location}` is a `local` source, resolved relative to the project root — and \
+             this command has no project. Use a `template` source (a path inside the template \
+             repository) if the data belongs to the template, or run the command from within \
+             a project."
+        )
+    )]
+    NeedsProject {
+        /// The declared name.
+        name: String,
+        /// The path that could not be resolved.
+        location: String,
+    },
+
     /// The declared `kind` or `format` is not one we know.
     #[error("data source `{name}` declares an unknown {what} `{value}`")]
     #[diagnostic(code(tpl::data::unknown_setting))]
@@ -373,7 +391,12 @@ pub struct TemplateTree<'a> {
 /// everyone.
 pub struct Loader<'a> {
     template: TemplateTree<'a>,
-    project_root: PathBuf,
+    // `None` when there is no project — `git tpl render --output` and
+    // `git tpl lint` resolve a template on its own. A `local` source then has
+    // nothing to be relative *to*, which is refused rather than guessed at:
+    // resolving it against the process's working directory would make the same
+    // template render differently depending on where the command was run.
+    project_root: Option<PathBuf>,
     cache: BTreeMap<String, Value>,
     provenance: Vec<Provenance>,
     decisions: BTreeMap<String, Decision>,
@@ -387,13 +410,16 @@ impl<'a> Loader<'a> {
     /// A loader reading template files from `template` and local files from
     /// `project_root`.
     ///
+    /// `project_root` is `None` for a project-free render, which makes a
+    /// `local` data source an error rather than a guess.
+    ///
     /// No remote source is permitted until [`with_decisions`](Self::with_decisions)
     /// says so. Defaulting to "allowed" would mean every future caller had to
     /// remember to close the gate.
-    pub fn new(template: TemplateTree<'a>, project_root: impl Into<PathBuf>) -> Self {
+    pub fn new(template: TemplateTree<'a>, project_root: Option<PathBuf>) -> Self {
         Self {
             template,
-            project_root: project_root.into(),
+            project_root,
             cache: BTreeMap::new(),
             provenance: Vec::new(),
             decisions: BTreeMap::new(),
@@ -596,12 +622,23 @@ impl<'a> Loader<'a> {
 
     /// Read a file from the project.
     fn read_local_file(&self, name: &str, path: &str) -> Result<Vec<u8>, DataError> {
-        let candidate = self.project_root.join(path);
+        // No project, nothing to be relative to. Falling back to the process's
+        // working directory would make the same template, the same answers and
+        // the same revision render differently depending on where the command
+        // was run from — which is invariant 2 with extra steps.
+        let Some(project_root) = self.project_root.as_deref() else {
+            return Err(DataError::NeedsProject {
+                name: name.to_string(),
+                location: path.to_string(),
+            });
+        };
+
+        let candidate = project_root.join(path);
 
         // Reject traversal rather than resolving it. `../../../etc/passwd` in a
         // template repository is untrusted input asking to read a file outside
         // the project.
-        if !within(&self.project_root, &candidate) {
+        if !within(project_root, &candidate) {
             return Err(DataError::EscapesRoot {
                 name: name.to_string(),
                 location: path.to_string(),

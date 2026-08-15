@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{World, tpl};
+use common::{Template, World, tpl, tpl_outside};
 
 /// A manifest exercising conditionals, dynamic defaults and computed values.
 const DYNAMIC: &str = r#"
@@ -918,4 +918,404 @@ message = "lowercase only"
     );
 
     world.init(&[]).failure().says("`message` has no `pattern`");
+}
+
+// ---------------------------------------------------------------------------
+// `git tpl questions` — the schema, without asking anything.
+//
+// Everything above drives the questionnaire through `init`. These drive the
+// declaration of it, which is what a caller that cannot answer a prompt needs.
+// ---------------------------------------------------------------------------
+
+struct Scratch {
+    dir: tempfile::TempDir,
+    config: tempfile::TempDir,
+}
+
+impl Scratch {
+    fn new() -> Self {
+        Self {
+            dir: tempfile::tempdir().expect("tempdir"),
+            config: tempfile::tempdir().expect("config dir"),
+        }
+    }
+
+    fn ask(&self, source: &str) -> serde_json::Value {
+        tpl_outside(
+            self.dir.path(),
+            self.config.path(),
+            &["--json", "questions", source],
+        )
+        .success()
+        .json()
+    }
+
+    /// The same schema, as the listing a person reads.
+    fn ask_text(&self, source: &str) -> common::Output {
+        tpl_outside(self.dir.path(), self.config.path(), &["questions", source])
+    }
+}
+
+fn names(json: &serde_json::Value) -> Vec<String> {
+    json["questions"]
+        .as_array()
+        .expect("questions")
+        .iter()
+        .map(|q| q["name"].as_str().expect("name").to_string())
+        .collect()
+}
+
+fn question<'a>(json: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {
+    json["questions"]
+        .as_array()
+        .expect("questions")
+        .iter()
+        .find(|q| q["name"] == name)
+        .unwrap_or_else(|| panic!("no question {name}"))
+}
+
+#[test]
+fn the_schema_needs_no_repository_and_no_prompt() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&template.source());
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["template"]["name"], "rust-library");
+    assert!(names(&json).contains(&"project_name".to_string()));
+    assert!(!scratch.dir.path().join(".git").exists());
+}
+
+/// Declaration order is not answer order. When a `when` or a `default`
+/// references an earlier answer, this is the order a caller has to answer in —
+/// and getting it wrong means asking for a value that does not exist yet.
+#[test]
+fn questions_are_listed_in_resolution_order_not_declaration_order() {
+    let world = World::with_template(
+        r#"
+name = "ordered"
+
+# Declared first, but depends on `base` — so it must be reported second.
+[questions.derived]
+type = "string"
+default = "{{ base }}-suffix"
+
+[questions.base]
+type = "string"
+default = "root"
+"#,
+        &[("file.txt.jinja", "{{ derived }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    assert_eq!(names(&json), ["base", "derived"]);
+    assert_eq!(question(&json, "base")["order"], 0);
+    assert_eq!(question(&json, "derived")["order"], 1);
+}
+
+/// A default may be an expression. A caller that treated `"{{ crate }}"` as a
+/// literal would write it verbatim into the answers file.
+#[test]
+fn an_expression_default_is_flagged_as_one() {
+    let world = World::with_template(
+        r#"
+name = "derived"
+
+[questions.crate_name]
+type = "string"
+default = "demo"
+
+[questions.bin_name]
+type = "string"
+default = "{{ crate_name }}"
+"#,
+        &[("file.txt.jinja", "{{ bin_name }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    assert_eq!(question(&json, "crate_name")["defaultIsExpression"], false);
+    assert_eq!(question(&json, "bin_name")["defaultIsExpression"], true);
+    assert_eq!(question(&json, "bin_name")["default"], "{{ crate_name }}");
+}
+
+/// `choices_from` names a path into a data file. Resolving it here saves the
+/// caller fetching and parsing the file itself.
+#[test]
+fn choices_from_a_template_data_file_are_resolved() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&template.source());
+    let license = question(&json, "license");
+    assert_eq!(license["choicesFrom"], "data.licenses.ids");
+
+    let resolved = license["choicesResolved"]
+        .as_array()
+        .expect("choicesResolved");
+    assert!(
+        resolved.iter().any(|value| value == "MIT"),
+        "expected MIT among {resolved:?}"
+    );
+}
+
+#[test]
+fn a_conditional_question_reports_its_condition() {
+    let world = World::with_template(
+        r#"
+name = "gated"
+
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.accent]
+type = "choice"
+when = "docs"
+choices = ["indigo", "teal"]
+default = "indigo"
+"#,
+        &[("file.txt.jinja", "x\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    let accent = question(&json, "accent");
+    assert_eq!(accent["when"], "docs");
+    assert_eq!(accent["type"], "choice");
+    assert_eq!(accent["choices"].as_array().expect("choices").len(), 2);
+}
+
+#[test]
+fn a_pattern_and_its_message_are_reported() {
+    let world = World::with_template(
+        r#"
+name = "validated"
+
+[questions.slug]
+type = "string"
+pattern = "^[a-z]+$"
+message = "lowercase letters only"
+default = "demo"
+"#,
+        &[("file.txt.jinja", "{{ slug }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    assert_eq!(question(&json, "slug")["pattern"], "^[a-z]+$");
+    assert_eq!(question(&json, "slug")["message"], "lowercase letters only");
+}
+
+#[test]
+fn computed_values_and_data_sources_are_listed_separately() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&template.source());
+    let computed = json["computed"].as_array().expect("computed");
+    assert!(computed.iter().any(|value| value == "package_name"));
+
+    let data = json["data"].as_array().expect("data");
+    assert_eq!(data.len(), 1);
+    assert_eq!(data[0]["name"], "licenses");
+    assert_eq!(data[0]["source"], "data/licenses.toml");
+}
+
+// ---------------------------------------------------------------------------
+// The text listing.
+//
+// The JSON schema above is what a program consumes; this is what an author
+// runs to remember what their own template asks. Until these existed the
+// whole branch had never run.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn the_text_listing_names_the_template_and_its_questions_in_order() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    let scratch = Scratch::new();
+
+    let output = scratch.ask_text(&template.source()).success();
+
+    output
+        .says("rust-library")
+        // The description, which is optional and present here.
+        .says("A small Rust library")
+        .says("Questions, in the order they are asked")
+        // Name and type, because the type is what decides how to answer it.
+        .says("project_name (a string)")
+        .says("license (");
+}
+
+/// A `when` says the question is not always asked, which is the difference
+/// between an answer file that works and one that silently ignores a key.
+#[test]
+fn the_text_listing_says_when_a_question_is_conditional() {
+    let world = World::with_template(
+        r#"
+name = "gated"
+
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.accent]
+type = "string"
+when = "docs"
+default = "indigo"
+"#,
+        &[("file.txt.jinja", "x\n")],
+    );
+    let scratch = Scratch::new();
+
+    scratch
+        .ask_text(&world.template.source())
+        .success()
+        .says("accent (a string) when docs");
+}
+
+/// A template may legitimately ask nothing. Saying so beats printing a heading
+/// followed by silence, which reads as a failure to load the manifest.
+#[test]
+fn a_template_that_asks_nothing_says_so() {
+    let world = World::with_template(
+        r#"name = "questionless""#,
+        &[("file.txt.jinja", "{{ template.name }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    scratch
+        .ask_text(&world.template.source())
+        .success()
+        .says("(none)");
+}
+
+// ---------------------------------------------------------------------------
+// When `choices_from` is *not* resolved statically.
+//
+// Resolving it means reading the file at schema time, with no answers and no
+// project. Three shapes make that impossible, and in each the honest answer is
+// to report `choicesFrom` and omit `choicesResolved` — a guess would be a
+// wrong answer dressed as a real one.
+// ---------------------------------------------------------------------------
+
+/// Fetching over the network to describe a schema would make `questions` an
+/// operation that can fail because a server is down.
+#[test]
+fn choices_from_a_remote_source_are_not_resolved() {
+    let world = World::with_template(
+        r#"
+name = "remote-choices"
+
+[data.licenses]
+source = "https://example.invalid/licenses.toml"
+
+[questions.license]
+type = "choice"
+choices_from = "data.licenses.ids"
+default = "MIT"
+"#,
+        &[("file.txt.jinja", "{{ license }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    let license = question(&json, "license");
+    assert_eq!(license["choicesFrom"], "data.licenses.ids");
+    assert!(
+        license.get("choicesResolved").is_none(),
+        "a remote source was resolved anyway: {license}"
+    );
+}
+
+/// A leading `./` is a file in the *project*, and there is no project here.
+#[test]
+fn choices_from_a_project_local_source_are_not_resolved() {
+    let world = World::with_template(
+        r#"
+name = "local-choices"
+
+[data.licenses]
+source = "./licenses.toml"
+
+[questions.license]
+type = "choice"
+choices_from = "data.licenses.ids"
+default = "MIT"
+"#,
+        &[("file.txt.jinja", "{{ license }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    let license = question(&json, "license");
+    assert!(
+        license.get("choicesResolved").is_none(),
+        "a project-local source was resolved without a project: {license}"
+    );
+}
+
+/// An interpolated source depends on an answer, which is precisely what has
+/// not been collected at the time the schema is described.
+#[test]
+fn choices_from_an_interpolated_source_are_not_resolved() {
+    let world = World::with_template(
+        r#"
+name = "interpolated-choices"
+
+[questions.flavour]
+type = "string"
+default = "mit"
+
+[data.licenses]
+source = "data/{{ flavour }}.toml"
+
+[questions.license]
+type = "choice"
+choices_from = "data.licenses.ids"
+default = "MIT"
+"#,
+        &[("file.txt.jinja", "{{ license }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    let license = question(&json, "license");
+    assert!(
+        license.get("choicesResolved").is_none(),
+        "a source depending on an answer was resolved before the answer: {license}"
+    );
+}
+
+/// An explicit non-`template` kind is a source read some other way.
+#[test]
+fn choices_from_a_non_template_kind_are_not_resolved() {
+    let world = World::with_template(
+        r#"
+name = "kinded-choices"
+
+[data.licenses]
+source = "licenses.toml"
+kind = "project"
+
+[questions.license]
+type = "choice"
+choices_from = "data.licenses.ids"
+default = "MIT"
+"#,
+        &[("file.txt.jinja", "{{ license }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    let license = question(&json, "license");
+    assert!(
+        license.get("choicesResolved").is_none(),
+        "a project-kind source was read out of the template: {license}"
+    );
 }

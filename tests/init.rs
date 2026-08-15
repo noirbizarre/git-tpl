@@ -542,3 +542,127 @@ fn without_a_merge_base_a_customisation_conflicts_the_template_never_touched() {
         out.stderr
     );
 }
+
+/// A data source in the *project*, not the template — `./` is the marker.
+///
+/// This is the case where the template asks a question whose choices the
+/// project owns: a house list of licences or environments that the template
+/// must not carry. The file is read relative to the project root, and never
+/// relative to the process's working directory — which would make the same
+/// template, answers and revision render differently depending on where the
+/// command was run from.
+#[test]
+fn a_project_local_data_source_is_read_relative_to_the_project_root() {
+    let world = common::World::with_template(
+        r#"
+name = "house-rules"
+
+[data.house]
+source = "./house.toml"
+
+[questions.env]
+type = "choice"
+choices_from = "data.house.envs"
+default = "staging"
+"#,
+        &[("env.txt.jinja", "{{ env }}\n")],
+    );
+
+    world
+        .project
+        .write("house.toml", "envs = [\"staging\", \"production\"]\n");
+    world.project.commit_all("chore: declare the house envs");
+
+    world.init(&[]).success();
+
+    assert_eq!(world.project.read("env.txt"), "staging\n");
+}
+
+/// `../../../etc/passwd` in a template repository is untrusted input asking to
+/// read a file outside the project. It is rejected rather than resolved: a
+/// canonicalising fix would still read the file when the path stayed inside
+/// after resolution, which is not the property wanted.
+#[test]
+fn a_project_local_data_source_may_not_escape_the_project_root() {
+    let world = common::World::with_template(
+        r#"
+name = "nosy"
+
+[data.secrets]
+source = "../outside.toml"
+
+[questions.leak]
+type = "choice"
+choices_from = "data.secrets.values"
+default = "a"
+"#,
+        &[("out.txt.jinja", "{{ leak }}\n")],
+    );
+
+    // A real file just outside the project, so the test fails for the right
+    // reason: refused, not merely absent.
+    std::fs::write(
+        world.dir.path().join("outside.toml"),
+        "values = [\"a\", \"b\"]\n",
+    )
+    .expect("write the file outside the project");
+
+    let output = tpl(
+        &world.project,
+        &["init", &world.template.source(), "--defaults"],
+    )
+    .failure();
+
+    output.says("tpl::data::escapes_root");
+}
+
+/// Re-attaching was refused outright, so changing an answer meant editing
+/// `.config/git.tpl.toml` by hand or starting the repository over. The ref is
+/// append-only, so another rendering on it is exactly what `update` writes —
+/// the only thing `--force` adds is asking the questions again.
+#[test]
+fn force_re_renders_over_an_existing_attachment() {
+    let world = World::new();
+    world.init(&["--answer", "project_name=first"]).success();
+
+    world
+        .init(&[])
+        .failure()
+        .says("already has a template attached");
+
+    tpl(
+        &world.project,
+        &[
+            "init",
+            &world.template.source(),
+            "--defaults",
+            "--force",
+            "--answer",
+            "project_name=second",
+        ],
+    )
+    .success();
+
+    assert!(world.project.read("README.md").contains("second"));
+}
+
+/// `update --dry-run` has always listed what would change. A flag meaning
+/// "the questions" on one command and "the files" on another is a flag with
+/// two meanings.
+#[test]
+fn a_dry_run_lists_the_files_it_would_render() {
+    let world = World::new();
+
+    tpl(
+        &world.project,
+        &["init", &world.template.source(), "--defaults", "--dry-run"],
+    )
+    .success()
+    .says("Files it would render")
+    .says("Cargo.toml")
+    .says("Nothing was created.");
+
+    // Still nothing written, which is the whole contract of the flag.
+    assert!(!world.project.exists(".config/git.tpl.toml"));
+    assert!(!world.project.has_ref(&world.ref_name()));
+}

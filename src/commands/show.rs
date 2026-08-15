@@ -4,13 +4,39 @@ use std::io::{self, Write};
 
 use tpl::ops::{self, OpError, Shown};
 
-use super::Session;
+use super::{Session, answering, supplied, trust};
 use crate::cli::{GlobalArgs, ShowArgs};
+use crate::prompt::{Confirmer, Interactive};
 
 pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
 
-    match ops::show(&ctx.repo, &ctx.root, &args.path)? {
+    // `--dirty` renders the template's working tree into a commit no ref
+    // points at, so an author can read a file out of an uncommitted edit
+    // without committing it first.
+    let against = if args.dirty {
+        let preferences = tpl::gitconfig::Preferences::load(&ctx.repo)?;
+        let mut prompter = Interactive;
+        let mut confirmer = Confirmer;
+        Some(ops::render_preview(
+            &ctx.repo,
+            &ctx.root,
+            supplied(&args.answers)?,
+            true,
+            &ctx.user,
+            answering(&args.answers, preferences.interactive, &mut prompter),
+            trust(
+                &args.answers,
+                false,
+                preferences.interactive,
+                &mut confirmer,
+            ),
+        )?)
+    } else {
+        None
+    };
+
+    match ops::show(&ctx.repo, &ctx.root, &args.path, against)? {
         // Bytes, verbatim, to stdout: `git tpl show README.md > mine.md` and
         // piping into an editor must both work, and rendered content is not
         // necessarily UTF-8 — so `write_all`, never `print!`.

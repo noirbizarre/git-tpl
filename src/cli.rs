@@ -39,6 +39,15 @@ pub struct GlobalArgs {
     #[arg(short, long, global = true, conflicts_with = "verbose")]
     pub quiet: bool,
 
+    /// Emit machine-readable JSON on stdout, including on failure
+    //
+    // Global rather than per-command, because the failure envelope has to be
+    // available everywhere: a caller scripting one command must be able to
+    // read *why* any command failed, including the ones that have no success
+    // payload of their own.
+    #[arg(long, global = true)]
+    pub json: bool,
+
     /// When to colourise output
     #[arg(long, global = true, value_enum, default_value_t = ColorChoice::Auto)]
     pub color: ColorChoice,
@@ -64,6 +73,18 @@ pub enum Command {
 
     /// Re-render the template and advance refs/tpl/<id>
     Update(UpdateArgs),
+
+    /// Render a template into a directory, with no project and no ref
+    Render(RenderArgs),
+
+    /// Check a template for problems, without rendering it
+    Lint(LintArgs),
+
+    /// List a template's questions and their schema
+    Questions(QuestionsArgs),
+
+    /// Show what a template sees, and evaluate expressions against it
+    Context(ContextArgs),
 
     /// Show the template, the rendered ref, and what is pending
     Status(StatusArgs),
@@ -103,6 +124,13 @@ pub struct InitArgs {
     /// Render the template's working tree rather than its HEAD
     #[arg(long)]
     pub dirty: bool,
+
+    /// Re-ask the questions and re-render over an existing attachment
+    //
+    // Not the same as `update`: that re-renders with the *recorded* answers,
+    // and there was no way to change them short of editing the config by hand.
+    #[arg(long)]
+    pub force: bool,
 
     /// Create the rendered ref but do not merge it into the branch
     #[arg(long)]
@@ -176,6 +204,14 @@ pub struct AnswerArgs {
     /// Accept every default without prompting
     #[arg(long)]
     pub defaults: bool,
+
+    /// Fail when a supplied answer names no question
+    ///
+    /// Recorded answers stay lenient whatever this says: a template drops
+    /// questions over time, and a project that answered one is not at fault
+    /// for it. This is about the answers a caller supplied *now*.
+    #[arg(long)]
+    pub strict_answers: bool,
 }
 
 impl AnswerArgs {
@@ -202,12 +238,126 @@ impl AnswerArgs {
     }
 }
 
+/// `git tpl render`
+#[derive(Debug, clap::Args)]
+pub struct RenderArgs {
+    /// The template to render: a path, a URL, or a `[shortcuts]` name
+    #[arg(value_name = "TEMPLATE")]
+    pub template: String,
+
+    /// Where to write the rendered files
+    #[arg(long, short, value_name = "DIR")]
+    pub output: PathBuf,
+
+    /// The branch, tag or commit to render
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Render this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Render the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+
+    /// Replace the contents of a non-empty output directory
+    #[arg(long)]
+    pub force: bool,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
+    /// Allow the template's remote data sources without asking
+    #[arg(long)]
+    pub trust: bool,
+}
+
+/// `git tpl lint`
+#[derive(Debug, clap::Args)]
+pub struct LintArgs {
+    /// The template to check; defaults to the current directory
+    #[arg(value_name = "TEMPLATE", default_value = ".")]
+    pub template: String,
+
+    /// The branch, tag or commit to check
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Check this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Check the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+}
+
+/// `git tpl questions`
+#[derive(Debug, clap::Args)]
+pub struct QuestionsArgs {
+    /// The template to inspect; defaults to the current directory
+    #[arg(value_name = "TEMPLATE", default_value = ".")]
+    pub template: String,
+
+    /// The branch, tag or commit to inspect
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Read this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Inspect the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+}
+
+/// `git tpl context`
+#[derive(Debug, clap::Args)]
+pub struct ContextArgs {
+    /// The template to resolve; defaults to the current directory
+    #[arg(value_name = "TEMPLATE", default_value = ".")]
+    pub template: String,
+
+    /// The branch, tag or commit to resolve
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Use this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Resolve the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+
+    /// Evaluate one expression against the resolved context and print it
+    #[arg(long, value_name = "EXPR")]
+    pub eval: Option<String>,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
+    /// Allow the template's remote data sources without asking
+    #[arg(long)]
+    pub trust: bool,
+}
+
 /// `git tpl status`
 #[derive(Debug, clap::Args)]
 pub struct StatusArgs {
-    /// Machine-readable output on stdout
-    #[arg(long, value_enum, default_value_t = Format::Text)]
-    pub format: Format,
+    /// Compare against the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+
+    // Deprecated: use the global `--json`.
+    //
+    // Kept for one minor so that a CI job pinned to `--format json` does not
+    // break on upgrade without being told why. It is hidden, so it stops being
+    // discoverable immediately, and it warns on stderr when used.
+    #[arg(long, value_enum, hide = true)]
+    pub format: Option<Format>,
 }
 
 /// Output format.
@@ -235,6 +385,24 @@ pub struct DiffArgs {
     #[arg(long)]
     pub reverse: bool,
 
+    /// Exit 1 when there is a difference, like `git diff --exit-code`
+    //
+    // Difference, not conflict: a conflicting preview is a correct answer to
+    // the question asked, and `febbc37` deliberately kept it at zero.
+    #[arg(long)]
+    pub exit_code: bool,
+
+    /// Preview the template's working tree rather than the rendered ref
+    //
+    // This renders, which nothing else in `diff` does. Answers come from the
+    // recorded ones; `--answer` overrides them for the preview only, and
+    // nothing is written anywhere.
+    #[arg(long)]
+    pub dirty: bool,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
     /// Limit to these paths
     #[arg(last = true, value_name = "PATH")]
     pub paths: Vec<String>,
@@ -243,6 +411,13 @@ pub struct DiffArgs {
 /// `git tpl show`
 #[derive(Debug, clap::Args)]
 pub struct ShowArgs {
+    /// Read from the template's working tree rather than the rendered ref
+    #[arg(long)]
+    pub dirty: bool,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
     /// The path, relative to the repository root
     ///
     /// A plain positional rather than `last = true`: `diff` needs `--` only
@@ -321,6 +496,7 @@ mod tests {
             answers: vec!["name=demo".into(), "ci=true".into()],
             defaults: false,
             answers_from: Vec::new(),
+            strict_answers: false,
         };
         let parsed = args.parsed().unwrap();
 
@@ -335,6 +511,7 @@ mod tests {
             answers: vec!["motto=a=b=c".into()],
             defaults: false,
             answers_from: Vec::new(),
+            strict_answers: false,
         };
         assert_eq!(
             args.parsed().unwrap()["motto"],
@@ -348,6 +525,7 @@ mod tests {
             answers: vec!["name".into()],
             defaults: false,
             answers_from: Vec::new(),
+            strict_answers: false,
         };
         let error = args.parsed().unwrap_err();
         assert!(error.contains("key=value"), "{error}");
@@ -359,6 +537,7 @@ mod tests {
             answers: vec!["suffix=".into()],
             defaults: false,
             answers_from: Vec::new(),
+            strict_answers: false,
         };
         assert_eq!(
             args.parsed().unwrap()["suffix"],
@@ -366,14 +545,25 @@ mod tests {
         );
     }
 
-    /// `--answer` is meaningless to `diff`, and a silently ignored flag is
-    /// worse than a refused one.
+    /// A silently ignored flag is worse than a refused one.
+    ///
+    /// `diff` and `show` gained `--answer` when they gained `--dirty`: both
+    /// now render, and a preview has to be answerable. The commands that still
+    /// never render still refuse it.
     #[test]
     fn answer_flags_are_refused_where_they_would_be_ignored() {
-        assert!(Cli::try_parse_from(["git-tpl", "diff", "--answer", "a=b"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "push", "--defaults"]).is_err());
-        assert!(Cli::try_parse_from(["git-tpl", "diff", "--answers-from", "a.toml"]).is_err());
-        assert!(Cli::try_parse_from(["git-tpl", "show", "x", "--defaults"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "fetch", "--answer", "a=b"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "merge", "--answers-from", "a.toml"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "status", "--defaults"]).is_err());
+    }
+
+    /// The other half of the same rule: a command that renders accepts them.
+    #[test]
+    fn answer_flags_are_accepted_where_a_preview_renders() {
+        assert!(Cli::try_parse_from(["git-tpl", "diff", "--dirty", "--answer", "a=b"]).is_ok());
+        assert!(Cli::try_parse_from(["git-tpl", "show", "x", "--dirty", "--defaults"]).is_ok());
+        assert!(Cli::try_parse_from(["git-tpl", "render", "t", "-o", "out", "--defaults"]).is_ok());
     }
 
     /// `show` reads one path. A second one is a typo — most likely a `--`

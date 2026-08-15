@@ -29,6 +29,10 @@ nav = [
   { "Usage" = [
     { "init" = "usage/init.md" },
     { "update" = "usage/update.md" },
+    { "render" = "usage/render.md" },
+    { "lint" = "usage/lint.md" },
+    { "questions" = "usage/questions.md" },
+    { "context" = "usage/context.md" },
     { "Answers from a file" = "usage/answers.md" },
     { "status" = "usage/status.md" },
     { "diff" = "usage/diff.md" },
@@ -51,6 +55,10 @@ nav = [
     { "Reproducibility" = "data/reproducibility.md" },
   ] },
   { "Configuration" = "configuration.md" },
+  { "Reference" = [
+    { "Diagnostic codes" = "reference/diagnostics.md" },
+    { "JSON output" = "reference/json.md" },
+  ] },
   { "Development" = [
     { "Setup" = "development/setup.md" },
     { "Contributing" = "development/contributing.md" },

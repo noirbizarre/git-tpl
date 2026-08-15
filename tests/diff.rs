@@ -281,3 +281,251 @@ fn diff_previews_a_merge_of_unrelated_histories() {
         output.stdout
     );
 }
+
+// ---------------------------------------------------------------------------
+// `--json`: the same summary as data.
+//
+// It carries what the text modes cannot — the conflicts as an array rather
+// than as chrome on stderr — and the numbers must be the same numbers, so the
+// assertions below cross-check against `--stat`'s own output.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn diff_json_reports_the_stat_as_data() {
+    let world = pending();
+
+    let json = tpl(&world.project, &["--json", "diff"]).success().json();
+
+    assert_eq!(json["ok"], true);
+    let changes = json["changes"].as_array().expect("an array of changes");
+    let find = |path: &str| {
+        changes
+            .iter()
+            .find(|c| c["path"] == path)
+            .unwrap_or_else(|| panic!("no change about {path} in {json}"))
+    };
+
+    // The same two changes `stat_counts_the_lines_a_merge_would_insert`
+    // asserts in text, spelled as fields rather than as a formatted line.
+    let readme = find("README.md");
+    assert_eq!(readme["kind"], "modified");
+    assert_eq!(readme["insertions"], 2);
+    assert_eq!(readme["deletions"], 0);
+    assert_eq!(readme["binary"], false);
+
+    let workflow = find(".github/workflows/release.yml");
+    assert_eq!(workflow["kind"], "added");
+    assert_eq!(workflow["insertions"], 1);
+
+    assert_eq!(json["insertions"], 3);
+    assert_eq!(json["deletions"], 0);
+    assert_eq!(json["conflicts"], serde_json::json!([]));
+}
+
+/// `deleted` is the third `ChangeKind`, and the one a caller is most likely to
+/// branch on — nothing else in the payload says a merge would remove a file.
+#[test]
+fn diff_json_names_a_deletion_as_such() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.template.repo.remove("template/ci.yml");
+    world.template.repo.commit_all("feat: drop the CI workflow");
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let json = tpl(&world.project, &["--json", "diff"]).success().json();
+
+    let deleted = json["changes"]
+        .as_array()
+        .expect("changes")
+        .iter()
+        .find(|c| c["path"] == "ci.yml")
+        .expect("a change about ci.yml");
+    assert_eq!(deleted["kind"], "deleted");
+    assert_eq!(deleted["insertions"], 0);
+    assert_eq!(deleted["deletions"], 5);
+}
+
+/// The single most valuable thing to know before merging, and the one the text
+/// output relegates to stderr. The exit code stays zero: a conflicting preview
+/// is a correct answer to the question asked.
+#[test]
+fn diff_json_names_the_files_that_would_conflict() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let readme = world.project.read("README.md");
+    world.project.write(
+        "README.md",
+        &format!("{readme}\nWritten by the user at the end.\n"),
+    );
+    world.project.commit_all("docs: append a line");
+
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let output = tpl(&world.project, &["--json", "diff"]).success();
+    let json = output.json();
+
+    assert_eq!(
+        json["conflicts"],
+        serde_json::json!(["README.md"]),
+        "the conflicting path is data, not prose: {json}"
+    );
+    assert!(
+        !output.stdout.contains("would conflict"),
+        "the human warning leaked onto stdout: {}",
+        output.stdout
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `--dirty`: previewing an uncommitted template edit.
+//
+// Everything above diffs the rendered ref. These render the template's working
+// tree on the fly, which is the loop a template author is actually in — and
+// the reason `diff` had to learn to render at all.
+// ---------------------------------------------------------------------------
+
+/// The point of the flag: an edit that is not committed anywhere still shows up.
+#[test]
+fn dirty_previews_an_uncommitted_template_edit() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world.template.repo.write(
+        "template/README.md.jinja",
+        "# {{ project_name }}\n\nnew line\n",
+    );
+
+    tpl(&world.project, &["diff", "--stat"])
+        .success()
+        .says("No differences.");
+
+    tpl(&world.project, &["diff", "--dirty", "--stat"])
+        .success()
+        .says("README.md");
+}
+
+/// A preview is a rendering, and a rendering that moved the ref would be an
+/// `update` nobody asked for — and one a later real update would have to
+/// reconcile with.
+#[test]
+fn a_dirty_preview_does_not_move_the_rendered_ref() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let before = world.project.rev_parse(&world.ref_name());
+    let head_before = world.project.rev_parse("HEAD");
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# changed\n");
+
+    tpl(&world.project, &["diff", "--dirty"]).success();
+
+    assert_eq!(
+        world.project.rev_parse(&world.ref_name()),
+        before,
+        "the preview advanced the rendered ref"
+    );
+    assert_eq!(
+        world.project.rev_parse("HEAD"),
+        head_before,
+        "the preview moved HEAD"
+    );
+    assert!(
+        world.project.status().is_empty(),
+        "the worktree was touched"
+    );
+}
+
+/// A preview answers the recorded questions, not a fresh questionnaire.
+/// Without this it would hang for a non-interactive caller and re-ask an
+/// interactive one just to look at a diff.
+#[test]
+fn a_dirty_preview_reuses_the_recorded_answers() {
+    let world = World::new();
+    world.init(&["--answer", "project_name=recorded"]).success();
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# {{ project_name }} edited\n");
+
+    tpl(&world.project, &["show", "--dirty", "README.md"])
+        .success()
+        .says("recorded");
+}
+
+/// `show --dirty` reads one file out of the same preview.
+#[test]
+fn show_dirty_reads_from_the_uncommitted_template() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# uncommitted marker\n");
+
+    tpl(&world.project, &["show", "README.md"])
+        .success()
+        .silent_about("uncommitted marker");
+
+    tpl(&world.project, &["show", "--dirty", "README.md"])
+        .success()
+        .says("uncommitted marker");
+}
+
+/// `status --dirty` is the cheap half: it reports against the working tree
+/// rather than the committed revision, so an uncommitted edit reads as pending.
+#[test]
+fn status_dirty_reports_an_uncommitted_template_as_pending() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    tpl(&world.project, &["status"]).code(0);
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# changed\n");
+
+    tpl(&world.project, &["status", "--dirty"]).code(2);
+}
+
+/// Git's own convention, so CI can assert "the template output has not
+/// drifted" without parsing anything.
+#[test]
+fn exit_code_reports_a_difference() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    tpl(&world.project, &["diff", "--exit-code"]).code(0);
+
+    world.move_template();
+    tpl(&world.project, &["update"]).success();
+
+    tpl(&world.project, &["diff", "--exit-code"]).code(1);
+    // Without the flag it stays zero, because a diff is not a failure.
+    tpl(&world.project, &["diff"]).code(0);
+}
+
+/// `--json` is a reporting mode, not a separate command: `--exit-code` must
+/// still mean what it means everywhere else.
+#[test]
+fn diff_json_honours_exit_code() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let json = tpl(&world.project, &["--json", "diff", "--exit-code"])
+        .code(0)
+        .json();
+    assert_eq!(json["changes"], serde_json::json!([]));
+
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    tpl(&world.project, &["--json", "diff", "--exit-code"]).code(1);
+}

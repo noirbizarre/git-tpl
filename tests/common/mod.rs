@@ -272,8 +272,20 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<String>) {
 
 /// Run `git-tpl` in a repository.
 pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
+    run_tpl(&repo.path, repo.config_home(), args)
+}
+
+/// Run `git-tpl` in a plain directory, with no repository.
+///
+/// The project-free commands — `render`, `lint`, `questions`, `context` — must
+/// work here, and a test that ran them inside a repository would not prove it.
+pub fn tpl_outside(dir: &Path, config_home: &Path, args: &[&str]) -> Output {
+    run_tpl(dir, config_home, args)
+}
+
+fn run_tpl(cwd: &Path, config_home: &Path, args: &[&str]) -> Output {
     let mut command = Command::cargo_bin("git-tpl").expect("built binary");
-    command.current_dir(&repo.path);
+    command.current_dir(cwd);
     // Deterministic output, whatever the developer's terminal or CI is doing.
     command.arg("--color").arg("never");
     command.args(args);
@@ -285,7 +297,7 @@ pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
     // without this the suite would read whatever the developer happens to have
     // written there — and `[defaults]` would change what a prompt returns.
     // `HOME` goes too, since it is the fallback the resolution uses.
-    command.env("XDG_CONFIG_HOME", repo.config_home());
+    command.env("XDG_CONFIG_HOME", config_home);
     command.env_remove("HOME");
 
     let output = command.output().expect("run git-tpl");
@@ -304,6 +316,31 @@ pub struct Output {
 }
 
 impl Output {
+    /// The JSON on stdout.
+    ///
+    /// Panics with the whole output when it is not JSON, because the usual
+    /// cause is a human line that escaped onto stdout — which is the bug
+    /// `--json` exists to prevent, and a `serde` error alone would not name it.
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.stdout).unwrap_or_else(|error| {
+            panic!(
+                "stdout is not JSON ({error})\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                self.stdout, self.stderr
+            )
+        })
+    }
+
+    /// The diagnostic code of a failure envelope.
+    ///
+    /// Tests assert on this rather than on the message: the codes are the
+    /// stable surface, and pinning prose is how error messages stop improving.
+    pub fn error_code(&self) -> String {
+        self.json()["error"]["code"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no error code in {}", self.stdout))
+            .to_string()
+    }
+
     /// Assert it exited zero, showing everything if not.
     pub fn success(self) -> Self {
         assert_eq!(

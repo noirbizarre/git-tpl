@@ -110,6 +110,22 @@ pub struct Manifest {
     #[serde(default = "default_root")]
     pub root: String,
 
+    /// Fail on an undeclared name in a rendered file, rather than rendering it
+    /// to an empty string.
+    ///
+    /// MiniJinja is lenient by default, which means `{{ typo }}` produces
+    /// nothing and the command succeeds — leaving a `Cargo.toml` with
+    /// `name = ""` that parses, or a workflow with `runs-on: ` that is valid
+    /// YAML. A manifest expression with the same typo is a hard error before
+    /// the first prompt; a file body was not, and the asymmetry is not
+    /// defensible once noticed.
+    ///
+    /// Opt-in for now: `git tpl lint` reports the same names as warnings, so
+    /// that the default flipping in a later release is a change template
+    /// authors have already been told about. See ADR-014.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
+
     /// Declared data sources, by name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub data: BTreeMap<String, DataSourceDecl>,

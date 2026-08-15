@@ -14,7 +14,7 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::context::Context;
-use crate::eval::{EvalError, Partials, render_string};
+use crate::eval::{EvalError, Partials, Undefined, render_string_with};
 use crate::git::{FileMode, GitBackend, Oid, TreeEntry};
 
 /// The suffix marking a file as a template.
@@ -159,6 +159,13 @@ pub struct Rendered {
     pub content: Vec<u8>,
     /// Whether the executable bit is set.
     pub executable: bool,
+    /// Whether the file went through MiniJinja, or was copied byte-for-byte.
+    ///
+    /// Reported because it is the one thing about a rendering an author cannot
+    /// see in the output: a workflow full of `${{ }}` that survived intact and
+    /// one that was never rendered look identical, and only the second is
+    /// correct by construction.
+    pub templated: bool,
 }
 
 /// Render a template tree against a context, producing a Git tree.
@@ -178,14 +185,23 @@ pub fn render_tree(
     entries: &[TreeEntry],
     context: &Context,
     partials: &Arc<Partials>,
+    undefined: Undefined,
 ) -> Result<Oid, RenderError> {
-    let rendered = render_entries(template, entries, context, partials)?;
+    let rendered = render_entries(template, entries, context, partials, undefined)?;
+    write_tree(project, &rendered)
+}
 
+/// Write already-rendered files into `project` as a tree.
+///
+/// Split from [`render_tree`] because it is the only part of a rendering that
+/// needs a repository to write into: `git tpl render --output` produces the
+/// same `Rendered` values and writes them to a directory instead.
+pub fn write_tree(project: &dyn GitBackend, rendered: &[Rendered]) -> Result<Oid, RenderError> {
     let mut tree_entries = Vec::with_capacity(rendered.len());
     for file in rendered {
         let oid = project.write_blob(&file.content)?;
         tree_entries.push(TreeEntry {
-            path: file.path,
+            path: file.path.clone(),
             oid,
             mode: if file.executable {
                 FileMode::BlobExecutable
@@ -206,6 +222,7 @@ pub fn render_entries(
     entries: &[TreeEntry],
     context: &Context,
     partials: &Arc<Partials>,
+    undefined: Undefined,
 ) -> Result<Vec<Rendered>, RenderError> {
     // Sorted input in, sorted output out. Rendering can reorder paths — a
     // templated segment may render to anything — so the result is re-sorted
@@ -223,7 +240,7 @@ pub fn render_entries(
             continue;
         }
 
-        let Some(path) = render_path(&entry.path, context, partials)? else {
+        let Some(path) = render_path(&entry.path, context, partials, undefined)? else {
             // A segment rendered empty, so this entry — and, for a directory,
             // everything beneath it — is skipped. That is how a template makes
             // a whole subtree conditional.
@@ -231,11 +248,14 @@ pub fn render_entries(
         };
 
         let source = template.read_blob(entry.oid)?;
-        let is_template = entry.path.ends_with(TEMPLATE_SUFFIX);
+        // A binary blob is copied even when it is named `.jinja`, so
+        // "was it rendered" is not the same question as "is it named like a
+        // template". This is the answer to the first.
+        let templated = entry.path.ends_with(TEMPLATE_SUFFIX) && !is_binary(&source);
 
-        let content = if is_template && !is_binary(&source) {
+        let content = if templated {
             let text = String::from_utf8_lossy(&source);
-            render_string(&text, context, &entry.path, partials)
+            render_string_with(&text, context, &entry.path, partials, undefined)
                 .map_err(|source| RenderError::Content {
                     path: entry.path.clone(),
                     source,
@@ -260,6 +280,7 @@ pub fn render_entries(
         out.push(Rendered {
             path,
             content,
+            templated,
             // Git records nothing about permissions except the executable bit,
             // so it is the only one that can be carried.
             executable: entry.mode == FileMode::BlobExecutable,
@@ -277,6 +298,7 @@ fn render_path(
     path: &str,
     context: &Context,
     partials: &Arc<Partials>,
+    undefined: Undefined,
 ) -> Result<Option<String>, RenderError> {
     // Strip the suffix before rendering, so a templated directory name ending
     // in `.jinja` is not mistaken for a template file.
@@ -284,12 +306,13 @@ fn render_path(
 
     let mut segments = Vec::new();
     for segment in stripped.split('/') {
-        let rendered = render_string(segment, context, path, partials).map_err(|source| {
-            RenderError::Path {
-                path: path.to_string(),
-                source,
-            }
-        })?;
+        let rendered =
+            render_string_with(segment, context, path, partials, undefined).map_err(|source| {
+                RenderError::Path {
+                    path: path.to_string(),
+                    source,
+                }
+            })?;
         let rendered = rendered.trim().to_string();
 
         if rendered.is_empty() {
@@ -358,11 +381,26 @@ mod tests {
         }
 
         fn render(&self, entries: &[TreeEntry], context: &Context) -> Vec<Rendered> {
-            render_entries(&self.repo, entries, context, no_partials()).unwrap()
+            render_entries(
+                &self.repo,
+                entries,
+                context,
+                no_partials(),
+                Undefined::Lenient,
+            )
+            .unwrap()
         }
 
         fn tree(&self, entries: &[TreeEntry], context: &Context) -> Oid {
-            render_tree(&self.repo, &self.repo, entries, context, no_partials()).unwrap()
+            render_tree(
+                &self.repo,
+                &self.repo,
+                entries,
+                context,
+                no_partials(),
+                Undefined::Lenient,
+            )
+            .unwrap()
         }
     }
 
@@ -463,6 +501,7 @@ mod tests {
             &[f.entry("{{ evil }}/x", b"x")],
             &context,
             no_partials(),
+            Undefined::Lenient,
         )
         .unwrap_err();
 
@@ -483,6 +522,7 @@ mod tests {
             &[f.entry("{{ evil }}/x", b"x")],
             &context,
             no_partials(),
+            Undefined::Lenient,
         )
         .unwrap_err();
 
@@ -537,10 +577,22 @@ mod tests {
             f.entry("crlf.txt.jinja", b"{{ project_name }}\r\nx\r\n"),
         ];
 
-        let rendered = render_entries(&f.repo, &entries[..1], &context(), no_partials());
+        let rendered = render_entries(
+            &f.repo,
+            &entries[..1],
+            &context(),
+            no_partials(),
+            Undefined::Lenient,
+        );
         assert_eq!(rendered.unwrap()[0].content, b"a\r\nb\r\n");
 
-        let rendered = render_entries(&f.repo, &entries[1..], &context(), no_partials());
+        let rendered = render_entries(
+            &f.repo,
+            &entries[1..],
+            &context(),
+            no_partials(),
+            Undefined::Lenient,
+        );
         assert_eq!(rendered.unwrap()[0].content, b"Demo\r\nx\r\n");
     }
 
@@ -573,6 +625,7 @@ mod tests {
             &[f.entry("{{ name }}.txt", b"a"), f.entry("same.txt", b"b")],
             &context,
             no_partials(),
+            Undefined::Lenient,
         )
         .unwrap_err();
 
@@ -587,6 +640,7 @@ mod tests {
             &[f.entry("bad.md.jinja", b"{{ 'x' | no_such_filter }}")],
             &context(),
             no_partials(),
+            Undefined::Lenient,
         )
         .unwrap_err();
 
@@ -668,7 +722,7 @@ mod tests {
             context: &Context,
             partials: &Arc<Partials>,
         ) -> Result<Vec<Rendered>, RenderError> {
-            render_entries(&self.repo, entries, context, partials)
+            render_entries(&self.repo, entries, context, partials, Undefined::Lenient)
         }
     }
 
@@ -861,8 +915,24 @@ mod tests {
             b"{% import 'macros.jinja' as m %}{{ m.title(project_name) }}\n",
         )];
 
-        let first = render_tree(&f.repo, &f.repo, &entries, &context(), &partials).unwrap();
-        let second = render_tree(&f.repo, &f.repo, &entries, &context(), &partials).unwrap();
+        let first = render_tree(
+            &f.repo,
+            &f.repo,
+            &entries,
+            &context(),
+            &partials,
+            Undefined::Lenient,
+        )
+        .unwrap();
+        let second = render_tree(
+            &f.repo,
+            &f.repo,
+            &entries,
+            &context(),
+            &partials,
+            Undefined::Lenient,
+        )
+        .unwrap();
 
         assert_eq!(first, second);
     }
@@ -893,8 +963,24 @@ mod tests {
         ));
 
         assert_ne!(
-            render_tree(&f.repo, &f.repo, &entries, &context(), &before).unwrap(),
-            render_tree(&f.repo, &f.repo, &entries, &context(), &after).unwrap(),
+            render_tree(
+                &f.repo,
+                &f.repo,
+                &entries,
+                &context(),
+                &before,
+                Undefined::Lenient
+            )
+            .unwrap(),
+            render_tree(
+                &f.repo,
+                &f.repo,
+                &entries,
+                &context(),
+                &after,
+                Undefined::Lenient
+            )
+            .unwrap(),
         );
     }
 

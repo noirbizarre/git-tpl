@@ -814,9 +814,11 @@ impl GitBackend for LibGit2 {
         Ok(to_oid(commit.tree_id()))
     }
 
-    fn tree_from_workdir(&self, root: &Path) -> Result<Oid, GitError> {
+    fn tree_from_workdir(&self, root: &Path) -> Result<(Oid, Vec<String>), GitError> {
         let mut entries = Vec::new();
-        collect_workdir(root, root, &self.repo, &mut entries)?;
+        let mut ignored = Vec::new();
+        collect_workdir(root, root, &self.repo, &mut entries, &mut ignored)?;
+        ignored.sort();
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
         let mut blobs = Vec::new();
@@ -837,7 +839,7 @@ impl GitBackend for LibGit2 {
             });
         }
 
-        self.build_tree(&blobs)
+        Ok((self.build_tree(&blobs)?, ignored))
     }
 
     fn read_path(&self, tree: Oid, path: &str) -> Result<Option<Vec<u8>>, GitError> {
@@ -1142,6 +1144,7 @@ fn collect_workdir(
     dir: &Path,
     repo: &Repository,
     out: &mut Vec<(String, PathBuf, bool)>,
+    ignored: &mut Vec<String>,
 ) -> Result<(), GitError> {
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .map_err(|e| GitError::Backend {
@@ -1165,7 +1168,15 @@ fn collect_workdir(
         let relative = path.strip_prefix(root).unwrap_or(&path);
         // Honour .gitignore, so a `--dirty` render matches what `git add -A`
         // would have staged rather than including build output.
+        //
+        // Recorded, not just skipped. This consults the whole libgit2 ignore
+        // stack — per-directory `.gitignore`, `.git/info/exclude` *and*
+        // `core.excludesFile` — so a global rule set years ago on an unrelated
+        // project can silently remove a file the author can see on disk. In a
+        // render there is no `git status` to consult, and an unexplained
+        // absence is the hardest kind of bug to find.
         if repo.is_path_ignored(relative).unwrap_or(false) {
+            ignored.push(relative.to_string_lossy().replace('\\', "/"));
             continue;
         }
 
@@ -1175,7 +1186,7 @@ fn collect_workdir(
         })?;
 
         if file_type.is_dir() {
-            collect_workdir(root, &path, repo, out)?;
+            collect_workdir(root, &path, repo, out, ignored)?;
         } else if file_type.is_file() {
             let relative_str = relative.to_string_lossy().replace('\\', "/");
             out.push((relative_str, path.clone(), is_executable(&path)));
