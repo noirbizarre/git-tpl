@@ -83,6 +83,9 @@ pub enum Command {
     /// List a template's questions and their schema
     Questions(QuestionsArgs),
 
+    /// Show what a template sees, and evaluate expressions against it
+    Context(ContextArgs),
+
     /// Show the template, the rendered ref, and what is pending
     Status(StatusArgs),
 
@@ -308,6 +311,37 @@ pub struct QuestionsArgs {
     /// Inspect the template's working tree rather than its HEAD
     #[arg(long)]
     pub dirty: bool,
+}
+
+/// `git tpl context`
+#[derive(Debug, clap::Args)]
+pub struct ContextArgs {
+    /// The template to resolve; defaults to the current directory
+    #[arg(value_name = "TEMPLATE", default_value = ".")]
+    pub template: String,
+
+    /// The branch, tag or commit to resolve
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Use this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Resolve the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+
+    /// Evaluate one expression against the resolved context and print it
+    #[arg(long, value_name = "EXPR")]
+    pub eval: Option<String>,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
+    /// Allow the template's remote data sources without asking
+    #[arg(long)]
+    pub trust: bool,
 }
 
 /// `git tpl status`

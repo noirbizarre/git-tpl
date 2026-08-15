@@ -1,5 +1,6 @@
 //! One module per subcommand.
 
+mod context;
 mod diff;
 mod fetch;
 mod init;
@@ -12,6 +13,7 @@ mod show;
 mod status;
 mod update;
 
+pub use context::run as context;
 pub use diff::run as diff;
 pub use fetch::run as fetch;
 pub use init::run as init;

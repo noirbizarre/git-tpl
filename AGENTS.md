@@ -139,6 +139,26 @@ users grep for, so renaming one is a breaking change.
 is that Git's behaviour is the behaviour; a test against a stub would test the
 stub. `tests/common/mod.rs` builds real repositories in temporary directories.
 
+## Driving git-tpl without a person
+
+Every command takes `--json`, and every failure carries a stable
+`error.code` — `docs/reference/diagnostics.md` is the catalogue. Branch on the
+code, never on the message; messages are expected to improve and are pinned
+nowhere.
+
+The loop for working on a template, none of which needs a repository:
+
+```sh
+git tpl --json questions ./tpl        # the answer schema, in resolution order
+git tpl --json lint ./tpl --dirty     # what a render would not tell you
+git tpl render ./tpl --dirty -o /tmp/out --answers-from answers.toml --defaults
+git tpl --json context ./tpl --eval '{{ some | filter }}'
+```
+
+Then check the *output* with the tools that understand it — `cargo build`,
+`actionlint`, whatever the template emits. git-tpl runs nothing over a
+rendering and never will; that is invariant 5, not an omission.
+
 ## Commits
 
 Conventional Commits, enforced by commitlint on `commit-msg`. The type becomes a

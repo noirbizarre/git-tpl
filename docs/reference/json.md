@@ -89,6 +89,22 @@ answered in when a `when` or a `default` references an earlier answer.
 `choicesResolved` appears when a `choices_from` points at a data file inside
 the template, saving the caller from fetching and parsing it.
 
+### `context`
+
+```json
+{ "ok": true,
+  "answers": {…}, "computed": {…}, "data": {…}, "template": {…}, "flat": {…} }
+```
+
+`flat` is what a template body sees: answers and computed values at the top
+level, `data` and `template` namespaced.
+
+With `--eval`:
+
+```json
+{ "ok": true, "expression": "{{ x | length }}", "type": "an integer", "value": 3 }
+```
+
 ### `status`
 
 Documented in [status](../usage/status.md). `--format json` is deprecated in

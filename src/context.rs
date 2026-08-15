@@ -207,8 +207,45 @@ impl Context {
         minijinja::Value::from_iter(root)
     }
 
-    /// A stable digest of the answers, recorded in the commit trailers.
+    /// Computed values, by name.
     ///
+    /// The counterpart of [`answers`](Self::answers), which existed because
+    /// only answers are recorded. This exists because `git tpl context` has to
+    /// show the whole of what a template sees, and a computed value is the
+    /// part an author most often gets wrong.
+    pub fn computed(&self) -> &BTreeMap<String, Value> {
+        &self.computed
+    }
+
+    /// Template metadata, by name.
+    pub fn template(&self) -> &BTreeMap<String, Value> {
+        &self.template
+    }
+
+    /// Everything a template sees, as JSON.
+    ///
+    /// `flat` mirrors [`to_minijinja`](Self::to_minijinja): answers and
+    /// computed values at the top level, `data` and `template` namespaced. A
+    /// dump that did not match what the renderer sees would be worse than
+    /// none, because it would be believed.
+    pub fn to_json(&self) -> serde_json::Value {
+        let table = |map: &BTreeMap<String, Value>| {
+            serde_json::to_value(Value::Table(map.clone())).unwrap_or(serde_json::Value::Null)
+        };
+
+        let mut flat = self.answers.clone();
+        flat.extend(self.computed.clone());
+
+        serde_json::json!({
+            "answers": table(&self.answers),
+            "computed": table(&self.computed),
+            "data": table(&self.data),
+            "template": table(&self.template),
+            "flat": table(&flat),
+        })
+    }
+
+    /// A stable digest of the answers, recorded in the commit trailers.    ///
     /// Lets `status` detect that answers changed without reading and comparing
     /// the configuration file, and records in Git what the tree was rendered
     /// from. Only answers, because only answers are input.

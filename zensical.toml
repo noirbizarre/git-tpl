@@ -32,6 +32,7 @@ nav = [
     { "render" = "usage/render.md" },
     { "lint" = "usage/lint.md" },
     { "questions" = "usage/questions.md" },
+    { "context" = "usage/context.md" },
     { "Answers from a file" = "usage/answers.md" },
     { "status" = "usage/status.md" },
     { "diff" = "usage/diff.md" },
