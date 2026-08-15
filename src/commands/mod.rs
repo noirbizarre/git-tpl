@@ -5,6 +5,7 @@ mod fetch;
 mod init;
 mod merge;
 mod push;
+mod show;
 mod status;
 mod update;
 
@@ -13,6 +14,7 @@ pub use fetch::run as fetch;
 pub use init::run as init;
 pub use merge::run as merge;
 pub use push::run as push;
+pub use show::run as show;
 pub use status::run as status;
 pub use update::run as update;
 

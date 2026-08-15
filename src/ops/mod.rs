@@ -127,6 +127,23 @@ pub enum OpError {
         /// The ref that was looked for.
         ref_name: String,
     },
+
+    /// The path is not in the rendering.
+    ///
+    /// Both fields are carried because the two things the reader does not
+    /// already know are which path was looked for *after normalisation* and
+    /// which ref was read.
+    #[error("`{path}` is not in `{ref_name}`")]
+    #[diagnostic(
+        code(tpl::ops::no_such_path),
+        help("run `git tpl diff --name-only` to list what the template renders")
+    )]
+    NoSuchPath {
+        /// The path that was looked for.
+        path: String,
+        /// The ref it was looked for in.
+        ref_name: String,
+    },
 }
 
 /// How answers are obtained during an operation.
@@ -892,6 +909,87 @@ pub fn diff_changes(project: &dyn GitBackend, project_root: &Path) -> Result<Vec
     };
 
     Ok(project.diff_trees(head_tree, project.commit(tip)?.tree)?)
+}
+
+/// What [`show`] found at a path.
+pub enum Shown {
+    /// A file, and its bytes exactly as rendered.
+    File(Vec<u8>),
+    /// A directory, and the root-relative paths beneath it, sorted.
+    Directory(Vec<String>),
+}
+
+/// Normalise a path argument into the form a Git tree lookup expects.
+///
+/// Root-relative, no leading `./`, no trailing `/`. An absolute path or a `..`
+/// component is refused rather than resolved: a tree lookup cannot escape a
+/// tree, so this is not a security boundary, but `read_path` would answer a
+/// bare "not found" for `../x` and send the reader looking in the wrong place.
+fn normalise_shown_path(path: &str) -> Result<String, OpError> {
+    let trimmed = path.trim_end_matches('/');
+    let trimmed = trimmed.strip_prefix("./").unwrap_or(trimmed);
+
+    if trimmed.starts_with('/') {
+        return Err(OpError::InvalidArgument {
+            message: format!("`{path}` is absolute; paths are relative to the repository root"),
+        });
+    }
+    if trimmed.split('/').any(|part| part == "..") {
+        return Err(OpError::InvalidArgument {
+            message: format!(
+                "`{path}` leaves the rendering; paths are relative to the repository root"
+            ),
+        });
+    }
+
+    // `.` and `./` name the whole rendering, which `subtree` already answers
+    // with the root tree. Reduced to the empty string so there is one spelling
+    // of "the root" below rather than three.
+    Ok(if trimmed == "." {
+        String::new()
+    } else {
+        trimmed.to_string()
+    })
+}
+
+/// One path as the template renders it, read from `refs/tpl/<id>`.
+///
+/// The ref tip, and only the ref tip. The motivating moment is a conflicted
+/// merge, where the tip is the side being read and the machine may be offline —
+/// so this never resolves the template repository and never touches the
+/// network.
+pub fn show(project: &dyn GitBackend, project_root: &Path, path: &str) -> Result<Shown, OpError> {
+    let (_, ref_name) = identify(project_root)?;
+    let tip = require_tip(project, &ref_name)?;
+    let tree = project.commit(tip)?.tree;
+
+    let path = normalise_shown_path(path)?;
+
+    // Asked before `read_path` on purpose: the backend's `read_path` calls
+    // `find_blob` on a tree oid and fails with an opaque "could not read the
+    // file" when the path is a directory.
+    if let Some(subtree) = project.subtree(tree, &path)? {
+        let entries = project.list_tree(subtree)?;
+        let paths = entries
+            .into_iter()
+            // `list_tree` yields paths relative to the tree it was given, so
+            // the prefix goes back on: everything this command prints is
+            // root-relative, like `git tpl diff --name-only`.
+            .map(|entry| {
+                if path.is_empty() {
+                    entry.path
+                } else {
+                    format!("{path}/{}", entry.path)
+                }
+            })
+            .collect();
+        return Ok(Shown::Directory(paths));
+    }
+
+    match project.read_path(tree, &path)? {
+        Some(bytes) => Ok(Shown::File(bytes)),
+        None => Err(OpError::NoSuchPath { path, ref_name }),
+    }
 }
 
 /// Merge the rendered ref into the current branch.

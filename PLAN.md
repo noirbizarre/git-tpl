@@ -28,6 +28,7 @@ main:  A ─── M ─── B ─── M'
 | `update` | ✅ ref only — HEAD, index and worktree untouched (asserted) |
 | `status` | ✅ text and `--format json`, exit 2 when pending |
 | `diff` | ✅ patch, `--stat`, `--name-only`, path limiting |
+| `show` | ✅ one path from `refs/tpl/<id>` — files verbatim on stdout, directories listed |
 | `merge` | ✅ libgit2 merge, `--abort`, zero custom conflict logic |
 | `fetch` / `push` | ✅ explicit refspecs, never forced, divergence refused |
 | Questions | ✅ string, boolean, integer, choice, multi_choice |
@@ -68,7 +69,7 @@ main:  A ─── M ─── B ─── M'
 | **Git-hosted data** (`source` + `ref` + `path`) | Designed in `docs/data/reproducibility.md`. `sha256` pinning covers the reproducibility case; this is about convenience for data that already lives in a repository. |
 | **`gh-tpl`** | Dropped from the bootstrap. Returns as a second `[[bin]]`, or by promoting the package to a workspace member — mechanical, no code movement. See ADR-004. |
 | **SSH integration tests** | The credential path is implemented (agent → default keys → helper) and auth failures are translated into actionable diagnostics. Not exercised against a real host, because CI must not depend on anyone's private credentials. |
-| **`git tpl show`, `git tpl detach`** | No clear semantics yet. Not implemented until there are. |
+| **`git tpl detach`** | No clear semantics yet. Not implemented until there are. |
 | **Testing a template** | A template author renders into a scratch directory and looks. There is no `render` command and no test runner, so most templates have no tests. The fixtures a runner would read are now expressible — `--answers-from` ships. See *Next*. |
 | **Template inheritance** | A template is one repository, standing alone. Fifteen templates in an organisation means fifteen copies of the same CI workflow. See *Next*. |
 | **Distribution beyond crates.io** | `cargo install`, `mise use -g cargo:git-tpl`, `mise use -g github:noirbizarre/git-tpl` and raw release binaries. No AUR package, no Homebrew formula, no mise registry entry. See *Next*. |
@@ -315,9 +316,6 @@ needs code.
 
 ### 6. Smaller things
 
-
-- `git tpl show <path>` — the template's version of one file. Wanted whenever a
-  merge conflicts.
 - `--stat` should count lines, not just files. Needs a line-level diff summary
   from libgit2.
 - Snapshot tests over CLI output. The harness and `insta` are already wired.
