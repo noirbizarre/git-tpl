@@ -221,14 +221,14 @@ pub enum GitError {
     },
 
     /// A revision could not be resolved.
-    #[error("could not resolve `{revision}` in `{origin}`")]
+    #[error("could not resolve `{reference}` in `{origin}`")]
     #[diagnostic(
         code(tpl::git::no_such_revision),
         help("`ref` must be a branch, tag or commit that exists in the template repository")
     )]
     NoSuchRevision {
-        /// The revision that was asked for.
-        revision: String,
+        /// The name that was asked for — a branch, tag or SHA.
+        reference: String,
         /// The repository it was looked for in.
         // Not named `source`: thiserror reserves that name for `#[source]`.
         origin: String,

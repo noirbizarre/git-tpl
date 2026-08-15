@@ -48,11 +48,11 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
 
     match outcome {
         UpdateOutcome::UpToDate {
-            revision,
+            revision_description,
             ignored_answers,
         } => {
             ctx.say(format!(
-                "Already up to date with {} at {revision}.",
+                "Already up to date with {} at {revision_description}.",
                 config.template.source
             ));
             report_ignored(&ctx, &ignored_answers);
@@ -61,8 +61,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
         UpdateOutcome::Updated {
             id,
             changes,
-            previous_revision,
-            revision,
+            previous_revision_description,
+            revision_description,
             answers_changed,
             ignored_answers,
             ..
@@ -73,9 +73,9 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
             ctx.say(field(
                 &ctx.theme,
                 "Revision",
-                &match previous_revision {
-                    Some(previous) => format!("{previous} → {revision}"),
-                    None => revision.clone(),
+                &match previous_revision_description {
+                    Some(previous) => format!("{previous} → {revision_description}"),
+                    None => revision_description.clone(),
                 },
             ));
             ctx.blank();

@@ -40,7 +40,7 @@ fn print_text(ctx: &Context, status: &ops::Status) {
         .map(|r| r.describe_revision())
         .unwrap_or_else(|| "never rendered".into());
 
-    let revision_line = match (&status.available_revision, status.template_moved) {
+    let revision_line = match (&status.available_revision_description, status.template_moved) {
         (Some(available), true) => format!(
             "{rendered} → {available}   {}",
             muted(&ctx.theme, "template has moved")
@@ -125,7 +125,7 @@ fn to_json(status: &ops::Status) -> String {
         "renderedRevision": recorded.and_then(|r| r.reference.clone()),
         "renderedCommit": recorded.and_then(|r| r.commit.map(|c| c.to_hex())),
         "dirty": recorded.map(|r| r.dirty).unwrap_or(false),
-        "availableRevision": status.available_revision,
+        "availableRevision": status.available_revision_description,
         "templateMoved": status.template_moved,
         "merged": status.merged,
         "renderingCount": status.rendering_count,

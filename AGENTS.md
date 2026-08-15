@@ -102,6 +102,20 @@ says what. Ideally naming the failure it prevents:
 A comment that restates the code is worse than none. A comment recording the
 bug that motivated the line saves the next person an afternoon.
 
+**One name per concept.** Two concepts here are easy to conflate, so they have
+fixed names:
+
+| Name | Type | Meaning |
+|---|---|---|
+| `reference` | `String` | the name asked for — a branch, tag, SHA, or `<worktree>` |
+| `revision` | `Oid` | the commit it resolved to |
+
+`revision` never names a `String`. A field holding the printable form of the
+pair is `*_description`, and is produced by `ops::describe_revision` — never
+by a `format!` at the call site, or the two ends of a `A → B` line come to
+disagree. The config key and CLI flag stay `ref`, because that is what a user
+writes.
+
 **Errors are typed and actionable.** `thiserror` for the library, `miette` at
 the binary edge. A diagnostic must carry the two things the user does not
 already know: what specifically failed, and what to do. Compare:

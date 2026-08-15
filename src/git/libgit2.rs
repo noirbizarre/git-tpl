@@ -578,7 +578,7 @@ impl GitBackend for LibGit2 {
         }
 
         Err(GitError::NoSuchRevision {
-            revision: revision.to_string(),
+            reference: revision.to_string(),
             origin: origin.to_string(),
         })
     }
@@ -600,7 +600,7 @@ impl GitBackend for LibGit2 {
             }
         }
         Err(GitError::NoSuchRevision {
-            revision: "HEAD".into(),
+            reference: "HEAD".into(),
             origin: "the template repository".into(),
         })
     }

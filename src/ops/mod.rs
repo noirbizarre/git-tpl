@@ -368,8 +368,8 @@ pub struct InitOutcome {
     /// Whether it was committed, or left staged for the user's merge
     /// resolution.
     pub config_committed: bool,
-    /// The revision that was rendered.
-    pub revision: String,
+    /// The revision that was rendered, ready to print.
+    pub revision_description: String,
     /// Supplied answers that name no question in this template.
     pub ignored_answers: Vec<String>,
 }
@@ -484,7 +484,10 @@ pub fn init(
         merge,
         config_path,
         config_committed,
-        revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+        revision_description: describe_revision(
+            &rendered.template.reference,
+            rendered.template.revision,
+        ),
         ignored_answers: rendered.ignored_answers,
     })
 }
@@ -496,8 +499,8 @@ pub enum UpdateOutcome {
     /// The reason determinism matters: a renderer that varied would create a
     /// commit on every run, and every one would be noise to merge.
     UpToDate {
-        /// The revision that was rendered.
-        revision: String,
+        /// The revision that was rendered, ready to print.
+        revision_description: String,
         /// Supplied answers that name no question in this template. Carried
         /// even here: a typo'd key is worth reporting whether or not the
         /// rendering changed.
@@ -511,10 +514,10 @@ pub enum UpdateOutcome {
         commit: Oid,
         /// What changed against the previous rendering.
         changes: Vec<Change>,
-        /// The revision previously rendered, if there was one.
-        previous_revision: Option<String>,
-        /// The revision now rendered.
-        revision: String,
+        /// The revision previously rendered, if there was one, ready to print.
+        previous_revision_description: Option<String>,
+        /// The revision now rendered, ready to print.
+        revision_description: String,
         /// Whether the recorded answers were rewritten — which happens when a
         /// template adds a question. Worth telling the user, since it is the
         /// one file `update` does modify.
@@ -560,7 +563,7 @@ pub fn update(
     let tip = project.resolve_ref(&ref_name)?;
 
     let previous = tip.map(|oid| project.commit(oid)).transpose()?;
-    let previous_revision = previous
+    let previous_revision_description = previous
         .as_ref()
         .and_then(|commit| Provenance::parse(&commit.message))
         .map(|recorded| recorded.describe_revision());
@@ -572,7 +575,10 @@ pub fn update(
         && previous.tree == rendered.tree
     {
         return Ok(UpdateOutcome::UpToDate {
-            revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+            revision_description: describe_revision(
+            &rendered.template.reference,
+            rendered.template.revision,
+        ),
             ignored_answers: rendered.ignored_answers,
         });
     }
@@ -603,8 +609,11 @@ pub fn update(
         id,
         commit,
         changes,
-        previous_revision,
-        revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+        previous_revision_description,
+        revision_description: describe_revision(
+            &rendered.template.reference,
+            rendered.template.revision,
+        ),
         answers_changed,
         ignored_answers: rendered.ignored_answers,
     })
@@ -623,7 +632,7 @@ pub struct Status {
     /// What the last rendering recorded.
     pub recorded: Option<Recorded>,
     /// What the configured `ref` resolves to now.
-    pub available_revision: Option<String>,
+    pub available_revision_description: Option<String>,
     /// Whether the template has moved since the last rendering.
     pub template_moved: bool,
     /// Whether the ref's tip is an ancestor of `HEAD`.
@@ -672,7 +681,7 @@ pub fn status(
     })
     .ok();
 
-    let available_revision = resolved
+    let available_revision_description = resolved
         .as_ref()
         .map(|r| describe_revision(&r.reference, r.revision));
 
@@ -714,7 +723,7 @@ pub fn status(
         ref_name,
         tip,
         recorded,
-        available_revision,
+        available_revision_description,
         template_moved,
         merged,
         remote,
@@ -885,7 +894,7 @@ mod tests {
             ref_name: "refs/tpl/tpl".into(),
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
-            available_revision: None,
+            available_revision_description: None,
             template_moved: false,
             merged: true,
             remote: None,
@@ -905,7 +914,7 @@ mod tests {
             ref_name: "refs/tpl/tpl".into(),
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
-            available_revision: None,
+            available_revision_description: None,
             template_moved: false,
             merged: true,
             remote: None,

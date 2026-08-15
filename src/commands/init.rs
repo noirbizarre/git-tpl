@@ -61,7 +61,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &args.template));
-    ctx.say(field(&ctx.theme, "Revision", &outcome.revision));
+    ctx.say(field(&ctx.theme, "Revision", &outcome.revision_description));
     ctx.blank();
     ctx.say(format!(
         "{} {}",
