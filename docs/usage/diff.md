@@ -3,7 +3,7 @@
 What merging the template would change.
 
 ```sh
-git tpl diff [--stat] [--name-only] [-- <path>...]
+git tpl diff [--stat] [--name-only] [--reverse] [-- <path>...]
 ```
 
 It is a diff between `HEAD` and `refs/tpl/<id>`, computed by libgit2 — the same
@@ -23,9 +23,11 @@ $ git tpl diff --stat
 git diff HEAD refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
-Identical. `git tpl diff` looks up the ref name for you and defaults to the
-paths the template owns. Use whichever you prefer — nothing about git-tpl
-requires its own diff command.
+Identical. `git tpl diff` looks up the ref name for you; that is the whole of
+what it adds. Both compare the entire tree, so files you have that the template
+does not — including `.config/git.tpl.toml` — appear as deletions. Pass
+`-- <path>` to narrow. Use whichever you prefer; nothing about git-tpl requires
+its own diff command.
 
 ## Reading it
 
