@@ -36,6 +36,32 @@ fn report_conflicts(ctx: &Session, conflicts: &[String]) {
 pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
 
+    // JSON first: it subsumes every other mode, and it is the one that carries
+    // the conflicts as *data*. In text output they are chrome on stderr, which
+    // is right for a human reading a patch and useless to a caller — and
+    // "which files would conflict" is the single most valuable thing to know
+    // before merging.
+    if global.json {
+        let preview = ops::diff_stat(&ctx.repo, &ctx.root, &args.paths, args.reverse)?;
+        let stats = &preview.changes;
+        println!(
+            "{}",
+            crate::report::success(serde_json::json!({
+                "conflicts": preview.conflicts,
+                "changes": stats.iter().map(|s| serde_json::json!({
+                    "path": s.path,
+                    "kind": s.kind.as_str(),
+                    "insertions": s.insertions,
+                    "deletions": s.deletions,
+                    "binary": s.binary,
+                })).collect::<Vec<_>>(),
+                "insertions": stats.iter().map(|s| s.insertions).sum::<usize>(),
+                "deletions": stats.iter().map(|s| s.deletions).sum::<usize>(),
+            }))
+        );
+        return Ok(crate::exit::SUCCESS);
+    }
+
     // `--name-only` wins when both are given: it is the machine-readable mode,
     // and a caller piping it should never receive a summary.
     if args.name_only {

@@ -1,0 +1,119 @@
+# Diagnostic codes
+
+Every failure carries a code of the form `tpl::<area>::<kind>`. Under
+[`--json`](json.md) it is the `error.code` field; in text output it is the first
+line of the diagnostic.
+
+**The codes are the stable surface.** Messages are not, and are expected to
+improve. A caller that matches on prose will break the next time one does;
+a caller that matches on a code will not. Removing or renaming a code is a
+breaking change, and a test pins the set so it cannot happen by accident.
+
+## Reading a failure
+
+```console
+$ git tpl --json render ./template --output ./out --defaults
+{"ok":false,"error":{
+  "code":"tpl::render::content",
+  "message":"failed to render `Cargo.toml.jinja`",
+  "causes":[{"code":"tpl::eval::expression","message":"undefined value","help":"..."}]}}
+```
+
+`causes` is where the actionable detail lives. The outer error names the file;
+the one beneath it names the expression and the reason. Branch on the outer
+code to decide *what kind* of failure it is, and read the innermost one to say
+*why*.
+
+## Templates
+
+Something is wrong with the template itself.
+
+| Code | Meaning |
+|---|---|
+| `tpl::manifest::missing` | No `template.toml` at the source. |
+| `tpl::manifest::parse` | `template.toml` is not valid TOML, or has an unknown key. |
+| `tpl::manifest::name_collision` | A question and a computed value share a name. |
+| `tpl::manifest::invalid_question` | A question declaration is not coherent — see the message. |
+| `tpl::graph::invalid_expression` | An expression in the manifest does not parse. |
+| `tpl::graph::unknown_reference` | An expression names something the template never declares. Carries a suggestion. |
+| `tpl::graph::cycle` | Questions, computed values or data sources depend on each other in a loop. |
+| `tpl::resolve::missing_root` | The render root does not exist in the template. |
+| `tpl::resolve::dirty_needs_local` | `--dirty` was used on a remote template, which has no working tree. |
+| `tpl::resolve::cache` | The temporary clone could not be created. |
+
+## Rendering
+
+| Code | Meaning |
+|---|---|
+| `tpl::render::content` | A file failed to render. The cause names the expression. |
+| `tpl::render::path` | A path segment failed to render. |
+| `tpl::render::escapes_tree` | A segment rendered to `.`, `..`, or something containing a separator. |
+| `tpl::render::collision` | Two template files render to the same output path. |
+| `tpl::render::partial_not_utf8` | A `.jinja` file outside the render root is not text. |
+
+## Answers and evaluation
+
+| Code | Meaning |
+|---|---|
+| `tpl::answers::read` | An answers file could not be read. |
+| `tpl::answers::parse` | An answers file is not valid TOML, JSON or YAML. |
+| `tpl::answers::shape` | An answers file is not a table of values. |
+| `tpl::eval::expression` | An expression failed to evaluate. |
+| `tpl::eval::bad_choices` | `choices_from` did not resolve to an array. |
+| `tpl::eval::wrong_type` | An answer is not of the declared type. |
+| `tpl::eval::invalid_choice` | An answer is not one of the choices. |
+| `tpl::eval::pattern_mismatch` | An answer does not match the question's `pattern`. |
+| `tpl::eval::unanswered` | A question has no default and no answer was supplied. Usual cause of a failing `--defaults` run. |
+| `tpl::eval::cancelled` | The user interrupted the questionnaire. |
+| `tpl::value::type_mismatch` | A value is not the type it was used as. |
+| `tpl::value::parse` | A value could not be parsed as its declared type. |
+
+## Data sources
+
+| Code | Meaning |
+|---|---|
+| `tpl::data::load` | A data source could not be read. |
+| `tpl::data::parse` | A data source is not valid in its declared format. |
+| `tpl::data::escapes_root` | A `local` path leaves the project root. |
+| `tpl::data::needs_project` | A `local` source was reached by a command with no project — `render`, `lint`, `context`. Use a `template` source, or run inside a project. |
+| `tpl::data::unknown_setting` | An unknown `kind` or `format`. |
+| `tpl::data::untrusted` | A remote source was not authorised. Pass `--trust`, or add the template to `[trust]`. |
+| `tpl::data::undeclared_remote` | A remote source that the manifest does not declare. |
+| `tpl::data::cancelled` | The user declined a remote fetch. |
+| `tpl::data::checksum` | A remote source did not match its `sha256`. |
+
+## Configuration
+
+| Code | Meaning |
+|---|---|
+| `tpl::config::missing` | No `.config/git.tpl.toml`. The repository has no template attached. |
+| `tpl::config::parse` | `.config/git.tpl.toml` is not valid TOML. |
+| `tpl::config::io` | It could not be read or written. |
+| `tpl::config::serialise` | It could not be written back. |
+| `tpl::userconfig::io` | `~/.config/git-tpl/config.toml` could not be read. |
+| `tpl::userconfig::parse` | It is not valid TOML, or has an unknown key. |
+| `tpl::userconfig::shortcut` | A `[shortcuts]` name cannot be used. |
+| `tpl::refs::underivable` | A template id could not be derived from the source. Pass `--id`. |
+| `tpl::refs::invalid` | An explicit `--id` is not usable in a ref name. |
+
+## Operations
+
+| Code | Meaning |
+|---|---|
+| `tpl::ops::already_initialised` | A template is already attached. Use `update`, or `init --force` to re-ask. |
+| `tpl::ops::invalid_argument` | An argument is not usable — see the message. |
+| `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist yet. Run `init` or `update`. |
+| `tpl::ops::no_such_path` | The path is not in the rendering. |
+
+## Git
+
+| Code | Meaning |
+|---|---|
+| `tpl::git::not_a_repository` | The command needs a repository and there is none. |
+| `tpl::git::no_such_revision` | The requested branch, tag or SHA does not exist. |
+| `tpl::git::auth` | Authentication failed. |
+| `tpl::git::network` | The remote could not be reached. |
+| `tpl::git::dirty_worktree` | The operation merges, and the worktree has uncommitted changes. |
+| `tpl::git::diverged` | The remote template ref has diverged. Nothing is force-pushed. |
+| `tpl::git::no_identity` | Git has no `user.name` or `user.email` configured. |
+| `tpl::git::backend` | Anything else libgit2 reported. |

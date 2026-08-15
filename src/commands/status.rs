@@ -5,7 +5,7 @@ use tpl::ops::{self, OpError};
 
 use super::Session;
 use crate::cli::{Format, GlobalArgs, StatusArgs};
-use crate::theme::{command, field, muted};
+use crate::theme::{command, field, muted, warning};
 
 pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -16,9 +16,19 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let preferences = Preferences::load(&ctx.repo)?;
     let status = ops::status(&ctx.repo, &ctx.root, &preferences)?;
 
-    match args.format {
-        Format::Json => println!("{}", to_json(&status)),
-        Format::Text => print_text(&ctx, &status),
+    let deprecated_json = args.format == Some(Format::Json);
+    if args.format.is_some() {
+        // stderr, so it cannot corrupt the JSON the caller came for.
+        ctx.warn(warning(
+            &ctx.theme,
+            "`--format` is deprecated and will be removed; use `--json`",
+        ));
+    }
+
+    if global.json || deprecated_json {
+        println!("{}", crate::report::success(json(&status)));
+    } else {
+        print_text(&ctx, &status);
     }
 
     Ok(if status.is_pending() {
@@ -112,7 +122,7 @@ fn print_text(ctx: &Session, status: &ops::Status) {
 /// scripts and CI, where JSON is conventionally camelCase, and the names
 /// follow the vocabulary of the text output rather than the field names of
 /// `Status`. Renaming a key here is a breaking change.
-fn to_json(status: &ops::Status) -> String {
+fn json(status: &ops::Status) -> serde_json::Value {
     let recorded = status.recorded.as_ref();
     serde_json::json!({
         "source": status.source,
@@ -134,5 +144,4 @@ fn to_json(status: &ops::Status) -> String {
         "worktreeClean": status.worktree_clean,
         "pending": status.is_pending(),
     })
-    .to_string()
 }

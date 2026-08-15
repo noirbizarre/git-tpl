@@ -39,6 +39,15 @@ pub struct GlobalArgs {
     #[arg(short, long, global = true, conflicts_with = "verbose")]
     pub quiet: bool,
 
+    /// Emit machine-readable JSON on stdout, including on failure
+    //
+    // Global rather than per-command, because the failure envelope has to be
+    // available everywhere: a caller scripting one command must be able to
+    // read *why* any command failed, including the ones that have no success
+    // payload of their own.
+    #[arg(long, global = true)]
+    pub json: bool,
+
     /// When to colourise output
     #[arg(long, global = true, value_enum, default_value_t = ColorChoice::Auto)]
     pub color: ColorChoice,
@@ -205,9 +214,13 @@ impl AnswerArgs {
 /// `git tpl status`
 #[derive(Debug, clap::Args)]
 pub struct StatusArgs {
-    /// Machine-readable output on stdout
-    #[arg(long, value_enum, default_value_t = Format::Text)]
-    pub format: Format,
+    /// Deprecated: use the global `--json`
+    //
+    // Kept for one minor so that a CI job pinned to `--format json` does not
+    // break on upgrade without being told why. It is hidden, so it stops being
+    // discoverable immediately, and it warns on stderr when used.
+    #[arg(long, value_enum, hide = true)]
+    pub format: Option<Format>,
 }
 
 /// Output format.

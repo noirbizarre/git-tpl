@@ -12,6 +12,7 @@ mod cli;
 mod commands;
 mod exit;
 mod prompt;
+mod report;
 mod theme;
 
 use std::process::ExitCode;
@@ -44,11 +45,18 @@ fn main() -> ExitCode {
     match result {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
-            // `{:?}` is miette's rendered diagnostic — the code, the help, the
-            // source snippet — not the derive output. `{}` would print only
-            // the one-line message and throw away everything that makes the
-            // error useful.
-            eprintln!("{:?}", Report::new(error));
+            if cli.global.json {
+                // Stdout, and still a non-zero exit. A caller reads the code
+                // to branch and the exit status to fail; neither substitutes
+                // for the other.
+                println!("{}", report::error(&error));
+            } else {
+                // `{:?}` is miette's rendered diagnostic — the code, the help,
+                // the source snippet — not the derive output. `{}` would print
+                // only the one-line message and throw away everything that
+                // makes the error useful.
+                eprintln!("{:?}", Report::new(error));
+            }
             ExitCode::from(exit::FAILURE)
         }
     }
@@ -56,6 +64,12 @@ fn main() -> ExitCode {
 
 /// Configure how diagnostics are rendered.
 fn install_diagnostic_hook(cli: &Cli) {
+    // Under `--json` nothing reaches miette's renderer, so installing a hook
+    // would only decide the appearance of output that is never produced.
+    if cli.global.json {
+        return;
+    }
+
     let colored = theme::Theme::resolve(cli.global.color).is_colored();
     let verbose = cli.global.verbose > 0;
 

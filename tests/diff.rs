@@ -281,3 +281,99 @@ fn diff_previews_a_merge_of_unrelated_histories() {
         output.stdout
     );
 }
+
+// ---------------------------------------------------------------------------
+// `--json`: the same summary as data.
+//
+// It carries what the text modes cannot — the conflicts as an array rather
+// than as chrome on stderr — and the numbers must be the same numbers, so the
+// assertions below cross-check against `--stat`'s own output.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn diff_json_reports_the_stat_as_data() {
+    let world = pending();
+
+    let json = tpl(&world.project, &["--json", "diff"]).success().json();
+
+    assert_eq!(json["ok"], true);
+    let changes = json["changes"].as_array().expect("an array of changes");
+    let find = |path: &str| {
+        changes
+            .iter()
+            .find(|c| c["path"] == path)
+            .unwrap_or_else(|| panic!("no change about {path} in {json}"))
+    };
+
+    // The same two changes `stat_counts_the_lines_a_merge_would_insert`
+    // asserts in text, spelled as fields rather than as a formatted line.
+    let readme = find("README.md");
+    assert_eq!(readme["kind"], "modified");
+    assert_eq!(readme["insertions"], 2);
+    assert_eq!(readme["deletions"], 0);
+    assert_eq!(readme["binary"], false);
+
+    let workflow = find(".github/workflows/release.yml");
+    assert_eq!(workflow["kind"], "added");
+    assert_eq!(workflow["insertions"], 1);
+
+    assert_eq!(json["insertions"], 3);
+    assert_eq!(json["deletions"], 0);
+    assert_eq!(json["conflicts"], serde_json::json!([]));
+}
+
+/// `deleted` is the third `ChangeKind`, and the one a caller is most likely to
+/// branch on — nothing else in the payload says a merge would remove a file.
+#[test]
+fn diff_json_names_a_deletion_as_such() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.template.repo.remove("template/ci.yml");
+    world.template.repo.commit_all("feat: drop the CI workflow");
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let json = tpl(&world.project, &["--json", "diff"]).success().json();
+
+    let deleted = json["changes"]
+        .as_array()
+        .expect("changes")
+        .iter()
+        .find(|c| c["path"] == "ci.yml")
+        .expect("a change about ci.yml");
+    assert_eq!(deleted["kind"], "deleted");
+    assert_eq!(deleted["insertions"], 0);
+    assert_eq!(deleted["deletions"], 5);
+}
+
+/// The single most valuable thing to know before merging, and the one the text
+/// output relegates to stderr. The exit code stays zero: a conflicting preview
+/// is a correct answer to the question asked.
+#[test]
+fn diff_json_names_the_files_that_would_conflict() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let readme = world.project.read("README.md");
+    world.project.write(
+        "README.md",
+        &format!("{readme}\nWritten by the user at the end.\n"),
+    );
+    world.project.commit_all("docs: append a line");
+
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let output = tpl(&world.project, &["--json", "diff"]).success();
+    let json = output.json();
+
+    assert_eq!(
+        json["conflicts"],
+        serde_json::json!(["README.md"]),
+        "the conflicting path is data, not prose: {json}"
+    );
+    assert!(
+        !output.stdout.contains("would conflict"),
+        "the human warning leaked onto stdout: {}",
+        output.stdout
+    );
+}

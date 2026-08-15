@@ -137,6 +137,19 @@ impl ChangeKind {
             ChangeKind::Deleted => "deleted ",
         }
     }
+
+    /// The machine-readable name, unpadded.
+    ///
+    /// Separate from [`label`](Self::label) because that one is padded for
+    /// column alignment, and a JSON consumer matching on `"added   "` would be
+    /// depending on a presentation decision.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ChangeKind::Added => "added",
+            ChangeKind::Modified => "modified",
+            ChangeKind::Deleted => "deleted",
+        }
+    }
 }
 
 /// A single change between two trees.

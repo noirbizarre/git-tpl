@@ -160,6 +160,35 @@ fn status_reports_being_ahead_of_the_remote() {
     tpl(&world.project, &["status"]).code(2).says("1 ahead");
 }
 
+/// The remote relation as data. `describe()` words it for a human — "1 ahead",
+/// "in sync" — and a caller needs the two numbers instead, because "behind" is
+/// the case that must block a push and prose is no way to detect it.
+#[test]
+fn status_json_reports_the_remote_relation() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+    tpl(&world.project, &["fetch"]).success();
+
+    let json = tpl(&world.project, &["--json", "status"]).success().json();
+    assert_eq!(json["remote"]["ref"], "refs/remotes/origin/tpl/template");
+    assert_eq!(json["remote"]["ahead"], 0);
+    assert_eq!(json["remote"]["behind"], 0);
+
+    // One local rendering the remote has not seen.
+    world
+        .template
+        .repo
+        .write("template/NEW.md.jinja", "# {{ project_name }}\n");
+    world.template.repo.commit_all("feat: add a file");
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let json = tpl(&world.project, &["--json", "status"]).code(2).json();
+    assert_eq!(json["remote"]["ahead"], 1);
+    assert_eq!(json["remote"]["behind"], 0);
+}
+
 /// A rendered ref is history others may have merged from; overwriting it
 /// destroys the merge base their next update depends on.
 #[test]

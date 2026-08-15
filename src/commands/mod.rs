@@ -72,18 +72,33 @@ impl Session {
     }
 
     /// Whether to print anything beyond errors.
+    ///
+    /// `--json` silences the prose as well as `--quiet` does: a caller asking
+    /// for a machine-readable answer did not also ask for a narration of how it
+    /// was reached, and warnings still get through via [`warn`](Self::warn).
     pub fn speaks(&self) -> bool {
-        !self.global.quiet
+        !self.global.quiet && !self.global.json
     }
 
     /// Print a line to stderr, unless quiet.
     ///
-    /// Human output goes to stderr so that `--format json` keeps stdout
+    /// Human output goes to stderr so that `--json` keeps stdout
     /// machine-readable.
     pub fn say(&self, line: impl AsRef<str>) {
         if self.speaks() {
             eprintln!("{}", line.as_ref());
         }
+    }
+
+    /// Print a warning to stderr, whatever the verbosity.
+    ///
+    /// Deliberately louder than [`say`](Self::say). A warning that `--quiet` or
+    /// `--json` swallows is a warning nobody reads, and the two cases that use
+    /// this — a deprecated flag, and answers that name no question — are both
+    /// things a caller is getting wrong right now. stderr, so a JSON payload on
+    /// stdout stays parseable.
+    pub fn warn(&self, line: impl AsRef<str>) {
+        eprintln!("{}", line.as_ref());
     }
 
     /// Print a blank line, unless quiet.

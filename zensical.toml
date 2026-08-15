@@ -51,6 +51,10 @@ nav = [
     { "Reproducibility" = "data/reproducibility.md" },
   ] },
   { "Configuration" = "configuration.md" },
+  { "Reference" = [
+    { "Diagnostic codes" = "reference/diagnostics.md" },
+    { "JSON output" = "reference/json.md" },
+  ] },
   { "Development" = [
     { "Setup" = "development/setup.md" },
     { "Contributing" = "development/contributing.md" },

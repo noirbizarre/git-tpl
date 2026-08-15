@@ -304,6 +304,31 @@ pub struct Output {
 }
 
 impl Output {
+    /// The JSON on stdout.
+    ///
+    /// Panics with the whole output when it is not JSON, because the usual
+    /// cause is a human line that escaped onto stdout — which is the bug
+    /// `--json` exists to prevent, and a `serde` error alone would not name it.
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.stdout).unwrap_or_else(|error| {
+            panic!(
+                "stdout is not JSON ({error})\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                self.stdout, self.stderr
+            )
+        })
+    }
+
+    /// The diagnostic code of a failure envelope.
+    ///
+    /// Tests assert on this rather than on the message: the codes are the
+    /// stable surface, and pinning prose is how error messages stop improving.
+    pub fn error_code(&self) -> String {
+        self.json()["error"]["code"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no error code in {}", self.stdout))
+            .to_string()
+    }
+
     /// Assert it exited zero, showing everything if not.
     pub fn success(self) -> Self {
         assert_eq!(
