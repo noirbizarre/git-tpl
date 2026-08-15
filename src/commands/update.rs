@@ -177,7 +177,11 @@ fn dry_run(
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &config.template.source));
-    ctx.say(field(&ctx.theme, "Revision", &rendered.template.reference));
+    ctx.say(field(
+        &ctx.theme,
+        "Revision",
+        &ops::describe_revision(&rendered.template.reference, rendered.template.revision),
+    ));
     ctx.blank();
     ctx.say(format!(
         "{} {}",

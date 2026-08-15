@@ -173,6 +173,28 @@ fn a_dry_run_writes_nothing() {
     assert_eq!(world.project.working_state(), before_state);
 }
 
+/// A dry run and a real run describe the same revision the same way, or the
+/// "Revision" line means two different things depending on a flag. The dry-run
+/// path used to print a bare branch name, with no commit — which is precisely
+/// the thing that line exists to show.
+#[test]
+fn a_dry_run_describes_the_revision_the_way_a_real_run_does() {
+    let world = World::new();
+    world.init(&[]).success();
+    move_template(&world);
+
+    let revision = world.template.repo.rev_parse("HEAD");
+    let short = &revision[..7];
+
+    tpl(&world.project, &["update", "--defaults", "--dry-run"])
+        .success()
+        .says(short);
+
+    tpl(&world.project, &["update", "--defaults"])
+        .success()
+        .says(short);
+}
+
 // --- what the template can do ----------------------------------------------
 
 #[test]

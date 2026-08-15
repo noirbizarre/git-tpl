@@ -145,8 +145,12 @@ fn dry_run(
     report_ignored(ctx, &ignored);
 
     ctx.blank();
-    ctx.say(field(&ctx.theme, "Template", &template.manifest.name));
-    ctx.say(field(&ctx.theme, "Revision", &template.reference));
+    ctx.say(field(&ctx.theme, "Template", &args.template));
+    ctx.say(field(
+        &ctx.theme,
+        "Revision",
+        &ops::describe_revision(&template.reference, template.revision),
+    ));
     ctx.blank();
     ctx.say(heading(
         &ctx.theme,

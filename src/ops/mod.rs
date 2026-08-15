@@ -674,7 +674,7 @@ pub fn status(
 
     let available_revision = resolved
         .as_ref()
-        .map(|r| format!("{} ({})", r.reference, r.revision.short()));
+        .map(|r| describe_revision(&r.reference, r.revision));
 
     let template_moved = match (&resolved, &recorded) {
         (Some(resolved), Some(recorded)) => recorded
