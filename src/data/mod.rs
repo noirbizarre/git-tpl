@@ -7,6 +7,7 @@
 //! not be — see `docs/concepts/determinism.md#security`.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -18,7 +19,7 @@ pub mod format;
 
 pub use format::Format;
 
-use crate::git::{Oid, libgit2::LibGit2};
+use crate::git::{GitBackend, Oid};
 use crate::template::{DataSourceDecl, Value};
 
 /// The most a remote response may be, in bytes.
@@ -37,7 +38,7 @@ const REMOTE_TIMEOUT: Duration = Duration::from_secs(30);
 const REMOTE_MAX_REDIRECTS: u32 = 5;
 
 /// Where a data source's bytes come from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
     /// A path in the template repository, read from its Git tree.
     ///
@@ -47,6 +48,14 @@ pub enum SourceKind {
     LocalFile,
     /// An `http(s)` URL.
     Remote,
+}
+
+impl fmt::Display for SourceKind {
+    /// The same spelling as the provenance trailer, so an error and a trailer
+    /// describing one source never disagree about what it is.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 impl SourceKind {
@@ -100,7 +109,7 @@ pub enum DataError {
         /// The resolved source.
         location: String,
         /// Which kind of source it is.
-        kind: String,
+        kind: SourceKind,
         /// Why it failed.
         reason: String,
     },
@@ -344,7 +353,11 @@ impl Provenance {
 /// Where a loader reads template files from.
 pub struct TemplateTree<'a> {
     /// The repository holding the template.
-    pub repo: &'a LibGit2,
+    ///
+    /// Held as a trait object rather than a concrete backend: this is a data
+    /// carrier, not a hot path, and naming the implementation here is how the
+    /// abstraction stopped being load-bearing above `src/git/` before.
+    pub repo: &'a dyn GitBackend,
     /// The tree of the resolved template revision.
     pub tree: Oid,
     /// The commit that tree came from, for provenance.
@@ -423,7 +436,7 @@ impl<'a> Loader<'a> {
                 name: name.to_string(),
                 what: "format",
                 value: explicit.clone(),
-                accepted: Some("expected `toml` or `json`".into()),
+                accepted: Some("expected `toml`, `json` or `yaml`".into()),
             })?,
             None => Format::infer(resolved_source),
         };
@@ -464,7 +477,7 @@ impl<'a> Loader<'a> {
         self.cache.insert(cache_key, value.clone());
         self.provenance.push(Provenance {
             name: name.to_string(),
-            kind: kind.clone(),
+            kind,
             location: resolved_source.to_string(),
             revision: match kind {
                 SourceKind::TemplateFile => Some(self.template.revision),
@@ -512,7 +525,7 @@ impl<'a> Loader<'a> {
             return Err(DataError::Load {
                 name: name.to_string(),
                 location: url.to_string(),
-                kind: "remote".into(),
+                kind: SourceKind::Remote,
                 reason: "unsupported scheme: a remote data source must be http or https".into(),
             });
         }
@@ -532,7 +545,7 @@ impl<'a> Loader<'a> {
         let mut response = agent.get(url).call().map_err(|e| DataError::Load {
             name: name.to_string(),
             location: url.to_string(),
-            kind: "remote".into(),
+            kind: SourceKind::Remote,
             reason: e.to_string(),
         })?;
 
@@ -544,7 +557,7 @@ impl<'a> Loader<'a> {
             .map_err(|e| DataError::Load {
                 name: name.to_string(),
                 location: url.to_string(),
-                kind: "remote".into(),
+                kind: SourceKind::Remote,
                 reason: match e {
                     ureq::Error::BodyExceedsLimit(limit) => {
                         format!("the response is larger than the {limit} byte limit")
@@ -567,13 +580,13 @@ impl<'a> Loader<'a> {
             .map_err(|e| DataError::Load {
                 name: name.to_string(),
                 location: path.to_string(),
-                kind: "template".into(),
+                kind: SourceKind::TemplateFile,
                 reason: e.to_string(),
             })?
             .ok_or_else(|| DataError::Load {
                 name: name.to_string(),
                 location: path.to_string(),
-                kind: "template".into(),
+                kind: SourceKind::TemplateFile,
                 reason: format!(
                     "no such file in the template repository at revision {}",
                     self.template.revision.short()
@@ -598,7 +611,7 @@ impl<'a> Loader<'a> {
         std::fs::read(&candidate).map_err(|e| DataError::Load {
             name: name.to_string(),
             location: path.to_string(),
-            kind: "local".into(),
+            kind: SourceKind::LocalFile,
             reason: e.to_string(),
         })
     }

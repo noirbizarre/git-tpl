@@ -1,18 +1,18 @@
 //! `git tpl fetch`
 
-use tpl::gitconfig::Preferences;
+use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError};
 
-use super::Context;
+use super::Session;
 use crate::cli::{GlobalArgs, RemoteArgs};
 use crate::theme::{command, muted};
 
-pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<(), OpError> {
-    let ctx = Context::discover(global)?;
-    let preferences =
-        Preferences::load(&ctx.repo)?.with_overrides(args.remote.as_deref(), false, false);
-
-    let (_, ref_name) = ops::identify(&ctx.root)?;
+pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
+    let ctx = Session::discover(global)?;
+    let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
+        remote: args.remote.as_deref(),
+        ..Default::default()
+    });
 
     if args.dry_run {
         ctx.say(format!(
@@ -20,11 +20,15 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<(), OpError> {
             preferences.fetch_refspec(),
             preferences.remote
         ));
-        return Ok(());
+        return Ok(crate::exit::SUCCESS);
     }
 
-    let relation = ops::fetch(&ctx.repo, &ctx.root, &preferences)?;
+    let (ref_name, relation) = ops::fetch(&ctx.repo, &ctx.root, &preferences)?;
 
+    // The arms are ordered, not independent: `is_diverged` is `ahead > 0 &&
+    // behind > 0`, so it has to be tested before the plain `behind > 0` arm
+    // below, which would otherwise swallow it and tell a diverged user to
+    // simply merge.
     match relation {
         None => {
             ctx.say(muted(
@@ -40,10 +44,7 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<(), OpError> {
         }
         Some(relation) if relation.is_diverged() => {
             ctx.blank();
-            ctx.say(format!(
-                "{ref_name} has diverged: {} ahead, {} behind.",
-                relation.ahead, relation.behind
-            ));
+            ctx.say(format!("{ref_name} has {}.", relation.describe()));
             ctx.blank();
             ctx.say("Both were rendered independently. Reconcile them:");
             ctx.say(command(
@@ -81,5 +82,5 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<(), OpError> {
         }
     }
 
-    Ok(())
+    Ok(crate::exit::SUCCESS)
 }

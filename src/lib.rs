@@ -10,7 +10,7 @@
 //! # Layering
 //!
 //! ```text
-//! ops        orchestration, one module per command
+//! ops        orchestration, one function per command
 //!  ├── render      the tree walk
 //!  ├── eval        prompting and expression evaluation
 //!  │    └── graph  the dependency DAG
@@ -19,6 +19,7 @@
 //! ```
 //!
 //! Dependencies point inward. Nothing below `ops` knows a command exists.
+//! `commands` — in the binary, not here — is the one module per subcommand.
 
 #![warn(missing_docs)]
 #![warn(clippy::all)]

@@ -61,10 +61,10 @@ editing the same file.
 `refs/tpl/<id>` is not special. Every Git command works on it:
 
 ```sh
-git show refs/tpl/rust-library
-git log --oneline refs/tpl/rust-library
-git diff HEAD refs/tpl/rust-library
-git merge refs/tpl/rust-library
+git show refs/tpl/github-com-noirbizarre-rust-library-template
+git log --oneline refs/tpl/github-com-noirbizarre-rust-library-template
+git diff HEAD refs/tpl/github-com-noirbizarre-rust-library-template
+git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 git-tpl's own `diff` and `merge` commands are conveniences over the last two.
@@ -128,19 +128,24 @@ differences and nothing you would have to learn to ignore.
 Provenance lives in the commit message, as trailers:
 
 ```
-tpl: render rawtools/rust-library at v1.4.0
+tpl: render rust-library at v1.4.0
 
-Template-Source: https://github.com/rawtools/rust-library
+Template-Source: https://github.com/noirbizarre/rust-library-template
 Template-Ref: v1.4.0
 Template-Commit: 4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29
 Answers-Digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
-Tpl-Version: 0.1.0
+Data-Source: licenses = template:data/licenses.toml@4f2c1a9
+Tpl-Version: 0.2.0
 ```
+
+The subject names the template's manifest `name` and the revision asked for.
+`Data-Source` appears once per data source the rendering actually used — see
+[Data sources](../data/index.md#provenance).
 
 `git tpl status` reads them back. So can you:
 
 ```sh
-git show --no-patch refs/tpl/rust-library
+git show --no-patch refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 ## Sharing, or not

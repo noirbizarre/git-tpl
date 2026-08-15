@@ -3,7 +3,7 @@
 Publish template refs to a remote.
 
 ```sh
-git tpl push [--remote <name>]
+git tpl push [--remote <name>] [--dry-run]
 ```
 
 Pushes `refs/tpl/<id>` explicitly:
@@ -47,7 +47,7 @@ The two modes this gives you are both first-class:
 ```console
 $ git tpl push
 To github.com:acme/my-project
- * [new ref]  refs/tpl/rawtools-rust-library -> refs/tpl/rawtools-rust-library
+ * [new ref]  refs/tpl/github-com-noirbizarre-rust-library-template -> refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 ## Divergence
@@ -55,7 +55,7 @@ To github.com:acme/my-project
 ```console
 $ git tpl push
 
-Cannot push refs/tpl/rawtools-rust-library: the remote copy has diverged.
+Cannot push refs/tpl/github-com-noirbizarre-rust-library-template: the remote copy has diverged.
 
   local   4f2c1a9  (2 commits not on the remote)
   remote  9a8b7c6  (1 commit not local)
@@ -63,7 +63,7 @@ Cannot push refs/tpl/rawtools-rust-library: the remote copy has diverged.
 Both were rendered independently. Reconcile them first:
 
   git tpl fetch
-  git merge refs/remotes/origin/tpl/rawtools-rust-library
+  git merge refs/remotes/origin/tpl/github-com-noirbizarre-rust-library-template
   git tpl push
 ```
 
@@ -81,7 +81,6 @@ differ and that is worth seeing.
 | Option | Meaning |
 |---|---|
 | `--remote <name>` | Default `origin`, or `tpl.remote`. |
-| `--all` | Push every `refs/tpl/*`. |
 | `--dry-run` | Report what would be pushed. |
 
 ## Pushing automatically after an update

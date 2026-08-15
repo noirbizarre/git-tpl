@@ -1,20 +1,21 @@
 //! `git tpl update`
 
-use tpl::gitconfig::Preferences;
+use tpl::git::GitBackend;
+use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError, UpdateOutcome};
 
-use super::{Context, answering, report_ignored, supplied, trust};
+use super::{Session, answering, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, heading, muted};
+use crate::theme::{change, command, field, headline, muted};
 
-pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
-    let ctx = Context::discover(global)?;
-    let preferences = Preferences::load(&ctx.repo)?.with_overrides(
-        args.remote.as_deref(),
-        args.push,
-        args.answers.defaults,
-    );
+pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
+    let ctx = Session::discover(global)?;
+    let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
+        remote: args.remote.as_deref(),
+        push: args.push,
+        non_interactive: args.answers.defaults,
+    });
 
     let mut config = tpl::config::Config::load(&ctx.root)?;
     // `--ref` renders a different revision for this run only. It deliberately
@@ -27,14 +28,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
     let overrides = supplied(&args.answers)?;
 
     if args.dry_run {
-        return dry_run(
-            &ctx,
-            &config,
-            overrides,
-            args.dirty,
-            preferences.interactive,
-            args.trust,
-        );
+        return dry_run(&ctx, &config, &args, overrides, preferences.interactive)
+            .map(|()| crate::exit::SUCCESS);
     }
 
     let mut prompter = Interactive;
@@ -55,11 +50,11 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
 
     match outcome {
         UpdateOutcome::UpToDate {
-            revision,
+            revision_description,
             ignored_answers,
         } => {
             ctx.say(format!(
-                "Already up to date with {} at {revision}.",
+                "Already up to date with {} at {revision_description}.",
                 config.template.source
             ));
             report_ignored(&ctx, &ignored_answers);
@@ -68,8 +63,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
         UpdateOutcome::Updated {
             id,
             changes,
-            previous_revision,
-            revision,
+            previous_revision_description,
+            revision_description,
             answers_changed,
             ignored_answers,
             ..
@@ -80,17 +75,13 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
             ctx.say(field(
                 &ctx.theme,
                 "Revision",
-                &match previous_revision {
-                    Some(previous) => format!("{previous} → {revision}"),
-                    None => revision.clone(),
+                &match previous_revision_description {
+                    Some(previous) => format!("{previous} → {revision_description}"),
+                    None => revision_description.clone(),
                 },
             ));
             ctx.blank();
-            ctx.say(format!(
-                "{} {}",
-                heading(&ctx.theme, "Updated"),
-                id.ref_name()
-            ));
+            ctx.say(headline(&ctx.theme, "Updated", &id.ref_name()));
             ctx.blank();
             for c in &changes {
                 ctx.say(change(&ctx.theme, c.kind, &c.path));
@@ -123,48 +114,44 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
         }
     }
 
-    Ok(())
+    Ok(crate::exit::SUCCESS)
 }
 
 fn dry_run(
-    ctx: &Context,
+    ctx: &Session,
     config: &tpl::config::Config,
+    args: &UpdateArgs,
     overrides: std::collections::BTreeMap<String, tpl::template::Value>,
-    dirty: bool,
     interactive: bool,
-    trusted: bool,
 ) -> Result<(), OpError> {
     let mut answers = config.answers.clone();
     answers.extend(overrides);
 
-    let mut prompter = Interactive;
-    let answering = if interactive {
-        ops::Answering::Interactive(&mut prompter)
-    } else {
-        ops::Answering::defaults()
-    };
-
+    // The same two helpers the real run uses. Reimplementing them here dropped
+    // the `--defaults` term, so `update --dry-run --defaults` prompted and
+    // asked to confirm remote sources — which is exactly what `--defaults`
+    // exists to prevent.
+    //
     // `--dry-run` still fetches: it reports what *would* change, and a render
     // that skipped its data would report a different tree than the real one.
+    let mut prompter = Interactive;
     let mut confirmer = Confirmer;
-    let trust = if trusted {
-        ops::Trust::always()
-    } else if interactive {
-        ops::Trust::Ask(&mut confirmer)
-    } else {
-        ops::Trust::refuse()
-    };
-
     let rendered = ops::render(
-        &ctx.repo, &ctx.root, config, answers, dirty, answering, trust,
+        &ctx.repo,
+        &ctx.root,
+        config,
+        answers,
+        args.dirty,
+        answering(&args.answers, interactive, &mut prompter),
+        trust(&args.answers, args.trust, interactive, &mut confirmer),
     )?;
 
     report_ignored(ctx, &rendered.ignored_answers);
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
-    let tip = tpl::git::GitBackend::resolve_ref(&ctx.repo, &ref_name)?;
+    let tip = ctx.repo.resolve_ref(&ref_name)?;
     let previous_tree = match tip {
-        Some(oid) => Some(tpl::git::GitBackend::commit(&ctx.repo, oid)?.tree),
+        Some(oid) => Some(ctx.repo.commit(oid)?.tree),
         None => None,
     };
 
@@ -173,17 +160,17 @@ fn dry_run(
         return Ok(());
     }
 
-    let changes = tpl::git::GitBackend::diff_trees(&ctx.repo, previous_tree, rendered.tree)?;
+    let changes = ctx.repo.diff_trees(previous_tree, rendered.tree)?;
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &config.template.source));
-    ctx.say(field(&ctx.theme, "Revision", &rendered.template.reference));
-    ctx.blank();
-    ctx.say(format!(
-        "{} {}",
-        heading(&ctx.theme, "Would update"),
-        id.ref_name()
+    ctx.say(field(
+        &ctx.theme,
+        "Revision",
+        &ops::describe_revision(&rendered.template.reference, rendered.template.revision),
     ));
+    ctx.blank();
+    ctx.say(headline(&ctx.theme, "Would update", &id.ref_name()));
     ctx.blank();
     for c in &changes {
         ctx.say(change(&ctx.theme, c.kind, &c.path));

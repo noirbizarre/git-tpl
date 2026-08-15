@@ -8,7 +8,7 @@
 pub mod libgit2;
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use miette::Diagnostic;
 use thiserror::Error;
@@ -167,6 +167,24 @@ impl AheadBehind {
     pub fn is_diverged(self) -> bool {
         self.ahead > 0 && self.behind > 0
     }
+
+    /// The relation in words, as `status` and `fetch` both report it.
+    ///
+    /// One phrasing, defined once. It was built three different ways —
+    /// "diverged — 2 ahead, 1 behind", "has diverged: 2 ahead, 1 behind" and
+    /// "local is 2 ahead and 1 behind" — for one fact, in three places a user
+    /// may well see in the same session.
+    pub fn describe(self) -> String {
+        if self.is_synced() {
+            "in sync".to_string()
+        } else if self.is_diverged() {
+            format!("diverged — {} ahead, {} behind", self.ahead, self.behind)
+        } else if self.ahead > 0 {
+            format!("{} ahead", self.ahead)
+        } else {
+            format!("{} behind", self.behind)
+        }
+    }
 }
 
 /// The outcome of a merge.
@@ -191,15 +209,6 @@ pub enum MergeOutcome {
     },
     /// The merge was staged but not committed, as asked.
     Staged,
-}
-
-/// A commit's author or committer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Signature {
-    /// Display name.
-    pub name: String,
-    /// Email address.
-    pub email: String,
 }
 
 /// A commit, as the domain needs to see it.
@@ -229,23 +238,15 @@ pub enum GitError {
         path: PathBuf,
     },
 
-    /// A ref does not exist.
-    #[error("`{name}` does not exist")]
-    #[diagnostic(code(tpl::git::no_such_ref))]
-    NoSuchRef {
-        /// The ref that was looked for.
-        name: String,
-    },
-
     /// A revision could not be resolved.
-    #[error("could not resolve `{revision}` in `{origin}`")]
+    #[error("could not resolve `{reference}` in `{origin}`")]
     #[diagnostic(
         code(tpl::git::no_such_revision),
         help("`ref` must be a branch, tag or commit that exists in the template repository")
     )]
     NoSuchRevision {
-        /// The revision that was asked for.
-        revision: String,
+        /// The name that was asked for — a branch, tag or SHA.
+        reference: String,
         /// The repository it was looked for in.
         // Not named `source`: thiserror reserves that name for `#[source]`.
         origin: String,
@@ -342,6 +343,13 @@ pub enum GitError {
 /// Every method takes and returns types defined in this module, never the
 /// backend's own. That is what makes the backend replaceable, and it is
 /// enforced by a hook rather than by hope.
+///
+/// The rule for membership is: **if anything above `src/git/` calls it, it
+/// belongs here.** Nothing outside this module may reach for an inherent
+/// method on a concrete backend, because a capability reachable only through
+/// `LibGit2` is a capability the abstraction does not actually cover. Opening,
+/// creating and cloning a repository are the exception, and stay inherent —
+/// they produce a backend rather than use one.
 pub trait GitBackend {
     /// The repository's working directory.
     fn workdir(&self) -> Result<PathBuf, GitError>;
@@ -421,6 +429,54 @@ pub trait GitBackend {
 
     /// Read a boolean `tpl.*` configuration value.
     fn config_bool(&self, key: &str) -> Result<Option<bool>, GitError>;
+
+    /// Resolve a revision — branch, tag or SHA — to a commit.
+    ///
+    /// `origin` names the repository only so that a failure can say where it
+    /// looked; it takes no part in the resolution.
+    fn resolve_revision(&self, revision: &str, origin: &str) -> Result<Oid, GitError>;
+
+    /// The default branch, used when no `ref` is configured.
+    fn default_branch(&self) -> Result<String, GitError>;
+
+    /// The tree of a commit.
+    fn commit_tree(&self, commit: Oid) -> Result<Oid, GitError>;
+
+    /// Build a tree from the files in a directory, for `--dirty` renders.
+    ///
+    /// Reads a working tree rather than a commit, honouring `.gitignore`, so
+    /// the result matches what `git add -A` would have staged.
+    fn tree_from_workdir(&self, root: &Path) -> Result<Oid, GitError>;
+
+    /// Read a file from a tree by path.
+    fn read_path(&self, tree: Oid, path: &str) -> Result<Option<Vec<u8>>, GitError>;
+
+    /// The subtree at `path`, if there is one.
+    fn subtree(&self, tree: Oid, path: &str) -> Result<Option<Oid>, GitError>;
+
+    /// Stage a path, for `init` writing the configuration file.
+    fn stage(&self, relative: &Path) -> Result<(), GitError>;
+
+    /// Commit whatever is staged, moving `HEAD`.
+    ///
+    /// The one method here that does move `HEAD`. It exists for the
+    /// configuration file `init` writes, which is a change to the project and
+    /// not to the rendered ref; invariant 1 is about `update`.
+    fn commit_index(&self, message: &str) -> Result<Oid, GitError>;
+
+    /// Reset the index and worktree to `HEAD`, discarding a failed merge.
+    fn abort_merge(&self) -> Result<(), GitError>;
+
+    /// Set a configuration value in this repository.
+    ///
+    /// Exists so that tests and `init` can configure a repository without
+    /// reaching for `git2` outside `src/git/libgit2.rs` — the
+    /// `git-backend-isolation` hook forbids that, and an exception "just for
+    /// tests" is how such boundaries rot.
+    fn set_config_str(&self, key: &str, value: &str) -> Result<(), GitError>;
+
+    /// Set a boolean configuration value in this repository.
+    fn set_config_bool(&self, key: &str, value: bool) -> Result<(), GitError>;
 }
 
 #[cfg(test)]
@@ -444,7 +500,7 @@ mod tests {
     /// Git records only the executable bit, which is why it is the only
     /// permission rendering preserves.
     #[test]
-    fn file_modes_round_trip() {
+    fn every_file_mode_survives_a_conversion_to_git_and_back() {
         for mode in [
             FileMode::Blob,
             FileMode::BlobExecutable,

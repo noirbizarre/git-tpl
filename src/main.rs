@@ -27,13 +27,17 @@ fn main() -> ExitCode {
     install_diagnostic_hook(&cli);
 
     let result = match cli.command {
-        Command::Init(args) => commands::init(args, &cli.global).map(|()| exit::SUCCESS),
-        Command::Update(args) => commands::update(args, &cli.global).map(|()| exit::SUCCESS),
+        // Every command returns its own exit code. `status` is the only one
+        // that returns anything but SUCCESS, but splitting the authority — the
+        // code in `status` and in `main` for the rest — is how the two come to
+        // disagree the day a second command grows a code of its own.
+        Command::Init(args) => commands::init(args, &cli.global),
+        Command::Update(args) => commands::update(args, &cli.global),
         Command::Status(args) => commands::status(args, &cli.global),
-        Command::Diff(args) => commands::diff(args, &cli.global).map(|()| exit::SUCCESS),
-        Command::Merge(args) => commands::merge(args, &cli.global).map(|()| exit::SUCCESS),
-        Command::Fetch(args) => commands::fetch(args, &cli.global).map(|()| exit::SUCCESS),
-        Command::Push(args) => commands::push(args, &cli.global).map(|()| exit::SUCCESS),
+        Command::Diff(args) => commands::diff(args, &cli.global),
+        Command::Merge(args) => commands::merge(args, &cli.global),
+        Command::Fetch(args) => commands::fetch(args, &cli.global),
+        Command::Push(args) => commands::push(args, &cli.global),
     };
 
     match result {

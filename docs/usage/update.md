@@ -57,10 +57,10 @@ refs/tpl/<template-id>
 ```console
 $ git tpl update
 
-Template: rawtools/rust-library
-Revision: v1.3.0 → v1.4.0
+Template:  https://github.com/noirbizarre/rust-library-template
+Revision:  v1.3.0 (8b3e7d1) → v1.4.0 (4f2c1a9)
 
-Updated refs/tpl/rawtools-rust-library
+Updated refs/tpl/github-com-noirbizarre-rust-library-template
 
   modified  Cargo.toml
   modified  README.md
@@ -80,7 +80,7 @@ made:
 
 ```console
 $ git tpl update
-Already up to date with rawtools/rust-library at v1.4.0.
+Already up to date with https://github.com/noirbizarre/rust-library-template at v1.4.0 (4f2c1a9).
 ```
 
 This is why [determinism](../concepts/determinism.md) matters. A renderer that
@@ -128,4 +128,5 @@ new question with no default is then an error.
 | `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--dirty` | Render the template's working tree. Local templates only. |
 | `--push` | Push the ref afterwards. Same as `tpl.autoPush`. |
+| `--remote <name>` | The remote `--push` uses. Default `origin`, or `tpl.remote`. |
 | `--dry-run` | Report what would change; write nothing. |

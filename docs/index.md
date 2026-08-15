@@ -36,7 +36,7 @@ conflict markers, the same `git rerere`, the same `--abort` you already know.
 cargo install git-tpl
 
 cd my-project
-git tpl init https://github.com/rawtools/rust-library-template
+git tpl init https://github.com/noirbizarre/rust-library-template
 ```
 
 That works on an empty repository and on a project that already has files — see

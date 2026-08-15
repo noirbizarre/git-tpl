@@ -19,7 +19,6 @@ use crate::data::{
     TrustGate, declared_remotes,
 };
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Prompter};
-use crate::git::libgit2::LibGit2;
 use crate::git::{AheadBehind, Change, GitBackend, GitError, MergeOutcome, Oid};
 use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
@@ -224,7 +223,7 @@ pub struct Render {
 /// Shared by `init`, `update` and `--dry-run`, so all three cannot disagree
 /// about what a rendering is.
 pub fn render(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     config: &Config,
     supplied: BTreeMap<String, Value>,
@@ -271,7 +270,7 @@ pub fn render(
 
     let mut loader = Loader::new(
         TemplateTree {
-            repo: &template.repo,
+            repo: template.repo.as_ref(),
             tree: template.tree,
             revision: template.revision,
         },
@@ -308,7 +307,13 @@ pub fn render(
     let entries = template.entries()?;
     // Blobs are read from the template repository — often a temporary clone —
     // and written into the project, which is where the ref will point.
-    let tree = render_tree(&template.repo, project, &entries, &context, &partials)?;
+    let tree = render_tree(
+        template.repo.as_ref(),
+        project,
+        &entries,
+        &context,
+        &partials,
+    )?;
 
     let provenance = Provenance {
         source: config.template.source.clone(),
@@ -335,7 +340,10 @@ pub fn render(
 /// A key that is not set is simply absent: a template suggesting `user.name`
 /// must still work for someone who has never set one, and the question's own
 /// `default` covers that case.
-fn git_seeds(project: &LibGit2, manifest: &Manifest) -> Result<BTreeMap<String, Value>, OpError> {
+fn git_seeds(
+    project: &dyn GitBackend,
+    manifest: &Manifest,
+) -> Result<BTreeMap<String, Value>, OpError> {
     let mut seeds = BTreeMap::new();
     for (name, question) in &manifest.questions {
         let Some(key) = question.git_config_key() else {
@@ -363,8 +371,8 @@ pub struct InitOutcome {
     /// Whether it was committed, or left staged for the user's merge
     /// resolution.
     pub config_committed: bool,
-    /// The revision that was rendered.
-    pub revision: String,
+    /// The revision that was rendered, ready to print.
+    pub revision_description: String,
     /// Supplied answers that name no question in this template.
     pub ignored_answers: Vec<String>,
 }
@@ -380,7 +388,7 @@ pub struct InitOutcome {
 /// for the demonstration.
 #[allow(clippy::too_many_arguments)]
 pub fn init(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     source: &str,
     reference: Option<String>,
@@ -479,7 +487,10 @@ pub fn init(
         merge,
         config_path,
         config_committed,
-        revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+        revision_description: describe_revision(
+            &rendered.template.reference,
+            rendered.template.revision,
+        ),
         ignored_answers: rendered.ignored_answers,
     })
 }
@@ -491,8 +502,8 @@ pub enum UpdateOutcome {
     /// The reason determinism matters: a renderer that varied would create a
     /// commit on every run, and every one would be noise to merge.
     UpToDate {
-        /// The revision that was rendered.
-        revision: String,
+        /// The revision that was rendered, ready to print.
+        revision_description: String,
         /// Supplied answers that name no question in this template. Carried
         /// even here: a typo'd key is worth reporting whether or not the
         /// rendering changed.
@@ -506,10 +517,10 @@ pub enum UpdateOutcome {
         commit: Oid,
         /// What changed against the previous rendering.
         changes: Vec<Change>,
-        /// The revision previously rendered, if there was one.
-        previous_revision: Option<String>,
-        /// The revision now rendered.
-        revision: String,
+        /// The revision previously rendered, if there was one, ready to print.
+        previous_revision_description: Option<String>,
+        /// The revision now rendered, ready to print.
+        revision_description: String,
         /// Whether the recorded answers were rewritten — which happens when a
         /// template adds a question. Worth telling the user, since it is the
         /// one file `update` does modify.
@@ -525,7 +536,7 @@ pub enum UpdateOutcome {
 /// tree is built as a Git object and one ref is moved. There is no code path
 /// here that writes a file into the project.
 pub fn update(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     overrides: BTreeMap<String, Value>,
     dirty: bool,
@@ -555,7 +566,7 @@ pub fn update(
     let tip = project.resolve_ref(&ref_name)?;
 
     let previous = tip.map(|oid| project.commit(oid)).transpose()?;
-    let previous_revision = previous
+    let previous_revision_description = previous
         .as_ref()
         .and_then(|commit| Provenance::parse(&commit.message))
         .map(|recorded| recorded.describe_revision());
@@ -567,7 +578,10 @@ pub fn update(
         && previous.tree == rendered.tree
     {
         return Ok(UpdateOutcome::UpToDate {
-            revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+            revision_description: describe_revision(
+                &rendered.template.reference,
+                rendered.template.revision,
+            ),
             ignored_answers: rendered.ignored_answers,
         });
     }
@@ -598,8 +612,11 @@ pub fn update(
         id,
         commit,
         changes,
-        previous_revision,
-        revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+        previous_revision_description,
+        revision_description: describe_revision(
+            &rendered.template.reference,
+            rendered.template.revision,
+        ),
         answers_changed,
         ignored_answers: rendered.ignored_answers,
     })
@@ -618,7 +635,7 @@ pub struct Status {
     /// What the last rendering recorded.
     pub recorded: Option<Recorded>,
     /// What the configured `ref` resolves to now.
-    pub available_revision: Option<String>,
+    pub available_revision_description: Option<String>,
     /// Whether the template has moved since the last rendering.
     pub template_moved: bool,
     /// Whether the ref's tip is an ancestor of `HEAD`.
@@ -642,7 +659,7 @@ impl Status {
 
 /// Report the state of the template attachment.
 pub fn status(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
 ) -> Result<Status, OpError> {
@@ -667,9 +684,9 @@ pub fn status(
     })
     .ok();
 
-    let available_revision = resolved
+    let available_revision_description = resolved
         .as_ref()
-        .map(|r| format!("{} ({})", r.reference, r.revision.short()));
+        .map(|r| describe_revision(&r.reference, r.revision));
 
     let template_moved = match (&resolved, &recorded) {
         (Some(resolved), Some(recorded)) => recorded
@@ -709,7 +726,7 @@ pub fn status(
         ref_name,
         tip,
         recorded,
-        available_revision,
+        available_revision_description,
         template_moved,
         merged,
         remote,
@@ -719,7 +736,7 @@ pub fn status(
 }
 
 /// How many commits the rendered ref holds.
-fn count_renderings(project: &LibGit2, tip: Oid) -> Result<usize, GitError> {
+fn count_renderings(project: &dyn GitBackend, tip: Oid) -> Result<usize, GitError> {
     let mut count = 0;
     let mut current = Some(tip);
     while let Some(oid) = current {
@@ -738,7 +755,7 @@ fn count_renderings(project: &LibGit2, tip: Oid) -> Result<usize, GitError> {
 }
 
 /// The rendered ref's tip, or a helpful error.
-fn require_tip(project: &LibGit2, ref_name: &str) -> Result<Oid, OpError> {
+fn require_tip(project: &dyn GitBackend, ref_name: &str) -> Result<Oid, OpError> {
     project
         .resolve_ref(ref_name)?
         .ok_or_else(|| OpError::NoRenderedRef {
@@ -756,7 +773,7 @@ pub fn identify(project_root: &Path) -> Result<(TemplateId, String), OpError> {
 
 /// The difference between `HEAD` and the rendered ref.
 pub fn diff(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     paths: &[String],
     reverse: bool,
@@ -780,7 +797,7 @@ pub fn diff(
 }
 
 /// The changes between `HEAD` and the rendered ref.
-pub fn diff_changes(project: &LibGit2, project_root: &Path) -> Result<Vec<Change>, OpError> {
+pub fn diff_changes(project: &dyn GitBackend, project_root: &Path) -> Result<Vec<Change>, OpError> {
     let (_, ref_name) = identify(project_root)?;
     let tip = require_tip(project, &ref_name)?;
 
@@ -797,7 +814,7 @@ pub fn diff_changes(project: &LibGit2, project_root: &Path) -> Result<Vec<Change
 /// Delegates entirely to the backend's merge. git-tpl contributes no conflict
 /// resolution — see `docs/adr/002-no-custom-reconciliation.md`.
 pub fn merge(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     message: Option<&str>,
     commit_result: bool,
@@ -818,23 +835,26 @@ pub fn merge(
 /// Never moves the local ref. What to do about a newer remote copy is the
 /// user's decision, and adopting someone else's rendering silently would be a
 /// surprising thing for a fetch to do.
+/// Returns the ref it compared, so the caller does not have to `identify` a
+/// second time to name it in the report.
 pub fn fetch(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
-) -> Result<Option<AheadBehind>, OpError> {
+) -> Result<(String, Option<AheadBehind>), OpError> {
     let (id, ref_name) = identify(project_root)?;
 
     project.fetch_refspec(&preferences.remote, &preferences.fetch_refspec())?;
 
     let remote_ref = id.remote_ref_name(&preferences.remote);
-    match (
+    let relation = match (
         project.resolve_ref(&ref_name)?,
         project.resolve_ref(&remote_ref)?,
     ) {
-        (Some(local), Some(remote)) => Ok(Some(project.ahead_behind(local, remote)?)),
-        _ => Ok(None),
-    }
+        (Some(local), Some(remote)) => Some(project.ahead_behind(local, remote)?),
+        _ => None,
+    };
+    Ok((ref_name, relation))
 }
 
 /// Push the rendered ref to a remote.
@@ -843,7 +863,7 @@ pub fn fetch(
 /// is history others may have merged from; overwriting it destroys the merge
 /// base their next update needs.
 pub fn push(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
 ) -> Result<String, OpError> {
@@ -880,7 +900,7 @@ mod tests {
             ref_name: "refs/tpl/tpl".into(),
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
-            available_revision: None,
+            available_revision_description: None,
             template_moved: false,
             merged: true,
             remote: None,
@@ -900,7 +920,7 @@ mod tests {
             ref_name: "refs/tpl/tpl".into(),
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
-            available_revision: None,
+            available_revision_description: None,
             template_moved: false,
             merged: true,
             remote: None,

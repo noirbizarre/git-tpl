@@ -29,9 +29,9 @@ it remains a valid merge base. This is the property the whole model depends on:
 rewriting a rendering that someone has already merged from destroys the base
 their next merge needs, and turns it into a whole-file conflict.
 
-The reason for a re-render — template moved, answer changed, data changed —
-becomes irrelevant to the mechanism. All four are the same event: the desired
-state changed. One code path.
+The reason for a re-render — template moved, answer changed, data changed,
+git-tpl itself renders differently — becomes irrelevant to the mechanism. All
+four are the same event: the desired state changed. One code path.
 
 A locally diverged ref is not a problem to detect and repair. It is simply the
 parent of the next commit.

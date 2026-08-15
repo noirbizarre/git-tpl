@@ -3,13 +3,14 @@
 Merge `refs/tpl/<id>` into the current branch.
 
 ```sh
-git tpl merge [--no-commit] [--message <msg>]
+git tpl merge [--no-commit] [-m <msg>]
+git tpl merge --abort
 ```
 
 ## It is a normal merge
 
 ```sh
-git merge refs/tpl/rawtools-rust-library
+git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 That is the operation. `git tpl merge` looks up the ref name and uses a
@@ -33,28 +34,28 @@ reimplementing them is the mistake this design exists to avoid.
 
 ```console
 $ git tpl merge
-
-Merging refs/tpl/rawtools-rust-library into main
-
-  modified  Cargo.toml
-  modified  README.md
-  added     .github/workflows/release.yml
-
-Merge made by the 'ort' strategy.
+Merged refs/tpl/github-com-noirbizarre-rust-library-template into the current branch
+Merge commit 2fff441.
 ```
 
-Fast-forwards when it can.
+Fast-forwards when it can, and says so:
+
+```console
+$ git tpl merge
+Fast-forwarded refs/tpl/github-com-noirbizarre-rust-library-template into the current branch
+Now at 15b50a5.
+```
+
+With `--no-commit`, the merge is staged and left for you to commit.
 
 ## Conflicts
 
 ```console
 $ git tpl merge
 
-Merging refs/tpl/rawtools-rust-library into main
+CONFLICT (content): Merge conflict in README.md
 
-CONFLICT (content): Merge conflict in Cargo.toml
-
-Automatic merge failed; fix conflicts and then commit the result.
+warning: automatic merge failed; fix conflicts and then commit the result.
 
   git status              see what conflicted
   git mergetool           resolve interactively
@@ -80,6 +81,5 @@ ambiguous, and genuinely wants a human.
 | Option | Meaning |
 |---|---|
 | `--no-commit` | Merge and stage, but do not commit. |
-| `--message <msg>` | Override the merge commit message. |
-| `--no-ff` | Always create a merge commit. |
+| `-m`, `--message <msg>` | Override the merge commit message. |
 | `--abort` | Abort an in-progress merge. Same as `git merge --abort`. |

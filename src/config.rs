@@ -33,20 +33,6 @@ pub enum ConfigError {
         path: PathBuf,
     },
 
-    /// A configuration file already exists where one was about to be created.
-    #[error("this repository already has a template attached")]
-    #[diagnostic(
-        code(tpl::config::exists),
-        help(
-            "`{}` already exists. Run `git tpl update` to re-render, or edit the answers there and update.",
-            CONFIG_PATH
-        )
-    )]
-    AlreadyExists {
-        /// The existing path.
-        path: PathBuf,
-    },
-
     /// The file could not be parsed as TOML, or does not match the schema.
     #[error("invalid configuration in `{name}`: {message}")]
     #[diagnostic(code(tpl::config::parse))]
@@ -216,7 +202,7 @@ mod tests {
         let config = Config::parse(
             r#"
             [template]
-            source = "https://github.com/rawtools/rust-library"
+            source = "https://github.com/noirbizarre/rust-library"
             "#,
             "test.toml",
         )
@@ -224,7 +210,7 @@ mod tests {
 
         assert_eq!(
             config.template.source,
-            "https://github.com/rawtools/rust-library"
+            "https://github.com/noirbizarre/rust-library"
         );
         assert_eq!(config.template.r#ref, None);
         assert!(config.answers.is_empty());
@@ -269,7 +255,7 @@ mod tests {
         let original = Config::parse(
             r#"
             [template]
-            source = "https://github.com/rawtools/rust-library"
+            source = "https://github.com/noirbizarre/rust-library"
             ref = "v1.4.0"
             id = "legacy-name"
             root = "src"

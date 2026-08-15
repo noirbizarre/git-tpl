@@ -40,7 +40,7 @@ template having moved, and produces a new rendering — exactly as editing a
 !!! note "`--dirty` applies here too"
 
     `git tpl update --dirty` reads template data from the template's working
-    tree, along with everything else. See
+    tree, along with everything else. Local templates only. See
     [Local template development](../templates/local-development.md).
 
 ## Project data

@@ -272,7 +272,7 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn cli_definition_is_valid() {
+    fn the_argument_definition_has_no_conflicting_flags_or_names() {
         Cli::command().debug_assert();
     }
 
@@ -291,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn verbosity_accumulates() {
+    fn repeating_the_verbose_flag_raises_the_level() {
         let cli = Cli::try_parse_from(["git-tpl", "-vv", "status"]).unwrap();
         assert_eq!(cli.global.verbose, 2);
     }

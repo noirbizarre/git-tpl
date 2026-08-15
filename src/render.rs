@@ -118,7 +118,7 @@ pub enum RenderError {
 /// is an authoring mistake, and silently importing replacement characters would
 /// surface later as an incomprehensible parse error.
 pub fn collect_partials(
-    template: &impl GitBackend,
+    template: &dyn GitBackend,
     tree: Oid,
     root: &str,
 ) -> Result<Partials, RenderError> {
@@ -173,8 +173,8 @@ pub struct Rendered {
 /// repository — often a temporary clone — while the rendered tree must be
 /// written into the project, which is where the ref will point.
 pub fn render_tree(
-    template: &impl GitBackend,
-    project: &impl GitBackend,
+    template: &dyn GitBackend,
+    project: &dyn GitBackend,
     entries: &[TreeEntry],
     context: &Context,
     partials: &Arc<Partials>,
@@ -202,7 +202,7 @@ pub fn render_tree(
 ///
 /// Reads blobs from `template`; produces bytes, not Git objects.
 pub fn render_entries(
-    template: &impl GitBackend,
+    template: &dyn GitBackend,
     entries: &[TreeEntry],
     context: &Context,
     partials: &Arc<Partials>,
@@ -453,7 +453,7 @@ mod tests {
     /// A template repository is untrusted input, and `..` in a rendered path is
     /// a request to write outside the tree.
     #[test]
-    fn a_path_that_would_escape_the_tree_is_rejected() {
+    fn a_path_that_would_escape_the_tree_is_refused() {
         let f = Fixture::new();
         let mut context = Context::new();
         context.set_answer("evil", Value::String("..".into()));

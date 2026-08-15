@@ -162,7 +162,7 @@ fn the_templates_own_files_are_not_rendered_into_the_project() {
 /// GitHub Actions files are full of `${{ }}`, and a tool that rendered every
 /// file would mangle them.
 #[test]
-fn a_non_jinja_file_is_copied_byte_for_byte() {
+fn a_non_jinja_file_reaches_the_project_byte_for_byte() {
     let world = World::new();
     world.init(&[]).success();
 

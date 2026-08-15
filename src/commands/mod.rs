@@ -26,8 +26,14 @@ use tpl::ops::OpError;
 use crate::cli::{AnswerArgs, GlobalArgs};
 use crate::theme::Theme;
 
-/// What every command needs.
-pub struct Context {
+/// What every command needs: the repository, where it is, and how to talk.
+///
+/// Named `Session` rather than `Context` because `tpl::Context` is the render
+/// context — the answers, computed values and data a template sees — and both
+/// are in scope in this crate. Two unrelated domain objects sharing the
+/// project's most-used type name is how a reader ends up looking for `answers`
+/// on the wrong one.
+pub struct Session {
     /// The repository the command runs against.
     pub repo: LibGit2,
     /// Its working directory — where `.config/git.tpl.toml` lives.
@@ -38,15 +44,10 @@ pub struct Context {
     pub global: GlobalArgs,
 }
 
-impl Context {
+impl Session {
     /// Discover the repository containing the current directory.
     pub fn discover(global: &GlobalArgs) -> Result<Self, OpError> {
-        let cwd = std::env::current_dir().map_err(|e| {
-            OpError::Git(tpl::git::GitError::Backend {
-                context: "determine the current directory".into(),
-                reason: e.to_string(),
-            })
-        })?;
+        let cwd = current_dir()?;
         // Searches upwards, like every Git command, so running from a
         // subdirectory works.
         let repo = LibGit2::discover(&cwd)?;
@@ -80,6 +81,20 @@ impl Context {
             eprintln!();
         }
     }
+}
+
+/// The current directory, or an error that says which step failed.
+///
+/// Shared with `init --init`, which needs it before there is a repository to
+/// discover — and which had its own copy of this mapping, with the same
+/// context string, until the two were one.
+pub fn current_dir() -> Result<PathBuf, OpError> {
+    std::env::current_dir().map_err(|e| {
+        OpError::Git(tpl::git::GitError::Backend {
+            context: "determine the current directory".into(),
+            reason: e.to_string(),
+        })
+    })
 }
 
 /// Turn `--trust` and the interactivity preferences into what `ops` expects.
@@ -121,7 +136,7 @@ pub fn answering<'a>(
 /// `_src_path` in it, and a template drops questions over time. Not silent
 /// either, because that is how a typo'd key becomes an afternoon spent
 /// wondering why an answer had no effect.
-pub fn report_ignored(ctx: &Context, ignored: &[String]) {
+pub fn report_ignored(ctx: &Session, ignored: &[String]) {
     if ignored.is_empty() {
         return;
     }

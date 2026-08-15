@@ -195,7 +195,7 @@ mod tests {
 
     fn sample() -> Provenance {
         Provenance {
-            source: "https://github.com/rawtools/rust-library".into(),
+            source: "https://github.com/noirbizarre/rust-library".into(),
             reference: "v1.4.0".into(),
             commit: oid("4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29"),
             dirty: false,

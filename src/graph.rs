@@ -40,7 +40,10 @@ pub enum GraphError {
         code(tpl::graph::unknown_reference),
         help("in: {expression}\n{}", match suggestion {
             Some(s) => format!("did you mean `{s}`?"),
-            None => "`{unknown}` is not a question, a computed value or a data source in this template".to_string(),
+            // `format!` rather than a literal: the literal spelling printed
+            // `{unknown}` verbatim, so the one branch that had to name the
+            // offending reference was the one that never did.
+            None => format!("`{unknown}` is not a question, a computed value or a data source in this template"),
         })
     )]
     UnknownReference {
@@ -667,6 +670,34 @@ mod tests {
             }
             other => panic!("expected an unknown reference, got {other:?}"),
         }
+    }
+
+    /// The help is the only place the offending name is spelled out when
+    /// there is no near-miss to suggest, so it must be interpolated rather
+    /// than printed as the literal `{unknown}`.
+    #[test]
+    fn a_reference_with_no_near_miss_is_named_in_the_help() {
+        let error = graph(
+            r#"
+            name = "t"
+            [computed]
+            greeting = "{{ nothing_like_anything }}"
+            "#,
+        )
+        .unwrap_err();
+
+        let help = miette::Diagnostic::help(&error)
+            .expect("an unknown reference always carries help")
+            .to_string();
+
+        assert!(
+            help.contains("`nothing_like_anything` is not a question"),
+            "help did not name the reference: {help}"
+        );
+        assert!(
+            !help.contains("{unknown}"),
+            "help printed the placeholder verbatim: {help}"
+        );
     }
 
     #[test]

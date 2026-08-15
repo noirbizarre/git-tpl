@@ -55,7 +55,7 @@ resolves `git tpl`.
 
 ```sh
 cd my-project
-git tpl init https://github.com/rawtools/rust-library-template
+git tpl init https://github.com/noirbizarre/rust-library-template
 ```
 
 That works on an empty repository and on a project that already has files. On an
@@ -85,10 +85,10 @@ main:  A ─── B ─── C ─── D ─── M
 you ran. Every Git command works on the ref:
 
 ```sh
-git show refs/tpl/rust-library
-git log  refs/tpl/rust-library
-git diff HEAD refs/tpl/rust-library
-git merge refs/tpl/rust-library
+git show refs/tpl/github-com-noirbizarre-rust-library-template
+git log  refs/tpl/github-com-noirbizarre-rust-library-template
+git diff HEAD refs/tpl/github-com-noirbizarre-rust-library-template
+git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 **`git tpl update` never touches your branch.** Not the worktree, not the index,
@@ -134,7 +134,7 @@ Templates cannot execute code — no hooks, no scripts, no embedded interpreter.
 - [The Git model](https://noirbizarre.github.io/git-tpl/concepts/git-model/) — start here
 - [Quick start](https://noirbizarre.github.io/git-tpl/getting-started/quickstart/)
 - [Template format](https://noirbizarre.github.io/git-tpl/templates/format/)
-- [Architecture decisions](https://noirbizarre.github.io/git-tpl/adr/README/)
+- [Architecture decisions](https://noirbizarre.github.io/git-tpl/adr/)
 
 ## Status
 

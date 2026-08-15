@@ -56,6 +56,7 @@ src/
 ├── graph.rs         the dependency DAG
 ├── eval.rs          expression evaluation and prompting
 ├── render.rs        the tree walk
+├── answers.rs       --answers-from files
 ├── data/            data sources
 ├── git/             the Git abstraction
 │   ├── mod.rs       GitBackend — our types, never git2's
@@ -101,6 +102,20 @@ says what. Ideally naming the failure it prevents:
 A comment that restates the code is worse than none. A comment recording the
 bug that motivated the line saves the next person an afternoon.
 
+**One name per concept.** Two concepts here are easy to conflate, so they have
+fixed names:
+
+| Name | Type | Meaning |
+|---|---|---|
+| `reference` | `String` | the name asked for — a branch, tag, SHA, or `<worktree>` |
+| `revision` | `Oid` | the commit it resolved to |
+
+`revision` never names a `String`. A field holding the printable form of the
+pair is `*_description`, and is produced by `ops::describe_revision` — never
+by a `format!` at the call site, or the two ends of a `A → B` line come to
+disagree. The config key and CLI flag stay `ref`, because that is what a user
+writes.
+
 **Errors are typed and actionable.** `thiserror` for the library, `miette` at
 the binary edge. A diagnostic must carry the two things the user does not
 already know: what specifically failed, and what to do. Compare:
@@ -111,7 +126,11 @@ help: source: data/absent.toml                          ← useful
       reason: no such file in the template repository at revision ffa9b4a
 ```
 
-Diagnostic codes are `tpl::<area>::<kind>`.
+Diagnostic codes are `tpl::<area>::<kind>`, where `<area>` is the declaring
+module's own name and a `mod.rs` takes its directory's. So `src/ops/mod.rs` is
+`tpl::ops`, `src/ops/resolve.rs` is `tpl::resolve`, and `src/template/value.rs`
+is `tpl::value` — the parent never appears. A code is a public identifier
+users grep for, so renaming one is a breaking change.
 
 **Test names are sentences.** `an_unchanged_template_produces_no_commit`, not
 `test_update_2`. The name should say what would be broken if it failed.

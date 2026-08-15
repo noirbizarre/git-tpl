@@ -2,19 +2,19 @@
 
 use tpl::ops::{self, OpError};
 
-use super::Context;
+use super::Session;
 use crate::cli::{DiffArgs, GlobalArgs};
 use crate::theme::{change, muted};
 
-pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<(), OpError> {
-    let ctx = Context::discover(global)?;
+pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
+    let ctx = Session::discover(global)?;
 
     if args.name_only || args.stat {
         let changes = ops::diff_changes(&ctx.repo, &ctx.root)?;
 
         if changes.is_empty() {
             ctx.say(muted(&ctx.theme, "No differences."));
-            return Ok(());
+            return Ok(crate::exit::SUCCESS);
         }
 
         for c in &changes {
@@ -34,7 +34,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<(), OpError> {
                 &format!("{} file(s) differ", changes.len()),
             ));
         }
-        return Ok(());
+        return Ok(crate::exit::SUCCESS);
     }
 
     let patch = ops::diff(&ctx.repo, &ctx.root, &args.paths, args.reverse)?;
@@ -44,5 +44,5 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<(), OpError> {
         // A patch is data. It goes to stdout so it can be piped into `git apply`.
         print!("{patch}");
     }
-    Ok(())
+    Ok(crate::exit::SUCCESS)
 }

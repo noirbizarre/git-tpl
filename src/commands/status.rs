@@ -3,12 +3,16 @@
 use tpl::gitconfig::Preferences;
 use tpl::ops::{self, OpError};
 
-use super::Context;
+use super::Session;
 use crate::cli::{Format, GlobalArgs, StatusArgs};
 use crate::theme::{command, field, muted};
 
 pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
-    let ctx = Context::discover(global)?;
+    let ctx = Session::discover(global)?;
+    // No overrides: `status` reports against the configured remote on purpose.
+    // It prompts for nothing and pushes nothing, and a `--remote` that changed
+    // only which remote a report compared against would be a flag whose effect
+    // is invisible in the output it produces.
     let preferences = Preferences::load(&ctx.repo)?;
     let status = ops::status(&ctx.repo, &ctx.root, &preferences)?;
 
@@ -24,7 +28,7 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     })
 }
 
-fn print_text(ctx: &Context, status: &ops::Status) {
+fn print_text(ctx: &Session, status: &ops::Status) {
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &status.source));
     ctx.say(field(&ctx.theme, "Ref", &status.ref_name));
@@ -36,7 +40,10 @@ fn print_text(ctx: &Context, status: &ops::Status) {
         .map(|r| r.describe_revision())
         .unwrap_or_else(|| "never rendered".into());
 
-    let revision_line = match (&status.available_revision, status.template_moved) {
+    let revision_line = match (
+        &status.available_revision_description,
+        status.template_moved,
+    ) {
         (Some(available), true) => format!(
             "{rendered} → {available}   {}",
             muted(&ctx.theme, "template has moved")
@@ -69,22 +76,10 @@ fn print_text(ctx: &Context, status: &ops::Status) {
     ));
 
     if let Some((remote_ref, relation)) = &status.remote {
-        let description = if relation.is_synced() {
-            "in sync".to_string()
-        } else if relation.is_diverged() {
-            format!(
-                "diverged — {} ahead, {} behind",
-                relation.ahead, relation.behind
-            )
-        } else if relation.ahead > 0 {
-            format!("{} ahead", relation.ahead)
-        } else {
-            format!("{} behind", relation.behind)
-        };
         ctx.say(field(
             &ctx.theme,
             "Remote",
-            &format!("{remote_ref} — {description}"),
+            &format!("{remote_ref} — {}", relation.describe()),
         ));
     }
 
@@ -111,6 +106,12 @@ fn print_text(ctx: &Context, status: &ops::Status) {
     }
 }
 
+/// The machine-readable form.
+///
+/// camelCase keys, and `ref` rather than `refName`: this is consumed by
+/// scripts and CI, where JSON is conventionally camelCase, and the names
+/// follow the vocabulary of the text output rather than the field names of
+/// `Status`. Renaming a key here is a breaking change.
 fn to_json(status: &ops::Status) -> String {
     let recorded = status.recorded.as_ref();
     serde_json::json!({
@@ -121,7 +122,7 @@ fn to_json(status: &ops::Status) -> String {
         "renderedRevision": recorded.and_then(|r| r.reference.clone()),
         "renderedCommit": recorded.and_then(|r| r.commit.map(|c| c.to_hex())),
         "dirty": recorded.map(|r| r.dirty).unwrap_or(false),
-        "availableRevision": status.available_revision,
+        "availableRevision": status.available_revision_description,
         "templateMoved": status.template_moved,
         "merged": status.merged,
         "renderingCount": status.rendering_count,

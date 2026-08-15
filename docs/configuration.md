@@ -17,7 +17,7 @@ answers used to render it.
 
 ```toml
 [template]
-source = "https://github.com/rawtools/rust-library-template"
+source = "https://github.com/noirbizarre/rust-library-template"
 ref = "main"
 
 [answers]
@@ -51,8 +51,8 @@ is the point: `update` is how you find out the template moved.
 
 | `source` | derived `id` |
 |---|---|
-| `https://github.com/rawtools/rust-library` | `github-com-rawtools-rust-library` |
-| `git@github.com:rawtools/rust-library.git` | `github-com-rawtools-rust-library` |
+| `https://github.com/noirbizarre/rust-library-template` | `github-com-noirbizarre-rust-library-template` |
+| `git@github.com:noirbizarre/rust-library-template.git` | `github-com-noirbizarre-rust-library-template` |
 | `../rust-library-template` | `rust-library-template` |
 
 The SSH and HTTPS forms of the same repository derive the *same* id, so switching
