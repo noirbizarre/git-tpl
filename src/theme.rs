@@ -132,6 +132,15 @@ pub fn heading(theme: &Theme, text: &str) -> String {
     theme.heading.apply_to(text).to_string()
 }
 
+/// A headline: an emphasised verb and the thing it happened to.
+///
+/// `Created refs/tpl/x`, `Updated refs/tpl/x`, `Merged refs/tpl/x into ...`.
+/// Five call sites were composing the same `"{} {}"` by hand around
+/// [`heading`], which is one shape too many to leave to each of them.
+pub fn headline(theme: &Theme, verb: &str, subject: &str) -> String {
+    format!("{} {subject}", heading(theme, verb))
+}
+
 /// A dimmed note.
 pub fn muted(theme: &Theme, text: &str) -> String {
     theme.muted.apply_to(text).to_string()

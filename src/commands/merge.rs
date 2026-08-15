@@ -5,15 +5,15 @@ use tpl::ops::{self, OpError};
 
 use super::Session;
 use crate::cli::{GlobalArgs, MergeArgs};
-use crate::theme::{command, heading, muted, warning};
+use crate::theme::{command, headline, muted, warning};
 
-pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<(), OpError> {
+pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
 
     if args.abort {
         ctx.repo.abort_merge()?;
         ctx.say("Merge aborted.");
-        return Ok(());
+        return Ok(crate::exit::SUCCESS);
     }
 
     let (id, outcome) = ops::merge(
@@ -28,18 +28,18 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<(), OpError> {
             ctx.say("Already up to date.");
         }
         MergeOutcome::FastForward { to } => {
-            ctx.say(format!(
-                "{} {} into the current branch",
-                heading(&ctx.theme, "Fast-forwarded"),
-                id.ref_name()
+            ctx.say(headline(
+                &ctx.theme,
+                "Fast-forwarded",
+                &format!("{} into the current branch", id.ref_name()),
             ));
             ctx.say(muted(&ctx.theme, &format!("Now at {}.", to.short())));
         }
         MergeOutcome::Merged { commit } => {
-            ctx.say(format!(
-                "{} {} into the current branch",
-                heading(&ctx.theme, "Merged"),
-                id.ref_name()
+            ctx.say(headline(
+                &ctx.theme,
+                "Merged",
+                &format!("{} into the current branch", id.ref_name()),
             ));
             ctx.say(muted(
                 &ctx.theme,
@@ -78,5 +78,5 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<(), OpError> {
         }
     }
 
-    Ok(())
+    Ok(crate::exit::SUCCESS)
 }

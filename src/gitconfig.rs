@@ -172,13 +172,10 @@ mod tests {
         let (_dir, repo) = repo();
         repo.set_config_str("tpl.remote", "upstream").unwrap();
 
-        let preferences =
-            Preferences::load(&repo)
-                .unwrap()
-                .with_overrides(Overrides {
-                    remote: Some("fork"),
-                    ..Default::default()
-                });
+        let preferences = Preferences::load(&repo).unwrap().with_overrides(Overrides {
+            remote: Some("fork"),
+            ..Default::default()
+        });
 
         assert_eq!(preferences.remote, "fork");
     }

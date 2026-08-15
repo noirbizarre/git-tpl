@@ -40,7 +40,10 @@ fn print_text(ctx: &Session, status: &ops::Status) {
         .map(|r| r.describe_revision())
         .unwrap_or_else(|| "never rendered".into());
 
-    let revision_line = match (&status.available_revision_description, status.template_moved) {
+    let revision_line = match (
+        &status.available_revision_description,
+        status.template_moved,
+    ) {
         (Some(available), true) => format!(
             "{rendered} → {available}   {}",
             muted(&ctx.theme, "template has moved")
@@ -73,22 +76,10 @@ fn print_text(ctx: &Session, status: &ops::Status) {
     ));
 
     if let Some((remote_ref, relation)) = &status.remote {
-        let description = if relation.is_synced() {
-            "in sync".to_string()
-        } else if relation.is_diverged() {
-            format!(
-                "diverged — {} ahead, {} behind",
-                relation.ahead, relation.behind
-            )
-        } else if relation.ahead > 0 {
-            format!("{} ahead", relation.ahead)
-        } else {
-            format!("{} behind", relation.behind)
-        };
         ctx.say(field(
             &ctx.theme,
             "Remote",
-            &format!("{remote_ref} — {description}"),
+            &format!("{remote_ref} — {}", relation.describe()),
         ));
     }
 

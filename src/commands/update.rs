@@ -1,14 +1,15 @@
 //! `git tpl update`
 
+use tpl::git::GitBackend;
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError, UpdateOutcome};
 
 use super::{Session, answering, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, heading, muted};
+use crate::theme::{change, command, field, headline, muted};
 
-pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
+pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
     let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
         remote: args.remote.as_deref(),
@@ -27,7 +28,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
     let overrides = supplied(&args.answers)?;
 
     if args.dry_run {
-        return dry_run(&ctx, &config, &args, overrides, preferences.interactive);
+        return dry_run(&ctx, &config, &args, overrides, preferences.interactive)
+            .map(|()| crate::exit::SUCCESS);
     }
 
     let mut prompter = Interactive;
@@ -79,11 +81,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
                 },
             ));
             ctx.blank();
-            ctx.say(format!(
-                "{} {}",
-                heading(&ctx.theme, "Updated"),
-                id.ref_name()
-            ));
+            ctx.say(headline(&ctx.theme, "Updated", &id.ref_name()));
             ctx.blank();
             for c in &changes {
                 ctx.say(change(&ctx.theme, c.kind, &c.path));
@@ -116,7 +114,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
         }
     }
 
-    Ok(())
+    Ok(crate::exit::SUCCESS)
 }
 
 fn dry_run(
@@ -151,9 +149,9 @@ fn dry_run(
     report_ignored(ctx, &rendered.ignored_answers);
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
-    let tip = tpl::git::GitBackend::resolve_ref(&ctx.repo, &ref_name)?;
+    let tip = ctx.repo.resolve_ref(&ref_name)?;
     let previous_tree = match tip {
-        Some(oid) => Some(tpl::git::GitBackend::commit(&ctx.repo, oid)?.tree),
+        Some(oid) => Some(ctx.repo.commit(oid)?.tree),
         None => None,
     };
 
@@ -162,7 +160,7 @@ fn dry_run(
         return Ok(());
     }
 
-    let changes = tpl::git::GitBackend::diff_trees(&ctx.repo, previous_tree, rendered.tree)?;
+    let changes = ctx.repo.diff_trees(previous_tree, rendered.tree)?;
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &config.template.source));
@@ -172,11 +170,7 @@ fn dry_run(
         &ops::describe_revision(&rendered.template.reference, rendered.template.revision),
     ));
     ctx.blank();
-    ctx.say(format!(
-        "{} {}",
-        heading(&ctx.theme, "Would update"),
-        id.ref_name()
-    ));
+    ctx.say(headline(&ctx.theme, "Would update", &id.ref_name()));
     ctx.blank();
     for c in &changes {
         ctx.say(change(&ctx.theme, c.kind, &c.path));

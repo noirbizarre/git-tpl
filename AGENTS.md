@@ -126,7 +126,11 @@ help: source: data/absent.toml                          ← useful
       reason: no such file in the template repository at revision ffa9b4a
 ```
 
-Diagnostic codes are `tpl::<area>::<kind>`.
+Diagnostic codes are `tpl::<area>::<kind>`, where `<area>` is the declaring
+module's own name and a `mod.rs` takes its directory's. So `src/ops/mod.rs` is
+`tpl::ops`, `src/ops/resolve.rs` is `tpl::resolve`, and `src/template/value.rs`
+is `tpl::value` — the parent never appears. A code is a public identifier
+users grep for, so renaming one is a breaking change.
 
 **Test names are sentences.** `an_unchanged_template_produces_no_commit`, not
 `test_update_2`. The name should say what would be broken if it failed.

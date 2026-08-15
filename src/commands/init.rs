@@ -7,16 +7,16 @@ use tpl::git::{GitBackend, MergeOutcome};
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError};
 
-use super::{Session, answering, report_ignored, supplied, trust};
+use super::{Session, answering, current_dir, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, InitArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, heading, muted, warning};
+use crate::theme::{change, command, field, heading, headline, muted, warning};
 
-pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
+pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // `--init` has to happen before discovery, since there may be no
     // repository to discover yet.
     if args.init {
-        let cwd = std::env::current_dir().map_err(io)?;
+        let cwd = current_dir()?;
         if LibGit2::discover(&cwd).is_err() {
             LibGit2::init(&cwd)?;
         }
@@ -34,7 +34,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
     let answers = supplied(&args.answers)?;
 
     if args.dry_run {
-        return dry_run(&ctx, &args, answers);
+        return dry_run(&ctx, &args, answers).map(|()| crate::exit::SUCCESS);
     }
 
     let mut prompter = Interactive;
@@ -63,11 +63,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
     ctx.say(field(&ctx.theme, "Template", &args.template));
     ctx.say(field(&ctx.theme, "Revision", &outcome.revision_description));
     ctx.blank();
-    ctx.say(format!(
-        "{} {}",
-        heading(&ctx.theme, "Created"),
-        outcome.id.ref_name()
-    ));
+    ctx.say(headline(&ctx.theme, "Created", &outcome.id.ref_name()));
     ctx.blank();
     for c in &outcome.changes {
         ctx.say(change(&ctx.theme, c.kind, &c.path));
@@ -121,7 +117,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
         },
     ));
 
-    Ok(())
+    Ok(crate::exit::SUCCESS)
 }
 
 /// Report what would be asked and rendered, without creating anything.
@@ -192,11 +188,4 @@ fn dry_run(
     ctx.blank();
     ctx.say(muted(&ctx.theme, "Nothing was created."));
     Ok(())
-}
-
-fn io(error: std::io::Error) -> OpError {
-    OpError::Git(tpl::git::GitError::Backend {
-        context: "determine the current directory".into(),
-        reason: error.to_string(),
-    })
 }

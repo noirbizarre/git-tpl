@@ -167,6 +167,24 @@ impl AheadBehind {
     pub fn is_diverged(self) -> bool {
         self.ahead > 0 && self.behind > 0
     }
+
+    /// The relation in words, as `status` and `fetch` both report it.
+    ///
+    /// One phrasing, defined once. It was built three different ways —
+    /// "diverged — 2 ahead, 1 behind", "has diverged: 2 ahead, 1 behind" and
+    /// "local is 2 ahead and 1 behind" — for one fact, in three places a user
+    /// may well see in the same session.
+    pub fn describe(self) -> String {
+        if self.is_synced() {
+            "in sync".to_string()
+        } else if self.is_diverged() {
+            format!("diverged — {} ahead, {} behind", self.ahead, self.behind)
+        } else if self.ahead > 0 {
+            format!("{} ahead", self.ahead)
+        } else {
+            format!("{} behind", self.behind)
+        }
+    }
 }
 
 /// The outcome of a merge.

@@ -340,7 +340,10 @@ pub fn render(
 /// A key that is not set is simply absent: a template suggesting `user.name`
 /// must still work for someone who has never set one, and the question's own
 /// `default` covers that case.
-fn git_seeds(project: &dyn GitBackend, manifest: &Manifest) -> Result<BTreeMap<String, Value>, OpError> {
+fn git_seeds(
+    project: &dyn GitBackend,
+    manifest: &Manifest,
+) -> Result<BTreeMap<String, Value>, OpError> {
     let mut seeds = BTreeMap::new();
     for (name, question) in &manifest.questions {
         let Some(key) = question.git_config_key() else {
@@ -576,9 +579,9 @@ pub fn update(
     {
         return Ok(UpdateOutcome::UpToDate {
             revision_description: describe_revision(
-            &rendered.template.reference,
-            rendered.template.revision,
-        ),
+                &rendered.template.reference,
+                rendered.template.revision,
+            ),
             ignored_answers: rendered.ignored_answers,
         });
     }
@@ -832,23 +835,26 @@ pub fn merge(
 /// Never moves the local ref. What to do about a newer remote copy is the
 /// user's decision, and adopting someone else's rendering silently would be a
 /// surprising thing for a fetch to do.
+/// Returns the ref it compared, so the caller does not have to `identify` a
+/// second time to name it in the report.
 pub fn fetch(
     project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
-) -> Result<Option<AheadBehind>, OpError> {
+) -> Result<(String, Option<AheadBehind>), OpError> {
     let (id, ref_name) = identify(project_root)?;
 
     project.fetch_refspec(&preferences.remote, &preferences.fetch_refspec())?;
 
     let remote_ref = id.remote_ref_name(&preferences.remote);
-    match (
+    let relation = match (
         project.resolve_ref(&ref_name)?,
         project.resolve_ref(&remote_ref)?,
     ) {
-        (Some(local), Some(remote)) => Ok(Some(project.ahead_behind(local, remote)?)),
-        _ => Ok(None),
-    }
+        (Some(local), Some(remote)) => Some(project.ahead_behind(local, remote)?),
+        _ => None,
+    };
+    Ok((ref_name, relation))
 }
 
 /// Push the rendered ref to a remote.

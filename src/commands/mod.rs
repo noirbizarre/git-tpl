@@ -47,12 +47,7 @@ pub struct Session {
 impl Session {
     /// Discover the repository containing the current directory.
     pub fn discover(global: &GlobalArgs) -> Result<Self, OpError> {
-        let cwd = std::env::current_dir().map_err(|e| {
-            OpError::Git(tpl::git::GitError::Backend {
-                context: "determine the current directory".into(),
-                reason: e.to_string(),
-            })
-        })?;
+        let cwd = current_dir()?;
         // Searches upwards, like every Git command, so running from a
         // subdirectory works.
         let repo = LibGit2::discover(&cwd)?;
@@ -86,6 +81,20 @@ impl Session {
             eprintln!();
         }
     }
+}
+
+/// The current directory, or an error that says which step failed.
+///
+/// Shared with `init --init`, which needs it before there is a repository to
+/// discover — and which had its own copy of this mapping, with the same
+/// context string, until the two were one.
+pub fn current_dir() -> Result<PathBuf, OpError> {
+    std::env::current_dir().map_err(|e| {
+        OpError::Git(tpl::git::GitError::Backend {
+            context: "determine the current directory".into(),
+            reason: e.to_string(),
+        })
+    })
 }
 
 /// Turn `--trust` and the interactivity preferences into what `ops` expects.
