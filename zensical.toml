@@ -32,6 +32,7 @@ nav = [
     { "Answers from a file" = "usage/answers.md" },
     { "status" = "usage/status.md" },
     { "diff" = "usage/diff.md" },
+    { "show" = "usage/show.md" },
     { "merge" = "usage/merge.md" },
     { "fetch" = "usage/fetch.md" },
     { "push" = "usage/push.md" },

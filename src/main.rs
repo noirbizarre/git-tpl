@@ -35,6 +35,7 @@ fn main() -> ExitCode {
         Command::Update(args) => commands::update(args, &cli.global),
         Command::Status(args) => commands::status(args, &cli.global),
         Command::Diff(args) => commands::diff(args, &cli.global),
+        Command::Show(args) => commands::show(args, &cli.global),
         Command::Merge(args) => commands::merge(args, &cli.global),
         Command::Fetch(args) => commands::fetch(args, &cli.global),
         Command::Push(args) => commands::push(args, &cli.global),

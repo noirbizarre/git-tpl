@@ -66,6 +66,9 @@ warning: automatic merge failed; fix conflicts and then commit the result.
 The index is left exactly as Git leaves it. Every tool you already use applies,
 because nothing here is special.
 
+[`git tpl show <path>`](show.md) prints the template's version of a conflicted
+file, which is often the quickest way to see what it was trying to say.
+
 ## Why conflicts are rarer than you expect
 
 The merge base is your *previous* rendering. So a file the template did not

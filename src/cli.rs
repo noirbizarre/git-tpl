@@ -70,6 +70,8 @@ pub enum Command {
 
     /// Show what merging the template would change
     Diff(DiffArgs),
+    /// Print the template's version of a file
+    Show(ShowArgs),
 
     /// Merge refs/tpl/<id> into the current branch
     Merge(MergeArgs),
@@ -238,6 +240,17 @@ pub struct DiffArgs {
     pub paths: Vec<String>,
 }
 
+/// `git tpl show`
+#[derive(Debug, clap::Args)]
+pub struct ShowArgs {
+    /// The path, relative to the repository root
+    ///
+    /// A plain positional rather than `last = true`: `diff` needs `--` only
+    /// because it takes a variadic list, and `show` takes exactly one path.
+    #[arg(value_name = "PATH")]
+    pub path: String,
+}
+
 /// `git tpl merge`
 #[derive(Debug, clap::Args)]
 pub struct MergeArgs {
@@ -360,6 +373,21 @@ mod tests {
         assert!(Cli::try_parse_from(["git-tpl", "diff", "--answer", "a=b"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "push", "--defaults"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "diff", "--answers-from", "a.toml"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "show", "x", "--defaults"]).is_err());
+    }
+
+    /// `show` reads one path. A second one is a typo — most likely a `--`
+    /// habit carried over from `diff` — and refusing it says so immediately.
+    #[test]
+    fn show_takes_exactly_one_path() {
+        let cli = Cli::try_parse_from(["git-tpl", "show", "src/lib.rs"]).unwrap();
+        match cli.command {
+            Command::Show(args) => assert_eq!(args.path, "src/lib.rs"),
+            other => panic!("expected show, got {other:?}"),
+        }
+
+        assert!(Cli::try_parse_from(["git-tpl", "show"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "show", "a", "b"]).is_err());
     }
 
     #[test]
