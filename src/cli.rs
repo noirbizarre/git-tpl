@@ -80,6 +80,9 @@ pub enum Command {
     /// Check a template for problems, without rendering it
     Lint(LintArgs),
 
+    /// List a template's questions and their schema
+    Questions(QuestionsArgs),
+
     /// Show the template, the rendered ref, and what is pending
     Status(StatusArgs),
 
@@ -268,6 +271,26 @@ pub struct LintArgs {
     pub root: Option<String>,
 
     /// Check the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+}
+
+/// `git tpl questions`
+#[derive(Debug, clap::Args)]
+pub struct QuestionsArgs {
+    /// The template to inspect; defaults to the current directory
+    #[arg(value_name = "TEMPLATE", default_value = ".")]
+    pub template: String,
+
+    /// The branch, tag or commit to inspect
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Read this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Inspect the template's working tree rather than its HEAD
     #[arg(long)]
     pub dirty: bool,
 }

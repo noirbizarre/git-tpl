@@ -70,6 +70,25 @@ full of `${{ }}` was copied rather than rendered-and-survived.
 `ok` is about the command, not the template: warnings do not fail it. Check
 `errors`, or the exit code.
 
+### `questions`
+
+```json
+{ "ok": true,
+  "template": { "name": "rust", "description": "…", "root": "template" },
+  "questions": [{ "name": "crate", "order": 0, "type": "string", "prompt": "Crate name",
+                  "default": null, "defaultIsExpression": false, "when": null,
+                  "pattern": "^[a-z0-9-]+$", "message": "…" }],
+  "computed": ["lib_name"],
+  "data": [{ "name": "targets", "source": "data/targets.toml", "format": "toml" }] }
+```
+
+Questions come in **resolution order**, which is the order they must be
+answered in when a `when` or a `default` references an earlier answer.
+
+`defaultIsExpression` distinguishes `"{{ crate }}"` from a literal.
+`choicesResolved` appears when a `choices_from` points at a data file inside
+the template, saving the caller from fetching and parsing it.
+
 ### `status`
 
 Documented in [status](../usage/status.md). `--format json` is deprecated in
