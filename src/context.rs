@@ -146,6 +146,10 @@ impl Context {
         };
 
         let root = match head {
+            // `data.<name>` is a namespace whose values are themselves
+            // structured, so the name is consumed here and the remainder is
+            // walked inside the value: `data.licenses.names.MIT` is
+            // source `licenses`, then `names.MIT` within it.
             "data" => {
                 let rest = rest?;
                 let (key, tail) = match rest.split_once('.') {
@@ -158,6 +162,9 @@ impl Context {
                     None => Some(value),
                 };
             }
+            // `template` is flat by contrast — `name` and `description`, and
+            // nothing nested — so there is no walk to do. Asymmetric with
+            // `data` on purpose: a template author cannot add keys here.
             "template" => {
                 let rest = rest?;
                 return self.template.get(rest);

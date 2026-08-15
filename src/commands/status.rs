@@ -106,6 +106,12 @@ fn print_text(ctx: &Session, status: &ops::Status) {
     }
 }
 
+/// The machine-readable form.
+///
+/// camelCase keys, and `ref` rather than `refName`: this is consumed by
+/// scripts and CI, where JSON is conventionally camelCase, and the names
+/// follow the vocabulary of the text output rather than the field names of
+/// `Status`. Renaming a key here is a breaking change.
 fn to_json(status: &ops::Status) -> String {
     let recorded = status.recorded.as_ref();
     serde_json::json!({

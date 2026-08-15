@@ -431,7 +431,10 @@ mod tests {
     #[case(Value::String("".into()), false)]
     #[case(Value::Array(vec![Value::Bool(false)]), true)]
     #[case(Value::Array(vec![]), false)]
-    fn truthiness_follows_jinja(#[case] value: Value, #[case] expected: bool) {
+    fn an_empty_value_is_falsy_and_a_populated_one_is_truthy(
+        #[case] value: Value,
+        #[case] expected: bool,
+    ) {
         assert_eq!(value.is_truthy(), expected);
     }
 

@@ -453,7 +453,7 @@ mod tests {
     /// A template repository is untrusted input, and `..` in a rendered path is
     /// a request to write outside the tree.
     #[test]
-    fn a_path_that_would_escape_the_tree_is_rejected() {
+    fn a_path_that_would_escape_the_tree_is_refused() {
         let f = Fixture::new();
         let mut context = Context::new();
         context.set_answer("evil", Value::String("..".into()));

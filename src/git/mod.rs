@@ -500,7 +500,7 @@ mod tests {
     /// Git records only the executable bit, which is why it is the only
     /// permission rendering preserves.
     #[test]
-    fn file_modes_round_trip() {
+    fn every_file_mode_survives_a_conversion_to_git_and_back() {
         for mode in [
             FileMode::Blob,
             FileMode::BlobExecutable,

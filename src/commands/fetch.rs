@@ -25,6 +25,10 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
     let (ref_name, relation) = ops::fetch(&ctx.repo, &ctx.root, &preferences)?;
 
+    // The arms are ordered, not independent: `is_diverged` is `ahead > 0 &&
+    // behind > 0`, so it has to be tested before the plain `behind > 0` arm
+    // below, which would otherwise swallow it and tell a diverged user to
+    // simply merge.
     match relation {
         None => {
             ctx.say(muted(

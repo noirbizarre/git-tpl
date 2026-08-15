@@ -239,7 +239,7 @@ b = "{{ a }}"
 }
 
 #[test]
-fn a_typo_is_reported_with_a_suggestion() {
+fn init_refuses_a_typo_in_an_expression_and_suggests_the_name_meant() {
     let world = World::with_template(
         r#"
 name = "typo"
@@ -260,7 +260,7 @@ package_name = "{{ projct_name | lower }}"
 }
 
 #[test]
-fn an_undeclared_data_source_is_reported() {
+fn init_refuses_a_choices_from_naming_a_data_source_the_manifest_never_declared() {
     let world = World::with_template(
         r#"
 name = "missing-data"
@@ -295,7 +295,7 @@ x = "{{ data.things }}"
 }
 
 #[test]
-fn malformed_data_is_reported_with_the_source_that_failed() {
+fn init_names_the_data_source_whose_file_would_not_parse() {
     let dir = tempfile::tempdir().unwrap();
     let template = common::Repo::init_in(dir.path(), "template");
     template.write(
@@ -380,7 +380,7 @@ fn a_malformed_manifest_is_reported() {
 /// A template repository is untrusted input, and `..` in a rendered path is a
 /// request to write outside the tree.
 #[test]
-fn a_path_that_would_escape_the_tree_is_refused() {
+fn init_refuses_a_path_that_would_escape_the_tree() {
     let world = World::with_template(
         r#"
 name = "escape"
@@ -439,7 +439,7 @@ default = true
 }
 
 #[test]
-fn a_templated_path_segment_is_rendered() {
+fn a_templated_path_segment_reaches_the_project_rendered() {
     let world = World::with_template(
         r#"
 name = "paths"

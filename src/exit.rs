@@ -28,7 +28,7 @@ mod tests {
     /// Collapsing PENDING into FAILURE would make the drift check useless,
     /// which is the entire reason it is separate.
     #[test]
-    fn exit_codes_are_distinct() {
+    fn pending_is_not_the_same_code_as_failure() {
         let codes = [SUCCESS, FAILURE, PENDING];
         let unique: std::collections::BTreeSet<_> = codes.iter().collect();
         assert_eq!(unique.len(), codes.len(), "{codes:?}");
