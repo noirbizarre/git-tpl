@@ -1,14 +1,22 @@
 # Configuration
 
-There are two places configuration lives, and the split is deliberate.
+There are three places configuration lives, and the split is deliberate. Each
+has exactly one owner.
 
 ```
-.config/git.tpl.toml       →  shared project configuration, versioned in Git
-.git/config, ~/.gitconfig  →  your local preferences
+.config/git.tpl.toml           →  the project. Versioned in Git. Everyone gets it.
+~/.config/git-tpl/config.toml  →  you. Never committed, never read by anyone else.
+.git/config, ~/.gitconfig      →  tpl.* preferences
 ```
 
 A freshly cloned repository is fully understandable from `.config/git.tpl.toml`
-alone. Nothing in Git configuration is required for git-tpl to work.
+alone. Neither of the other two is required for git-tpl to work, and nothing in
+either can change what a template renders.
+
+The test for which file something belongs in: **would a new contributor cloning
+this repository need it to be true?** If yes, `.config/git.tpl.toml`. If it is
+about your machine or your habits, one of the other two — Git config if Git
+already models it, the user configuration otherwise.
 
 ## `.config/git.tpl.toml`
 
@@ -81,6 +89,42 @@ credentials. No paths that only exist on your machine.
 The rendered ref is the state. Duplicating it into a file would create two
 sources of truth that can disagree, and the file would be the one that is wrong.
 
+## `~/.config/git-tpl/config.toml`
+
+Yours. Never committed, and never read by anyone else — so nothing in it may
+change what a template renders. See
+[ADR-013](adr/013-user-configuration.md).
+
+The path follows XDG: `$XDG_CONFIG_HOME/git-tpl/config.toml`, falling back to
+`~/.config/git-tpl/config.toml`. An absent file is the normal case, not an
+error. Unknown keys *are* an error — nothing generates this file, so a key that
+is not understood is a typo.
+
+```toml
+[defaults]
+author = "Axel Haustant"
+license = "MIT"
+
+[shortcuts]
+gh = "https://github.com/"
+ghs = "ssh://git@github.com/"
+
+[trust]
+templates = ["github.com/noirbizarre/*"]
+```
+
+Three sections, and deliberately nothing else.
+
+| Section | What it does |
+|---|---|
+| `[defaults]` | Pre-fills a prompt whose question has the same name. |
+| `[shortcuts]` | Expands a leading `<name>:` in a template URL you type. |
+| `[trust]` | Templates whose remote data is fetched without a confirmation. |
+
+Note the name: the project file is `git.tpl.toml`, mirroring `git tpl`; this one
+is named after the binary. Two shapes, so a stray copy of one is never mistaken
+for the other.
+
 ## Git configuration
 
 Local, per-user, per-repository behaviour. All keys are under `tpl.`.
@@ -125,6 +169,11 @@ how *you* work; committing it would impose it on every contributor. Conversely,
 the template source is a property of the project, and putting it in
 `.git/config` would mean a fresh clone had no idea where the project came from.
 
-The test for which file a setting belongs in: **would a new contributor cloning
-this repository need it to be true?** If yes, `.config/git.tpl.toml`. If it is
-about your machine or your habits, Git config.
+### Why these are not in the user configuration either
+
+Git already models remotes, and it already has a precedence chain across
+system, user and repository files that people know. Reimplementing either would
+mean `git config tpl.remote` no longer told you the truth. The user
+configuration holds the three things Git has no opinion about: what a prompt
+should be pre-filled with, what a URL prefix abbreviates, and which templates
+you have already agreed to let reach the network.

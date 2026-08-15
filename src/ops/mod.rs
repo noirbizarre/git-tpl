@@ -37,6 +37,15 @@ pub enum OpError {
     #[diagnostic(transparent)]
     Config(#[from] ConfigError),
 
+    /// The user's own configuration is invalid.
+    ///
+    /// Separate from `Config` because the two files have different owners: this
+    /// one is on the machine running the command, and no amount of editing the
+    /// project will fix it.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    UserConfig(#[from] crate::userconfig::UserConfigError),
+
     /// The template could not be resolved.
     #[error(transparent)]
     #[diagnostic(transparent)]

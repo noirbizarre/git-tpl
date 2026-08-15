@@ -67,7 +67,7 @@ main:  A ─── M ─── B ─── M'
 | **`git tpl show`, `git tpl detach`** | No clear semantics yet. Not implemented until there are. |
 | **Testing a template** | A template author renders into a scratch directory and looks. There is no `render` command and no test runner, so most templates have no tests. The fixtures a runner would read are now expressible — `--answers-from` ships. See *Next*. |
 | **Template inheritance** | A template is one repository, standing alone. Fifteen templates in an organisation means fifteen copies of the same CI workflow. See *Next*. |
-| **User configuration** | There is no `~/.config/git-tpl.toml`. Prompt defaults come from the template alone, template sources are written out in full every time, and remote-data trust is per-invocation with no persistent list. See *Next*. |
+| **User configuration** | There is no `~/.config/git-tpl/config.toml`. Prompt defaults come from the template alone, template sources are written out in full every time, and remote-data trust is per-invocation with no persistent list. See *Next*. |
 | **Distribution beyond crates.io** | `cargo install`, `mise use -g cargo:git-tpl`, `mise use -g github:noirbizarre/git-tpl` and raw release binaries. No AUR package, no Homebrew formula, no mise registry entry. See *Next*. |
 
 ---
@@ -160,23 +160,28 @@ same template's network access on every run — the last of which is now a real
 prompt rather than a hypothetical one, because remote data sources ship.
 
 ```
-$XDG_CONFIG_HOME/git-tpl.toml     (default: ~/.config/git-tpl.toml)
+$XDG_CONFIG_HOME/git-tpl/config.toml   (default: ~/.config/git-tpl/config.toml)
 ```
 
 **Three files, three owners.** This one looks like the project file and is not
 it, so the split has to be stated before anything else:
 
 ```
-.config/git.tpl.toml       →  the project. Versioned. Everyone gets it.
-~/.config/git-tpl.toml     →  you. Never committed, never read by anyone else.
-.git/config, ~/.gitconfig  →  tpl.* preferences (unchanged)
+.config/git.tpl.toml           →  the project. Versioned. Everyone gets it.
+~/.config/git-tpl/config.toml  →  you. Never committed, never read by anyone else.
+.git/config, ~/.gitconfig      →  tpl.* preferences (unchanged)
 ```
 
 The naming difference is deliberate rather than an oversight: the project file
 is Git-shaped and lives in `.config/` (ADR-010), the user file is named after
 the binary and follows XDG. Two names means a stray copy of one is never
-mistaken for the other. This is a new on-disk format, which is to say a
-contract, so it needs **ADR-013** before it needs code.
+mistaken for the other. A directory rather than a bare file, so a second
+user-side file later is not a move of a path people have written down. This is a
+new on-disk format, which is to say a contract, and **ADR-013** records it.
+
+**Landed so far:** the file, its XDG resolution, parsing, validation and
+diagnostics, plus `$XDG_CONFIG_HOME` isolation in the test harness. The three
+sections are read in the three commits that follow.
 
 ```toml
 [defaults]

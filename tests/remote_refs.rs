@@ -18,10 +18,7 @@ fn with_remote(world: &World) -> Repo {
         .git(&["remote", "add", "origin", &remote_path.to_string_lossy()]);
     world.project.git(&["push", "-q", "origin", "main"]);
 
-    Repo {
-        path: remote_path,
-        _dir: None,
-    }
+    Repo::at(remote_path)
 }
 
 fn remote_refs(remote: &Repo) -> Vec<String> {
