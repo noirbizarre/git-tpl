@@ -141,6 +141,47 @@ fn a_remote_fetch_is_refused_when_the_template_is_not_trusted() {
     );
 }
 
+/// `--defaults` means there is nobody to ask, and that has to hold on the
+/// `--dry-run` path too. The dry run built its own trust decision inline and
+/// left the `--defaults` term out; it survived only because `update` also
+/// folds `--defaults` into `tpl.interactive`, so the two spellings happened to
+/// agree. Pinned here so that removing either one is a test failure rather
+/// than a prompt on a CI runner.
+#[test]
+fn a_dry_run_under_defaults_refuses_an_untrusted_fetch_like_a_real_run() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let template = template_with(
+        dir.path(),
+        &format!("source = \"{}\"", server.url("/reg.json")),
+        "{{ data.reg.count }}\n",
+    );
+    let project = project(dir.path());
+
+    tpl(
+        &project,
+        &[
+            "init",
+            &template.path.to_string_lossy(),
+            "--defaults",
+            "--trust",
+        ],
+    )
+    .success();
+
+    let before = server.hits();
+
+    tpl(&project, &["update", "--defaults", "--dry-run"])
+        .failure()
+        .says("tpl::data::untrusted");
+
+    assert_eq!(
+        server.hits(),
+        before,
+        "refused means not fetched, on the dry-run path as much as the real one"
+    );
+}
+
 #[test]
 fn trust_allows_the_fetch_without_a_prompt() {
     let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);

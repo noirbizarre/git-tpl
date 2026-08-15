@@ -27,14 +27,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
     let overrides = supplied(&args.answers)?;
 
     if args.dry_run {
-        return dry_run(
-            &ctx,
-            &config,
-            overrides,
-            args.dirty,
-            preferences.interactive,
-            args.trust,
-        );
+        return dry_run(&ctx, &config, &args, overrides, preferences.interactive);
     }
 
     let mut prompter = Interactive;
@@ -129,34 +122,30 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
 fn dry_run(
     ctx: &Context,
     config: &tpl::config::Config,
+    args: &UpdateArgs,
     overrides: std::collections::BTreeMap<String, tpl::template::Value>,
-    dirty: bool,
     interactive: bool,
-    trusted: bool,
 ) -> Result<(), OpError> {
     let mut answers = config.answers.clone();
     answers.extend(overrides);
 
-    let mut prompter = Interactive;
-    let answering = if interactive {
-        ops::Answering::Interactive(&mut prompter)
-    } else {
-        ops::Answering::defaults()
-    };
-
+    // The same two helpers the real run uses. Reimplementing them here dropped
+    // the `--defaults` term, so `update --dry-run --defaults` prompted and
+    // asked to confirm remote sources — which is exactly what `--defaults`
+    // exists to prevent.
+    //
     // `--dry-run` still fetches: it reports what *would* change, and a render
     // that skipped its data would report a different tree than the real one.
+    let mut prompter = Interactive;
     let mut confirmer = Confirmer;
-    let trust = if trusted {
-        ops::Trust::always()
-    } else if interactive {
-        ops::Trust::Ask(&mut confirmer)
-    } else {
-        ops::Trust::refuse()
-    };
-
     let rendered = ops::render(
-        &ctx.repo, &ctx.root, config, answers, dirty, answering, trust,
+        &ctx.repo,
+        &ctx.root,
+        config,
+        answers,
+        args.dirty,
+        answering(&args.answers, interactive, &mut prompter),
+        trust(&args.answers, args.trust, interactive, &mut confirmer),
     )?;
 
     report_ignored(ctx, &rendered.ignored_answers);
