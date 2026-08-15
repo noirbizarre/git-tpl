@@ -37,6 +37,7 @@ pub mod eval;
 pub mod git;
 pub mod gitconfig;
 pub mod graph;
+pub mod lint;
 pub mod ops;
 pub mod provenance;
 pub mod refs;

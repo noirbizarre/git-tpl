@@ -84,6 +84,11 @@ pub enum OpError {
     #[diagnostic(transparent)]
     Render(#[from] RenderError),
 
+    /// A template failed its static checks.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Lint(#[from] crate::lint::LintError),
+
     /// A Git operation failed.
     #[error(transparent)]
     #[diagnostic(transparent)]

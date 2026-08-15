@@ -3,6 +3,7 @@
 mod diff;
 mod fetch;
 mod init;
+mod lint;
 mod merge;
 mod push;
 mod render;
@@ -13,6 +14,7 @@ mod update;
 pub use diff::run as diff;
 pub use fetch::run as fetch;
 pub use init::run as init;
+pub use lint::run as lint;
 pub use merge::run as merge;
 pub use push::run as push;
 pub use render::run as render;

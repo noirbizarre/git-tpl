@@ -51,6 +51,19 @@ Something is wrong with the template itself.
 | `tpl::render::collision` | Two template files render to the same output path. |
 | `tpl::render::partial_not_utf8` | A `.jinja` file outside the render root is not text. |
 
+## Linting
+
+Reported by [`git tpl lint`](../usage/lint.md) as findings rather than raised
+as errors, so they arrive in the `diagnostics` array rather than in `error`.
+Only `severity: "error"` fails the command.
+
+| Code | Severity | Meaning |
+|---|---|---|
+| `tpl::lint::degenerate_path` | error | A conditional segment leaves a literal suffix outside the block, so it renders to something like `.yaml` instead of being skipped. |
+| `tpl::lint::collision` | error | Two paths can collapse to the same name for some answer set. |
+| `tpl::lint::syntax` | error | A `.jinja` file does not parse, including in branches no answer set reaches. |
+| `tpl::lint::foreign_expression` | warning | A `${{ ... }}` MiniJinja will consume, rendering it to `$`. |
+
 ## Answers and evaluation
 
 | Code | Meaning |

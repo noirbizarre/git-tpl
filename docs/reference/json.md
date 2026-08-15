@@ -57,6 +57,19 @@ first knowing which command it ran.
 byte-for-byte. It is the only way to tell, from the output, that a workflow
 full of `${{ }}` was copied rather than rendered-and-survived.
 
+### `lint`
+
+```json
+{ "ok": true,
+  "template": "rust",
+  "diagnostics": [{ "severity": "warning", "code": "tpl::lint::undeclared",
+                    "message": "…", "help": "…", "path": "Cargo.toml.jinja" }],
+  "errors": 0, "warnings": 1 }
+```
+
+`ok` is about the command, not the template: warnings do not fail it. Check
+`errors`, or the exit code.
+
 ### `status`
 
 Documented in [status](../usage/status.md). `--format json` is deprecated in

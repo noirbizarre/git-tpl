@@ -77,6 +77,9 @@ pub enum Command {
     /// Render a template into a directory, with no project and no ref
     Render(RenderArgs),
 
+    /// Check a template for problems, without rendering it
+    Lint(LintArgs),
+
     /// Show the template, the rendered ref, and what is pending
     Status(StatusArgs),
 
@@ -247,6 +250,26 @@ pub struct RenderArgs {
     /// Allow the template's remote data sources without asking
     #[arg(long)]
     pub trust: bool,
+}
+
+/// `git tpl lint`
+#[derive(Debug, clap::Args)]
+pub struct LintArgs {
+    /// The template to check; defaults to the current directory
+    #[arg(value_name = "TEMPLATE", default_value = ".")]
+    pub template: String,
+
+    /// The branch, tag or commit to check
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Check this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Check the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
 }
 
 /// `git tpl status`
