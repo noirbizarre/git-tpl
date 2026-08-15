@@ -38,6 +38,19 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
     let against = preview(&ctx, args.dirty, &args.answers)?;
 
+    // `--exit-code` reports *difference*, in Git's own convention, so that CI
+    // can assert "the template output has not drifted" without parsing
+    // anything. Deliberately not conflict: a conflicting preview is a correct
+    // answer to the question asked, and turning it into a failure would make
+    // the flag useless on exactly the repositories that need it.
+    let code = |changed: bool| {
+        if changed && args.exit_code {
+            crate::exit::FAILURE
+        } else {
+            crate::exit::SUCCESS
+        }
+    };
+
     // JSON first: it subsumes every other mode, and it is the one that carries
     // the conflicts as *data*. In text output they are chrome on stderr, which
     // is right for a human reading a patch and useless to a caller — and
@@ -61,7 +74,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "deletions": stats.iter().map(|s| s.deletions).sum::<usize>(),
             }))
         );
-        return Ok(crate::exit::SUCCESS);
+        return Ok(code(!stats.is_empty()));
     }
 
     // `--name-only` wins when both are given: it is the machine-readable mode,
@@ -70,7 +83,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         let preview = ops::diff_changes(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
         if preview.changes.is_empty() {
             ctx.say(muted(&ctx.theme, "No differences."));
-            return Ok(crate::exit::SUCCESS);
+            return Ok(code(false));
         }
         report_conflicts(&ctx, &preview.conflicts);
         for c in &preview.changes {
@@ -78,7 +91,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             // obvious thing to do, and it must not receive decoration.
             println!("{}", c.path);
         }
-        return Ok(crate::exit::SUCCESS);
+        return Ok(code(true));
     }
 
     if args.stat {
@@ -86,7 +99,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         let stats = &preview.changes;
         if stats.is_empty() {
             ctx.say(muted(&ctx.theme, "No differences."));
-            return Ok(crate::exit::SUCCESS);
+            return Ok(code(false));
         }
 
         report_conflicts(&ctx, &preview.conflicts);
@@ -103,18 +116,19 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             &ctx.theme,
             &diff_summary(stats.len(), insertions, deletions),
         ));
-        return Ok(crate::exit::SUCCESS);
+        return Ok(code(true));
     }
 
     let preview = ops::diff(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
-    if preview.changes.is_empty() {
-        ctx.say(muted(&ctx.theme, "No differences."));
-    } else {
+    let changed = !preview.changes.is_empty();
+    if changed {
         report_conflicts(&ctx, &preview.conflicts);
         // A patch is data. It goes to stdout so it can be piped into `git apply`.
         print!("{}", preview.changes);
+    } else {
+        ctx.say(muted(&ctx.theme, "No differences."));
     }
-    Ok(crate::exit::SUCCESS)
+    Ok(code(changed))
 }
 
 /// Render the template now, when `--dirty` asks for a preview of it.

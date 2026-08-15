@@ -122,6 +122,13 @@ pub struct InitArgs {
     #[arg(long)]
     pub dirty: bool,
 
+    /// Re-ask the questions and re-render over an existing attachment
+    //
+    // Not the same as `update`: that re-renders with the *recorded* answers,
+    // and there was no way to change them short of editing the config by hand.
+    #[arg(long)]
+    pub force: bool,
+
     /// Create the rendered ref but do not merge it into the branch
     #[arg(long)]
     pub no_merge: bool,
@@ -194,6 +201,14 @@ pub struct AnswerArgs {
     /// Accept every default without prompting
     #[arg(long)]
     pub defaults: bool,
+
+    /// Fail when a supplied answer names no question
+    ///
+    /// Recorded answers stay lenient whatever this says: a template drops
+    /// questions over time, and a project that answered one is not at fault
+    /// for it. This is about the answers a caller supplied *now*.
+    #[arg(long)]
+    pub strict_answers: bool,
 }
 
 impl AnswerArgs {
@@ -336,6 +351,13 @@ pub struct DiffArgs {
     #[arg(long)]
     pub reverse: bool,
 
+    /// Exit 1 when there is a difference, like `git diff --exit-code`
+    //
+    // Difference, not conflict: a conflicting preview is a correct answer to
+    // the question asked, and `febbc37` deliberately kept it at zero.
+    #[arg(long)]
+    pub exit_code: bool,
+
     /// Preview the template's working tree rather than the rendered ref
     //
     // This renders, which nothing else in `diff` does. Answers come from the
@@ -440,6 +462,7 @@ mod tests {
             answers: vec!["name=demo".into(), "ci=true".into()],
             defaults: false,
             answers_from: Vec::new(),
+            strict_answers: false,
         };
         let parsed = args.parsed().unwrap();
 
@@ -454,6 +477,7 @@ mod tests {
             answers: vec!["motto=a=b=c".into()],
             defaults: false,
             answers_from: Vec::new(),
+            strict_answers: false,
         };
         assert_eq!(
             args.parsed().unwrap()["motto"],
@@ -467,6 +491,7 @@ mod tests {
             answers: vec!["name".into()],
             defaults: false,
             answers_from: Vec::new(),
+            strict_answers: false,
         };
         let error = args.parsed().unwrap_err();
         assert!(error.contains("key=value"), "{error}");
@@ -478,6 +503,7 @@ mod tests {
             answers: vec!["suffix=".into()],
             defaults: false,
             answers_from: Vec::new(),
+            strict_answers: false,
         };
         assert_eq!(
             args.parsed().unwrap()["suffix"],

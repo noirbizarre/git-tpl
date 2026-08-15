@@ -133,6 +133,19 @@ pub enum OpError {
         ref_name: String,
     },
 
+    /// A supplied answer names no question, under `--strict-answers`.
+    #[error("`{key}` names no question in this template")]
+    #[diagnostic(
+        code(tpl::answers::unknown_key),
+        help("{suggestion}Remove it, or drop --strict-answers to ignore it.")
+    )]
+    UnknownAnswer {
+        /// The offending key.
+        key: String,
+        /// A "did you mean?" prefix, or empty.
+        suggestion: String,
+    },
+
     /// The path is not in the rendering.
     ///
     /// Both fields are carried because the two things the reader does not
@@ -597,11 +610,16 @@ pub fn init(
     supplied: BTreeMap<String, Value>,
     dirty: bool,
     merge_after: bool,
+    force: bool,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<InitOutcome, OpError> {
-    if Config::exists_in(project_root) {
+    // `--force` re-asks the questions and renders onto the existing ref, which
+    // is not a new operation: the ref is append-only, so another rendering on
+    // it is exactly what `update` writes. The only thing `force` adds is
+    // asking again, which `update` has no way to do.
+    if !force && Config::exists_in(project_root) {
         return Err(OpError::AlreadyInitialised);
     }
 

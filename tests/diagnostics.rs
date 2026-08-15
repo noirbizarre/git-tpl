@@ -77,6 +77,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::answers::parse",
     "tpl::answers::read",
     "tpl::answers::shape",
+    "tpl::answers::unknown_key",
     "tpl::config::io",
     "tpl::config::missing",
     "tpl::config::parse",

@@ -58,6 +58,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         answers,
         args.dirty,
         !args.no_merge,
+        args.force,
         &ctx.user,
         answering(&args.answers, preferences.interactive, &mut prompter),
         trust(

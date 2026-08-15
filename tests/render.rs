@@ -424,3 +424,70 @@ default = "demo"
 
     assert!(scratch.read("Cargo.toml").contains("name = \"demo\""));
 }
+
+/// A typo'd key silently swaps in the default. For a boolean that deletes a
+/// whole conditional subtree while the warning scrolls past.
+#[test]
+fn strict_answers_refuses_a_key_that_names_no_question() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+
+    // Lenient by default: reported, but not fatal.
+    scratch
+        .run(&[
+            "render",
+            &template.source(),
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--answer",
+            "projct_name=oops",
+            "--defaults",
+        ])
+        .success()
+        .says("answers ignored");
+
+    let output = scratch
+        .run(&[
+            "--json",
+            "render",
+            &template.source(),
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--force",
+            "--answer",
+            "projct_name=oops",
+            "--defaults",
+            "--strict-answers",
+        ])
+        .failure();
+
+    assert_eq!(output.error_code(), "tpl::answers::unknown_key");
+    let json = output.json();
+    let help = json["error"]["help"].as_str().expect("help");
+    assert!(help.contains("project_name"), "no suggestion in: {help}");
+}
+
+/// The other half of the flag, and the one that would go unnoticed if it broke:
+/// a strict run whose answers are all real must be an ordinary run. A check
+/// that refuses correct input is worse than no check.
+#[test]
+fn strict_answers_accepts_an_answer_set_that_names_only_real_questions() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+
+    scratch
+        .run(&[
+            "render",
+            &template.source(),
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--answer",
+            "project_name=strictly",
+            "--defaults",
+            "--strict-answers",
+        ])
+        .success()
+        .silent_about("answers ignored");
+
+    assert!(scratch.read("Cargo.toml").contains("strictly"));
+}

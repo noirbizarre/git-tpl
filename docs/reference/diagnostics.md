@@ -72,6 +72,7 @@ Only `severity: "error"` fails the command.
 | `tpl::answers::read` | An answers file could not be read. |
 | `tpl::answers::parse` | An answers file is not valid TOML, JSON or YAML. |
 | `tpl::answers::shape` | An answers file is not a table of values. |
+| `tpl::answers::unknown_key` | A supplied answer names no question, under `--strict-answers`. Carries a suggestion. |
 | `tpl::eval::expression` | An expression failed to evaluate. |
 | `tpl::eval::bad_choices` | `choices_from` did not resolve to an array. |
 | `tpl::eval::wrong_type` | An answer is not of the declared type. |

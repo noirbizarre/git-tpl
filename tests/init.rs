@@ -615,3 +615,33 @@ default = "a"
 
     output.says("tpl::data::escapes_root");
 }
+
+/// Re-attaching was refused outright, so changing an answer meant editing
+/// `.config/git.tpl.toml` by hand or starting the repository over. The ref is
+/// append-only, so another rendering on it is exactly what `update` writes —
+/// the only thing `--force` adds is asking the questions again.
+#[test]
+fn force_re_renders_over_an_existing_attachment() {
+    let world = World::new();
+    world.init(&["--answer", "project_name=first"]).success();
+
+    world
+        .init(&[])
+        .failure()
+        .says("already has a template attached");
+
+    tpl(
+        &world.project,
+        &[
+            "init",
+            &world.template.source(),
+            "--defaults",
+            "--force",
+            "--answer",
+            "project_name=second",
+        ],
+    )
+    .success();
+
+    assert!(world.project.read("README.md").contains("second"));
+}

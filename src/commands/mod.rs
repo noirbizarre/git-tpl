@@ -249,6 +249,34 @@ pub fn answering<'a>(
     }
 }
 
+/// Refuse supplied answers that name no question, under `--strict-answers`.
+///
+/// The lenient default exists for *recorded* answers: a template drops
+/// questions over time, and a project that answered one is not at fault. A
+/// hand-written `--answers-from` is a different trust level — there a typo'd
+/// key silently swaps in the default, and for a boolean that deletes a whole
+/// conditional subtree while the warning scrolls past.
+pub fn enforce_strict_answers(
+    args: &AnswerArgs,
+    ignored: &[String],
+    known: impl IntoIterator<Item = String>,
+) -> Result<(), OpError> {
+    if !args.strict_answers {
+        return Ok(());
+    }
+    let Some(key) = ignored.first() else {
+        return Ok(());
+    };
+    let known: Vec<String> = known.into_iter().collect();
+    let suggestion = tpl::suggest::closest(key, known.iter().map(String::as_str))
+        .map(|close| format!("Did you mean `{close}`? "))
+        .unwrap_or_default();
+    Err(OpError::UnknownAnswer {
+        key: key.clone(),
+        suggestion,
+    })
+}
+
 /// Report supplied answers that name no question in the template.
 ///
 /// Not an error: an answers file carried over from another generator has

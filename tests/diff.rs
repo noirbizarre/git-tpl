@@ -494,3 +494,38 @@ fn status_dirty_reports_an_uncommitted_template_as_pending() {
 
     tpl(&world.project, &["status", "--dirty"]).code(2);
 }
+
+/// Git's own convention, so CI can assert "the template output has not
+/// drifted" without parsing anything.
+#[test]
+fn exit_code_reports_a_difference() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    tpl(&world.project, &["diff", "--exit-code"]).code(0);
+
+    world.move_template();
+    tpl(&world.project, &["update"]).success();
+
+    tpl(&world.project, &["diff", "--exit-code"]).code(1);
+    // Without the flag it stays zero, because a diff is not a failure.
+    tpl(&world.project, &["diff"]).code(0);
+}
+
+/// `--json` is a reporting mode, not a separate command: `--exit-code` must
+/// still mean what it means everywhere else.
+#[test]
+fn diff_json_honours_exit_code() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let json = tpl(&world.project, &["--json", "diff", "--exit-code"])
+        .code(0)
+        .json();
+    assert_eq!(json["changes"], serde_json::json!([]));
+
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    tpl(&world.project, &["--json", "diff", "--exit-code"]).code(1);
+}
