@@ -60,10 +60,12 @@ fact in the commit trailers. Not as an ambient global.
 
 ## Remote data is the remaining hazard
 
-A template that loads data over HTTP is only as reproducible as that URL. Today
+A template that loads data over HTTP is only as reproducible as that URL.
 git-tpl records which data sources contributed to a rendering in the commit
-trailers, so you can at least tell. Pinning by checksum is
-[planned](../data/reproducibility.md).
+trailers, so you can always tell what a tree was built from — and a source may
+declare a `sha256`, which turns a changed response into an error rather than a
+silently different tree. See
+[Reproducing a rendering](../data/reproducibility.md).
 
 Local data — files in the template repository — has no such problem. It is read
 from the template's Git tree at the resolved revision, so it is pinned by the
