@@ -8,6 +8,14 @@ on:
 permissions:
   contents: read
 
+# GitHub defaults Windows steps to pwsh, which neither stops at the first
+# failing command nor reports anything but the last one's exit status — a
+# multi-command step there fails silently and the job goes green. bash is
+# present on all three runners and is invoked with `-e -o pipefail`.
+defaults:
+  run:
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
