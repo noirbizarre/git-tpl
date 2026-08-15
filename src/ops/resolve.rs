@@ -68,7 +68,11 @@ pub enum ResolveError {
 /// A template, resolved to a revision and ready to render.
 pub struct Resolved {
     /// The repository holding it. Kept alive because trees are read from it.
-    pub repo: LibGit2,
+    ///
+    /// Boxed as a trait object: `resolve` is the one place that has to choose
+    /// between opening and cloning, and naming the concrete backend beyond
+    /// that choice is what let `LibGit2` spread through `ops`.
+    pub repo: Box<dyn GitBackend>,
     /// The manifest.
     pub manifest: Manifest,
     /// The whole template tree, for reading data files.
@@ -101,7 +105,7 @@ impl Resolved {
     /// the tree — including the synthetic `--dirty` one — so a partial is
     /// pinned to the same revision as everything else it renders with.
     pub fn partials(&self) -> Result<Arc<Partials>, RenderError> {
-        collect_partials(&self.repo, self.tree, &self.root).map(Arc::new)
+        collect_partials(self.repo.as_ref(), self.tree, &self.root).map(Arc::new)
     }
 }
 
@@ -130,7 +134,7 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
     let (repo, cache) = match &local {
         // A local template is opened in place. Cloning it would cost a copy
         // and, worse, would hide uncommitted changes that `--dirty` needs.
-        Some(path) => (LibGit2::open(path)?, None),
+        Some(path) => (Box::new(LibGit2::open(path)?) as Box<dyn GitBackend>, None),
         None => {
             // A fresh temporary clone per run. Caching between runs would be
             // faster, but a stale cache silently rendering an old template is a
@@ -142,7 +146,7 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
                 source,
             })?;
             let repo = LibGit2::clone_bare(request.source, dir.path())?;
-            (repo, Some(dir))
+            (Box::new(repo) as Box<dyn GitBackend>, Some(dir))
         }
     };
 

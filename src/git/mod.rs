@@ -8,7 +8,7 @@
 pub mod libgit2;
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use miette::Diagnostic;
 use thiserror::Error;
@@ -193,15 +193,6 @@ pub enum MergeOutcome {
     Staged,
 }
 
-/// A commit's author or committer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Signature {
-    /// Display name.
-    pub name: String,
-    /// Email address.
-    pub email: String,
-}
-
 /// A commit, as the domain needs to see it.
 #[derive(Debug, Clone)]
 pub struct Commit {
@@ -334,6 +325,13 @@ pub enum GitError {
 /// Every method takes and returns types defined in this module, never the
 /// backend's own. That is what makes the backend replaceable, and it is
 /// enforced by a hook rather than by hope.
+///
+/// The rule for membership is: **if anything above `src/git/` calls it, it
+/// belongs here.** Nothing outside this module may reach for an inherent
+/// method on a concrete backend, because a capability reachable only through
+/// `LibGit2` is a capability the abstraction does not actually cover. Opening,
+/// creating and cloning a repository are the exception, and stay inherent —
+/// they produce a backend rather than use one.
 pub trait GitBackend {
     /// The repository's working directory.
     fn workdir(&self) -> Result<PathBuf, GitError>;
@@ -413,6 +411,54 @@ pub trait GitBackend {
 
     /// Read a boolean `tpl.*` configuration value.
     fn config_bool(&self, key: &str) -> Result<Option<bool>, GitError>;
+
+    /// Resolve a revision — branch, tag or SHA — to a commit.
+    ///
+    /// `origin` names the repository only so that a failure can say where it
+    /// looked; it takes no part in the resolution.
+    fn resolve_revision(&self, revision: &str, origin: &str) -> Result<Oid, GitError>;
+
+    /// The default branch, used when no `ref` is configured.
+    fn default_branch(&self) -> Result<String, GitError>;
+
+    /// The tree of a commit.
+    fn commit_tree(&self, commit: Oid) -> Result<Oid, GitError>;
+
+    /// Build a tree from the files in a directory, for `--dirty` renders.
+    ///
+    /// Reads a working tree rather than a commit, honouring `.gitignore`, so
+    /// the result matches what `git add -A` would have staged.
+    fn tree_from_workdir(&self, root: &Path) -> Result<Oid, GitError>;
+
+    /// Read a file from a tree by path.
+    fn read_path(&self, tree: Oid, path: &str) -> Result<Option<Vec<u8>>, GitError>;
+
+    /// The subtree at `path`, if there is one.
+    fn subtree(&self, tree: Oid, path: &str) -> Result<Option<Oid>, GitError>;
+
+    /// Stage a path, for `init` writing the configuration file.
+    fn stage(&self, relative: &Path) -> Result<(), GitError>;
+
+    /// Commit whatever is staged, moving `HEAD`.
+    ///
+    /// The one method here that does move `HEAD`. It exists for the
+    /// configuration file `init` writes, which is a change to the project and
+    /// not to the rendered ref; invariant 1 is about `update`.
+    fn commit_index(&self, message: &str) -> Result<Oid, GitError>;
+
+    /// Reset the index and worktree to `HEAD`, discarding a failed merge.
+    fn abort_merge(&self) -> Result<(), GitError>;
+
+    /// Set a configuration value in this repository.
+    ///
+    /// Exists so that tests and `init` can configure a repository without
+    /// reaching for `git2` outside `src/git/libgit2.rs` — the
+    /// `git-backend-isolation` hook forbids that, and an exception "just for
+    /// tests" is how such boundaries rot.
+    fn set_config_str(&self, key: &str, value: &str) -> Result<(), GitError>;
+
+    /// Set a boolean configuration value in this repository.
+    fn set_config_bool(&self, key: &str, value: bool) -> Result<(), GitError>;
 }
 
 #[cfg(test)]

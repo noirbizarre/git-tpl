@@ -18,7 +18,7 @@ pub mod format;
 
 pub use format::Format;
 
-use crate::git::{Oid, libgit2::LibGit2};
+use crate::git::{GitBackend, Oid};
 use crate::template::{DataSourceDecl, Value};
 
 /// The most a remote response may be, in bytes.
@@ -344,7 +344,11 @@ impl Provenance {
 /// Where a loader reads template files from.
 pub struct TemplateTree<'a> {
     /// The repository holding the template.
-    pub repo: &'a LibGit2,
+    ///
+    /// Held as a trait object rather than a concrete backend: this is a data
+    /// carrier, not a hot path, and naming the implementation here is how the
+    /// abstraction stopped being load-bearing above `src/git/` before.
+    pub repo: &'a dyn GitBackend,
     /// The tree of the resolved template revision.
     pub tree: Oid,
     /// The commit that tree came from, for provenance.

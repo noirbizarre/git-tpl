@@ -4,7 +4,6 @@
 //! `git-backend-isolation` prek hook fails the commit if `git2::` appears
 //! anywhere else under `src/`. See `docs/adr/011-git-backend-isolation.md`.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use git2::build::TreeUpdateBuilder;
@@ -15,7 +14,7 @@ use git2::{
 
 use super::{
     AheadBehind, Change, ChangeKind, Commit, FileMode, GitBackend, GitError, MergeOutcome, Oid,
-    Signature, TreeEntry,
+    TreeEntry,
 };
 
 /// A repository opened through libgit2.
@@ -73,120 +72,6 @@ impl LibGit2 {
             .clone(url, into)
             .map_err(|e| translate_network(url, &e))?;
         Ok(Self { repo })
-    }
-
-    /// Fetch into an existing bare clone.
-    pub fn fetch_all(&self, url: &str) -> Result<(), GitError> {
-        let mut remote = self
-            .repo
-            .find_remote("origin")
-            .or_else(|_| self.repo.remote_anonymous(url))
-            .map_err(|e| backend("find the template remote", &e))?;
-
-        let mut fetch = FetchOptions::new();
-        fetch.remote_callbacks(credential_callbacks(url));
-        fetch.download_tags(AutotagOption::All);
-
-        remote
-            .fetch(
-                &[
-                    "+refs/heads/*:refs/remotes/origin/*",
-                    "+refs/tags/*:refs/tags/*",
-                ],
-                Some(&mut fetch),
-                None,
-            )
-            .map_err(|e| translate_network(url, &e))?;
-        Ok(())
-    }
-
-    /// Resolve a revision — branch, tag or SHA — to a commit.
-    pub fn resolve_revision(&self, revision: &str, source: &str) -> Result<Oid, GitError> {
-        // `revparse_single` handles SHAs, tags and local branches. A bare
-        // clone's branches live under `refs/remotes/origin/`, so a plain
-        // `main` needs the fallback below.
-        let candidates = [
-            revision.to_string(),
-            format!("refs/tags/{revision}"),
-            format!("refs/remotes/origin/{revision}"),
-            format!("refs/heads/{revision}"),
-        ];
-
-        for candidate in &candidates {
-            if let Ok(object) = self.repo.revparse_single(candidate)
-                && let Ok(commit) = object.peel_to_commit()
-            {
-                return Ok(to_oid(commit.id()));
-            }
-        }
-
-        Err(GitError::NoSuchRevision {
-            revision: revision.to_string(),
-            origin: source.to_string(),
-        })
-    }
-
-    /// The default branch of a bare clone, used when no `ref` is configured.
-    pub fn default_branch(&self) -> Result<String, GitError> {
-        // `HEAD` in a bare clone points at whatever the remote said its default
-        // branch was, which is the correct answer and needs no guessing between
-        // `main` and `master`.
-        if let Ok(head) = self.repo.head()
-            // `Result` since git2 0.21: a non-UTF-8 name is an error rather
-            // than a silent `None`. Either way we fall through to the guesses.
-            && let Ok(name) = head.shorthand()
-        {
-            return Ok(name.to_string());
-        }
-        for candidate in ["main", "master"] {
-            if self.resolve_revision(candidate, "").is_ok() {
-                return Ok(candidate.to_string());
-            }
-        }
-        Err(GitError::NoSuchRevision {
-            revision: "HEAD".into(),
-            origin: "the template repository".into(),
-        })
-    }
-
-    /// The tree of a commit.
-    pub fn commit_tree(&self, commit: Oid) -> Result<Oid, GitError> {
-        let commit = self
-            .repo
-            .find_commit(from_oid(commit))
-            .map_err(|e| backend("read the commit", &e))?;
-        Ok(to_oid(commit.tree_id()))
-    }
-
-    /// Build a tree from the files in a directory, for `--dirty` renders.
-    ///
-    /// Reads the template's working tree rather than a commit. Honours
-    /// `.gitignore` and skips `.git`, so the result matches what a `git add -A`
-    /// would have staged.
-    pub fn tree_from_workdir(&self, root: &Path) -> Result<Oid, GitError> {
-        let mut entries = Vec::new();
-        collect_workdir(root, root, &self.repo, &mut entries)?;
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-        let mut blobs = Vec::new();
-        for (path, absolute, executable) in entries {
-            let content = std::fs::read(&absolute).map_err(|e| GitError::Backend {
-                context: format!("read `{}`", absolute.display()),
-                reason: e.to_string(),
-            })?;
-            let oid = self.write_blob(&content)?;
-            blobs.push(TreeEntry {
-                path,
-                oid,
-                mode: if executable {
-                    FileMode::BlobExecutable
-                } else {
-                    FileMode::Blob
-                },
-            });
-        }
-
-        self.build_tree(&blobs)
     }
 
     /// The signature to author commits with.
@@ -673,75 +558,122 @@ impl GitBackend for LibGit2 {
             Err(e) => Err(backend("read a configuration value", &e)),
         }
     }
-}
+    fn resolve_revision(&self, revision: &str, origin: &str) -> Result<Oid, GitError> {
+        // `revparse_single` handles SHAs, tags and local branches. A bare
+        // clone's branches live under `refs/remotes/origin/`, so a plain
+        // `main` needs the fallback below.
+        let candidates = [
+            revision.to_string(),
+            format!("refs/tags/{revision}"),
+            format!("refs/remotes/origin/{revision}"),
+            format!("refs/heads/{revision}"),
+        ];
 
-impl LibGit2 {
-    /// Reset the index and worktree to `HEAD`, discarding a failed merge.
-    pub fn abort_merge(&self) -> Result<(), GitError> {
-        let head = self
-            .repo
-            .head()
-            .and_then(|h| h.peel(ObjectType::Commit))
-            .map_err(|e| backend("resolve HEAD", &e))?;
-        self.repo
-            .reset(&head, ResetType::Hard, None)
-            .map_err(|e| backend("reset the worktree", &e))?;
-        self.repo
-            .cleanup_state()
-            .map_err(|e| backend("clean up the merge state", &e))?;
-        Ok(())
-    }
+        for candidate in &candidates {
+            if let Ok(object) = self.repo.revparse_single(candidate)
+                && let Ok(commit) = object.peel_to_commit()
+            {
+                return Ok(to_oid(commit.id()));
+            }
+        }
 
-    /// The configured identity, for display.
-    pub fn identity(&self) -> Option<Signature> {
-        self.repo.signature().ok().map(|s| Signature {
-            name: s.name().unwrap_or_default().to_string(),
-            email: s.email().unwrap_or_default().to_string(),
+        Err(GitError::NoSuchRevision {
+            revision: revision.to_string(),
+            origin: origin.to_string(),
         })
     }
 
-    /// Set a configuration value in this repository.
-    ///
-    /// Exists so that tests and `init` can configure a repository without
-    /// reaching for `git2` outside this module — the `git-backend-isolation`
-    /// hook forbids that, and an exception "just for tests" is how such
-    /// boundaries rot.
-    pub fn set_config_str(&self, key: &str, value: &str) -> Result<(), GitError> {
-        let mut config = self
+    fn default_branch(&self) -> Result<String, GitError> {
+        // `HEAD` in a bare clone points at whatever the remote said its default
+        // branch was, which is the correct answer and needs no guessing between
+        // `main` and `master`.
+        if let Ok(head) = self.repo.head()
+            // `Result` since git2 0.21: a non-UTF-8 name is an error rather
+            // than a silent `None`. Either way we fall through to the guesses.
+            && let Ok(name) = head.shorthand()
+        {
+            return Ok(name.to_string());
+        }
+        for candidate in ["main", "master"] {
+            if self.resolve_revision(candidate, "").is_ok() {
+                return Ok(candidate.to_string());
+            }
+        }
+        Err(GitError::NoSuchRevision {
+            revision: "HEAD".into(),
+            origin: "the template repository".into(),
+        })
+    }
+
+    fn commit_tree(&self, commit: Oid) -> Result<Oid, GitError> {
+        let commit = self
             .repo
-            .config()
-            .map_err(|e| backend("read the Git configuration", &e))?;
-        config
-            .set_str(key, value)
-            .map_err(|e| backend("write a configuration value", &e))
+            .find_commit(from_oid(commit))
+            .map_err(|e| backend("read the commit", &e))?;
+        Ok(to_oid(commit.tree_id()))
     }
 
-    /// Set a boolean configuration value in this repository.
-    pub fn set_config_bool(&self, key: &str, value: bool) -> Result<(), GitError> {
-        let mut config = self
+    fn tree_from_workdir(&self, root: &Path) -> Result<Oid, GitError> {
+        let mut entries = Vec::new();
+        collect_workdir(root, root, &self.repo, &mut entries)?;
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut blobs = Vec::new();
+        for (path, absolute, executable) in entries {
+            let content = std::fs::read(&absolute).map_err(|e| GitError::Backend {
+                context: format!("read `{}`", absolute.display()),
+                reason: e.to_string(),
+            })?;
+            let oid = self.write_blob(&content)?;
+            blobs.push(TreeEntry {
+                path,
+                oid,
+                mode: if executable {
+                    FileMode::BlobExecutable
+                } else {
+                    FileMode::Blob
+                },
+            });
+        }
+
+        self.build_tree(&blobs)
+    }
+
+    fn read_path(&self, tree: Oid, path: &str) -> Result<Option<Vec<u8>>, GitError> {
+        let tree = self
             .repo
-            .config()
-            .map_err(|e| backend("read the Git configuration", &e))?;
-        config
-            .set_bool(key, value)
-            .map_err(|e| backend("write a configuration value", &e))
+            .find_tree(from_oid(tree))
+            .map_err(|e| backend("read the tree", &e))?;
+        match tree.get_path(Path::new(path)) {
+            Ok(entry) => {
+                let blob = self
+                    .repo
+                    .find_blob(entry.id())
+                    .map_err(|e| backend("read the file", &e))?;
+                Ok(Some(blob.content().to_vec()))
+            }
+            Err(e) if e.code() == ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(backend("look up the path", &e)),
+        }
     }
 
-    /// Add a remote.
-    pub fn add_remote(&self, name: &str, url: &str) -> Result<(), GitError> {
-        self.repo
-            .remote(name, url)
-            .map(|_| ())
-            .map_err(|e| backend("add the remote", &e))
+    fn subtree(&self, tree: Oid, path: &str) -> Result<Option<Oid>, GitError> {
+        if path.is_empty() || path == "." {
+            return Ok(Some(tree));
+        }
+        let tree = self
+            .repo
+            .find_tree(from_oid(tree))
+            .map_err(|e| backend("read the tree", &e))?;
+        match tree.get_path(Path::new(path)) {
+            Ok(entry) if entry.kind() == Some(ObjectType::Tree) => Ok(Some(to_oid(entry.id()))),
+            Ok(_) => Ok(None),
+            Err(e) if e.code() == ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(backend("look up the subtree", &e)),
+        }
     }
 
-    /// Whether a remote is configured.
-    pub fn has_remote(&self, name: &str) -> bool {
-        self.repo.find_remote(name).is_ok()
-    }
-
-    /// Stage a path, for `init` writing the configuration file.
-    pub fn stage(&self, relative: &Path) -> Result<(), GitError> {
+    fn stage(&self, relative: &Path) -> Result<(), GitError> {
         let mut index = self
             .repo
             .index()
@@ -753,8 +685,7 @@ impl LibGit2 {
         Ok(())
     }
 
-    /// Commit whatever is staged, moving `HEAD`.
-    pub fn commit_index(&self, message: &str) -> Result<Oid, GitError> {
+    fn commit_index(&self, message: &str) -> Result<Oid, GitError> {
         let signature = self.signature()?;
         let mut index = self
             .repo
@@ -791,40 +722,39 @@ impl LibGit2 {
             .map_err(|e| backend("create the commit", &e))
     }
 
-    /// Read a file from a tree by path.
-    pub fn read_path(&self, tree: Oid, path: &str) -> Result<Option<Vec<u8>>, GitError> {
-        let tree = self
+    fn abort_merge(&self) -> Result<(), GitError> {
+        let head = self
             .repo
-            .find_tree(from_oid(tree))
-            .map_err(|e| backend("read the tree", &e))?;
-        match tree.get_path(Path::new(path)) {
-            Ok(entry) => {
-                let blob = self
-                    .repo
-                    .find_blob(entry.id())
-                    .map_err(|e| backend("read the file", &e))?;
-                Ok(Some(blob.content().to_vec()))
-            }
-            Err(e) if e.code() == ErrorCode::NotFound => Ok(None),
-            Err(e) => Err(backend("look up the path", &e)),
-        }
+            .head()
+            .and_then(|h| h.peel(ObjectType::Commit))
+            .map_err(|e| backend("resolve HEAD", &e))?;
+        self.repo
+            .reset(&head, ResetType::Hard, None)
+            .map_err(|e| backend("reset the worktree", &e))?;
+        self.repo
+            .cleanup_state()
+            .map_err(|e| backend("clean up the merge state", &e))?;
+        Ok(())
     }
 
-    /// The subtree at `path`, if there is one.
-    pub fn subtree(&self, tree: Oid, path: &str) -> Result<Option<Oid>, GitError> {
-        if path.is_empty() || path == "." {
-            return Ok(Some(tree));
-        }
-        let tree = self
+    fn set_config_str(&self, key: &str, value: &str) -> Result<(), GitError> {
+        let mut config = self
             .repo
-            .find_tree(from_oid(tree))
-            .map_err(|e| backend("read the tree", &e))?;
-        match tree.get_path(Path::new(path)) {
-            Ok(entry) if entry.kind() == Some(ObjectType::Tree) => Ok(Some(to_oid(entry.id()))),
-            Ok(_) => Ok(None),
-            Err(e) if e.code() == ErrorCode::NotFound => Ok(None),
-            Err(e) => Err(backend("look up the subtree", &e)),
-        }
+            .config()
+            .map_err(|e| backend("read the Git configuration", &e))?;
+        config
+            .set_str(key, value)
+            .map_err(|e| backend("write a configuration value", &e))
+    }
+
+    fn set_config_bool(&self, key: &str, value: bool) -> Result<(), GitError> {
+        let mut config = self
+            .repo
+            .config()
+            .map_err(|e| backend("read the Git configuration", &e))?;
+        config
+            .set_bool(key, value)
+            .map_err(|e| backend("write a configuration value", &e))
     }
 }
 
@@ -1022,11 +952,6 @@ fn is_executable(_path: &Path) -> bool {
     // for a file created there, so a tree built on Windows and one built on
     // Linux from the same source agree.
     false
-}
-
-/// Convenience for callers that want an ordered map of a tree's contents.
-pub fn tree_map(entries: &[TreeEntry]) -> BTreeMap<&str, &TreeEntry> {
-    entries.iter().map(|e| (e.path.as_str(), e)).collect()
 }
 
 #[cfg(test)]

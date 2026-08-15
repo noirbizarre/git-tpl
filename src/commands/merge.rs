@@ -1,6 +1,6 @@
 //! `git tpl merge`
 
-use tpl::git::MergeOutcome;
+use tpl::git::{GitBackend, MergeOutcome};
 use tpl::ops::{self, OpError};
 
 use super::Context;

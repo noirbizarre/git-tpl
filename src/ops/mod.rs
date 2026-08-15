@@ -19,7 +19,6 @@ use crate::data::{
     TrustGate, declared_remotes,
 };
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Prompter};
-use crate::git::libgit2::LibGit2;
 use crate::git::{AheadBehind, Change, GitBackend, GitError, MergeOutcome, Oid};
 use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
@@ -224,7 +223,7 @@ pub struct Render {
 /// Shared by `init`, `update` and `--dry-run`, so all three cannot disagree
 /// about what a rendering is.
 pub fn render(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     config: &Config,
     supplied: BTreeMap<String, Value>,
@@ -271,7 +270,7 @@ pub fn render(
 
     let mut loader = Loader::new(
         TemplateTree {
-            repo: &template.repo,
+            repo: template.repo.as_ref(),
             tree: template.tree,
             revision: template.revision,
         },
@@ -308,7 +307,13 @@ pub fn render(
     let entries = template.entries()?;
     // Blobs are read from the template repository — often a temporary clone —
     // and written into the project, which is where the ref will point.
-    let tree = render_tree(&template.repo, project, &entries, &context, &partials)?;
+    let tree = render_tree(
+        template.repo.as_ref(),
+        project,
+        &entries,
+        &context,
+        &partials,
+    )?;
 
     let provenance = Provenance {
         source: config.template.source.clone(),
@@ -335,7 +340,7 @@ pub fn render(
 /// A key that is not set is simply absent: a template suggesting `user.name`
 /// must still work for someone who has never set one, and the question's own
 /// `default` covers that case.
-fn git_seeds(project: &LibGit2, manifest: &Manifest) -> Result<BTreeMap<String, Value>, OpError> {
+fn git_seeds(project: &dyn GitBackend, manifest: &Manifest) -> Result<BTreeMap<String, Value>, OpError> {
     let mut seeds = BTreeMap::new();
     for (name, question) in &manifest.questions {
         let Some(key) = question.git_config_key() else {
@@ -380,7 +385,7 @@ pub struct InitOutcome {
 /// for the demonstration.
 #[allow(clippy::too_many_arguments)]
 pub fn init(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     source: &str,
     reference: Option<String>,
@@ -525,7 +530,7 @@ pub enum UpdateOutcome {
 /// tree is built as a Git object and one ref is moved. There is no code path
 /// here that writes a file into the project.
 pub fn update(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     overrides: BTreeMap<String, Value>,
     dirty: bool,
@@ -642,7 +647,7 @@ impl Status {
 
 /// Report the state of the template attachment.
 pub fn status(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
 ) -> Result<Status, OpError> {
@@ -719,7 +724,7 @@ pub fn status(
 }
 
 /// How many commits the rendered ref holds.
-fn count_renderings(project: &LibGit2, tip: Oid) -> Result<usize, GitError> {
+fn count_renderings(project: &dyn GitBackend, tip: Oid) -> Result<usize, GitError> {
     let mut count = 0;
     let mut current = Some(tip);
     while let Some(oid) = current {
@@ -738,7 +743,7 @@ fn count_renderings(project: &LibGit2, tip: Oid) -> Result<usize, GitError> {
 }
 
 /// The rendered ref's tip, or a helpful error.
-fn require_tip(project: &LibGit2, ref_name: &str) -> Result<Oid, OpError> {
+fn require_tip(project: &dyn GitBackend, ref_name: &str) -> Result<Oid, OpError> {
     project
         .resolve_ref(ref_name)?
         .ok_or_else(|| OpError::NoRenderedRef {
@@ -756,7 +761,7 @@ pub fn identify(project_root: &Path) -> Result<(TemplateId, String), OpError> {
 
 /// The difference between `HEAD` and the rendered ref.
 pub fn diff(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     paths: &[String],
     reverse: bool,
@@ -780,7 +785,7 @@ pub fn diff(
 }
 
 /// The changes between `HEAD` and the rendered ref.
-pub fn diff_changes(project: &LibGit2, project_root: &Path) -> Result<Vec<Change>, OpError> {
+pub fn diff_changes(project: &dyn GitBackend, project_root: &Path) -> Result<Vec<Change>, OpError> {
     let (_, ref_name) = identify(project_root)?;
     let tip = require_tip(project, &ref_name)?;
 
@@ -797,7 +802,7 @@ pub fn diff_changes(project: &LibGit2, project_root: &Path) -> Result<Vec<Change
 /// Delegates entirely to the backend's merge. git-tpl contributes no conflict
 /// resolution — see `docs/adr/002-no-custom-reconciliation.md`.
 pub fn merge(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     message: Option<&str>,
     commit_result: bool,
@@ -819,7 +824,7 @@ pub fn merge(
 /// user's decision, and adopting someone else's rendering silently would be a
 /// surprising thing for a fetch to do.
 pub fn fetch(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
 ) -> Result<Option<AheadBehind>, OpError> {
@@ -843,7 +848,7 @@ pub fn fetch(
 /// is history others may have merged from; overwriting it destroys the merge
 /// base their next update needs.
 pub fn push(
-    project: &LibGit2,
+    project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
 ) -> Result<String, OpError> {

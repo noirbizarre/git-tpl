@@ -28,7 +28,7 @@ mod keys {
 ///
 /// An empty value counts as unset, so a blank `user.name` falls back to the
 /// template's own default rather than pre-filling a prompt with nothing.
-pub fn seed(repo: &impl GitBackend, key: &str) -> Result<Option<String>, GitError> {
+pub fn seed(repo: &dyn GitBackend, key: &str) -> Result<Option<String>, GitError> {
     Ok(repo
         .config_string(key)?
         .filter(|value| !value.trim().is_empty()))
@@ -64,7 +64,7 @@ impl Preferences {
     /// libgit2's configuration snapshot applies Git's own precedence —
     /// repository, then user, then system — so `git config tpl.remote` and
     /// git-tpl always agree about what is in effect.
-    pub fn load(repo: &impl GitBackend) -> Result<Self, GitError> {
+    pub fn load(repo: &dyn GitBackend) -> Result<Self, GitError> {
         let defaults = Self::default();
         Ok(Self {
             remote: repo
