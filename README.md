@@ -134,7 +134,7 @@ Templates cannot execute code — no hooks, no scripts, no embedded interpreter.
 - [The Git model](https://noirbizarre.github.io/git-tpl/concepts/git-model/) — start here
 - [Quick start](https://noirbizarre.github.io/git-tpl/getting-started/quickstart/)
 - [Template format](https://noirbizarre.github.io/git-tpl/templates/format/)
-- [Architecture decisions](https://noirbizarre.github.io/git-tpl/adr/README/)
+- [Architecture decisions](https://noirbizarre.github.io/git-tpl/adr/)
 
 ## Status
 

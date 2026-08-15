@@ -40,7 +40,7 @@ mise run setup                # cargo install --path . --force
 ```
 
 ```sh
-mise run docs                 # serve the documentation at localhost:8000
+mise run docs                 # serve the documentation (Zensical's default port)
 mise run docs:build
 ```
 
