@@ -1148,8 +1148,41 @@ fn the_text_listing_names_the_template_and_its_questions_in_order() {
         .says("A small Rust library")
         .says("Questions, in the order they are asked")
         // Name and type, because the type is what decides how to answer it.
-        .says("project_name (a string)")
-        .says("license (");
+        .says("project_name (string)")
+        .says("license (choice)");
+}
+
+/// The listing must name the kind the manifest declares, not the type an
+/// answer parses as: `choice`, never `a string`. They differ for exactly the
+/// two kinds an author is most likely to look up.
+#[test]
+fn the_text_listing_names_the_declared_kind_not_the_value_type() {
+    let world = World::with_template(
+        r#"
+name = "kinds"
+
+[questions.license]
+type = "choice"
+choices = ["MIT", "Apache-2.0"]
+
+[questions.features]
+type = "multi_choice"
+choices = ["cli", "lib"]
+
+[questions.msrv]
+type = "boolean"
+"#,
+        &[("file.txt.jinja", "x\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.ask_text(&world.template.source()).success();
+
+    output
+        .says("license (choice)")
+        .says("features (multi_choice)")
+        .says("msrv (boolean)")
+        .silent_about("an array");
 }
 
 /// A `when` says the question is not always asked, which is the difference
@@ -1176,7 +1209,7 @@ default = "indigo"
     scratch
         .ask_text(&world.template.source())
         .success()
-        .says("accent (a string) when docs");
+        .says("accent (string) when docs");
 }
 
 /// A template may legitimately ask nothing. Saying so beats printing a heading

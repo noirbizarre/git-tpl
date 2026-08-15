@@ -32,6 +32,25 @@ impl QuestionKind {
         }
     }
 
+    /// The name the manifest and `--json` use — `choice`, not `a string`.
+    ///
+    /// Distinct from [`QuestionKind::type_name`], which is the *value* type an
+    /// answer must parse as and is dispatched on by [`Value::parse_as`].
+    /// Listing a question by its value type names a type its author cannot
+    /// write in a manifest, and hides the one they did.
+    //
+    // These are the serde `rename_all = "snake_case"` variant names; the match
+    // lives next to the enum so the two spellings cannot drift apart.
+    pub fn declared_name(self) -> &'static str {
+        match self {
+            QuestionKind::String => "string",
+            QuestionKind::Boolean => "boolean",
+            QuestionKind::Integer => "integer",
+            QuestionKind::Choice => "choice",
+            QuestionKind::MultiChoice => "multi_choice",
+        }
+    }
+
     /// Whether this kind draws its answer from a list of choices.
     pub fn is_choice(self) -> bool {
         matches!(self, QuestionKind::Choice | QuestionKind::MultiChoice)
@@ -197,6 +216,19 @@ mod tests {
         #[case] expected: bool,
     ) {
         assert_eq!(kind.accepts(&value), expected);
+    }
+
+    /// The listing and the JSON schema must name a kind the same way, or the
+    /// answer to "what kind of question is this" depends on how you asked.
+    #[rstest]
+    #[case(QuestionKind::String)]
+    #[case(QuestionKind::Boolean)]
+    #[case(QuestionKind::Integer)]
+    #[case(QuestionKind::Choice)]
+    #[case(QuestionKind::MultiChoice)]
+    fn the_declared_name_is_the_serialised_name(#[case] kind: QuestionKind) {
+        let serialised = serde_json::to_value(kind).expect("serialise");
+        assert_eq!(serialised, serde_json::Value::from(kind.declared_name()));
     }
 
     #[rstest]
