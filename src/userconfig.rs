@@ -13,6 +13,7 @@
 //! is recorded, and `[trust]` authorises a fetch rather than changing what is
 //! rendered. See `docs/adr/013-user-configuration.md`.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -183,6 +184,28 @@ impl UserConfig {
         Ok(config)
     }
 
+    /// Expand a leading `<name>:` written on the command line.
+    ///
+    /// The expanded URL is what gets recorded in `.config/git.tpl.toml` and
+    /// what derives the template id, so a shortcut never leaves this machine.
+    /// Without that rule, a project created by someone with a `mine:` shortcut
+    /// is unusable by everyone else, and `refs/tpl/<id>` differs per
+    /// contributor for the same template.
+    ///
+    /// An unknown prefix is left alone: it may be a real scheme, and this
+    /// function cannot know every one of them. Expansion is applied once and
+    /// never recursively — a shortcut whose expansion is another shortcut would
+    /// make the recorded URL depend on the order of a map.
+    pub fn expand<'a>(&self, source: &'a str) -> Cow<'a, str> {
+        let Some((name, rest)) = source.split_once(':') else {
+            return Cow::Borrowed(source);
+        };
+        match self.shortcuts.get(name) {
+            Some(prefix) => Cow::Owned(format!("{prefix}{rest}")),
+            None => Cow::Borrowed(source),
+        }
+    }
+
     /// Refuse shortcut names that cannot work.
     ///
     /// Checked when the file is read rather than when a shortcut is used: a
@@ -280,6 +303,56 @@ mod tests {
         let error = UserConfig::parse("[shortcuts]\n\"a/b\" = \"https://x/\"\n", "config.toml")
             .unwrap_err();
         assert!(matches!(error, UserConfigError::Shortcut { .. }));
+    }
+
+    fn shortcuts() -> UserConfig {
+        UserConfig::parse(
+            r#"
+            [shortcuts]
+            gh = "https://github.com/"
+            ghs = "ssh://git@github.com/"
+            mine = "https://github.com/noirbizarre/"
+            "#,
+            "config.toml",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_known_prefix_expands() {
+        assert_eq!(
+            shortcuts().expand("gh:org/thing"),
+            "https://github.com/org/thing"
+        );
+        assert_eq!(
+            shortcuts().expand("mine:git-tpl"),
+            "https://github.com/noirbizarre/git-tpl"
+        );
+    }
+
+    #[test]
+    fn an_unknown_prefix_is_left_alone() {
+        // It may be a real scheme, and there is no list of every one of them.
+        for source in [
+            "https://github.com/org/thing",
+            "ssh://git@github.com/org/thing",
+            "git@github.com:org/thing.git",
+            "../a-local-template",
+            "unknown:whatever",
+        ] {
+            assert_eq!(shortcuts().expand(source), source);
+        }
+    }
+
+    #[test]
+    fn expansion_is_not_recursive() {
+        // `ghs` expands to a value beginning `ssh:`, which is a prefix in its
+        // own right. Expanding again would make the recorded URL depend on the
+        // iteration order of a map.
+        assert_eq!(
+            shortcuts().expand("ghs:org/thing"),
+            "ssh://git@github.com/org/thing"
+        );
     }
 
     #[test]

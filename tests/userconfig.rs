@@ -142,3 +142,67 @@ fn a_user_default_naming_no_question_is_neither_fatal_nor_reported() {
 
     world.init(&[]).success().silent_about("licence");
 }
+
+// --- [shortcuts] ------------------------------------------------------------
+
+/// The rule that makes shortcuts safe: what is recorded is the expanded URL.
+///
+/// If the shortcut were recorded instead, a project created by someone with a
+/// `mine:` shortcut would be unusable by everyone else, and `refs/tpl/<id>`
+/// would differ per contributor for the same template — template refs are
+/// append-only, so two contributors deriving two ids is not a cosmetic problem.
+#[test]
+fn an_expanded_shortcut_is_what_gets_recorded_in_the_project() {
+    let world = World::new();
+    let source = world.template.source();
+    // A local path, so the test needs no network; the substitution is the same
+    // one a `https://github.com/` prefix gets. Forward slashes throughout —
+    // Git accepts them on every platform, and a Windows path written into TOML
+    // raw would be a string full of invalid escape sequences.
+    let path = std::path::Path::new(&source);
+    let parent = path
+        .parent()
+        .expect("a path with a parent")
+        .to_string_lossy()
+        .replace('\\', "/");
+    let name = path
+        .file_name()
+        .expect("a path with a final component")
+        .to_string_lossy()
+        .into_owned();
+    world
+        .project
+        .user_config(&format!("[shortcuts]\nt = \"{parent}/\"\n"));
+
+    tpl(
+        &world.project,
+        &["init", &format!("t:{name}"), "--defaults"],
+    )
+    .success();
+
+    let recorded = world.project.read(".config/git.tpl.toml");
+    assert!(
+        recorded.contains(&format!("source = \"{parent}/{name}\"")),
+        "the expanded URL must be recorded, not the shortcut:\n{recorded}"
+    );
+    assert!(
+        !recorded.contains("t:"),
+        "the shortcut must never leave this machine:\n{recorded}"
+    );
+    // Derived from the expanded URL, so every contributor gets the same ref.
+    world.project.git(&["rev-parse", &world.ref_name()]);
+}
+
+/// It may be a real scheme, and there is no list of every one of them.
+#[test]
+fn an_unknown_prefix_is_left_alone() {
+    let world = World::new();
+    world
+        .project
+        .user_config("[shortcuts]\ngh = \"https://github.com/\"\n");
+
+    // The failure must be about resolving `nope://x`, not about an expansion.
+    tpl(&world.project, &["init", "nope://x", "--defaults"])
+        .failure()
+        .silent_about("https://github.com/");
+}

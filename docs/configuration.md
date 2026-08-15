@@ -163,6 +163,47 @@ file once for every template you will ever generate, so it is *expected* to
 overshoot, and warning about `author` on every template that has no `author`
 question is how a warning stops being read.
 
+### `[shortcuts]`
+
+A prefix substitution on a leading `<name>:` in a template URL you type.
+
+```toml
+[shortcuts]
+gh = "https://github.com/"
+ghs = "ssh://git@github.com/"
+mine = "https://github.com/noirbizarre/"
+```
+
+```sh
+git tpl init gh:org/rust-library-template
+git tpl init mine:rust-library-template
+```
+
+!!! warning "The expanded URL is what gets recorded"
+
+    `.config/git.tpl.toml` receives `https://github.com/org/...`, and the
+    template id — and so `refs/tpl/<id>` — is derived from that. A shortcut
+    never leaves your machine. If it did, a project you created would be
+    unusable by anyone without your file, and every contributor would derive a
+    different ref for the same template.
+
+The rules, all of them:
+
+- Only the URL you type on the command line is expanded. A source read out of a
+  repository never is, because expansion happens before git-tpl's internals see
+  the argument at all.
+- An unknown `foo:` is left alone — it may be a real scheme. Only names present
+  in this file expand.
+- Expansion happens once, never recursively. `ghs = "ssh://git@github.com/"`
+  does not then expand as `ssh:`.
+- A name may not contain `/`, and may not be `https`, `http`, `ssh`, `git` or
+  `file`. Those are refused when the file is read, not when a shortcut is used.
+
+`gh` and `ghs` are separate names rather than one name whose scheme git-tpl
+guesses. The reason to want the SSH form is a private repository, and inferring
+which one you meant from whether a clone failed is exactly the retry logic that
+produces incomprehensible authentication errors.
+
 Note the name: the project file is `git.tpl.toml`, mirroring `git tpl`; this one
 is named after the binary. Two shapes, so a stray copy of one is never mistaken
 for the other.

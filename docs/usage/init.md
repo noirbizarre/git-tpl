@@ -40,6 +40,11 @@ which is exactly what it is.
 
 Use `--no-merge` to stop after step 9 and wire it up yourself.
 
+`<template>` is any Git URL or local path. If you have defined
+[shortcuts](../configuration.md#shortcuts), a leading `<name>:` is expanded
+first — and it is the expanded URL that is recorded in the project, so the
+shortcut never leaves your machine.
+
 ## Options
 
 | Option | Meaning |

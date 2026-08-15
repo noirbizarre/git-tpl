@@ -33,8 +33,18 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
     let answers = supplied(&args.answers)?;
 
+    // Expanded here, at the edge, and not in `ops`. Everything below this line
+    // sees the real URL, which makes the rule structural rather than a thing to
+    // remember: a shortcut can only ever match what was typed on the command
+    // line, never a value read out of a repository. The expanded form is what
+    // `ops::init` records in `.config/git.tpl.toml` and what derives
+    // `refs/tpl/<id>`, so a shortcut never leaves this machine — otherwise a
+    // project created by someone with a `mine:` shortcut would be unusable by
+    // everyone else.
+    let template = ctx.user.expand(&args.template).into_owned();
+
     if args.dry_run {
-        return dry_run(&ctx, &args, answers).map(|()| crate::exit::SUCCESS);
+        return dry_run(&ctx, &args, &template, answers).map(|()| crate::exit::SUCCESS);
     }
 
     let mut prompter = Interactive;
@@ -42,7 +52,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let outcome = ops::init(
         &ctx.repo,
         &ctx.root,
-        &args.template,
+        &template,
         args.r#ref.clone(),
         args.id.as_deref(),
         answers,
@@ -61,7 +71,9 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     report_ignored(&ctx, &outcome.ignored_answers);
 
     ctx.blank();
-    ctx.say(field(&ctx.theme, "Template", &args.template));
+    // The expanded URL, not what was typed: this is the line a user copies
+    // when reporting a problem, and it is what is now recorded in the project.
+    ctx.say(field(&ctx.theme, "Template", &template));
     ctx.say(field(&ctx.theme, "Revision", &outcome.revision_description));
     ctx.blank();
     ctx.say(headline(&ctx.theme, "Created", &outcome.id.ref_name()));
@@ -128,10 +140,11 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 fn dry_run(
     ctx: &Session,
     args: &InitArgs,
+    source: &str,
     answers: BTreeMap<String, tpl::template::Value>,
 ) -> Result<(), OpError> {
     let template = ops::resolve::resolve(ops::Request {
-        source: &args.template,
+        source,
         reference: args.r#ref.as_deref(),
         root: None,
         dirty: args.dirty,
@@ -148,7 +161,7 @@ fn dry_run(
     report_ignored(ctx, &ignored);
 
     ctx.blank();
-    ctx.say(field(&ctx.theme, "Template", &args.template));
+    ctx.say(field(&ctx.theme, "Template", source));
     ctx.say(field(
         &ctx.theme,
         "Revision",

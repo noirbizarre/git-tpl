@@ -180,7 +180,8 @@ user-side file later is not a move of a path people have written down. This is a
 new on-disk format, which is to say a contract, and **ADR-013** records it.
 
 **Landed so far:** the file, its XDG resolution, parsing, validation and
-diagnostics, `$XDG_CONFIG_HOME` isolation in the test harness, and `[defaults]`.
+diagnostics, `$XDG_CONFIG_HOME` isolation in the test harness, `[defaults]` and
+`[shortcuts]`.
 
 ```toml
 [defaults]
@@ -239,8 +240,11 @@ source.
 
 #### `[shortcuts]` expand before anything else sees the URL
 
-Prefix substitution on a leading `<name>:`, performed in `ops` before the source
-reaches `GitBackend` or `refs.rs`. One rule makes it safe:
+Prefix substitution on a leading `<name>:`, performed in `commands` before the
+source reaches `ops` at all — one layer further out than this said, and strictly
+stronger for it: `ops` never sees an unexpanded source, so "matched only against
+the CLI argument" is structural rather than a rule to remember. One rule makes
+it safe:
 
 > **The expanded URL is what gets written to `.config/git.tpl.toml`, and what
 > derives the template id.** A shortcut never leaves your machine.
