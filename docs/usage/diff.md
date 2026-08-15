@@ -11,15 +11,17 @@ machinery `git diff` uses, so the output is a diff you already know how to read.
 
 ```console
 $ git tpl diff --stat
-  added     .github/workflows/release.yml
-  deleted   NOTES.md
-  modified  README.md
+  added     .github/workflows/release.yml    +48    -0
+  deleted   NOTES.md                          +0   -12
+  modified  README.md                         +9    -3
+  modified  docs/logo.png                    Bin
 
-3 file(s) differ
+4 files changed, 57 insertions(+), 15 deletions(-)
 ```
 
-`--stat` lists what changed, not how much: there are no insertion or deletion
-counts. Run the plain-Git equivalent below for a `git diff --stat` diffstat.
+The counts are `git diff --stat`'s counts — the same libgit2 diff, walked hunk
+by hunk — so the summary line matches what the plain-Git equivalent below
+prints. A binary file shows `Bin`: two zeroes would read as "nothing changed".
 
 ## The plain Git equivalent
 
@@ -54,14 +56,18 @@ The direction is `HEAD` → template, so:
 
 ```sh
 git tpl diff -- Cargo.toml
+git tpl diff --stat -- src/
 git tpl diff --name-only
 ```
+
+`-- <path>` and `--reverse` apply to every mode: the patch, `--stat` and
+`--name-only` all report the same diff, so they narrow and reverse alike.
 
 ## Options
 
 | Option | Meaning |
 |---|---|
-| `--stat` | Summary instead of the full patch. |
-| `--name-only` | Paths only. |
+| `--stat` | A per-file summary with line counts, instead of the full patch. |
+| `--name-only` | Paths only, on stdout. Wins if `--stat` is also given. |
 | `--reverse` | Diff the other way, template → `HEAD`. |
 | `-- <path>...` | Limit to these paths. |

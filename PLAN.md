@@ -27,7 +27,7 @@ main:  A ─── M ─── B ─── M'
 | Adopting an existing project | ✅ `init` — the merge reconciles the two sides; no separate command |
 | `update` | ✅ ref only — HEAD, index and worktree untouched (asserted) |
 | `status` | ✅ text and `--format json`, exit 2 when pending |
-| `diff` | ✅ patch, `--stat`, `--name-only`, path limiting |
+| `diff` | ✅ patch, `--stat` with line counts, `--name-only`, path limiting and `--reverse` in every mode |
 | `show` | ✅ one path from `refs/tpl/<id>` — files verbatim on stdout, directories listed |
 | `merge` | ✅ libgit2 merge, `--abort`, zero custom conflict logic |
 | `fetch` / `push` | ✅ explicit refspecs, never forced, divergence refused |
@@ -316,8 +316,6 @@ needs code.
 
 ### 6. Smaller things
 
-- `--stat` should count lines, not just files. Needs a line-level diff summary
-  from libgit2.
 - Snapshot tests over CLI output. The harness and `insta` are already wired.
 - Named tests for two behaviours that are currently correct but undefended: a
   computed value holding a sequence (`| select`) and one holding a table
@@ -404,9 +402,6 @@ cached between them — for the same reason the template itself is cloned fresh:
 a stale cache silently rendering old data is a far worse failure than a slow
 fetch, in a tool whose whole premise is reproducibility. `sha256` is the answer
 for anyone who needs the bytes to be the same ones.
-
-**`--stat` reports file counts, not line counts.** Honest but less useful than
-`git diff --stat`.
 
 **Windows exec bits.** Rendering records `false` for every file on Windows,
 matching what Git records there. A tree built on Windows and one built on Linux

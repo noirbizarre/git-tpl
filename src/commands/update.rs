@@ -162,7 +162,7 @@ fn dry_run(
         return Ok(());
     }
 
-    let changes = ctx.repo.diff_trees(previous_tree, rendered.tree)?;
+    let changes = ctx.repo.diff_trees(previous_tree, rendered.tree, &[])?;
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &config.template.source));

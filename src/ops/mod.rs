@@ -19,7 +19,7 @@ use crate::data::{
     TrustGate, declared_remotes,
 };
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Prompter};
-use crate::git::{AheadBehind, Change, GitBackend, GitError, MergeOutcome, Oid};
+use crate::git::{AheadBehind, Change, FileStat, GitBackend, GitError, MergeOutcome, Oid};
 use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
 use crate::provenance::{Provenance, Recorded};
@@ -530,7 +530,7 @@ pub fn init(
     let commit = project.create_commit(rendered.tree, &[], &rendered.provenance.to_message())?;
     project.set_ref(&ref_name, commit, "tpl: initial render")?;
 
-    let changes = project.diff_trees(None, rendered.tree)?;
+    let changes = project.diff_trees(None, rendered.tree, &[])?;
 
     // Written after rendering, so a template that fails to render leaves no
     // half-initialised project behind.
@@ -697,7 +697,7 @@ pub fn update(
         project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
     project.set_ref(&ref_name, commit, "tpl: update")?;
 
-    let changes = project.diff_trees(previous.as_ref().map(|c| c.tree), rendered.tree)?;
+    let changes = project.diff_trees(previous.as_ref().map(|c| c.tree), rendered.tree, &[])?;
 
     // Answers are written back so that a question the template just added is
     // recorded rather than asked again on every update.
@@ -873,13 +873,16 @@ pub fn identify(project_root: &Path) -> Result<(TemplateId, String), OpError> {
     Ok((id, ref_name))
 }
 
-/// The difference between `HEAD` and the rendered ref.
-pub fn diff(
+/// The two trees a diff runs between, oriented.
+///
+/// Every diff mode resolves the same pair and applies the same `--reverse`
+/// swap; doing it once is what keeps `--stat` from disagreeing with the patch
+/// about which direction it is reporting.
+fn diff_endpoints(
     project: &dyn GitBackend,
     project_root: &Path,
-    paths: &[String],
     reverse: bool,
-) -> Result<String, OpError> {
+) -> Result<(Option<Oid>, Oid), OpError> {
     let (_, ref_name) = identify(project_root)?;
     let tip = require_tip(project, &ref_name)?;
 
@@ -889,26 +892,46 @@ pub fn diff(
     };
     let template_tree = project.commit(tip)?.tree;
 
-    let (from, to) = if reverse {
+    Ok(if reverse {
+        // With no HEAD there is nothing to diff against, so the reversed diff
+        // is the template against itself: empty, which is the truth.
         (Some(template_tree), head_tree.unwrap_or(template_tree))
     } else {
         (head_tree, template_tree)
-    };
+    })
+}
 
+/// The difference between `HEAD` and the rendered ref.
+pub fn diff(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    paths: &[String],
+    reverse: bool,
+) -> Result<String, OpError> {
+    let (from, to) = diff_endpoints(project, project_root, reverse)?;
     Ok(project.diff_patch(from, to, paths)?)
 }
 
 /// The changes between `HEAD` and the rendered ref.
-pub fn diff_changes(project: &dyn GitBackend, project_root: &Path) -> Result<Vec<Change>, OpError> {
-    let (_, ref_name) = identify(project_root)?;
-    let tip = require_tip(project, &ref_name)?;
+pub fn diff_changes(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    paths: &[String],
+    reverse: bool,
+) -> Result<Vec<Change>, OpError> {
+    let (from, to) = diff_endpoints(project, project_root, reverse)?;
+    Ok(project.diff_trees(from, to, paths)?)
+}
 
-    let head_tree = match project.head_commit()? {
-        Some(oid) => Some(project.commit(oid)?.tree),
-        None => None,
-    };
-
-    Ok(project.diff_trees(head_tree, project.commit(tip)?.tree)?)
+/// The changes between `HEAD` and the rendered ref, with their line counts.
+pub fn diff_stat(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    paths: &[String],
+    reverse: bool,
+) -> Result<Vec<FileStat>, OpError> {
+    let (from, to) = diff_endpoints(project, project_root, reverse)?;
+    Ok(project.diff_stat(from, to, paths)?)
 }
 
 /// What [`show`] found at a path.

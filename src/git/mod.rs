@@ -148,6 +148,27 @@ pub struct Change {
     pub path: String,
 }
 
+/// A change between two trees, with how much of it there was.
+///
+/// Separate from [`Change`] because the line counts cost a walk over every hunk
+/// of every delta, and the `init`/`update` reports only ever need the path and
+/// the kind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileStat {
+    /// What happened.
+    pub kind: ChangeKind,
+    /// The path it happened to.
+    pub path: String,
+    /// Lines added. Zero for a binary file — the concept does not apply there,
+    /// and inventing a number is worse than saying so.
+    pub insertions: usize,
+    /// Lines removed. Zero for a binary file, for the same reason.
+    pub deletions: usize,
+    /// Whether either side is binary, so the caller prints `Bin` rather than
+    /// two zeroes that would read as "nothing changed".
+    pub binary: bool,
+}
+
 /// How a local ref relates to its remote counterpart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AheadBehind {
@@ -395,7 +416,23 @@ pub trait GitBackend {
     fn set_ref(&self, name: &str, oid: Oid, reflog_message: &str) -> Result<(), GitError>;
 
     /// The differences between two trees, in path order.
-    fn diff_trees(&self, from: Option<Oid>, to: Oid) -> Result<Vec<Change>, GitError>;
+    ///
+    /// `paths` limits the diff to those pathspecs; an empty slice means the
+    /// whole tree.
+    fn diff_trees(
+        &self,
+        from: Option<Oid>,
+        to: Oid,
+        paths: &[String],
+    ) -> Result<Vec<Change>, GitError>;
+
+    /// The differences between two trees with their line counts, in path order.
+    fn diff_stat(
+        &self,
+        from: Option<Oid>,
+        to: Oid,
+        paths: &[String],
+    ) -> Result<Vec<FileStat>, GitError>;
 
     /// A textual patch between two trees, as `git diff` would render it.
     fn diff_patch(&self, from: Option<Oid>, to: Oid, paths: &[String]) -> Result<String, GitError>;
