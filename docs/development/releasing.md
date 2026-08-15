@@ -28,6 +28,10 @@ Release PR  (chore(release): X.Y.Z)
      │  then publishes to crates.io
      ▼
 the release is made public
+     │
+     ▼
+🍺 Homebrew
+     │  renders the formula and pushes it to noirbizarre/homebrew-tap
 ```
 
 ## Division of labour
@@ -82,6 +86,7 @@ Neither writes anything.
 | `.github/workflows/ship.yaml` | The driver |
 | `.github/workflows/prepare-release.yaml` | Version, changelog, release artifact |
 | `.github/workflows/publish-release.yaml` | Cross-compilation and assets |
+| `.github/workflows/homebrew.yaml` | The Homebrew tap formula |
 
 CI validates the setup on every run:
 
@@ -157,9 +162,43 @@ too.
     to create new crates. 0.1.0 was therefore published by hand with an API
     token. Every version since goes through this job.
 
+## Homebrew
+
+The `git-tpl` formula in
+[noirbizarre/homebrew-tap](https://github.com/noirbizarre/homebrew-tap) is
+generated, never hand-edited. `packaging/homebrew/git-tpl.rb` is the template;
+`@VERSION@` and the three `@SHA256_*@` placeholders are substituted by
+`.github/workflows/homebrew.yaml`, which then commits the result to the tap.
+
+It triggers on `release: published`, not on the publish workflow finishing.
+gh-ship only undrafts the release once 📦 Publish Release has succeeded, so
+`published` is the first moment at which the download URLs baked into the
+formula actually resolve. Publishing earlier would put a formula in the tap
+that 404s.
+
+The checksums are computed from the downloaded assets rather than read out of
+`SHA256SUMS`, so a disagreement between the two cannot reach users — and an
+unsubstituted placeholder fails the job, because a formula that kept one would
+install nothing.
+
+Re-running is safe. The push compares the staged formula against the tap's and
+exits without committing when they match, so a re-run for a tag already in the
+tap is a no-op rather than an empty commit.
+
+A tap only covers macOS arm64 and Intel, and Linux x86-64 — the platforms with
+an asset the formula can trust. homebrew-core is not a target yet: it has an
+acceptance bar around notability and release history that this project does not
+clear, and submitting early spends a reviewer's afternoon for nothing.
+
 ## Requirements
 
 A GitHub App with `APP_CLIENT_ID` (a repository variable) and
 `APP_PRIVATE_KEY` (a secret) in the `release` environment. The default
 `GITHUB_TOKEN` cannot trigger workflows, so a Release PR it authored would show
 no CI results.
+
+A `TAP_TOKEN` secret in the `homebrew` environment: a fine-grained personal
+access token whose repository access is limited to `noirbizarre/homebrew-tap`
+with `Contents: Read and write`. It is scoped to its own environment rather
+than sharing `release`, so nothing that publishes a release can also rewrite
+the tap.
