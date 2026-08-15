@@ -3,12 +3,12 @@
 use tpl::gitconfig::Preferences;
 use tpl::ops::{self, OpError};
 
-use super::Context;
+use super::Session;
 use crate::cli::{Format, GlobalArgs, StatusArgs};
 use crate::theme::{command, field, muted};
 
 pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
-    let ctx = Context::discover(global)?;
+    let ctx = Session::discover(global)?;
     // No overrides: `status` reports against the configured remote on purpose.
     // It prompts for nothing and pushes nothing, and a `--remote` that changed
     // only which remote a report compared against would be a flag whose effect
@@ -28,7 +28,7 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     })
 }
 
-fn print_text(ctx: &Context, status: &ops::Status) {
+fn print_text(ctx: &Session, status: &ops::Status) {
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &status.source));
     ctx.say(field(&ctx.theme, "Ref", &status.ref_name));

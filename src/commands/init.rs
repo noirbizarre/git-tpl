@@ -7,7 +7,7 @@ use tpl::git::{GitBackend, MergeOutcome};
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError};
 
-use super::{Context, answering, report_ignored, supplied, trust};
+use super::{Session, answering, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, InitArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, heading, muted, warning};
@@ -22,7 +22,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
         }
     }
 
-    let ctx = Context::discover(global)?;
+    let ctx = Session::discover(global)?;
     let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
         // `init` has no `--remote` and no `--push`; `--defaults` is the only
         // preference it can override, and it must, or `tpl.interactive true`
@@ -129,7 +129,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<(), OpError> {
 /// The cheapest way to find a cycle or a typo in an expression, since both are
 /// caught when the graph is built rather than when a question is reached.
 fn dry_run(
-    ctx: &Context,
+    ctx: &Session,
     args: &InitArgs,
     answers: BTreeMap<String, tpl::template::Value>,
 ) -> Result<(), OpError> {

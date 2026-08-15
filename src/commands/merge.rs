@@ -3,12 +3,12 @@
 use tpl::git::{GitBackend, MergeOutcome};
 use tpl::ops::{self, OpError};
 
-use super::Context;
+use super::Session;
 use crate::cli::{GlobalArgs, MergeArgs};
 use crate::theme::{command, heading, muted, warning};
 
 pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<(), OpError> {
-    let ctx = Context::discover(global)?;
+    let ctx = Session::discover(global)?;
 
     if args.abort {
         ctx.repo.abort_merge()?;

@@ -3,13 +3,13 @@
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError, UpdateOutcome};
 
-use super::{Context, answering, report_ignored, supplied, trust};
+use super::{Session, answering, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, heading, muted};
 
 pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
-    let ctx = Context::discover(global)?;
+    let ctx = Session::discover(global)?;
     let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
         remote: args.remote.as_deref(),
         push: args.push,
@@ -120,7 +120,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<(), OpError> {
 }
 
 fn dry_run(
-    ctx: &Context,
+    ctx: &Session,
     config: &tpl::config::Config,
     args: &UpdateArgs,
     overrides: std::collections::BTreeMap<String, tpl::template::Value>,

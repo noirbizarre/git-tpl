@@ -3,12 +3,12 @@
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError};
 
-use super::Context;
+use super::Session;
 use crate::cli::{GlobalArgs, RemoteArgs};
 use crate::theme::{command, muted};
 
 pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<(), OpError> {
-    let ctx = Context::discover(global)?;
+    let ctx = Session::discover(global)?;
     let preferences =
         Preferences::load(&ctx.repo)?.with_overrides(Overrides {
             remote: args.remote.as_deref(),

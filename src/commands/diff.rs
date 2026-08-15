@@ -2,12 +2,12 @@
 
 use tpl::ops::{self, OpError};
 
-use super::Context;
+use super::Session;
 use crate::cli::{DiffArgs, GlobalArgs};
 use crate::theme::{change, muted};
 
 pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<(), OpError> {
-    let ctx = Context::discover(global)?;
+    let ctx = Session::discover(global)?;
 
     if args.name_only || args.stat {
         let changes = ops::diff_changes(&ctx.repo, &ctx.root)?;
