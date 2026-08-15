@@ -9,7 +9,7 @@ git tpl merge [--no-commit] [--message <msg>]
 ## It is a normal merge
 
 ```sh
-git merge refs/tpl/rawtools-rust-library
+git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 That is the operation. `git tpl merge` looks up the ref name and uses a
@@ -34,7 +34,7 @@ reimplementing them is the mistake this design exists to avoid.
 ```console
 $ git tpl merge
 
-Merging refs/tpl/rawtools-rust-library into main
+Merging refs/tpl/github-com-noirbizarre-rust-library-template into main
 
   modified  Cargo.toml
   modified  README.md
@@ -50,7 +50,7 @@ Fast-forwards when it can.
 ```console
 $ git tpl merge
 
-Merging refs/tpl/rawtools-rust-library into main
+Merging refs/tpl/github-com-noirbizarre-rust-library-template into main
 
 CONFLICT (content): Merge conflict in Cargo.toml
 

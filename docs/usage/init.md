@@ -55,7 +55,7 @@ Use `--no-merge` to stop after step 9 and wire it up yourself.
 ## Example
 
 ```console
-$ git tpl init https://github.com/rawtools/rust-library-template
+$ git tpl init https://github.com/noirbizarre/rust-library-template
 
 Template: rust-library
   A small Rust library
@@ -64,10 +64,10 @@ Template: rust-library
 ? License › MIT
 ? Enable CI? › yes
 
-Template: rawtools/rust-library-template
+Template: noirbizarre/rust-library-template
 Revision: v1.4.0 (8b3e7d1)
 
-Created refs/tpl/github-com-rawtools-rust-library-template
+Created refs/tpl/github-com-noirbizarre-rust-library-template
 
   added     Cargo.toml
   added     README.md
@@ -110,7 +110,7 @@ commit is merged, and Git reconciles the two sides.
 
 ```sh
 cd my-existing-project
-git tpl init https://github.com/rawtools/rust-library-template
+git tpl init https://github.com/noirbizarre/rust-library-template
 ```
 
 **Expect conflicts, and expect them to be small.** Because there is no merge

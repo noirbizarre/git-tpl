@@ -9,8 +9,8 @@ git tpl status [--format json]
 ```console
 $ git tpl status
 
-Template:  rawtools/rust-library
-Ref:       refs/tpl/rawtools-rust-library
+Template:  noirbizarre/rust-library-template
+Ref:       refs/tpl/github-com-noirbizarre-rust-library-template
 
 Revision:  v1.3.0 (8b3e7d1)  →  v1.4.0 (4f2c1a9)   template has moved
 Rendered:  2 commits, last at 8b3e7d1

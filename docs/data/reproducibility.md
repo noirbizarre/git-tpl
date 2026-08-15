@@ -37,7 +37,7 @@ Data-Source: registry = remote:https://example.com/registry.json@sha256:9f86d081
 Read it back from Git:
 
 ```sh
-git show --no-patch refs/tpl/rust-library
+git show --no-patch refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 So you can always determine *which* external sources contributed to a tree, and

@@ -57,10 +57,10 @@ refs/tpl/<template-id>
 ```console
 $ git tpl update
 
-Template: rawtools/rust-library
+Template: noirbizarre/rust-library-template
 Revision: v1.3.0 → v1.4.0
 
-Updated refs/tpl/rawtools-rust-library
+Updated refs/tpl/github-com-noirbizarre-rust-library-template
 
   modified  Cargo.toml
   modified  README.md
@@ -80,7 +80,7 @@ made:
 
 ```console
 $ git tpl update
-Already up to date with rawtools/rust-library at v1.4.0.
+Already up to date with noirbizarre/rust-library-template at v1.4.0.
 ```
 
 This is why [determinism](../concepts/determinism.md) matters. A renderer that

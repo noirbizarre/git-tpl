@@ -31,7 +31,7 @@ git-tpl and never configured anything.
 ```console
 $ git tpl fetch
 From github.com:acme/my-project
- * [new ref]  refs/tpl/rawtools-rust-library -> origin/tpl/rawtools-rust-library
+ * [new ref]  refs/tpl/github-com-noirbizarre-rust-library-template -> origin/tpl/github-com-noirbizarre-rust-library-template
 
 The remote copy is 2 commits ahead of your local ref.
 Run `git tpl merge --from-remote` to use it, or `git tpl update` to render your own.

@@ -216,7 +216,7 @@ mod tests {
         let config = Config::parse(
             r#"
             [template]
-            source = "https://github.com/rawtools/rust-library"
+            source = "https://github.com/noirbizarre/rust-library"
             "#,
             "test.toml",
         )
@@ -224,7 +224,7 @@ mod tests {
 
         assert_eq!(
             config.template.source,
-            "https://github.com/rawtools/rust-library"
+            "https://github.com/noirbizarre/rust-library"
         );
         assert_eq!(config.template.r#ref, None);
         assert!(config.answers.is_empty());
@@ -269,7 +269,7 @@ mod tests {
         let original = Config::parse(
             r#"
             [template]
-            source = "https://github.com/rawtools/rust-library"
+            source = "https://github.com/noirbizarre/rust-library"
             ref = "v1.4.0"
             id = "legacy-name"
             root = "src"

@@ -22,7 +22,7 @@ It contains only the template reference and the answers.
 
 ```toml
 [template]
-source = "https://github.com/rawtools/rust-library-template"
+source = "https://github.com/noirbizarre/rust-library-template"
 ref = "main"
 
 [answers]

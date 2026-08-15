@@ -20,7 +20,7 @@ $ git tpl diff --stat
 ## The plain Git equivalent
 
 ```sh
-git diff HEAD refs/tpl/rawtools-rust-library
+git diff HEAD refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 Identical. `git tpl diff` looks up the ref name for you and defaults to the

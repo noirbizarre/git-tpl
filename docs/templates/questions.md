@@ -372,7 +372,7 @@ map or a string, the error says so and names the path:
 ```
 Failed to evaluate question `license`.
 
-  Template:    rawtools/rust-library
+  Template:    noirbizarre/rust-library-template
   Reference:   data.licenses.ids
   Reason:      expected an array of choices, got a table
 ```

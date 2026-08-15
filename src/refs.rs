@@ -59,8 +59,8 @@ impl TemplateId {
     ///
     /// | source | id |
     /// |---|---|
-    /// | `https://github.com/rawtools/rust-library` | `github-com-rawtools-rust-library` |
-    /// | `git@github.com:rawtools/rust-library.git` | `github-com-rawtools-rust-library` |
+    /// | `https://github.com/noirbizarre/rust-library` | `github-com-noirbizarre-rust-library` |
+    /// | `git@github.com:noirbizarre/rust-library.git` | `github-com-noirbizarre-rust-library` |
     /// | `../rust-library-template` | `rust-library-template` |
     pub fn derive(source: &str) -> Result<Self, TemplateIdError> {
         let normalised = normalise(source);
@@ -163,7 +163,7 @@ fn normalise(source: &str) -> String {
         }
     }
 
-    // `git@github.com:rawtools/x` — the scp-style separator is a path
+    // `git@github.com:noirbizarre/x` — the scp-style separator is a path
     // separator, not a port. Ports are stripped below in any case, so
     // normalising it to `/` here is enough to make the scp and URL forms agree.
     let s = s.replace(':', "/");
@@ -233,24 +233,24 @@ mod tests {
 
     #[rstest]
     #[case(
-        "https://github.com/rawtools/rust-library",
-        "github-com-rawtools-rust-library"
+        "https://github.com/noirbizarre/rust-library",
+        "github-com-noirbizarre-rust-library"
     )]
     #[case(
-        "http://github.com/rawtools/rust-library",
-        "github-com-rawtools-rust-library"
+        "http://github.com/noirbizarre/rust-library",
+        "github-com-noirbizarre-rust-library"
     )]
     #[case(
-        "https://github.com/rawtools/rust-library.git",
-        "github-com-rawtools-rust-library"
+        "https://github.com/noirbizarre/rust-library.git",
+        "github-com-noirbizarre-rust-library"
     )]
     #[case(
-        "git@github.com:rawtools/rust-library.git",
-        "github-com-rawtools-rust-library"
+        "git@github.com:noirbizarre/rust-library.git",
+        "github-com-noirbizarre-rust-library"
     )]
     #[case(
-        "ssh://git@github.com/rawtools/rust-library",
-        "github-com-rawtools-rust-library"
+        "ssh://git@github.com/noirbizarre/rust-library",
+        "github-com-noirbizarre-rust-library"
     )]
     #[case(
         "https://gitlab.example.com/team/sub/tpl",
@@ -265,9 +265,9 @@ mod tests {
     /// merge, having no common ancestor, conflicts on everything that differs.
     #[test]
     fn the_ssh_and_https_forms_of_a_repository_derive_the_same_id() {
-        let https = TemplateId::derive("https://github.com/rawtools/rust-library").unwrap();
-        let ssh = TemplateId::derive("git@github.com:rawtools/rust-library.git").unwrap();
-        let ssh_url = TemplateId::derive("ssh://git@github.com/rawtools/rust-library").unwrap();
+        let https = TemplateId::derive("https://github.com/noirbizarre/rust-library").unwrap();
+        let ssh = TemplateId::derive("git@github.com:noirbizarre/rust-library.git").unwrap();
+        let ssh_url = TemplateId::derive("ssh://git@github.com/noirbizarre/rust-library").unwrap();
         assert_eq!(https, ssh);
         assert_eq!(https, ssh_url);
     }
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn an_explicit_id_overrides_the_derivation() {
         let id = TemplateId::resolve(
-            "https://github.com/rawtools/rust-library",
+            "https://github.com/noirbizarre/rust-library",
             Some("legacy-name"),
         )
         .unwrap();
@@ -337,7 +337,7 @@ mod tests {
     /// Every derived id must survive `TemplateId::explicit`, or a source could
     /// produce an id we would refuse to accept if it were written down.
     #[rstest]
-    #[case("https://github.com/rawtools/rust-library")]
+    #[case("https://github.com/noirbizarre/rust-library")]
     #[case("git@github.com:a/b.git")]
     #[case("../my-template")]
     #[case("https://example.com/~weird/name!!")]

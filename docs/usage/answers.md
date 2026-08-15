@@ -4,7 +4,7 @@
 both `git tpl init` and `git tpl update`.
 
 ```console
-$ git tpl init https://github.com/rawtools/rust-library-template \
+$ git tpl init https://github.com/noirbizarre/rust-library-template \
     --answers-from answers.toml
 ```
 

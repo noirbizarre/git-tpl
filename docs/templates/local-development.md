@@ -113,9 +113,12 @@ keep the id stable:
 
 ```toml
 [template]
-source = "https://github.com/rawtools/rust-library"   # moved
-id = "rawtools-rust-library-template"                 # unchanged
+source = "https://github.com/noirbizarre/rust-library-template"  # moved here
+id = "gitlab-com-noirbizarre-rust-library-template"              # derived from the old address
 ref = "main"
 ```
+
+Without the `id` line, the new `source` would derive
+`github-com-noirbizarre-rust-library-template` and the ref would start over.
 
 See [Configuration](../configuration.md#template).
