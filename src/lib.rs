@@ -42,6 +42,7 @@ pub mod provenance;
 pub mod refs;
 pub mod render;
 pub mod template;
+pub mod userconfig;
 
 pub use config::{Config, ConfigError};
 pub use context::Context;
@@ -49,6 +50,7 @@ pub use data::Loader;
 pub use graph::Graph;
 pub use refs::TemplateId;
 pub use template::{Manifest, Value};
+pub use userconfig::{UserConfig, UserConfigError};
 
 /// The version of git-tpl, recorded in the provenance trailers of every
 /// rendered commit so that a rendering difference caused by an engine change is

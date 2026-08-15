@@ -22,6 +22,7 @@ use std::path::PathBuf;
 use tpl::git::GitBackend;
 use tpl::git::libgit2::LibGit2;
 use tpl::ops::OpError;
+use tpl::userconfig::UserConfig;
 
 use crate::cli::{AnswerArgs, GlobalArgs};
 use crate::theme::Theme;
@@ -42,6 +43,13 @@ pub struct Session {
     pub theme: Theme,
     /// Global flags.
     pub global: GlobalArgs,
+    /// The user's own preferences, read once per command.
+    ///
+    /// Read here rather than in `ops` so that the library never touches the
+    /// environment, and so that the four call sites — `init`, `init --dry-run`,
+    /// `update`, `update --dry-run` — cannot come to disagree about which file
+    /// they read.
+    pub user: UserConfig,
 }
 
 impl Session {
@@ -57,6 +65,7 @@ impl Session {
             root,
             theme: Theme::resolve(global.color),
             global: global.clone(),
+            user: UserConfig::load()?,
         })
     }
 

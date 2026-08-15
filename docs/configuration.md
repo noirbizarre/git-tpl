@@ -1,14 +1,22 @@
 # Configuration
 
-There are two places configuration lives, and the split is deliberate.
+There are three places configuration lives, and the split is deliberate. Each
+has exactly one owner.
 
 ```
-.config/git.tpl.toml       →  shared project configuration, versioned in Git
-.git/config, ~/.gitconfig  →  your local preferences
+.config/git.tpl.toml           →  the project. Versioned in Git. Everyone gets it.
+~/.config/git-tpl/config.toml  →  you. Never committed, never read by anyone else.
+.git/config, ~/.gitconfig      →  tpl.* preferences
 ```
 
 A freshly cloned repository is fully understandable from `.config/git.tpl.toml`
-alone. Nothing in Git configuration is required for git-tpl to work.
+alone. Neither of the other two is required for git-tpl to work, and nothing in
+either can change what a template renders.
+
+The test for which file something belongs in: **would a new contributor cloning
+this repository need it to be true?** If yes, `.config/git.tpl.toml`. If it is
+about your machine or your habits, one of the other two — Git config if Git
+already models it, the user configuration otherwise.
 
 ## `.config/git.tpl.toml`
 
@@ -81,6 +89,174 @@ credentials. No paths that only exist on your machine.
 The rendered ref is the state. Duplicating it into a file would create two
 sources of truth that can disagree, and the file would be the one that is wrong.
 
+## `~/.config/git-tpl/config.toml`
+
+Yours. Never committed, and never read by anyone else — so nothing in it may
+change what a template renders. See
+[ADR-013](adr/013-user-configuration.md).
+
+The path follows XDG: `$XDG_CONFIG_HOME/git-tpl/config.toml`, falling back to
+`~/.config/git-tpl/config.toml`. An absent file is the normal case, not an
+error. Unknown keys *are* an error — nothing generates this file, so a key that
+is not understood is a typo.
+
+```toml
+[defaults]
+author = "Axel Haustant"
+license = "MIT"
+
+[shortcuts]
+gh = "https://github.com/"
+ghs = "ssh://git@github.com/"
+
+[trust]
+templates = ["github.com/noirbizarre/*"]
+```
+
+Three sections, and deliberately nothing else.
+
+| Section | What it does |
+|---|---|
+| `[defaults]` | Pre-fills a prompt whose question has the same name. |
+| `[shortcuts]` | Expands a leading `<name>:` in a template URL you type. |
+| `[trust]` | Templates whose remote data is fetched without a confirmation. |
+
+### `[defaults]`
+
+A key matching a question's name pre-fills that question's prompt. Press Enter
+and it becomes your answer, recorded in `.config/git.tpl.toml` like any other.
+
+```toml
+[defaults]
+author = "Axel Haustant"
+email = "axel@example.com"
+license = "MIT"
+```
+
+**It seeds a prompt and nothing else.** If the question is not asked —
+`--defaults`, `tpl.interactive false`, CI — this file is ignored entirely and
+the template's own `default` applies. Anything else would mean the same template
+rendered two different trees on two machines, and then an unchanged template
+would no longer produce no commit. It is the same rule
+[`default_from`](templates/questions.md#git-seeded-defaults) already follows.
+
+Any question type may be seeded, not only `string`.
+
+Precedence, highest first:
+
+```
+1.  --answer
+2.  --answers-from                    (the last file given wins)
+3.  answers in .config/git.tpl.toml
+4.  [defaults]                        ← this file
+5.  default_from
+6.  the question's own default
+```
+
+`[defaults]` sits above `default_from` because the two are different kinds of
+statement: `default_from` is the *template author* guessing where the answer
+usually comes from, and `[defaults]` is you saying it outright.
+
+A key naming no question — or naming one of another type — is skipped in
+silence. That is deliberate, and differs from `--answers-from`: you write this
+file once for every template you will ever generate, so it is *expected* to
+overshoot, and warning about `author` on every template that has no `author`
+question is how a warning stops being read.
+
+### `[shortcuts]`
+
+A prefix substitution on a leading `<name>:` in a template URL you type.
+
+```toml
+[shortcuts]
+gh = "https://github.com/"
+ghs = "ssh://git@github.com/"
+mine = "https://github.com/noirbizarre/"
+```
+
+```sh
+git tpl init gh:org/rust-library-template
+git tpl init mine:rust-library-template
+```
+
+!!! warning "The expanded URL is what gets recorded"
+
+    `.config/git.tpl.toml` receives `https://github.com/org/...`, and the
+    template id — and so `refs/tpl/<id>` — is derived from that. A shortcut
+    never leaves your machine. If it did, a project you created would be
+    unusable by anyone without your file, and every contributor would derive a
+    different ref for the same template.
+
+The rules, all of them:
+
+- Only the URL you type on the command line is expanded. A source read out of a
+  repository never is, because expansion happens before git-tpl's internals see
+  the argument at all.
+- An unknown `foo:` is left alone — it may be a real scheme. Only names present
+  in this file expand.
+- Expansion happens once, never recursively. `ghs = "ssh://git@github.com/"`
+  does not then expand as `ssh:`.
+- A name may not contain `/`, and may not be `https`, `http`, `ssh`, `git` or
+  `file`. Those are refused when the file is read, not when a shortcut is used.
+
+`gh` and `ghs` are separate names rather than one name whose scheme git-tpl
+guesses. The reason to want the SSH form is a private repository, and inferring
+which one you meant from whether a clone failed is exactly the retry logic that
+produces incomprehensible authentication errors.
+
+### `[trust]`
+
+Templates whose [remote data sources](data/remote.md) are fetched without asking
+you first.
+
+```toml
+[trust]
+templates = [
+  "github.com/noirbizarre/*",
+  "github.com/myorg/**",
+]
+```
+
+Patterns are matched against the template's source URL, normalised first: the
+scheme, any userinfo, the port, a trailing `.git` and a trailing slash are
+dropped, backslashes are read as path separators, and what is left is folded to
+lower case. One entry therefore covers every way of writing the same
+repository:
+
+```
+github.com/org/t   matches   https://github.com/org/t
+                             git@github.com:org/t.git
+                             ssh://git@github.com:22/org/t/
+                             gh:org/t          (shortcuts expand first)
+```
+
+You may write a pattern as a full URL if that is what you have to hand — both
+sides are normalised the same way.
+
+Globs only, over `/`-separated segments:
+
+| | |
+|---|---|
+| `*` | any run of characters **within** one segment |
+| `**` | any number of segments |
+
+No regular expressions and no negation. This list decides whether a fetch
+happens, and a trust list that needs debugging is a trust list that will be got
+wrong.
+
+**A match grants even when nothing can be asked** — under `--defaults`, in CI,
+anywhere. The entry is prior consent, deliberately written, and no weaker than
+`--trust`. A template the list does *not* name is still refused, loudly, when
+there is nobody to ask: nothing is granted by omission.
+
+**What trust gates.** Only what a template asks git-tpl to do on its behalf,
+which today is one thing: a remote data fetch. Rendering never requires trust,
+because a template cannot execute anything, trusted or not.
+
+Note the name: the project file is `git.tpl.toml`, mirroring `git tpl`; this one
+is named after the binary. Two shapes, so a stray copy of one is never mistaken
+for the other.
+
 ## Git configuration
 
 Local, per-user, per-repository behaviour. All keys are under `tpl.`.
@@ -125,6 +301,11 @@ how *you* work; committing it would impose it on every contributor. Conversely,
 the template source is a property of the project, and putting it in
 `.git/config` would mean a fresh clone had no idea where the project came from.
 
-The test for which file a setting belongs in: **would a new contributor cloning
-this repository need it to be true?** If yes, `.config/git.tpl.toml`. If it is
-about your machine or your habits, Git config.
+### Why these are not in the user configuration either
+
+Git already models remotes, and it already has a precedence chain across
+system, user and repository files that people know. Reimplementing either would
+mean `git config tpl.remote` no longer told you the truth. The user
+configuration holds the three things Git has no opinion about: what a prompt
+should be pre-filled with, what a URL prefix abbreviates, and which templates
+you have already agreed to let reach the network.

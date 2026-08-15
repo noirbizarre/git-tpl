@@ -158,11 +158,18 @@ Precedence, highest first:
 
 ```
 --answer  >  --answers-from  >  answers in .config/git.tpl.toml
-          >  default_from (only when asked)  >  default
+          >  [defaults] (only when asked)  >  default_from (only when asked)
+          >  default
 ```
 
 A key that is unset, or set to an empty value, is simply absent: the question
 falls back to its `default`.
+
+The user's own
+[`[defaults]`](../configuration.md#defaults) sits above `default_from` and
+follows the same seeds-the-prompt-only rule. `default_from` is the template
+author's guess about where an answer usually comes from; `[defaults]` is the
+person at the keyboard saying it outright, so the person wins.
 
 ## Validation
 

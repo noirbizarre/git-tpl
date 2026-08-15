@@ -100,8 +100,31 @@ writing anything anywhere:
 git tpl init https://github.com/org/template --trust
 ```
 
-When there is nobody to ask — `--defaults`, `tpl.interactive false`, CI — every
-remote source is **refused**, loudly, naming what was refused:
+### Saying it once
+
+A prompt answered `yes` twenty times a day is not a decision, it is a
+keystroke. Templates you have already made up your mind about go in your own
+[`[trust]` list](../configuration.md#trust):
+
+```toml
+# ~/.config/git-tpl/config.toml
+[trust]
+templates = [
+  "github.com/noirbizarre/*",
+  "github.com/myorg/**",
+]
+```
+
+A match accepts every source without a prompt, exactly as `--trust` would —
+including when there is nobody to ask. The entry *is* the prior consent, and it
+is no weaker for having been written yesterday.
+
+The list lives on your machine and never in `.config/git.tpl.toml`. A project
+cannot consent to network access on its reader's behalf.
+
+When there is nobody to ask — `--defaults`, `tpl.interactive false`, CI — and
+the template matches no `[trust]` entry, every remote source is **refused**,
+loudly, naming what was refused:
 
 ```
 x data source `licenses` was not fetched, because the template is not trusted

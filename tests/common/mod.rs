@@ -22,6 +22,13 @@ pub struct Repo {
     /// Kept so a repository that owns its temporary directory outlives it.
     /// `None` when the directory belongs to a [`World`].
     pub _dir: Option<tempfile::TempDir>,
+    /// An `$XDG_CONFIG_HOME` of this repository's own, empty unless a test
+    /// fills it.
+    ///
+    /// Every `tpl()` invocation points at it, so the suite can never read —
+    /// or be changed by — the developer's `~/.config/git-tpl/config.toml`.
+    /// Outside the worktree, or `status` and `diff` would see it.
+    pub _config_dir: tempfile::TempDir,
 }
 
 impl Repo {
@@ -34,6 +41,7 @@ impl Repo {
         let repo = Self {
             path,
             _dir: Some(dir),
+            _config_dir: tempfile::tempdir().expect("config home"),
         };
         repo.git(&["init", "-q", "-b", "main"]);
         repo.configure();
@@ -44,7 +52,11 @@ impl Repo {
     pub fn init_in(parent: &Path, name: &str) -> Self {
         let path = parent.join(name);
         std::fs::create_dir_all(&path).expect("create repo dir");
-        let repo = Self { path, _dir: None };
+        let repo = Self {
+            path,
+            _dir: None,
+            _config_dir: tempfile::tempdir().expect("config home"),
+        };
         repo.git(&["init", "-q", "-b", "main"]);
         repo.configure();
         repo
@@ -69,6 +81,31 @@ impl Repo {
         // assertions about the host's Git configuration.
         self.git(&["config", "core.autocrlf", "false"]);
         self.git(&["config", "core.eol", "lf"]);
+    }
+
+    /// An existing repository at a path, with its own isolated config home.
+    ///
+    /// For a repository this harness did not create — a bare remote pushed to
+    /// by a test, say.
+    pub fn at(path: PathBuf) -> Self {
+        Self {
+            path,
+            _dir: None,
+            _config_dir: tempfile::tempdir().expect("config home"),
+        }
+    }
+
+    /// This repository's isolated `$XDG_CONFIG_HOME`.
+    pub fn config_home(&self) -> &Path {
+        self._config_dir.path()
+    }
+
+    /// Write the user configuration `tpl()` will read.
+    pub fn user_config(&self, toml: &str) -> &Self {
+        let path = self.config_home().join("git-tpl").join("config.toml");
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("create config dir");
+        std::fs::write(&path, toml).expect("write user config");
+        self
     }
 
     /// Write a file, creating parent directories.
@@ -244,6 +281,12 @@ pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
     // ambient config would change what the tests exercise.
     command.env_remove("NO_COLOR");
     command.env_remove("CLICOLOR_FORCE");
+    // The user configuration is read from `$XDG_CONFIG_HOME/git-tpl/`, so
+    // without this the suite would read whatever the developer happens to have
+    // written there — and `[defaults]` would change what a prompt returns.
+    // `HOME` goes too, since it is the fallback the resolution uses.
+    command.env("XDG_CONFIG_HOME", repo.config_home());
+    command.env_remove("HOME");
 
     let output = command.output().expect("run git-tpl");
     Output {

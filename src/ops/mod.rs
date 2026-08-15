@@ -26,6 +26,7 @@ use crate::provenance::{Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
 use crate::render::{RenderError, render_tree};
 use crate::template::{Manifest, Value};
+use crate::userconfig::UserConfig;
 
 pub use resolve::{Request, ResolveError, Resolved};
 
@@ -36,6 +37,15 @@ pub enum OpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Config(#[from] ConfigError),
+
+    /// The user's own configuration is invalid.
+    ///
+    /// Separate from `Config` because the two files have different owners: this
+    /// one is on the machine running the command, and no amount of editing the
+    /// project will fix it.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    UserConfig(#[from] crate::userconfig::UserConfigError),
 
     /// The template could not be resolved.
     #[error(transparent)]
@@ -222,14 +232,19 @@ pub struct Render {
 ///
 /// Shared by `init`, `update` and `--dry-run`, so all three cannot disagree
 /// about what a rendering is.
+// Every argument is a distinct decision the caller has already made, and
+// bundling them into a struct would only move the list somewhere a reader has
+// to go and find it.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     project: &dyn GitBackend,
     project_root: &Path,
     config: &Config,
     supplied: BTreeMap<String, Value>,
     dirty: bool,
+    user: &UserConfig,
     mut answering: Answering<'_>,
-    mut trust: Trust<'_>,
+    trust: Trust<'_>,
 ) -> Result<Render, OpError> {
     let template = resolve::resolve(Request {
         source: &config.template.source,
@@ -262,6 +277,26 @@ pub fn render(
     // A template with no remote data is never asked about — the overwhelming
     // majority, and they must not acquire a prompt they have no use for.
     let requests = declared_remotes(&template.manifest.data);
+
+    // A `[trust]` entry is prior consent, deliberately written, and no weaker
+    // than `--trust` — so it grants even when there is nobody to ask. Refusing
+    // it non-interactively would leave `--trust` on every CI invocation as the
+    // only way to use a template you have already agreed to, which teaches
+    // people to pass `--trust` unconditionally.
+    //
+    // Applied here rather than where `Trust` is constructed, because that is in
+    // the CLI and only this layer has the source: `update` reads it out of the
+    // project configuration. One place, so `init`, `update` and both dry runs
+    // cannot disagree.
+    //
+    // An *unmatched* template is untouched, and `Trust::Refuse` still refuses
+    // it loudly. Nothing is granted by omission.
+    let mut trust = if user.trust.allows(&config.template.source) {
+        Trust::always()
+    } else {
+        trust
+    };
+
     let decisions: BTreeMap<String, Decision> = if requests.is_empty() {
         BTreeMap::new()
     } else {
@@ -282,7 +317,7 @@ pub fn render(
     // is empty *and* `DefaultsOnly` ignores it — two guards, because a machine
     // value reaching the tree would end invariant 2.
     let seeds = if answering.is_interactive() {
-        git_seeds(project, &template.manifest)?
+        prompt_seeds(project, &template.manifest, user)?
     } else {
         BTreeMap::new()
     };
@@ -335,16 +370,36 @@ pub fn render(
     })
 }
 
-/// Collect the prompt seeds a manifest's `default_from` keys ask for.
+/// Collect everything a prompt may be pre-filled with, in precedence order.
 ///
-/// A key that is not set is simply absent: a template suggesting `user.name`
+/// Two sources, and the user's own wins:
+///
+/// ```text
+/// [defaults] in the user configuration  >  default_from  >  the question's default
+/// ```
+///
+/// A `default_from` is the *template author's* suggestion about where an answer
+/// usually comes from; `[defaults]` is the person at the keyboard stating it
+/// outright. When both speak, the person does.
+///
+/// A key that names no question — or names one of another type — is skipped in
+/// silence, unlike an ignored `--answers-from` key. The difference is the file:
+/// an answers file is supplied for *this* template, so a key it does not
+/// recognise is a typo, whereas `[defaults]` is written once for every template
+/// the user will ever generate and is *expected* to overshoot. Reporting
+/// `author` on every run of every template that has no `author` question would
+/// be noise, and noise is how a real warning stops being read.
+///
+/// A source that is simply unset is absent: a template suggesting `user.name`
 /// must still work for someone who has never set one, and the question's own
-/// `default` covers that case.
-fn git_seeds(
+/// `default` covers that.
+fn prompt_seeds(
     project: &dyn GitBackend,
     manifest: &Manifest,
+    user: &UserConfig,
 ) -> Result<BTreeMap<String, Value>, OpError> {
     let mut seeds = BTreeMap::new();
+
     for (name, question) in &manifest.questions {
         let Some(key) = question.git_config_key() else {
             continue;
@@ -353,7 +408,33 @@ fn git_seeds(
             seeds.insert(name.clone(), Value::String(value));
         }
     }
+
+    apply_user_defaults(&mut seeds, manifest, user);
+
     Ok(seeds)
+}
+
+/// Overlay the user's `[defaults]` onto the seeds a manifest asked for.
+///
+/// Split out from [`prompt_seeds`] so the precedence rule can be tested without
+/// a repository — it is the part with a decision in it.
+fn apply_user_defaults(
+    seeds: &mut BTreeMap<String, Value>,
+    manifest: &Manifest,
+    user: &UserConfig,
+) {
+    for (name, value) in &user.defaults {
+        let Some(question) = manifest.questions.get(name) else {
+            continue;
+        };
+        // Type-checked rather than coerced. A seed that does not fit is a
+        // collision with an unrelated template's question of the same name, and
+        // pre-filling a boolean prompt with a string would be worse than not
+        // pre-filling it at all.
+        if question.kind.accepts(value) {
+            seeds.insert(name.clone(), value.clone());
+        }
+    }
 }
 
 /// The result of an `init`.
@@ -396,6 +477,7 @@ pub fn init(
     supplied: BTreeMap<String, Value>,
     dirty: bool,
     merge_after: bool,
+    user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<InitOutcome, OpError> {
@@ -418,6 +500,7 @@ pub fn init(
         &config,
         supplied,
         dirty,
+        user,
         answering,
         trust,
     )?;
@@ -540,6 +623,7 @@ pub fn update(
     project_root: &Path,
     overrides: BTreeMap<String, Value>,
     dirty: bool,
+    user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<UpdateOutcome, OpError> {
@@ -557,6 +641,7 @@ pub fn update(
         &config,
         supplied,
         dirty,
+        user,
         answering,
         trust,
     )?;
@@ -891,6 +976,80 @@ pub fn push(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A manifest with one question of each of the kinds these tests need.
+    fn manifest_with(questions: &str) -> Manifest {
+        Manifest::parse(&format!("name = \"t\"\n{questions}"), "template.toml").unwrap()
+    }
+
+    fn user_with(defaults: &str) -> UserConfig {
+        UserConfig::parse(&format!("[defaults]\n{defaults}"), "config.toml").unwrap()
+    }
+
+    #[test]
+    fn a_user_default_overrides_a_git_seeded_one() {
+        // `default_from` is the template author guessing where the answer comes
+        // from; `[defaults]` is the person at the keyboard saying it outright.
+        let manifest = manifest_with("[questions.author]\ntype = \"string\"\n");
+        let mut seeds = BTreeMap::from([("author".to_string(), Value::String("From Git".into()))]);
+
+        apply_user_defaults(
+            &mut seeds,
+            &manifest,
+            &user_with("author = \"From The File\"\n"),
+        );
+
+        assert_eq!(
+            seeds.get("author"),
+            Some(&Value::String("From The File".into()))
+        );
+    }
+
+    #[test]
+    fn a_user_default_naming_no_question_is_skipped() {
+        // Silently, unlike an ignored `--answers-from` key: this file is
+        // written once for every template the user will ever generate, so it is
+        // expected to overshoot.
+        let manifest = manifest_with("[questions.author]\ntype = \"string\"\n");
+        let mut seeds = BTreeMap::new();
+
+        apply_user_defaults(&mut seeds, &manifest, &user_with("licence = \"MIT\"\n"));
+
+        assert!(seeds.is_empty());
+    }
+
+    #[test]
+    fn a_user_default_of_the_wrong_type_is_skipped() {
+        // A collision with an unrelated template's question of the same name.
+        // Pre-filling a boolean prompt with a string is worse than not
+        // pre-filling it.
+        let manifest = manifest_with("[questions.ci]\ntype = \"boolean\"\n");
+        let mut seeds = BTreeMap::new();
+
+        apply_user_defaults(&mut seeds, &manifest, &user_with("ci = \"yes please\"\n"));
+
+        assert!(seeds.is_empty());
+    }
+
+    #[test]
+    fn a_user_default_seeds_a_question_of_any_kind() {
+        // Not only `string`, which is all `default_from` may seed. The whole
+        // point of the file is `license = "MIT"`, and `license` is a choice.
+        let manifest = manifest_with(
+            "[questions.license]\ntype = \"choice\"\nchoices = [\"MIT\", \"Apache-2.0\"]\n\n\
+             [questions.ci]\ntype = \"boolean\"\n",
+        );
+        let mut seeds = BTreeMap::new();
+
+        apply_user_defaults(
+            &mut seeds,
+            &manifest,
+            &user_with("license = \"MIT\"\nci = true\n"),
+        );
+
+        assert_eq!(seeds.get("license"), Some(&Value::String("MIT".into())));
+        assert_eq!(seeds.get("ci"), Some(&Value::Bool(true)));
+    }
 
     #[test]
     fn a_status_with_nothing_outstanding_is_not_pending() {
