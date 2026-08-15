@@ -52,23 +52,32 @@ mise run docs:build
 src/
 ├── lib.rs           the library surface
 ├── main.rs          the git-tpl binary
+├── exit.rs          exit codes, defined once
 ├── config.rs        .config/git.tpl.toml
 ├── gitconfig.rs     tpl.* keys and their precedence
-├── refs.rs          template id normalisation
+├── refs.rs          template id → refs/tpl/<id>
 ├── provenance.rs    commit trailers
-├── template/        manifest, questions
+├── template/        manifest, questions, the Value type
 ├── context.rs       the shared evaluation context
 ├── graph.rs         the dependency DAG
 ├── eval.rs          expression evaluation and prompting
 ├── render.rs        the tree walk
+├── answers.rs       --answers-from files
 ├── data/            data source abstraction and loaders
 ├── git/             the Git abstraction
-│   ├── mod.rs       the GitBackend trait
+│   ├── mod.rs       the GitBackend trait — our types, never git2's
 │   └── libgit2.rs   the only implementation
-├── ops/             orchestration, one module per command
+├── ops/             orchestration, one function per command
 ├── cli.rs           argument types only
+├── theme.rs         formatting helpers that return String
+├── prompt.rs        the demand-based prompter
 └── commands/        one module per subcommand
 ```
+
+`ops/` is a module with one *function* per command — `init`, `update`,
+`status`, `diff`, `merge`, `fetch`, `push` — plus `resolve` for fetching a
+template. `commands/` is the directory with one module per subcommand; that is
+where argument handling and output formatting live, and nothing else.
 
 Dependencies point inward. `ops` uses `render`, `graph`, `git`; nothing in
 `template/` or `render.rs` knows a command exists.
