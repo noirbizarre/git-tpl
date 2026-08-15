@@ -491,3 +491,87 @@ fn only_http_and_https_are_fetched() {
 
     output.says("tpl::data::load").says("scheme");
 }
+
+// --- the persistent trust list ----------------------------------------------
+
+/// A `[trust]` entry is prior consent, deliberately written, and no weaker than
+/// `--trust` — so it grants where `--trust` would, including where there is
+/// nobody to ask.
+///
+/// The alternative is `--trust` on every CI invocation as the only way to use a
+/// template you have already agreed to, which teaches people to pass `--trust`
+/// unconditionally.
+#[test]
+fn a_trusted_pattern_grants_without_a_prompt_and_without_a_flag() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let template = template_with(
+        dir.path(),
+        &format!("source = \"{}\"", server.url("/reg.json")),
+        "{{ data.reg.count }}\n",
+    );
+    let project = project(dir.path());
+    // Matched against the *template's* source, not the data URL: trust is a
+    // statement about whose template you are willing to run.
+    //
+    // Forward slashes: a Windows path written into TOML raw is a string full of
+    // invalid escape sequences. `normalise` treats both separators alike, so
+    // the pattern still matches the backslashed source the command is given.
+    let source = template.path.to_string_lossy().into_owned();
+    project.user_config(&format!(
+        "[trust]\ntemplates = [\"{}/**\"]\n",
+        dir.path().to_string_lossy().replace('\\', "/")
+    ));
+
+    // No `--trust`, and `--defaults` means there is nobody to ask.
+    tpl(&project, &["init", &source, "--defaults"]).success();
+
+    assert_eq!(project.read("out.txt"), "2\n");
+    assert_eq!(server.hits(), 1);
+}
+
+/// The other half of the same claim: nothing is granted by omission. A template
+/// the list does not name is still refused, loudly, and still says what would
+/// have allowed it.
+#[test]
+fn a_template_outside_the_trust_list_is_still_refused() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let template = template_with(
+        dir.path(),
+        &format!("source = \"{}\"", server.url("/reg.json")),
+        "{{ data.reg.count }}\n",
+    );
+    let project = project(dir.path());
+    project.user_config("[trust]\ntemplates = [\"github.com/someone-else/*\"]\n");
+
+    tpl(
+        &project,
+        &["init", &template.path.to_string_lossy(), "--defaults"],
+    )
+    .failure()
+    .says("tpl::data::untrusted")
+    .says("--trust");
+
+    assert_eq!(server.hits(), 0);
+}
+
+/// Trust gates the network and nothing else. A template with no remote data is
+/// unaffected by the list, in either direction.
+#[test]
+fn an_empty_trust_list_changes_nothing_for_a_template_with_no_remote_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = Repo::init_in(dir.path(), "template");
+    template.write("template.toml", "name = \"plain\"\n");
+    template.write("template/out.txt.jinja", "plain\n");
+    template.commit_all("feat: initial");
+    let project = project(dir.path());
+    project.user_config("[trust]\ntemplates = []\n");
+
+    tpl(
+        &project,
+        &["init", &template.path.to_string_lossy(), "--defaults"],
+    )
+    .success()
+    .silent_about("trust");
+}

@@ -10,7 +10,7 @@ version of the project is worse than none, because it is believed.
 ## Where things stand
 
 **The core model works end to end.** `init → update → diff → merge` on real
-repositories, with real libgit2 merges and real conflicts. 474 tests pass.
+repositories, with real libgit2 merges and real conflicts. 517 tests pass.
 
 ```
 main:  A ─── M ─── B ─── M'
@@ -51,9 +51,13 @@ main:  A ─── M ─── B ─── M'
 | Local template development | ✅ including `--dirty` |
 | `.config/git.tpl.toml` | ✅ written, committed, hand-editable |
 | Git config (`tpl.*`) | ✅ Git's own precedence |
+| `~/.config/git-tpl/config.toml` | ✅ XDG, hand-written, unknown keys refused (ADR-013) |
+| `[defaults]` | ✅ seeds a prompt, ignored when nothing is asked — asserted by test |
+| `[shortcuts]` | ✅ expanded at the CLI edge; the expanded URL is what is recorded |
+| `[trust]` | ✅ glob patterns over the normalised URL; grants non-interactively too |
 | Git backend isolation | ✅ enforced by a prek hook, not by hope |
 | HTTP isolation | ✅ same, confining the client to `src/data/` |
-| Documentation | ✅ full Zensical site, 12 ADRs |
+| Documentation | ✅ full Zensical site, 13 ADRs |
 | Tooling | ✅ mise, prek, git-cliff, gh-ship, CI |
 | Releases | ✅ binaries for six targets, plus crates.io via Trusted Publishing |
 
@@ -67,29 +71,13 @@ main:  A ─── M ─── B ─── M'
 | **`git tpl show`, `git tpl detach`** | No clear semantics yet. Not implemented until there are. |
 | **Testing a template** | A template author renders into a scratch directory and looks. There is no `render` command and no test runner, so most templates have no tests. The fixtures a runner would read are now expressible — `--answers-from` ships. See *Next*. |
 | **Template inheritance** | A template is one repository, standing alone. Fifteen templates in an organisation means fifteen copies of the same CI workflow. See *Next*. |
-| **User configuration** | There is no `~/.config/git-tpl/config.toml`. Prompt defaults come from the template alone, template sources are written out in full every time, and remote-data trust is per-invocation with no persistent list. See *Next*. |
 | **Distribution beyond crates.io** | `cargo install`, `mise use -g cargo:git-tpl`, `mise use -g github:noirbizarre/git-tpl` and raw release binaries. No AUR package, no Homebrew formula, no mise registry entry. See *Next*. |
 
 ---
 
 ## Next
 
-### 1. A persistent trust list
-
-Remote data sources ship, gated by a confirmation shown before any fetch, plus
-`--trust` for one invocation. What is missing is the ability to say "I always
-trust this organisation" once, instead of confirming the same template's network
-access on every run.
-
-That is a user-side fact — it belongs on the machine of the only party who can
-consent to it, never in `.config/git.tpl.toml`, because a project cannot consent
-on its reader's behalf. So it arrives with the user configuration file, as
-`[trust].templates`, and is described in item 5 rather than duplicated here.
-
-The gate it plugs into already exists: `TrustGate` in `src/data/`, selected in
-`commands::trust`. A pattern match becomes one more arm alongside `--trust`.
-
-### 2. SSH verification
+### 1. SSH verification
 
 Not a CI job. A documented procedure a developer can run against a private
 repository of their own:
@@ -102,7 +90,7 @@ repository of their own:
 The credential callback tries the agent first precisely so a passphrase never
 has to be typed. That is the part worth confirming by hand.
 
-### 3. `gh-tpl`
+### 2. `gh-tpl`
 
 `gh extension install` requires a repository named `gh-tpl` shipping a binary
 named `gh-tpl`, and this repository is `noirbizarre/git-tpl`. Options, in order of
@@ -115,7 +103,7 @@ preference:
 The CLI layer is already thin enough that the second binary is a `main.rs` and
 a different `bin_name`.
 
-### 4. Distribution: AUR and Homebrew
+### 3. Distribution: AUR and Homebrew
 
 Cheap, because a release already produces six binaries and a `SHA256SUMS`. Both
 packages are consumers of an artefact that exists; neither needs a build change.
@@ -152,164 +140,7 @@ entry in `jdx/mise`'s `registry.toml` is what makes the short
 All of this is downstream of a version somebody else depends on. Packaging
 0.1.x means chasing it.
 
-### 5. A user configuration file
-
-Three unrelated frustrations with one home: retyping your name into every
-project, typing `https://github.com/` twenty times a day, and confirming the
-same template's network access on every run — the last of which is now a real
-prompt rather than a hypothetical one, because remote data sources ship.
-
-```
-$XDG_CONFIG_HOME/git-tpl/config.toml   (default: ~/.config/git-tpl/config.toml)
-```
-
-**Three files, three owners.** This one looks like the project file and is not
-it, so the split has to be stated before anything else:
-
-```
-.config/git.tpl.toml           →  the project. Versioned. Everyone gets it.
-~/.config/git-tpl/config.toml  →  you. Never committed, never read by anyone else.
-.git/config, ~/.gitconfig      →  tpl.* preferences (unchanged)
-```
-
-The naming difference is deliberate rather than an oversight: the project file
-is Git-shaped and lives in `.config/` (ADR-010), the user file is named after
-the binary and follows XDG. Two names means a stray copy of one is never
-mistaken for the other. A directory rather than a bare file, so a second
-user-side file later is not a move of a path people have written down. This is a
-new on-disk format, which is to say a contract, and **ADR-013** records it.
-
-**Landed so far:** the file, its XDG resolution, parsing, validation and
-diagnostics, `$XDG_CONFIG_HOME` isolation in the test harness, `[defaults]` and
-`[shortcuts]`.
-
-```toml
-[defaults]
-author = "Axel Haustant"
-email = "axel@example.com"
-license = "MIT"
-
-[shortcuts]
-gh = "https://github.com/"
-ghs = "ssh://git@github.com/"
-mine = "https://github.com/noirbizarre/"
-
-[trust]
-templates = [
-  "github.com/noirbizarre/*",
-  "github.com/myorg/**",
-]
-```
-
-Three sections, and deliberately nothing else. Anything that describes the
-project belongs in `.config/git.tpl.toml`; anything Git already models belongs
-in `tpl.*`.
-
-#### `[defaults]` seeds prompts, never the context
-
-This is the whole design, and the only thing that keeps invariant 2 true. It is
-the implemented `default_from = "git:user.name"` rule applied to a second
-source.
-
-- A key matching a question name becomes that question's **prompt default**.
-- The value the user accepts is recorded in `.config/git.tpl.toml` like any
-  other answer, so the project remains reproducible for someone who has never
-  seen your file.
-- If the question is **not asked** — `--defaults`, `tpl.interactive false`, CI —
-  the file is **ignored** and the template's own `default` applies. Otherwise
-  the same template renders two different trees on two machines and the model
-  breaks. This needs the test that says so, named for the claim:
-  `user_defaults_do_not_apply_when_questions_are_not_asked`.
-- Keys matching no question — or matching one of another type — are skipped in
-  **silence**, and this is where the shipped behaviour deviates from the
-  paragraph above. Reporting them, "exactly as for `--answers-from`", was the
-  wrong instinct: an answers file is supplied for *this* template, so a key it
-  does not recognise is a typo, whereas `[defaults]` is written once for every
-  template the user will ever generate and is expected to overshoot. Warning
-  about `author` on every template that has no `author` question is how a
-  warning stops being read. Recorded in ADR-013.
-- Precedence, stated once and tested, extending the chain `--answers-from` established:
-
-  ```
-  --answer  >  --answers-from  >  answers in .config/git.tpl.toml
-            >  [defaults]      >  default_from  >  the question's default
-  ```
-
-- No per-template namespacing in v1. If it proves necessary,
-  `[defaults."github.com/org/*"]` is additive.
-
-#### `[shortcuts]` expand before anything else sees the URL
-
-Prefix substitution on a leading `<name>:`, performed in `commands` before the
-source reaches `ops` at all — one layer further out than this said, and strictly
-stronger for it: `ops` never sees an unexpanded source, so "matched only against
-the CLI argument" is structural rather than a rule to remember. One rule makes
-it safe:
-
-> **The expanded URL is what gets written to `.config/git.tpl.toml`, and what
-> derives the template id.** A shortcut never leaves your machine.
-
-Without it, a project created by someone with `mine:` is unusable by everyone
-else, and `refs/tpl/<id>` differs per contributor for the same template — an
-invariant-3 problem wearing a convenience feature's clothes. Also:
-
-- Shortcuts are matched only against the CLI argument, never against a value
-  read out of a repository.
-- `gh:` and `ghs:` are separate names rather than a scheme guessed from
-  context. The reason for the ssh form is private repositories, and inferring
-  which one you meant from whether a clone failed is exactly the retry logic
-  that produces incomprehensible auth errors.
-- An unknown `foo:` is left alone — it may be a real scheme. Only names present
-  in the file expand.
-- A name may not contain `/` and may not be a known scheme (`https`, `ssh`,
-  `git`, `file`). Rejected when the file is read, not when it is used.
-
-#### `[trust]` is a user-side fact and is never recorded in the project
-
-Patterns match the **expanded** URL, normalised first: scheme, userinfo, port
-and a trailing `.git` dropped, case folded. One entry therefore covers
-`https://github.com/org/t`, `git@github.com:org/t.git` and `gh:org/t`. Globs
-only — `*` within a path segment, `**` across segments. No regex and no
-negation, because a trust list that needs debugging is a trust list that will
-be got wrong.
-
-#### What trust actually gates
-
-**Rendering never requires trust.** Invariant 5 is untouched: no subprocess, no
-eval, no code from a template, trusted or not. Trust gates only the things a
-template asks *git-tpl* to do on its behalf, of which there are at most two:
-
-| Capability | Status | Shown in full before it happens |
-|---|---|---|
-| **Remote data fetch** | ✅ implemented | every URL, the source name that declared it, the size limit |
-| **Post-render tasks** | *Under review*, ADR-gated | every rendered command, in order |
-
-When the template is **not** trusted:
-
-1. Every requested capability is listed in full, before any of it happens.
-2. You **pick per item** — accept, skip, or abort. Skipping a data source
-   produces the failure the loader already reports by name, so no new failure
-   mode is invented.
-3. Nothing is remembered. The next run asks again.
-
-When it **is** trusted — the URL matches a `[trust].templates` pattern, or
-`--trust` was passed — everything is accepted without a prompt. `--trust` is
-per-invocation and writes nothing anywhere.
-
-Non-interactive and untrusted (`--defaults`, `tpl.interactive false`, CI): every
-capability is **refused**, loudly, naming what was refused and saying that
-`--trust` or a `[trust]` entry would allow it. Never silently accepted — a CI
-runner is the worst possible place to grant a capability by omission.
-
-Two things this is not, so it is not read as a weakening:
-
-- Trust is not a security boundary against a template you have already decided
-  to run. It is a confirmation step that makes the network and the shell
-  visible before they are used.
-- It does not create a place to record trust *in the project*. Trust lives on
-  the machine of the only party who can consent to it.
-
-### 6. Testing a template
+### 4. Testing a template
 
 A template author has no way to say *"given these answers, this is what comes
 out"* except to render into a scratch directory and look. Every template above
@@ -381,7 +212,7 @@ CI without wrapping.
 The fixtures *are* answers files, read by the same parsers — which is why
 `--answers-from` had to come first.
 
-### 7. Template inheritance
+### 5. Template inheritance
 
 The largest template-side feature there is, and the one that decides whether an
 organisation with fifteen templates maintains fifteen copies of its CI workflow.
@@ -482,7 +313,7 @@ This changes the manifest, which is a contract, and changes what "the template"
 means for provenance and for `refs/tpl/<id>`. It needs **ADR-014** before it
 needs code.
 
-### 8. Smaller things
+### 6. Smaller things
 
 
 - `git tpl show <path>` — the template's version of one file. Wanted whenever a
@@ -543,7 +374,7 @@ it or not at all. What the ADR would have to establish:
   and 2 stay literally true, and their tests stay untouched. If either has to be
   relaxed, the feature is declined.
 - Trust is per-invocation and explicit, or it comes from the user's own
-  `[trust]` list (item 5). Never from `.config/git.tpl.toml` — the project
+  `[trust]` list (the user's `[trust]` list). Never from `.config/git.tpl.toml` — the project
   cannot consent on the reader's behalf.
 - Tasks run on `init`, not on `update`. `update` being a ref-only operation is
   most of its value.
@@ -567,7 +398,7 @@ correct semantic — it is a tree diff — and it is documented, but the first
 **The template is cloned fresh on every run.** Correct and slow for a large
 remote template. A cache would need invalidation, and a stale cache silently
 rendering an old template is a far worse failure than a slow fetch — so this
-stays until it actually hurts. Inheritance (item 7) is what would make it
+stays until it actually hurts. Inheritance (item 5) is what would make it
 hurt: a three-deep chain is three clones per run.
 
 **A remote data source is fetched on every run.** Once per run, but never

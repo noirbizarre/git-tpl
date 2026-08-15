@@ -204,6 +204,55 @@ guesses. The reason to want the SSH form is a private repository, and inferring
 which one you meant from whether a clone failed is exactly the retry logic that
 produces incomprehensible authentication errors.
 
+### `[trust]`
+
+Templates whose [remote data sources](data/remote.md) are fetched without asking
+you first.
+
+```toml
+[trust]
+templates = [
+  "github.com/noirbizarre/*",
+  "github.com/myorg/**",
+]
+```
+
+Patterns are matched against the template's source URL, normalised first: the
+scheme, any userinfo, the port, a trailing `.git` and a trailing slash are
+dropped, backslashes are read as path separators, and what is left is folded to
+lower case. One entry therefore covers every way of writing the same
+repository:
+
+```
+github.com/org/t   matches   https://github.com/org/t
+                             git@github.com:org/t.git
+                             ssh://git@github.com:22/org/t/
+                             gh:org/t          (shortcuts expand first)
+```
+
+You may write a pattern as a full URL if that is what you have to hand — both
+sides are normalised the same way.
+
+Globs only, over `/`-separated segments:
+
+| | |
+|---|---|
+| `*` | any run of characters **within** one segment |
+| `**` | any number of segments |
+
+No regular expressions and no negation. This list decides whether a fetch
+happens, and a trust list that needs debugging is a trust list that will be got
+wrong.
+
+**A match grants even when nothing can be asked** — under `--defaults`, in CI,
+anywhere. The entry is prior consent, deliberately written, and no weaker than
+`--trust`. A template the list does *not* name is still refused, loudly, when
+there is nobody to ask: nothing is granted by omission.
+
+**What trust gates.** Only what a template asks git-tpl to do on its behalf,
+which today is one thing: a remote data fetch. Rendering never requires trust,
+because a template cannot execute anything, trusted or not.
+
 Note the name: the project file is `git.tpl.toml`, mirroring `git tpl`; this one
 is named after the binary. Two shapes, so a stray copy of one is never mistaken
 for the other.

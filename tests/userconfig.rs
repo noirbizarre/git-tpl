@@ -38,8 +38,11 @@ fn a_malformed_user_configuration_names_the_file_and_the_line() {
 fn an_unknown_section_in_the_user_configuration_is_refused() {
     let world = World::new();
     // Nothing generates this file, so an unrecognised key is a typo — and a
-    // silently ignored `[defualts]` is an afternoon wasted.
-    world.project.user_config("[defualts]\nauthor = \"x\"\n");
+    // silently ignored `[shortcut]` is an afternoon spent wondering why a
+    // shortcut had no effect.
+    world
+        .project
+        .user_config("[shortcut]\ngh = \"https://x/\"\n");
 
     tpl(
         &world.project,

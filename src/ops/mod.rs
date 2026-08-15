@@ -244,7 +244,7 @@ pub fn render(
     dirty: bool,
     user: &UserConfig,
     mut answering: Answering<'_>,
-    mut trust: Trust<'_>,
+    trust: Trust<'_>,
 ) -> Result<Render, OpError> {
     let template = resolve::resolve(Request {
         source: &config.template.source,
@@ -277,6 +277,26 @@ pub fn render(
     // A template with no remote data is never asked about — the overwhelming
     // majority, and they must not acquire a prompt they have no use for.
     let requests = declared_remotes(&template.manifest.data);
+
+    // A `[trust]` entry is prior consent, deliberately written, and no weaker
+    // than `--trust` — so it grants even when there is nobody to ask. Refusing
+    // it non-interactively would leave `--trust` on every CI invocation as the
+    // only way to use a template you have already agreed to, which teaches
+    // people to pass `--trust` unconditionally.
+    //
+    // Applied here rather than where `Trust` is constructed, because that is in
+    // the CLI and only this layer has the source: `update` reads it out of the
+    // project configuration. One place, so `init`, `update` and both dry runs
+    // cannot disagree.
+    //
+    // An *unmatched* template is untouched, and `Trust::Refuse` still refuses
+    // it loudly. Nothing is granted by omission.
+    let mut trust = if user.trust.allows(&config.template.source) {
+        Trust::always()
+    } else {
+        trust
+    };
+
     let decisions: BTreeMap<String, Decision> = if requests.is_empty() {
         BTreeMap::new()
     } else {

@@ -132,8 +132,10 @@ Also decided:
 
 Patterns match the expanded source URL, normalised first: scheme, userinfo, port
 and a trailing `.git` dropped, case folded, scp-style `host:path` written
-`host/path`. One entry therefore covers `https://github.com/org/t`,
-`git@github.com:org/t.git` and `gh:org/t`.
+`host/path`, and a backslash read as a path separator so a local Windows source
+is a sequence of segments rather than one blob no `*` could match. One entry
+therefore covers `https://github.com/org/t`, `git@github.com:org/t.git` and
+`gh:org/t`.
 
 Globs only — `*` within a path segment, `**` across segments. No regex and no
 negation, because a trust list that needs debugging is a trust list that will be

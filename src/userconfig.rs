@@ -116,6 +116,118 @@ pub struct Trust {
     pub templates: Vec<String>,
 }
 
+impl Trust {
+    /// Whether a template source matches one of the patterns.
+    ///
+    /// The source is normalised first, so a single entry covers every way of
+    /// writing the same repository:
+    ///
+    /// ```text
+    /// github.com/org/t   matches  https://github.com/org/t
+    ///                             git@github.com:org/t.git
+    ///                             ssh://git@github.com:22/org/T/
+    /// ```
+    pub fn allows(&self, source: &str) -> bool {
+        let value = normalise(source);
+        self.templates
+            .iter()
+            .any(|pattern| matches(&normalise(pattern), &value))
+    }
+}
+
+/// Reduce a source to the part that identifies the repository.
+///
+/// Scheme, userinfo, port, a trailing `.git` and a trailing slash go, and what
+/// is left is folded to lower case. An scp-style `host:path` is rewritten
+/// `host/path`, so it normalises to the same thing its URL form does.
+///
+/// Deliberately *not* shared with `refs::normalise`, which exists to slugify a
+/// ref name. Coupling them would mean a change to trust matching could change a
+/// ref name, and template refs are append-only.
+fn normalise(source: &str) -> String {
+    // A backslash is a path separator, so a local Windows source is a sequence
+    // of segments like every other source rather than one opaque blob that no
+    // `*` can ever match. Both the pattern and the value come through here, so
+    // `C:\\templates\\rust` and `C:/templates/*` meet in the same shape.
+    let source = source.replace('\\', "/");
+    let mut rest = source.as_str();
+
+    // Scheme. Matched by `://` rather than against a list, so a scheme this
+    // code has never heard of is still stripped.
+    if let Some((_, after)) = rest.split_once("://") {
+        rest = after;
+    }
+
+    // Userinfo. Only within the authority, or a `user@` appearing in a path
+    // would take the host with it.
+    let authority_end = rest.find('/').unwrap_or(rest.len());
+    let mut owned;
+    if let Some(at) = rest[..authority_end].rfind('@') {
+        owned = rest[at + 1..].to_string();
+    } else {
+        owned = rest.to_string();
+    }
+
+    // A port, or the `:` of an scp-style `host:org/repo`. Both sit between the
+    // host and the path, and both must end up as a single `/`.
+    let host_end = owned.find('/').unwrap_or(owned.len());
+    if let Some(colon) = owned[..host_end].find(':') {
+        let tail = owned[colon + 1..].trim_start_matches('/');
+        // A numeric port carries no identity; anything else is a path.
+        let tail = match tail.split_once('/') {
+            Some((first, path)) if first.chars().all(|c| c.is_ascii_digit()) => path,
+            _ => tail,
+        };
+        owned = format!("{}/{}", &owned[..colon], tail);
+    }
+
+    owned = owned.trim_end_matches('/').to_string();
+    owned = owned.strip_suffix(".git").unwrap_or(&owned).to_string();
+    owned.to_lowercase()
+}
+
+/// Glob matching over `/`-separated segments.
+///
+/// `*` matches within one segment, `**` matches across them. No regex and no
+/// negation: a trust list that needs debugging is a trust list that will be got
+/// wrong, and this one decides whether a fetch happens.
+fn matches(pattern: &str, value: &str) -> bool {
+    let pattern: Vec<&str> = pattern.split('/').collect();
+    let value: Vec<&str> = value.split('/').collect();
+    segments(&pattern, &value)
+}
+
+fn segments(pattern: &[&str], value: &[&str]) -> bool {
+    match pattern.first() {
+        None => value.is_empty(),
+        Some(&"**") => {
+            // Every possible span, shortest first. The recursion is bounded by
+            // the number of segments in a URL, which is small.
+            (0..=value.len()).any(|skip| segments(&pattern[1..], &value[skip..]))
+        }
+        Some(head) => match value.first() {
+            Some(segment) if segment_matches(head, segment) => segments(&pattern[1..], &value[1..]),
+            _ => false,
+        },
+    }
+}
+
+/// `*` within a single segment, matching any run of characters but never a `/`.
+fn segment_matches(pattern: &str, value: &str) -> bool {
+    match pattern.split_once('*') {
+        None => pattern == value,
+        Some((prefix, rest)) => {
+            let Some(after) = value.strip_prefix(prefix) else {
+                return false;
+            };
+            // Try every split point, so a pattern with several `*` works
+            // without a second pass.
+            (0..=after.len())
+                .any(|at| after.is_char_boundary(at) && segment_matches(rest, &after[at..]))
+        }
+    }
+}
+
 impl UserConfig {
     /// Where the configuration lives, if this machine has a home directory.
     ///
@@ -275,7 +387,9 @@ mod tests {
 
     #[test]
     fn an_unknown_section_is_refused() {
-        let error = UserConfig::parse("[defualts]\nauthor = \"x\"\n", "config.toml").unwrap_err();
+        // A singular `[shortcut]`, which is the mistake people actually make.
+        let error =
+            UserConfig::parse("[shortcut]\ngh = \"https://x/\"\n", "config.toml").unwrap_err();
         assert!(matches!(error, UserConfigError::Parse { .. }));
     }
 
@@ -353,6 +467,84 @@ mod tests {
             shortcuts().expand("ghs:org/thing"),
             "ssh://git@github.com/org/thing"
         );
+    }
+
+    // --- [trust] ------------------------------------------------------------
+
+    fn trusting(patterns: &[&str]) -> Trust {
+        Trust {
+            templates: patterns.iter().map(|p| p.to_string()).collect(),
+        }
+    }
+
+    #[rstest::rstest]
+    // One entry covers every way of writing the same repository.
+    #[case("https://github.com/org/t")]
+    #[case("http://github.com/org/t")]
+    #[case("ssh://git@github.com/org/t")]
+    #[case("ssh://git@github.com:22/org/t")]
+    #[case("git@github.com:org/t.git")]
+    #[case("https://github.com/org/t.git")]
+    #[case("https://user:token@github.com/org/t/")]
+    #[case("https://github.com/ORG/T")]
+    fn one_pattern_covers_every_form_of_the_same_url(#[case] source: &str) {
+        assert!(
+            trusting(&["github.com/org/t"]).allows(source),
+            "{source} should have matched"
+        );
+    }
+
+    #[test]
+    fn a_pattern_may_be_written_as_a_url_too() {
+        // Both sides are normalised, so pasting the URL you cloned works.
+        assert!(trusting(&["https://github.com/org/*"]).allows("git@github.com:org/t.git"));
+    }
+
+    #[test]
+    fn a_star_stays_within_one_segment() {
+        let trust = trusting(&["github.com/org/*"]);
+        assert!(trust.allows("https://github.com/org/t"));
+        // Otherwise `org/*` would silently cover every repository of every
+        // organisation whose name starts with `org`.
+        assert!(!trust.allows("https://github.com/org/group/t"));
+        assert!(!trust.allows("https://github.com/other/t"));
+    }
+
+    #[test]
+    fn a_double_star_crosses_segments() {
+        let trust = trusting(&["github.com/org/**"]);
+        assert!(trust.allows("https://github.com/org/t"));
+        assert!(trust.allows("https://github.com/org/group/t"));
+        assert!(!trust.allows("https://github.com/other/t"));
+    }
+
+    #[test]
+    fn a_star_is_not_a_substring_match() {
+        // `github.com` must not match `evil-github.com`, and a host that merely
+        // ends the right way must not match either.
+        let trust = trusting(&["github.com/**"]);
+        assert!(!trust.allows("https://evil-github.com/org/t"));
+        assert!(!trust.allows("https://github.com.evil.test/org/t"));
+    }
+
+    #[test]
+    fn an_empty_list_trusts_nothing() {
+        assert!(!Trust::default().allows("https://github.com/org/t"));
+    }
+
+    #[test]
+    fn a_local_path_is_matchable() {
+        assert!(trusting(&["**/templates/*"]).allows("/home/someone/templates/rust"));
+    }
+
+    #[test]
+    fn a_windows_path_is_matchable_too() {
+        // A backslash is a separator, not a character inside one enormous
+        // segment that no `*` could ever match. The drive letter survives as a
+        // segment of its own, which is consistent on both sides.
+        let trust = trusting(&["c:/templates/*"]);
+        assert!(trust.allows(r"C:\templates\rust"));
+        assert!(!trust.allows(r"C:\elsewhere\rust"));
     }
 
     #[test]
