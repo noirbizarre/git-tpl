@@ -323,8 +323,20 @@ pub enum GitError {
     },
 
     /// A network operation failed for a reason other than authentication.
+    ///
+    /// `reason` is rendered, not merely carried: libgit2's message is the only
+    /// thing separating a proxy, a typo, a DNS failure and a build missing its
+    /// TLS backend, and without it the diagnostic tells the user nothing they
+    /// did not already know.
     #[error("could not reach `{url}`")]
-    #[diagnostic(code(tpl::git::network))]
+    #[diagnostic(
+        code(tpl::git::network),
+        help(
+            "reason: {reason}\n\
+             Check the URL, then your network and any proxy:\n  \
+             git config --get http.proxy"
+        )
+    )]
     Network {
         /// The remote.
         url: String,
