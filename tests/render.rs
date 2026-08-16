@@ -30,23 +30,9 @@ impl Scratch {
         self.dir.path().join("out")
     }
 
-    /// Make `core.excludesFile` name a global ignore file holding `rules`.
-    ///
-    /// Written to `$XDG_CONFIG_HOME/git/config`, which is where libgit2 looks
-    /// for a global config — it does not read `GIT_CONFIG_GLOBAL`, which is a
-    /// git-core environment variable. The harness points `XDG_CONFIG_HOME` at
-    /// a temporary directory, so this is how a test gets a global rule without
-    /// touching the developer's own.
+    /// Point `core.excludesFile` at a global ignore file holding `rules`.
     fn global_gitignore(&self, rules: &str) -> &Self {
-        let ignore = self.config.path().join("global.gitignore");
-        std::fs::write(&ignore, rules).expect("write global ignore");
-        let git = self.config.path().join("git");
-        std::fs::create_dir_all(&git).expect("create git config dir");
-        std::fs::write(
-            git.join("config"),
-            format!("[core]\n\texcludesFile = {}\n", ignore.display()),
-        )
-        .expect("write global config");
+        common::global_gitignore(self.config.path(), rules);
         self
     }
 

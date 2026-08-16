@@ -620,18 +620,9 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
     template.repo.write("tests/case.toml", "[answers]\n");
     template.repo.commit_all("test: a case");
 
-    // The rule the whole bug depends on. Written where libgit2 looks for a
-    // global config — it does not read `GIT_CONFIG_GLOBAL` — so the test never
-    // touches the developer's own ignore rules.
-    let git = template.repo.config_home().join("git");
-    std::fs::create_dir_all(&git).expect("create git config dir");
-    let excludes = template.repo.config_home().join("global.gitignore");
-    std::fs::write(&excludes, "mise.toml\nmise.lock\n").expect("write global ignore");
-    std::fs::write(
-        git.join("config"),
-        format!("[core]\n\texcludesFile = {}\n", excludes.display()),
-    )
-    .expect("write global config");
+    // The rule the whole bug depends on, in an isolated config so the test
+    // never touches the developer's own ignore rules.
+    common::global_gitignore(template.repo.config_home(), "mise.toml\nmise.lock\n");
 
     run(&template, &["--dirty", "--write"]).success();
     assert!(

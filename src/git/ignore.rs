@@ -142,7 +142,13 @@ fn default_excludes_file() -> Option<PathBuf> {
     if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
         return Some(PathBuf::from(xdg).join("git").join("ignore"));
     }
-    let home = std::env::var_os("HOME").filter(|v| !v.is_empty())?;
+    // `USERPROFILE` is the Windows fallback libgit2 itself uses. Git for
+    // Windows usually exports `HOME`, but nothing guarantees it, and without
+    // this a Windows user's global ignore file would simply not be found —
+    // silently including files `git add -A` leaves out.
+    let home = ["HOME", "USERPROFILE"]
+        .into_iter()
+        .find_map(|name| std::env::var_os(name).filter(|value| !value.is_empty()))?;
     Some(
         PathBuf::from(home)
             .join(".config")
