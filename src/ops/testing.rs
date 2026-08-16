@@ -13,7 +13,7 @@
 //! area would drop itself out of the coverage guard.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use miette::Diagnostic;
 use thiserror::Error;
@@ -1260,16 +1260,10 @@ fn set_executable(path: &Path, executable: bool) -> std::io::Result<()> {
     Ok(())
 }
 
-/// The working-tree directory a case's snapshot is written to.
-///
-/// Exposed so the command can name it in output without rebuilding the path and
-/// coming to disagree with what was written.
-pub fn snapshot_dir(workdir: &Path, tests_dir: &str, case: &str) -> PathBuf {
-    workdir.join(snapshot_path(tests_dir, case))
-}
-
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn case(body: &str) -> Result<Case, TestError> {
@@ -1345,12 +1339,78 @@ mod tests {
         assert!(matches!(result, Err(TestError::CaseShape { .. })));
     }
 
+    /// Each of these is a section written with the wrong type. The message has
+    /// to name what the section should be, because "invalid case" tells an
+    /// author nothing they cannot already see.
+    #[rstest]
+    #[case("answers = 1\n", "`answers` must be a table")]
+    #[case("expect = 1\n", "`expect` must be a table")]
+    #[case("[expect]\ncontains = 1\n", "`expect.contains` must be a table")]
+    #[case("[expect]\nerror = 1\n", "`expect.error` must be a diagnostic code")]
+    #[case("[expect]\nfiles = 1\n", "`expect.files` must be an array of strings")]
+    #[case(
+        "[expect]\nabsent = 1\n",
+        "`expect.absent` must be an array of strings"
+    )]
+    #[case(
+        "[expect.contains]\n\"a\" = 1\n",
+        "`expect.contains.\"a\"` must be an array of strings"
+    )]
+    fn a_section_of_the_wrong_type_names_the_type_it_should_be(
+        #[case] body: &str,
+        #[case] expected: &str,
+    ) {
+        let reason = shape_reason(case(body));
+        assert!(reason.contains(expected), "{reason}");
+    }
+
     #[test]
     fn a_case_that_does_not_parse_names_the_format() {
         match Case::parse("c", "tests/c.json", b"{not json") {
             Err(TestError::CaseParse { format, .. }) => assert_eq!(format, "json"),
             other => panic!("expected a parse error, got {other:?}"),
         }
+    }
+
+    fn read_manifest(body: &str) -> Result<BTreeMap<String, RecordedFile>, TestError> {
+        parse_manifest(body.as_bytes(), &|reason| TestError::SnapshotRead {
+            case: "c".into(),
+            path: "p".into(),
+            reason,
+        })
+    }
+
+    fn snapshot_read_reason(result: Result<BTreeMap<String, RecordedFile>, TestError>) -> String {
+        match result {
+            Err(TestError::SnapshotRead { reason, .. }) => reason,
+            Ok(_) => panic!("expected the manifest to be refused"),
+            Err(other) => panic!("expected a snapshot read error, got {other:?}"),
+        }
+    }
+
+    /// A manifest that has been hand-edited into nonsense is refused rather
+    /// than half-read. Silently dropping a malformed line would quietly shrink
+    /// the set of files the snapshot asserts on.
+    #[rstest]
+    #[case("100644 abc\n", "is not a manifest entry")]
+    #[case("100600 abc 3 a.txt\n", "`100600` is not a file mode")]
+    #[case("100644 abc three a.txt\n", "`three` is not a byte count")]
+    fn a_malformed_manifest_line_is_refused(#[case] body: &str, #[case] expected: &str) {
+        let reason = snapshot_read_reason(read_manifest(body));
+        assert!(reason.contains(expected), "{reason}");
+    }
+
+    #[test]
+    fn a_manifest_path_may_contain_spaces() {
+        // The path is last precisely so it needs no quoting.
+        let parsed = read_manifest("100644 abc 3 a file.txt\n").unwrap();
+        assert_eq!(parsed.keys().collect::<Vec<_>>(), ["a file.txt"]);
+    }
+
+    #[test]
+    fn manifest_comments_and_blank_lines_are_skipped() {
+        let parsed = read_manifest("# a comment\n\n100644 abc 3 a.txt\n").unwrap();
+        assert_eq!(parsed.len(), 1);
     }
 
     #[test]
@@ -1435,6 +1495,20 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert!(changes[0].mode_only);
         assert!(changes[0].patch.is_none());
+    }
+
+    /// Not every unreadable file has a NUL in it. A Latin-1 `README` sniffs as
+    /// text and still cannot be decoded, and the diff has to decline rather
+    /// than panic on it.
+    #[test]
+    fn a_change_that_is_not_utf8_carries_no_patch_either() {
+        let before = [0xffu8, 0xfe, b'a'];
+        let after = [0xffu8, 0xfe, b'b'];
+        assert!(
+            !is_binary(&before),
+            "no NUL, so not binary by the heuristic"
+        );
+        assert!(patch(&before, &after).is_none());
     }
 
     #[test]

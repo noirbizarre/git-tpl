@@ -849,6 +849,417 @@ fn write_still_fails_a_case_whose_expectations_are_unmet() {
     );
 }
 
+/// A snapshot that has been hand-edited into disagreeing with itself.
+///
+/// The MANIFEST is authoritative for the file list and modes, `files/` for
+/// content. Trusting either half alone would let a snapshot drift into
+/// asserting nothing while still reporting green, which is the worst failure
+/// mode a snapshot suite has.
+fn corrupted_snapshot(dir: &Path, corrupt: impl Fn(&Template)) -> common::Output {
+    let built = template(
+        dir,
+        &[(
+            "tests/minimal.toml",
+            "[answers]\nproject_name = \"thing\"\n",
+        )],
+    );
+    run(&built, &["--write"]).success();
+    corrupt(&built);
+    built.repo.commit_all("test: a corrupted snapshot");
+    run(&built, &["--json"])
+}
+
+#[test]
+fn a_snapshot_whose_manifest_lists_a_file_that_is_not_there_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = corrupted_snapshot(dir.path(), |built| {
+        std::fs::remove_file(
+            built
+                .repo
+                .path
+                .join("tests/__snapshots__/minimal/files/pyproject.toml"),
+        )
+        .unwrap();
+    })
+    .failure();
+    assert_eq!(output.error_code(), "tpl::testing::snapshot_read");
+}
+
+#[test]
+fn a_snapshot_file_that_the_manifest_does_not_list_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = corrupted_snapshot(dir.path(), |built| {
+        built.repo.write(
+            "tests/__snapshots__/minimal/files/smuggled.txt",
+            "never rendered\n",
+        );
+    })
+    .failure();
+    assert_eq!(output.error_code(), "tpl::testing::snapshot_read");
+}
+
+#[test]
+fn a_snapshot_file_edited_without_its_digest_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    // Same length, different bytes: only the digest catches this one, which is
+    // why the manifest records one rather than a size alone.
+    let output = corrupted_snapshot(dir.path(), |built| {
+        built.repo.write(
+            "tests/__snapshots__/minimal/files/pyproject.toml",
+            "name = \"OTHER\"\n",
+        );
+    })
+    .failure();
+    assert_eq!(output.error_code(), "tpl::testing::snapshot_read");
+    assert!(output.stdout.contains("digest"), "{}", output.stdout);
+}
+
+#[test]
+fn a_snapshot_file_of_the_wrong_length_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = corrupted_snapshot(dir.path(), |built| {
+        built.repo.write(
+            "tests/__snapshots__/minimal/files/pyproject.toml",
+            "name = \"thing\"\nand more\n",
+        );
+    })
+    .failure();
+    assert_eq!(output.error_code(), "tpl::testing::snapshot_read");
+}
+
+#[test]
+fn a_snapshot_with_an_unreadable_manifest_says_how_to_recover() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = corrupted_snapshot(dir.path(), |built| {
+        built
+            .repo
+            .write("tests/__snapshots__/minimal/MANIFEST", "not a manifest\n");
+    })
+    .failure();
+    assert_eq!(output.error_code(), "tpl::testing::snapshot_read");
+    assert!(
+        output.stdout.contains("--write"),
+        "the help says how to re-record: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn write_over_a_changed_snapshot_reports_it_as_updated() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "[answers]\nproject_name = \"thing\"\n",
+        )],
+    );
+    run(&built, &["--write"]).success();
+    built.repo.commit_all("test: record");
+
+    built.repo.write(
+        "template/pyproject.toml.jinja",
+        "name = \"{{ project_name }}\"\nnew = 1\n",
+    );
+    built.repo.commit_all("feat: change the template");
+
+    let output = run(&built, &["--json", "--write"]).success();
+    assert_eq!(
+        output.json()["cases"][0]["snapshot"],
+        "updated",
+        "replacing an existing snapshot is not the same event as creating one"
+    );
+    assert_eq!(output.json()["summary"]["snapshotsWritten"], 1);
+}
+
+#[test]
+fn contains_naming_a_file_the_template_does_not_render_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\nproject_name = \"a\"\n\n[expect.contains]\n\"absent.txt\" = \"x\"\n",
+        )],
+    );
+
+    let output = run(&built, &["--json"]).code(1);
+    let failure = &output.json()["cases"][0]["failures"][0];
+    assert_eq!(failure["kind"], "containsMissingFile");
+    assert_eq!(failure["path"], "absent.txt");
+}
+
+#[test]
+fn contains_cannot_look_inside_a_file_that_is_not_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(dir.path(), "name = \"bin\"\n", &[]);
+    std::fs::create_dir_all(built.repo.path.join("template")).unwrap();
+    // Genuinely not UTF-8: a lone 0xff is not a valid encoding of anything.
+    // `[0, 1, 2, 3]` would decode fine as control characters and only report a
+    // missing substring, which is a different failure.
+    std::fs::write(
+        built.repo.path.join("template/logo.png"),
+        [0xffu8, 0xfe, 0, 1],
+    )
+    .unwrap();
+    built
+        .repo
+        .write("tests/c.toml", "[expect.contains]\n\"logo.png\" = \"x\"\n");
+    built.repo.commit_all("test: a binary file");
+
+    let output = run(&built, &["--json"]).code(1);
+    assert_eq!(
+        output.json()["cases"][0]["failures"][0]["kind"],
+        "containsNotUtf8"
+    );
+
+    run(&built, &[])
+        .code(1)
+        .says("`logo.png` is not text, so `contains` cannot look in it");
+}
+
+/// The snapshot goes to the working tree, so the working tree can refuse it.
+/// The diagnostic has to name the path and what the OS said, because "could
+/// not write the snapshot" alone leaves the reader guessing at permissions.
+#[cfg(unix)]
+#[test]
+fn a_snapshot_that_cannot_be_written_names_the_path_and_the_reason() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[("tests/c.toml", "[answers]\nproject_name = \"a\"\n")],
+    );
+
+    let tests_dir = built.repo.path.join("tests");
+    let original = std::fs::metadata(&tests_dir).unwrap().permissions();
+    let mut locked = original.clone();
+    locked.set_mode(0o500);
+    std::fs::set_permissions(&tests_dir, locked).unwrap();
+
+    let output = run(&built, &["--json", "--write"]).failure();
+
+    // Restore before asserting, or a failure here leaves an undeletable
+    // temporary directory behind.
+    std::fs::set_permissions(&tests_dir, original).unwrap();
+
+    assert_eq!(output.error_code(), "tpl::testing::snapshot_write");
+    assert!(
+        output.stdout.contains("__snapshots__"),
+        "the help names the path: {}",
+        output.stdout
+    );
+}
+
+#[test]
+fn a_missing_file_points_at_the_closest_path_the_template_did_render() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\nproject_name = \"a\"\n\n[expect]\nfiles = [\"pyproject.tml\"]\n",
+        )],
+    );
+
+    let output = run(&built, &["--json"]).code(1);
+    let failure = &output.json()["cases"][0]["failures"][0];
+    assert_eq!(failure["kind"], "missingFile");
+    assert_eq!(
+        failure["closest"], "pyproject.toml",
+        "a typo in a case is a typo, and saying so beats listing the whole tree"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_in_the_tests_directory_is_not_a_case() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[("tests/real.toml", "[answers]\nproject_name = \"a\"\n")],
+    );
+    std::os::unix::fs::symlink("real.toml", built.repo.path.join("tests/link.toml")).unwrap();
+    built.repo.commit_all("test: a symlink");
+
+    let output = run(&built, &["--json"]).success();
+    assert_eq!(
+        output.json()["summary"]["total"],
+        1,
+        "a symlink is not a second case"
+    );
+}
+
+#[test]
+fn a_file_with_no_extension_is_not_a_case() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[
+            ("tests/real.toml", "[answers]\nproject_name = \"a\"\n"),
+            ("tests/NOTES", "scratch, not a case\n"),
+        ],
+    );
+
+    let output = run(&built, &["--json"]).success();
+    assert_eq!(output.json()["summary"]["total"], 1);
+}
+
+#[test]
+fn a_tests_directory_holding_no_cases_is_the_same_as_having_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[("tests/README.md", "# how to write a case\n")],
+    );
+
+    let output = run(&built, &["--json"]).failure();
+    assert_eq!(output.error_code(), "tpl::testing::no_tests");
+}
+
+/// Every failure kind, rendered for a person rather than a script.
+///
+/// The JSON shape is pinned case by case above; this pins the prose, because
+/// the text output is what an author actually reads when their suite goes red
+/// and a `kind` string tells them nothing.
+#[test]
+fn the_human_output_explains_every_kind_of_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[
+            (
+                "tests/missing.toml",
+                "[answers]\nproject_name = \"a\"\n\n[expect]\nfiles = [\"pyproject.tml\"]\n",
+            ),
+            (
+                "tests/unexpected.toml",
+                "[answers]\nwith_ci = true\n\n[expect]\nabsent = [\"ci.yml\"]\n",
+            ),
+            (
+                "tests/substring.toml",
+                "[answers]\nproject_name = \"a\"\n\n[expect.contains]\n\"pyproject.toml\" = \"nowhere\"\n",
+            ),
+            (
+                "tests/nofile.toml",
+                "[answers]\nproject_name = \"a\"\n\n[expect.contains]\n\"absent.txt\" = \"x\"\n",
+            ),
+            (
+                "tests/wrongcode.toml",
+                "[answers]\nwith_ci = \"not a boolean\"\n\n[expect]\nerror = \"tpl::render::collision\"\n",
+            ),
+            (
+                "tests/noerror.toml",
+                "[answers]\nproject_name = \"a\"\n\n[expect]\nerror = \"tpl::eval::wrong_type\"\n",
+            ),
+            (
+                "tests/blewup.toml",
+                "[answers]\nwith_ci = \"not a boolean\"\n",
+            ),
+        ],
+    );
+
+    run(&built, &[])
+        .code(1)
+        // Every case is named, and every failure says what to do about it.
+        .says("missing file      pyproject.tml")
+        .says("the template rendered `pyproject.toml`")
+        .says("unexpected file   ci.yml")
+        .says("`pyproject.toml` does not contain: nowhere")
+        .says("named by `contains`")
+        .says("expected tpl::render::collision, got")
+        .says("expected the render to fail with tpl::eval::wrong_type, but it succeeded")
+        .says("the render failed:")
+        .says("add `error = \"tpl::eval::wrong_type\"` if that is the point of the case")
+        .says("0 passed, 7 failed");
+}
+
+#[test]
+fn the_human_output_of_a_snapshot_difference_says_how_to_re_record_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "[answers]\nproject_name = \"thing\"\n",
+        )],
+    );
+    run(&built, &["--write"]).success();
+    built.repo.commit_all("test: record");
+
+    built.repo.write(
+        "template/pyproject.toml.jinja",
+        "name = \"{{ project_name }}\"\nnew = 1\n",
+    );
+    built.repo.commit_all("feat: change the template");
+
+    // Without -v: what changed, but not how.
+    run(&built, &[])
+        .code(1)
+        .says("snapshot differs (1 file)")
+        .says("modified pyproject.toml")
+        .says("re-record with `git tpl test --write`")
+        .silent_about("+new = 1");
+
+    // With -v: the hunks too. A large rendering would otherwise bury the list
+    // of what changed under the change itself.
+    run(&built, &["-v"]).code(1).says("+new = 1");
+}
+
+#[test]
+fn the_human_output_reports_what_write_did_to_each_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "[answers]\nproject_name = \"thing\"\n",
+        )],
+    );
+
+    run(&built, &["--write"])
+        .success()
+        .says("snapshot written")
+        .says("1 snapshot(s) recorded, 0 unchanged");
+    built.repo.commit_all("test: record");
+
+    run(&built, &["--write"])
+        .success()
+        .says("snapshot unchanged")
+        .says("0 snapshot(s) recorded, 1 unchanged");
+
+    run(&built, &[]).success().says("snapshot ok");
+}
+
+#[test]
+fn trust_allows_a_remote_data_source_without_asking() {
+    let dir = tempfile::tempdir().unwrap();
+    // The source is never reachable. What is under test is that `--trust`
+    // takes the decision without a prompt — so the failure is the fetch, not a
+    // refusal, and certainly not a hang waiting for an answer nobody can give.
+    let built = Template::minimal(
+        dir.path(),
+        r#"
+name = "remote-data"
+
+[data.things]
+source = "https://127.0.0.1:1/things.toml"
+"#,
+        &[("a.txt.jinja", "{{ data.things.name }}\n")],
+    );
+    built.repo.write("tests/c.toml", "[answers]\n");
+    built.repo.commit_all("test: a remote source");
+
+    let output = run(&built, &["--json", "--trust"]).code(1);
+    let failure = &output.json()["cases"][0]["failures"][0];
+    assert_eq!(failure["kind"], "unexpectedError");
+    assert_ne!(
+        failure["code"], "tpl::data::untrusted",
+        "--trust decides, so the source is reached rather than refused"
+    );
+}
+
 // --- behaviour and plumbing -------------------------------------------------
 
 #[test]

@@ -765,6 +765,54 @@ mod tests {
     use super::*;
     use rstest::rstest;
 
+    fn request(name: &str) -> RemoteRequest {
+        RemoteRequest {
+            name: name.to_string(),
+            source: format!("https://example.invalid/{name}.toml"),
+        }
+    }
+
+    /// The whole point of `Decided`: a decision taken once is honoured
+    /// afterwards, *including* a refusal. A gate that replayed a blanket yes
+    /// would turn one "no" into an allowance the second time it was consulted,
+    /// which is the bug this type exists to make impossible.
+    #[test]
+    fn a_replayed_decision_keeps_both_the_allowance_and_the_refusal() {
+        let mut gate = Decided::new(BTreeMap::from([
+            ("allowed".to_string(), Decision::Allow),
+            ("skipped".to_string(), Decision::Skip),
+        ]));
+
+        let requests = [request("allowed"), request("skipped")];
+        let replayed = gate.confirm(&requests, REMOTE_LIMIT_BYTES).unwrap();
+
+        assert_eq!(replayed["allowed"], Decision::Allow);
+        assert_eq!(replayed["skipped"], Decision::Skip);
+    }
+
+    #[test]
+    fn a_replayed_decision_is_the_same_every_time_it_is_consulted() {
+        let mut gate = Decided::new(BTreeMap::from([("a".to_string(), Decision::Skip)]));
+        let requests = [request("a")];
+
+        let first = gate.confirm(&requests, REMOTE_LIMIT_BYTES).unwrap();
+        let second = gate.confirm(&requests, REMOTE_LIMIT_BYTES).unwrap();
+
+        assert_eq!(first, second, "one consent, however many renderings");
+    }
+
+    /// Fails closed. The decisions are taken over the same manifest, so a
+    /// request nobody decided on cannot arise — and if it ever does, silence
+    /// must not read as consent.
+    #[test]
+    fn a_request_nobody_decided_on_is_skipped_rather_than_allowed() {
+        let mut gate = Decided::new(BTreeMap::new());
+        let replayed = gate
+            .confirm(&[request("unknown")], REMOTE_LIMIT_BYTES)
+            .unwrap();
+        assert_eq!(replayed["unknown"], Decision::Skip);
+    }
+
     #[rstest]
     #[case("data/licenses.toml", SourceKind::TemplateFile)]
     #[case("licenses.toml", SourceKind::TemplateFile)]
