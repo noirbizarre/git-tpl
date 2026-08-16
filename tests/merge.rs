@@ -432,3 +432,35 @@ fn a_conflicted_merge_is_reported_as_json() {
         .collect();
     assert!(conflicts.contains(&"README.md"), "{conflicts:?}");
 }
+
+/// Aborting is the undoing of a merge, so it gets its own `result`. Reporting
+/// it as `upToDate` would tell a caller the opposite of what happened.
+#[test]
+fn an_aborted_merge_is_reported_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world
+        .project
+        .write("README.md", "# mine\n\nentirely different\n");
+    world.project.commit_all("chore: rewrite the readme");
+
+    world.template.repo.write(
+        "template/README.md.jinja",
+        "# {{ project_name }}\n\nentirely other\n",
+    );
+    world.template.repo.commit_all("feat: rewrite the readme");
+    tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["merge"]).success();
+
+    let head = world.project.rev_parse("HEAD");
+
+    let json = tpl(&world.project, &["--json", "merge", "--abort"])
+        .success()
+        .json();
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["result"], "aborted");
+    assert_eq!(world.project.rev_parse("HEAD"), head, "HEAD moved");
+    assert_eq!(world.project.status(), "", "the worktree is not clean");
+}

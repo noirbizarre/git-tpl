@@ -440,3 +440,27 @@ fn a_dry_run_reports_what_would_change_as_json() {
         "a dry run advanced the ref"
     );
 }
+
+/// The `upToDate` arm of a dry run, which is the same silent-success shape
+/// issue #53 was about: nothing to do is still an outcome.
+#[test]
+fn a_dry_run_with_nothing_to_do_reports_up_to_date_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let output = tpl(
+        &world.project,
+        &["--json", "update", "--defaults", "--dry-run"],
+    )
+    .success();
+
+    assert!(
+        !output.stdout.trim().is_empty(),
+        "stdout was empty\n--- stderr ---\n{}",
+        output.stderr
+    );
+    let json = output.json();
+    assert_eq!(json["dryRun"], true);
+    assert_eq!(json["result"], "upToDate");
+    assert_eq!(json["changes"], serde_json::json!([]));
+}

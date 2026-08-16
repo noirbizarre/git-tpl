@@ -281,4 +281,20 @@ mod tests {
         assert_eq!(conflicted["result"], "conflicted");
         assert_eq!(conflicted["conflicts"], json!(["mise.toml"]));
     }
+
+    // The full hex, not the seven characters the prose abbreviates to: a
+    // caller that has to `git cat-file` the commit needs an id Git will take.
+    #[test]
+    fn a_merge_that_moved_the_branch_reports_the_full_commit_id() {
+        use tpl::git::{MergeOutcome, Oid};
+        let oid = Oid::from_bytes([0xab; 20]);
+
+        let fast_forward = merge(&MergeOutcome::FastForward { to: oid });
+        assert_eq!(fast_forward["result"], "fastForward");
+        assert_eq!(fast_forward["commit"], oid.to_hex());
+
+        let merged = merge(&MergeOutcome::Merged { commit: oid });
+        assert_eq!(merged["result"], "merged");
+        assert_eq!(merged["commit"], oid.to_hex());
+    }
 }

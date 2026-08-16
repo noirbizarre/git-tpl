@@ -383,3 +383,77 @@ fn push_reports_the_ref_as_json() {
     assert_eq!(json["dryRun"], true);
     assert_eq!(json["ref"], world.ref_name());
 }
+
+/// The remote copy is strictly ahead: someone else rendered and published, and
+/// we have not. Fetching never moves the local ref, so this is the arm that
+/// has to *report* rather than act — and `state` is how a caller knows.
+#[test]
+fn fetch_reports_being_behind_the_remote_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+
+    // Someone else renders on top of the ref we share and publishes it.
+    let shared = world.project.rev_parse(&world.ref_name());
+    let other = Repo::init_in(world.dir.path(), "other");
+    other.git(&[
+        "remote",
+        "add",
+        "origin",
+        &world.dir.path().join("remote.git").to_string_lossy(),
+    ]);
+    other.git(&["fetch", "-q", "origin", "refs/tpl/*:refs/tpl/*"]);
+    other.write("x.txt", "theirs\n");
+    other.git(&["add", "-A"]);
+    let their_tree = other.git(&["write-tree"]);
+    let their_commit = other.git(&[
+        "commit-tree",
+        &their_tree,
+        "-p",
+        &shared,
+        "-m",
+        "tpl: their render",
+    ]);
+    other.git(&["update-ref", &world.ref_name(), &their_commit]);
+    other.git(&[
+        "push",
+        "-q",
+        "origin",
+        &format!("{}:{}", world.ref_name(), world.ref_name()),
+    ]);
+
+    let json = tpl(&world.project, &["--json", "fetch"]).success().json();
+
+    assert_eq!(json["state"], "behind");
+    assert_eq!(json["relation"]["behind"], 1);
+    assert_eq!(json["relation"]["ahead"], 0);
+    assert_eq!(json["relation"]["diverged"], false);
+
+    // The local ref did not move. Adopting someone else's rendering is a
+    // decision, and a fetch must not make it.
+    assert_eq!(world.project.rev_parse(&world.ref_name()), shared);
+}
+
+/// A dry run still transfers nothing, and still says what it would have done.
+#[test]
+fn a_fetch_dry_run_reports_the_refspec_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+
+    let json = tpl(&world.project, &["--json", "fetch", "--dry-run"])
+        .success()
+        .json();
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["dryRun"], true);
+    assert_eq!(json["remote"], "origin");
+    assert!(
+        json["refspec"]
+            .as_str()
+            .expect("refspec")
+            .contains("refs/tpl/"),
+        "{json}"
+    );
+}

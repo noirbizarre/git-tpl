@@ -744,3 +744,68 @@ fn a_dry_run_reports_the_questions_as_json() {
 
     assert!(!world.project.has_ref(&world.ref_name()));
 }
+
+/// A branch with nothing of its own to keep: Git moves the pointer rather than
+/// writing a merge commit, and `merge.result` must say which of the two
+/// happened. It is the cleanest history a generated project can have, and a
+/// caller inspecting it should not have to run `git log` to find out.
+#[test]
+fn init_in_an_empty_repository_reports_a_fast_forward_as_json() {
+    let world = World::empty_project();
+
+    let json = tpl(
+        &world.project,
+        &["--json", "init", &world.template.source(), "--defaults"],
+    )
+    .success()
+    .json();
+
+    assert_eq!(json["merge"]["result"], "fastForward");
+    // The full hex, which is what Git will take back.
+    assert_eq!(
+        json["merge"]["commit"],
+        world.project.rev_parse(&world.ref_name())
+    );
+}
+
+/// `supplied` says which answers the caller has already provided, so a driver
+/// knows what it still has to ask. The text output marks the same thing with
+/// a `(supplied)` note.
+#[test]
+fn a_dry_run_marks_the_answers_already_supplied() {
+    let world = World::new();
+
+    let json = tpl(
+        &world.project,
+        &[
+            "--json",
+            "init",
+            &world.template.source(),
+            "--defaults",
+            "--dry-run",
+            "--answer",
+            "project_name=given",
+        ],
+    )
+    .success()
+    .json();
+
+    let supplied: Vec<(&str, bool)> = json["questions"]
+        .as_array()
+        .expect("questions")
+        .iter()
+        .filter(|q| q["kind"] == "question")
+        .map(|q| {
+            (
+                q["name"].as_str().expect("name"),
+                q["supplied"].as_bool().expect("supplied"),
+            )
+        })
+        .collect();
+
+    assert!(supplied.contains(&("project_name", true)), "{supplied:?}");
+    assert!(
+        supplied.iter().any(|(_, supplied)| !supplied),
+        "every question was reported as supplied: {supplied:?}"
+    );
+}
