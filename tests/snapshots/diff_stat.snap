@@ -1,0 +1,12 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 0
+--- stdout ---
+<empty>
+--- stderr ---
+  added     .github/workflows/release.yml     +1    -0
+  modified  README.md                         +2    -0
+
+2 files changed, 3 insertions(+)

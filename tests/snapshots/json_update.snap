@@ -1,0 +1,31 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 0
+--- stdout ---
+{
+  "result": "updated",
+  "id": "template",
+  "ref": "refs/tpl/template",
+  "template": "[tmp]/template",
+  "commit": "[sha]",
+  "previousRevision": "main ([short])",
+  "revision": "main ([short])",
+  "changes": [
+    {
+      "path": ".github/workflows/release.yml",
+      "kind": "added"
+    },
+    {
+      "path": "README.md",
+      "kind": "modified"
+    }
+  ],
+  "answersChanged": false,
+  "ignoredAnswers": [],
+  "pushed": null,
+  "ok": true
+}
+--- stderr ---
+<empty>

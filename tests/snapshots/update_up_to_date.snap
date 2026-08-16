@@ -1,0 +1,9 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 0
+--- stdout ---
+<empty>
+--- stderr ---
+Already up to date with [tmp]/template at main ([short]).

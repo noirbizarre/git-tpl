@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 1
+--- stdout ---
+{
+  "ok": false,
+  "error": {
+    "message": "no git-tpl configuration found at `[tmp]/project/.config/git.tpl.toml`",
+    "code": "tpl::config::missing",
+    "help": "run `git tpl init <template>` to attach a template to this repository"
+  }
+}
+--- stderr ---
+<empty>

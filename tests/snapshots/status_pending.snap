@@ -1,0 +1,19 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 2
+--- stdout ---
+<empty>
+--- stderr ---
+
+Template:  [tmp]/template
+Ref:       refs/tpl/template
+
+Revision:  main ([short]) → main ([short])   template has moved
+Rendered:  1 rendering
+Merged:    yes
+Worktree:  clean
+
+The template has moved. Run:
+  git tpl update

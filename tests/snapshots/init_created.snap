@@ -1,0 +1,23 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 0
+--- stdout ---
+<empty>
+--- stderr ---
+
+Template:  [tmp]/template
+Revision:  main ([short])
+
+Created refs/tpl/template
+
+  added     Cargo.toml
+  added     README.md
+  added     ci.yml
+  added     run.sh
+  added     src/lib.rs
+
+Merged into main.
+
+Answers recorded in .config/git.tpl.toml and committed.

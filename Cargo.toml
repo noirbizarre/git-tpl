@@ -194,6 +194,12 @@ sha2 = "0.11"
 hex = "0.4"
 rstest = "0.26"
 pretty_assertions = "1"
+# `regex::escape`, for the snapshot filter that redacts the tests' temporary
+# directory. Already in the dev tree via `insta`'s `filters`, so it costs no
+# extra compilation; the runtime `regex-lite` is deliberately not reused here,
+# because the pattern is consumed by `insta`'s `regex` and the two crates'
+# syntaxes are only incidentally the same.
+regex = "1"
 
 [profile.release]
 lto = true

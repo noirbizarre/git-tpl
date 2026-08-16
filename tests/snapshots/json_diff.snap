@@ -1,0 +1,30 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 0
+--- stdout ---
+{
+  "conflicts": [],
+  "changes": [
+    {
+      "path": ".github/workflows/release.yml",
+      "kind": "added",
+      "insertions": 1,
+      "deletions": 0,
+      "binary": false
+    },
+    {
+      "path": "README.md",
+      "kind": "modified",
+      "insertions": 2,
+      "deletions": 0,
+      "binary": false
+    }
+  ],
+  "insertions": 3,
+  "deletions": 0,
+  "ok": true
+}
+--- stderr ---
+<empty>

@@ -534,6 +534,7 @@ dependencies = [
  "minijinja",
  "predicates",
  "pretty_assertions",
+ "regex",
  "regex-lite",
  "rstest",
  "serde",

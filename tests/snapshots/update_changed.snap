@@ -1,0 +1,22 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 0
+--- stdout ---
+<empty>
+--- stderr ---
+
+Template:  [tmp]/template
+Revision:  main ([short]) → main ([short])
+
+Updated refs/tpl/template
+
+  added     .github/workflows/release.yml
+  modified  README.md
+
+Your working tree was not modified.
+
+Run:
+  git tpl diff
+  git tpl merge

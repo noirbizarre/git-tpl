@@ -1,0 +1,16 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 0
+--- stdout ---
+<empty>
+--- stderr ---
+
+Template:  [tmp]/template
+Ref:       refs/tpl/template
+
+Revision:  main ([short])
+Rendered:  1 rendering
+Merged:    yes
+Worktree:  clean
