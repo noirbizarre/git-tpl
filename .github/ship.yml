@@ -23,13 +23,13 @@ pull_request:
   # skips `^chore\(release\):`, so it never reappears in the next changelog.
   title: "chore(release): {{ version }}"
   header: |
-    This PR prepares the next release of git-tpl.
+    This PR prepares the next release of `git-tpl`.
 
-    The version bump and changelog were produced by the `prepare-release`
-    workflow. Review the changelog, then merge — 🚢 Ship takes it from there.
+    The version bump and changelog were produced by the `prepare-release` workflow.
+    Review the changelog, then merge — 🚢 Ship takes it from there.
   footer: |
     ---
-    Generated automatically by [gh-ship](https://github.com/noirbizarre/gh-ship).
+    Generated automatically by [gh-ship](https://github.com/noirbizarre/gh-ship) 🚢.
   labels: [release]
   reuse: true
 
