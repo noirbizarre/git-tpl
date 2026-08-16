@@ -55,7 +55,9 @@ Something is wrong with the template itself.
 
 Reported by [`git tpl lint`](../usage/lint.md) as findings rather than raised
 as errors, so they arrive in the `diagnostics` array rather than in `error`.
-Only `severity: "error"` fails the command.
+Only `severity: "error"` fails the command, unless
+[`--deny`](../usage/lint.md#choosing-what-fails) names a warning or the whole
+severity.
 
 | Code | Severity | Meaning |
 |---|---|---|
@@ -64,6 +66,14 @@ Only `severity: "error"` fails the command.
 | `tpl::lint::syntax` | error | A `.jinja` file does not parse, including in branches no answer set reaches. |
 | `tpl::lint::foreign_expression` | warning | A `${{ ... }}` MiniJinja will consume, rendering it to `$`. |
 | `tpl::lint::undeclared` | warning | A file body uses a name the template does not declare. Renders empty unless `strict = true`. |
+
+These two are about the flags rather than the template, so they are raised as
+errors before anything is checked:
+
+| Code | Meaning |
+|---|---|
+| `tpl::lint::unknown_code` | A `--deny` or `--allow` names something that is neither `warnings` nor a code above. |
+| `tpl::lint::conflicting_level` | The same code, or `warnings`, was both denied and allowed. |
 
 ## Answers and evaluation
 

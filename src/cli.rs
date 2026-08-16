@@ -303,6 +303,20 @@ pub struct LintArgs {
     /// Check the template's working tree rather than its HEAD
     #[arg(long)]
     pub dirty: bool,
+
+    /// Fail on a warning: `warnings`, or a single `tpl::lint::*` code
+    ///
+    /// Repeatable. A named code overrides `warnings`, whichever order the
+    /// flags are written in.
+    #[arg(short = 'D', long = "deny", value_name = "CODE|warnings")]
+    pub deny: Vec<String>,
+
+    /// Do not report a finding at all: `warnings`, or a single `tpl::lint::*` code
+    ///
+    /// Repeatable. A named code overrides `warnings`, whichever order the
+    /// flags are written in.
+    #[arg(short = 'A', long = "allow", value_name = "CODE|warnings")]
+    pub allow: Vec<String>,
 }
 
 /// `git tpl questions`

@@ -453,3 +453,191 @@ fn a_github_expression_is_not_also_reported_as_undeclared() {
     let output = scratch.lint(&world.template.source(), &[]).success();
     assert_eq!(codes(&output), ["tpl::lint::foreign_expression"]);
 }
+
+// --- `--deny` and `--allow` -------------------------------------------------
+//
+// A template that has decided a warning must never ship needs a way to say so
+// without a second lint run and a JSON round-trip. See issue #46.
+
+/// Two warnings and one error, so that a whole-severity rule and a per-code
+/// rule can be told apart.
+fn mixed() -> World {
+    World::with_template(
+        r#"
+name = "mixed"
+
+[questions]
+project_name = { type = "string", default = "demo" }
+"#,
+        &[
+            ("ci.yaml.jinja", "runs-on: ${{ matrix.os }}\n"),
+            ("README.md.jinja", "# {{ typo }}\n"),
+        ],
+    )
+}
+
+#[test]
+fn denying_warnings_makes_a_warning_fail_the_lint() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .lint(&world.template.source(), &["-D", "warnings"])
+        .failure();
+
+    let json = output.json();
+    assert_eq!(
+        json["errors"], 0,
+        "no rule was broken that is fatal by nature"
+    );
+    assert_eq!(json["warnings"], 2);
+    assert_eq!(json["denied"], 2);
+}
+
+/// The severity is the template's; `denied` is this run's policy. Collapsing
+/// the two would lose the difference a caller needs.
+#[test]
+fn a_denied_warning_keeps_its_severity_in_json() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .lint(
+            &world.template.source(),
+            &["-D", "tpl::lint::foreign_expression"],
+        )
+        .failure();
+
+    let json = output.json();
+    let foreign = json["diagnostics"]
+        .as_array()
+        .expect("diagnostics")
+        .iter()
+        .find(|d| d["code"] == "tpl::lint::foreign_expression")
+        .expect("the foreign expression finding")
+        .clone();
+    assert_eq!(foreign["severity"], "warning");
+    assert_eq!(foreign["denied"], true);
+    assert_eq!(json["denied"], 1);
+}
+
+#[test]
+fn denying_one_code_leaves_the_other_warnings_passing() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .lint(&world.template.source(), &["-D", "tpl::lint::undeclared"])
+        .failure();
+
+    let json = output.json();
+    assert_eq!(json["denied"], 1);
+    assert_eq!(json["warnings"], 2, "both are still reported");
+}
+
+#[test]
+fn an_allowed_code_disappears_from_the_report_and_the_counts() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .lint(&world.template.source(), &["-A", "tpl::lint::undeclared"])
+        .success();
+
+    assert_eq!(codes(&output), ["tpl::lint::foreign_expression"]);
+    assert_eq!(output.json()["warnings"], 1);
+}
+
+/// The composition the flag pair exists for: everything fatal, except the one
+/// code a template is still migrating away from.
+#[test]
+fn a_named_allow_makes_an_exception_to_denied_warnings() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .lint(
+            &world.template.source(),
+            &["-D", "warnings", "-A", "tpl::lint::undeclared"],
+        )
+        .failure();
+
+    let json = output.json();
+    assert_eq!(codes(&output), ["tpl::lint::foreign_expression"]);
+    assert_eq!(json["denied"], 1);
+}
+
+/// Precedence is by specificity, not by position. A CI fragment that reorders
+/// its arguments must not change what the build means.
+#[test]
+fn the_order_of_deny_and_allow_does_not_matter() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    let first = scratch
+        .lint(
+            &world.template.source(),
+            &["-D", "warnings", "-A", "tpl::lint::undeclared"],
+        )
+        .failure();
+    let second = scratch
+        .lint(
+            &world.template.source(),
+            &["-A", "tpl::lint::undeclared", "-D", "warnings"],
+        )
+        .failure();
+
+    assert_eq!(first.json(), second.json());
+}
+
+#[test]
+fn denying_warnings_still_succeeds_when_there_are_none() {
+    let world = World::with_template(r#"name = "sound""#, &[("README.md", "hello\n")]);
+    let scratch = Scratch::new();
+
+    scratch
+        .lint(&world.template.source(), &["-D", "warnings"])
+        .success();
+}
+
+/// A misspelled code that was accepted would deny nothing, and the failure
+/// would be a green CI run — the one outcome nobody checks.
+#[test]
+fn an_unknown_denied_code_is_rejected() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .lint(&world.template.source(), &["-D", "tpl::lint::undeclare"])
+        .failure();
+
+    assert_eq!(output.error_code(), "tpl::lint::unknown_code");
+}
+
+#[test]
+fn denying_and_allowing_the_same_code_is_rejected() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .lint(
+            &world.template.source(),
+            &["-D", "tpl::lint::undeclared", "-A", "tpl::lint::undeclared"],
+        )
+        .failure();
+
+    assert_eq!(output.error_code(), "tpl::lint::conflicting_level");
+}
+
+#[test]
+fn the_text_report_marks_a_denied_warning() {
+    let world = mixed();
+    let scratch = Scratch::new();
+
+    scratch
+        .lint_text(&world.template.source(), &["-D", "warnings"])
+        .failure()
+        .says("warning[tpl::lint::foreign_expression] (denied)")
+        .says("0 error(s), 2 warning(s)")
+        .says("2 warning(s) denied, which fails the lint");
+}

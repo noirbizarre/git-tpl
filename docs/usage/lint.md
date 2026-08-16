@@ -12,7 +12,8 @@ ones a given answer set never reaches — and the worst of them are silent.
 
 Exit code is 1 when there is an error, 0 when there are only warnings. A lint
 that fails on things a template may legitimately mean is a lint people stop
-running.
+running. When a particular template *has* decided it never means one of them,
+[`--deny`](#choosing-what-fails) says so.
 
 ## What it checks
 
@@ -80,10 +81,59 @@ A warning, because that is still the default. Set `strict = true` in
 Names that came from a `${{ … }}` are not reported: `matrix` belongs to GitHub
 Actions, and advising an author to declare it would be advice not to take.
 
+## Choosing what fails
+
+The default severities are a judgement about templates in general. A given
+template may have a firmer opinion — a workflow repository that never means a
+raw `${{ }}`, say. Two repeatable flags, spelled as `cargo clippy` spells them:
+
+| Flag | Effect |
+|---|---|
+| `-D`, `--deny <CODE\|warnings>` | The finding fails the lint |
+| `-A`, `--allow <CODE\|warnings>` | The finding is not reported at all |
+
+Both take either the word `warnings`, meaning the whole severity, or a single
+`tpl::lint::*` [code](../reference/diagnostics.md#linting).
+
+```sh
+git tpl lint . -D warnings                        # any warning fails
+git tpl lint . -D tpl::lint::foreign_expression   # only that one fails
+git tpl lint . -A tpl::lint::undeclared           # stop reporting that one
+```
+
+A named code always overrides `warnings`, so an exception is a matter of
+naming it:
+
+```sh
+# Everything fatal, except the code this template is still migrating away from
+git tpl lint . -D warnings -A tpl::lint::undeclared
+```
+
+Precedence is by specificity, not by position: writing the `-A` first means the
+same thing. Unlike clippy, where the last flag wins, arguments here can be
+reordered by a shell fragment or a composed CI config without changing what the
+build means. Naming the same code in both flags is an error rather than a
+coin-toss, as is `-D warnings -A warnings`.
+
+A misspelled code is an error too — `tpl::lint::unknown_code`, listing the
+valid ones. Accepting it would deny nothing, and the symptom would be a green
+CI run.
+
+Denying does not rewrite a severity. A denied warning is still reported as a
+warning, marked `(denied)`, and [`--json`](../reference/json.md#lint) keeps
+`"severity": "warning"` beside `"denied": true` — so a consumer can tell a rule
+the template broke from a policy this run applied.
+
 ## In CI
 
 ```yaml
 - run: git tpl lint . --dirty
+```
+
+For a repository where warnings are errors:
+
+```yaml
+- run: git tpl lint . --dirty -D warnings
 ```
 
 Or with [`--json`](../reference/json.md) for anything that needs to read the

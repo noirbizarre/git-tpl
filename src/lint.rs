@@ -23,6 +23,26 @@ use crate::graph::{Graph, GraphError};
 use crate::render::TEMPLATE_SUFFIX;
 use crate::template::Manifest;
 
+/// Every rule this module can report, sorted.
+///
+/// The list a `--deny` or `--allow` argument is checked against, so that a
+/// typo in CI fails loudly instead of quietly denying nothing. A new rule
+/// registers itself here; `tests/diagnostics.rs` enforces that the set and the
+/// reference page agree.
+pub const CODES: &[&str] = &[
+    "tpl::lint::collision",
+    "tpl::lint::degenerate_path",
+    "tpl::lint::foreign_expression",
+    "tpl::lint::syntax",
+    "tpl::lint::undeclared",
+];
+
+/// The word that stands for the whole warning severity in `--deny`/`--allow`.
+///
+/// Spelled as clippy spells it, because the audience types
+/// `cargo clippy -- -D warnings` daily.
+pub const WARNINGS: &str = "warnings";
+
 /// How much a finding matters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -91,6 +111,177 @@ pub enum LintError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Git(#[from] crate::git::GitError),
+
+    /// A `--deny` or `--allow` names something that is not a rule.
+    ///
+    /// An error rather than a shrug: the whole point of the flag is to make a
+    /// build fail, and a misspelled code that is accepted silently denies
+    /// nothing. The failure would be a green CI run, which is the one outcome
+    /// nobody checks.
+    #[error("`{spelling}` is not a lint code")]
+    #[diagnostic(code(tpl::lint::unknown_code), help("{help}"))]
+    UnknownCode {
+        /// What was written on the command line.
+        spelling: String,
+        /// The valid vocabulary, and the nearest match if there is one.
+        help: String,
+    },
+
+    /// The same code was both denied and allowed.
+    ///
+    /// Neither answer is defensible, and picking one by argument order would
+    /// make the meaning depend on how a CI fragment was assembled.
+    #[error("`{spelling}` is both denied and allowed")]
+    #[diagnostic(
+        code(tpl::lint::conflicting_level),
+        help(
+            "`--deny` and `--allow` disagree about the same thing, so there is no verdict \
+             to reach. Drop one of them. A named code overrides `warnings`, so \
+             `--deny warnings --allow tpl::lint::undeclared` is how an exception is spelled."
+        )
+    )]
+    ConflictingLevel {
+        /// The code, or `warnings`, named by both flags.
+        spelling: String,
+    },
+}
+
+/// What `--deny` and `--allow` were asked for.
+///
+/// Resolution is by *specificity*, not by position: a named code always beats
+/// the `warnings` bucket, whichever flag came first. Clippy resolves by
+/// position, but CI arguments get reordered by shell fragments and composed
+/// configs, and a rule whose meaning depends on argument order is a rule that
+/// changes meaning silently.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Levels {
+    /// `--deny warnings`.
+    deny_warnings: bool,
+    /// `--allow warnings`.
+    allow_warnings: bool,
+    /// Codes named by `--deny`.
+    deny: std::collections::BTreeSet<String>,
+    /// Codes named by `--allow`.
+    allow: std::collections::BTreeSet<String>,
+}
+
+/// A finding, with the verdict the levels reached about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Verdict {
+    /// The finding itself, with its native severity intact.
+    pub finding: Finding,
+    /// Whether a `--deny` made it fatal.
+    ///
+    /// Kept beside the severity rather than rewriting it, so a caller can tell
+    /// a rule the template broke from a policy this run applied.
+    pub denied: bool,
+}
+
+impl Levels {
+    /// Validate the two argument lists.
+    ///
+    /// Fails before the tree is walked, so a typo costs no work.
+    pub fn parse(deny: &[String], allow: &[String]) -> Result<Self, LintError> {
+        let mut levels = Self::default();
+        for spelling in deny {
+            match check(spelling)? {
+                Selector::Warnings => levels.deny_warnings = true,
+                Selector::Code(code) => {
+                    levels.deny.insert(code.to_string());
+                }
+            }
+        }
+        for spelling in allow {
+            match check(spelling)? {
+                Selector::Warnings => levels.allow_warnings = true,
+                Selector::Code(code) => {
+                    levels.allow.insert(code.to_string());
+                }
+            }
+        }
+
+        // Only a conflict at the *same* specificity is ambiguous. A named code
+        // against `warnings` is the exception mechanism, not a mistake.
+        if levels.deny_warnings && levels.allow_warnings {
+            return Err(LintError::ConflictingLevel {
+                spelling: WARNINGS.to_string(),
+            });
+        }
+        if let Some(both) = levels.deny.intersection(&levels.allow).next() {
+            return Err(LintError::ConflictingLevel {
+                spelling: both.clone(),
+            });
+        }
+
+        Ok(levels)
+    }
+
+    /// Whether anything was asked for at all.
+    pub fn is_empty(&self) -> bool {
+        !self.deny_warnings && !self.allow_warnings && self.deny.is_empty() && self.allow.is_empty()
+    }
+
+    /// Drop the allowed findings, and mark the denied ones.
+    pub fn apply(&self, findings: Vec<Finding>) -> Vec<Verdict> {
+        findings
+            .into_iter()
+            .filter(|finding| !self.allows(finding))
+            .map(|finding| Verdict {
+                // An error is already fatal; `denied` records a promotion, and
+                // saying an error was denied would make the JSON count wrong.
+                denied: finding.severity == Severity::Warning && self.denies(&finding),
+                finding,
+            })
+            .collect()
+    }
+
+    /// Whether this finding should not be reported at all.
+    fn allows(&self, finding: &Finding) -> bool {
+        if self.deny.contains(finding.code) {
+            return false; // The named code wins over `--allow warnings`.
+        }
+        self.allow.contains(finding.code)
+            || (self.allow_warnings && finding.severity == Severity::Warning)
+    }
+
+    /// Whether this finding should fail the command.
+    fn denies(&self, finding: &Finding) -> bool {
+        if self.allow.contains(finding.code) {
+            return false; // The named code wins over `--deny warnings`.
+        }
+        self.deny.contains(finding.code) || self.deny_warnings
+    }
+}
+
+/// What one `--deny`/`--allow` value selects.
+enum Selector<'a> {
+    /// Every warning.
+    Warnings,
+    /// One rule.
+    Code(&'a str),
+}
+
+/// Reject anything that is not `warnings` or a known code.
+fn check(spelling: &str) -> Result<Selector<'_>, LintError> {
+    if spelling == WARNINGS {
+        return Ok(Selector::Warnings);
+    }
+    if let Some(code) = CODES.iter().find(|code| **code == spelling) {
+        return Ok(Selector::Code(code));
+    }
+
+    // The nearest match first: the common mistake is a remembered code, not an
+    // invented one, and reading a list of six to find a typo is work.
+    let suggestion = crate::suggest::closest(spelling, CODES.iter().copied().chain([WARNINGS]))
+        .map(|close| format!("Did you mean `{close}`? "))
+        .unwrap_or_default();
+    Err(LintError::UnknownCode {
+        spelling: spelling.to_string(),
+        help: format!(
+            "{suggestion}Valid values are `{WARNINGS}` and: {}",
+            CODES.join(", ")
+        ),
+    })
 }
 
 /// Lint a resolved template.
@@ -671,6 +862,183 @@ mod tests {
             path: path.to_string(),
             oid: crate::git::Oid::from_bytes([0; 20]),
             mode: crate::git::FileMode::Blob,
+        }
+    }
+
+    fn levels(deny: &[&str], allow: &[&str]) -> Result<Levels, LintError> {
+        let deny: Vec<String> = deny.iter().map(|s| s.to_string()).collect();
+        let allow: Vec<String> = allow.iter().map(|s| s.to_string()).collect();
+        Levels::parse(&deny, &allow)
+    }
+
+    fn sample() -> Vec<Finding> {
+        vec![
+            Finding::error("tpl::lint::syntax", "a.jinja", "boom".into(), "fix".into()),
+            Finding::warning(
+                "tpl::lint::foreign_expression",
+                "b.jinja",
+                "boom".into(),
+                "fix".into(),
+            ),
+            Finding::warning(
+                "tpl::lint::undeclared",
+                "c.jinja",
+                "boom".into(),
+                "fix".into(),
+            ),
+        ]
+    }
+
+    fn denied(verdicts: &[Verdict]) -> Vec<&str> {
+        verdicts
+            .iter()
+            .filter(|v| v.denied)
+            .map(|v| v.finding.code)
+            .collect()
+    }
+
+    fn reported(verdicts: &[Verdict]) -> Vec<&str> {
+        verdicts.iter().map(|v| v.finding.code).collect()
+    }
+
+    #[test]
+    fn no_levels_deny_nothing() {
+        let verdicts = levels(&[], &[]).unwrap().apply(sample());
+        assert_eq!(reported(&verdicts).len(), 3);
+        assert!(denied(&verdicts).is_empty());
+    }
+
+    #[test]
+    fn denying_warnings_promotes_every_warning_but_not_the_errors() {
+        let verdicts = levels(&["warnings"], &[]).unwrap().apply(sample());
+        assert_eq!(
+            denied(&verdicts),
+            ["tpl::lint::foreign_expression", "tpl::lint::undeclared"]
+        );
+    }
+
+    #[test]
+    fn denying_one_code_leaves_the_other_warnings_alone() {
+        let verdicts = levels(&["tpl::lint::foreign_expression"], &[])
+            .unwrap()
+            .apply(sample());
+        assert_eq!(denied(&verdicts), ["tpl::lint::foreign_expression"]);
+    }
+
+    #[test]
+    fn an_allowed_finding_is_not_reported_at_all() {
+        let verdicts = levels(&[], &["tpl::lint::undeclared"])
+            .unwrap()
+            .apply(sample());
+        assert_eq!(
+            reported(&verdicts),
+            ["tpl::lint::syntax", "tpl::lint::foreign_expression"]
+        );
+    }
+
+    #[test]
+    fn allowing_an_error_silences_it_too() {
+        let verdicts = levels(&[], &["tpl::lint::syntax"]).unwrap().apply(sample());
+        assert!(!reported(&verdicts).contains(&"tpl::lint::syntax"));
+    }
+
+    #[test]
+    fn denying_a_code_that_is_already_an_error_changes_nothing() {
+        let verdicts = levels(&["tpl::lint::syntax"], &[]).unwrap().apply(sample());
+        // Already fatal; counting it as denied would double-count it.
+        assert!(denied(&verdicts).is_empty());
+        assert_eq!(reported(&verdicts).len(), 3);
+    }
+
+    // The composition the flag exists for: everything fatal except the one
+    // code a template is still migrating away from.
+    #[test]
+    fn a_named_allow_beats_the_warnings_bucket() {
+        let verdicts = levels(&["warnings"], &["tpl::lint::undeclared"])
+            .unwrap()
+            .apply(sample());
+        assert_eq!(denied(&verdicts), ["tpl::lint::foreign_expression"]);
+        assert!(!reported(&verdicts).contains(&"tpl::lint::undeclared"));
+    }
+
+    // Precedence is by specificity, so the levels a pair of argument lists
+    // reach cannot depend on how a CI fragment happened to order them.
+    #[test]
+    fn the_levels_do_not_depend_on_the_order_of_the_values() {
+        let one = levels(
+            &["warnings", "tpl::lint::syntax"],
+            &["tpl::lint::undeclared", "tpl::lint::collision"],
+        )
+        .unwrap();
+        let other = levels(
+            &["tpl::lint::syntax", "warnings"],
+            &["tpl::lint::collision", "tpl::lint::undeclared"],
+        )
+        .unwrap();
+        assert_eq!(one, other);
+    }
+
+    #[test]
+    fn a_named_deny_beats_allow_warnings() {
+        let verdicts = levels(&["tpl::lint::undeclared"], &["warnings"])
+            .unwrap()
+            .apply(sample());
+        assert_eq!(
+            reported(&verdicts),
+            ["tpl::lint::syntax", "tpl::lint::undeclared"]
+        );
+        assert_eq!(denied(&verdicts), ["tpl::lint::undeclared"]);
+    }
+
+    #[test]
+    fn an_unknown_code_is_rejected_with_the_valid_ones() {
+        // Assembled rather than written out: `tests/diagnostics.rs` harvests
+        // bare `"tpl::…"` literals from `src/`, and a fake one would be read
+        // as an undocumented code.
+        let unknown = format!("tpl::lint::{}", "nope");
+        let error = levels(&[&unknown], &[]).unwrap_err();
+        let LintError::UnknownCode { spelling, help } = error else {
+            panic!("expected an unknown code, got {error:?}");
+        };
+        assert_eq!(spelling, unknown);
+        assert!(help.contains("undeclared"), "{help}");
+        assert!(help.contains(WARNINGS), "{help}");
+    }
+
+    #[test]
+    fn a_near_miss_is_suggested() {
+        let typo = "tpl::lint::undeclared".strip_suffix('d').expect("a typo");
+        let error = levels(&[], &[typo]).unwrap_err();
+        let LintError::UnknownCode { help, .. } = error else {
+            panic!("expected an unknown code");
+        };
+        assert!(
+            help.starts_with("Did you mean `tpl::lint::undeclared`?"),
+            "{help}"
+        );
+    }
+
+    #[test]
+    fn denying_and_allowing_the_same_code_is_rejected() {
+        let error = levels(&["tpl::lint::undeclared"], &["tpl::lint::undeclared"]).unwrap_err();
+        assert!(matches!(error, LintError::ConflictingLevel { .. }));
+    }
+
+    #[test]
+    fn denying_and_allowing_warnings_wholesale_is_rejected() {
+        let error = levels(&["warnings"], &["warnings"]).unwrap_err();
+        assert!(matches!(error, LintError::ConflictingLevel { .. }));
+    }
+
+    // The list `--deny` validates against has to be the list the rules use, or
+    // a code becomes undeniable the day it is added.
+    #[test]
+    fn every_rule_code_is_denyable() {
+        let mut sorted = CODES.to_vec();
+        sorted.sort_unstable();
+        assert_eq!(CODES, sorted.as_slice(), "CODES must stay sorted");
+        for code in CODES {
+            assert!(levels(&[code], &[]).is_ok(), "{code} is not accepted");
         }
     }
 }
