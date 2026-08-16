@@ -29,9 +29,13 @@ Release PR  (chore(release): X.Y.Z)
      ▼
 the release is made public
      │
-     ▼
-🍺 Homebrew
-     │  renders the formula and pushes it to noirbizarre/homebrew-tap
+     ├─────────────────────┐
+     ▼                     ▼
+🍺 Homebrew           📦 AUR
+     │  renders the       │  renders both PKGBUILDs and pushes
+     │  formula and       │  them to aur.archlinux.org
+     │  pushes it to
+     │  noirbizarre/homebrew-tap
 ```
 
 ## Division of labour
@@ -87,6 +91,7 @@ Neither writes anything.
 | `.github/workflows/prepare-release.yaml` | Version, changelog, release artifact |
 | `.github/workflows/publish-release.yaml` | Cross-compilation and assets |
 | `.github/workflows/homebrew.yaml` | The Homebrew tap formula |
+| `.github/workflows/aur.yaml` | The two AUR packages |
 
 CI validates the setup on every run:
 
@@ -190,6 +195,78 @@ an asset the formula can trust. homebrew-core is not a target yet: it has an
 acceptance bar around notability and release history that this project does not
 clear, and submitting early spends a reviewer's afternoon for nothing.
 
+## The AUR
+
+Two packages, both generated and never hand-edited.
+[`git-tpl-bin`](https://aur.archlinux.org/packages/git-tpl-bin) repackages the
+`linux-amd64` and `linux-arm64` archives;
+[`git-tpl`](https://aur.archlinux.org/packages/git-tpl) compiles from the
+tagged source. They conflict, because both own `/usr/bin/git-tpl` — a user
+installs one or the other.
+
+`packaging/aur/<pkgname>/PKGBUILD` is the template; `@VERSION@` and the
+`@SHA256*@` placeholders are substituted by `.github/workflows/aur.yaml`, which
+then commits the result and a regenerated `.SRCINFO` to the AUR. The AUR
+repository is a **mirror**: nothing is ever read back out of it, so an edit made
+on aur.archlinux.org is lost at the next release. That is the point — one
+source of truth, and it is this repository.
+
+The trigger and the checksum handling are the same as Homebrew's, for the same
+reasons: `release: published` is the first moment the URLs baked into a PKGBUILD
+resolve, the checksums are computed from the assets rather than read out of
+`SHA256SUMS`, and a leftover placeholder fails the job. That last one matters
+more here than in a formula: an empty `sha256sums` entry does not fail a
+makepkg build, it accepts whatever it downloads.
+
+Re-running is safe, and idempotent for the same reason the tap is: the push
+compares the staged files against the AUR's and exits without committing when
+they match.
+
+### What the job proves before pushing
+
+Both packages are built with `makepkg`, which is what verifies the checksums,
+then `namcap`-ed, installed, and checked through `git tpl --version` — not
+`git-tpl --version`. Git resolves `git tpl` only via an executable named
+exactly `git-tpl` on `PATH`, and a rename inside the archive is the one failure
+that would otherwise pass unnoticed.
+
+`--nocheck` on the build: `check()` would re-run, in release mode, the suite
+♻️ CI already ran on this commit. The PKGBUILD keeps its `check()` so users and
+packagers still run it.
+
+!!! warning "namcap exits 0 whatever it reports"
+
+    Errors included. A step that just calls `namcap` logs a broken package and
+    goes green, so the job greps its output for `E:` and fails on a match.
+    `W:` is tolerated: a Rust binary linking `libgcc_s` always draws two
+    warnings that cannot both be satisfied, and failing on those would disable
+    the check entirely.
+
+!!! warning "`!lto` in the source package is load-bearing"
+
+    makepkg enables LTO globally, which puts `-flto=auto` into `CFLAGS` — and
+    `CFLAGS` is what the `libgit2-sys` build script compiles vendored libgit2
+    with. The resulting `libgit2.a` holds LLVM bitcode rather than objects, and
+    the link fails with a screenful of `undefined symbol: git_repository_open`.
+    Nothing is lost by disabling it: `Cargo.toml` already sets `lto = true` on
+    the release profile.
+
+### The account
+
+An AUR account is a standing maintenance obligation, not a one-off. The AUR
+creates a pkgbase on its first push, so the workflow imports both packages
+itself as long as the names are free and the key belongs to the account
+claiming them. If it fails, the release is unaffected and the packages are
+stale; re-run it, or do it by hand:
+
+```sh
+git clone ssh://aur@aur.archlinux.org/git-tpl-bin.git
+cd git-tpl-bin
+# edit PKGBUILD
+makepkg --printsrcinfo > .SRCINFO
+git commit -am 'Update to X.Y.Z' && git push
+```
+
 ## Requirements
 
 A GitHub App with `APP_CLIENT_ID` (a repository variable) and
@@ -202,3 +279,14 @@ access token whose repository access is limited to `noirbizarre/homebrew-tap`
 with `Contents: Read and write`. It is scoped to its own environment rather
 than sharing `release`, so nothing that publishes a release can also rewrite
 the tap.
+
+An `AUR_SSH_PRIVATE_KEY` secret in the `aur` environment: the private half of a
+key registered on the AUR account that maintains both packages. Scoped to its
+own environment for the same reason as `TAP_TOKEN`.
+
+Re-running either after a failure needs no release:
+
+```sh
+gh workflow run homebrew.yaml -f tag=X.Y.Z
+gh workflow run aur.yaml -f tag=X.Y.Z
+```

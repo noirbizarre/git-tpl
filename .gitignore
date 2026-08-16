@@ -1,5 +1,12 @@
 /target
 
+# Where the packaging workflows render their templates, and where makepkg
+# leaves what it builds. The templates under packaging/ are the source; what
+# lands here is derived from a published release and is regenerated, never
+# edited. Ignored so that rendering one locally to test it cannot be committed.
+/build
+/assets
+
 # Zensical documentation build output
 site/
 
