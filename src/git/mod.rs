@@ -344,6 +344,34 @@ pub enum GitError {
         reason: String,
     },
 
+    /// A clone failed for a local reason — the remote is not implicated.
+    ///
+    /// Split from `Network` because the two remedies share nothing. `clone`
+    /// creates the repository and writes its objects, so a full `$TMPDIR`, a
+    /// read-only destination or a refused `mkdir` all surface as an error from
+    /// the same call the URL was passed to. Reporting those as "could not
+    /// reach" sent a user off to check a proxy that was never involved, and
+    /// looked intermittent because it tracked free disk space.
+    #[error("could not clone `{url}`")]
+    #[diagnostic(
+        code(tpl::git::clone),
+        help(
+            "reason: {reason}\n\
+             The remote answered; writing the clone failed. Check the free \
+             space and the permissions on the destination:\n  \
+             df -h {}",
+            path.display()
+        )
+    )]
+    Clone {
+        /// The remote that was being cloned.
+        url: String,
+        /// The destination that could not be written.
+        path: PathBuf,
+        /// libgit2's message.
+        reason: String,
+    },
+
     /// The worktree has uncommitted changes and the operation needs it clean.
     #[error("the working tree has uncommitted changes")]
     #[diagnostic(
