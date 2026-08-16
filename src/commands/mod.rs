@@ -13,6 +13,7 @@ mod questions;
 mod render;
 mod show;
 mod status;
+mod test;
 mod update;
 
 pub use completion::run as completion;
@@ -28,6 +29,7 @@ pub use questions::run as questions;
 pub use render::run as render;
 pub use show::run as show;
 pub use status::run as status;
+pub use test::run as test;
 pub use update::run as update;
 
 use std::collections::BTreeMap;

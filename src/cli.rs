@@ -80,6 +80,9 @@ pub enum Command {
     /// Check a template for problems, without rendering it
     Lint(LintArgs),
 
+    /// Run a template's own test cases
+    Test(TestArgs),
+
     /// List a template's questions and their schema
     Questions(QuestionsArgs),
 
@@ -317,6 +320,49 @@ pub struct LintArgs {
     /// flags are written in.
     #[arg(short = 'A', long = "allow", value_name = "CODE|warnings")]
     pub allow: Vec<String>,
+}
+
+/// `git tpl test`
+///
+/// Deliberately carries no [`AnswerArgs`]. A case file supplies the answers,
+/// and that is the point of it — a `--answer` on the command line would change
+/// what every case asserts without changing what any case says. See the
+/// argument tests at the bottom of this file.
+#[derive(Debug, clap::Args)]
+pub struct TestArgs {
+    /// The template to test; defaults to the current directory
+    #[arg(value_name = "TEMPLATE", default_value = ".")]
+    pub template: String,
+
+    /// Run only the cases with these names
+    ///
+    /// A name, not a path: `tests/minimal.toml` is the case `minimal`.
+    #[arg(value_name = "CASE")]
+    pub cases: Vec<String>,
+
+    /// Read cases from this directory instead of `tests`
+    #[arg(long, value_name = "DIR")]
+    pub tests: Option<String>,
+
+    /// The branch, tag or commit to test
+    #[arg(long, value_name = "REF")]
+    pub r#ref: Option<String>,
+
+    /// Test this subdirectory instead of the manifest's root
+    #[arg(long, value_name = "PATH")]
+    pub root: Option<String>,
+
+    /// Test the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+
+    /// Record each case's rendering as its snapshot
+    #[arg(long)]
+    pub write: bool,
+
+    /// Allow the template's remote data sources without asking
+    #[arg(long)]
+    pub trust: bool,
 }
 
 /// `git tpl questions`
@@ -605,6 +651,39 @@ mod tests {
         assert!(Cli::try_parse_from(["git-tpl", "diff", "--dirty", "--answer", "a=b"]).is_ok());
         assert!(Cli::try_parse_from(["git-tpl", "show", "x", "--dirty", "--defaults"]).is_ok());
         assert!(Cli::try_parse_from(["git-tpl", "render", "t", "-o", "out", "--defaults"]).is_ok());
+    }
+
+    /// `test` is the third case, and its reason is neither of the other two.
+    ///
+    /// It renders — repeatedly — so "the flag would be ignored" is not why it
+    /// refuses. It refuses because the *case file* is the answer set: a
+    /// `--answer` here would silently change what every case asserts while
+    /// every case file still said otherwise, and a suite that does not test
+    /// what it says it tests is worse than no suite.
+    #[test]
+    fn test_refuses_answer_flags_because_the_cases_own_the_answers() {
+        assert!(Cli::try_parse_from(["git-tpl", "test", "--answer", "a=b"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "test", "--defaults"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "test", "--answers-from", "a.toml"]).is_err());
+    }
+
+    /// The template argument is optional, and the positionals after it are
+    /// case names rather than a second template.
+    #[test]
+    fn test_defaults_to_the_current_directory_and_takes_case_names() {
+        let cli = Cli::try_parse_from(["git-tpl", "test"]).unwrap();
+        let Command::Test(args) = cli.command else {
+            panic!("expected test")
+        };
+        assert_eq!(args.template, ".");
+        assert!(args.cases.is_empty());
+
+        let cli = Cli::try_parse_from(["git-tpl", "test", "./tpl", "minimal", "with-ci"]).unwrap();
+        let Command::Test(args) = cli.command else {
+            panic!("expected test")
+        };
+        assert_eq!(args.template, "./tpl");
+        assert_eq!(args.cases, ["minimal", "with-ci"]);
     }
 
     /// `show` reads one path. A second one is a typo — most likely a `--`

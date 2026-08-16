@@ -62,7 +62,13 @@ project is:
 [ADR-003](../adr/003-minijinja-only.md).
 
 **Code execution from templates.** Hooks, scripts, subprocesses, embedded
-interpreters. Templates are untrusted input.
+interpreters. Templates are untrusted input. This includes a `command` key in a
+`git tpl test` case, which is where the rule is most tempting to break —
+[ADR-016](../adr/016-template-tests-are-data.md).
+
+**A matrix language for test cases.** Three files beat a combinatorial block
+whose expansion nobody can predict. If a template needs twelve cases, twelve
+files say so honestly.
 
 **Runtime values in the render context.** `now()`, `git.user`, environment
 access. [ADR-006](../adr/006-no-runtime-context.md).

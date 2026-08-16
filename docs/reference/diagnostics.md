@@ -131,6 +131,25 @@ errors before anything is checked:
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
 | `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
 
+## Template tests
+
+Raised by [`git tpl test`](../usage/test.md) when the *run* cannot proceed. A
+case that simply fails its expectations is not one of these: it arrives in the
+report's `cases[].failures` array, and the command exits `1`.
+
+The area is `testing` rather than `test`, which is reserved for the diagnostic
+fixtures in `src/report.rs`.
+
+| Code | Meaning |
+|---|---|
+| `tpl::testing::no_tests` | The tests directory does not exist at the resolved revision, or holds no case files. |
+| `tpl::testing::no_such_case` | A named case does not exist. Carries a suggestion and the available names. |
+| `tpl::testing::case_parse` | A case file is not valid TOML, JSON or YAML. |
+| `tpl::testing::case_shape` | A case file parses but is not a coherent case — an unknown key, a wrong type, contradictory expectations, or two files claiming one case name. |
+| `tpl::testing::write_needs_local` | `--write` was used on a template with no working tree to write a snapshot into. |
+| `tpl::testing::snapshot_read` | A recorded snapshot is unreadable, or its `MANIFEST` contradicts the files beside it. |
+| `tpl::testing::snapshot_write` | A snapshot could not be written to the working tree. |
+
 ## Git
 
 | Code | Meaning |

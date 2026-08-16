@@ -5,6 +5,7 @@
 //! operations the CLI exposes.
 
 pub mod resolve;
+pub mod testing;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -88,6 +89,15 @@ pub enum OpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Lint(#[from] crate::lint::LintError),
+
+    /// The test runner could not run.
+    ///
+    /// Only failures that stop the run reach here. An unmet expectation is a
+    /// [`testing::Failure`] carried in the report, not an error: twelve failing
+    /// cases must all be reported, and an error would report one.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Test(#[from] testing::TestError),
 
     /// A Git operation failed.
     #[error(transparent)]
@@ -342,7 +352,8 @@ impl<'a> Target<'a> {
 /// A rendering, against a template somebody else resolved.
 ///
 /// [`RenderedFiles`] is this plus the [`Resolved`] that produced it. The two
-/// are split so that a caller with many answer sets can resolve once: [`resolve::resolve`] makes a fresh temporary clone every call,
+/// are split so that a caller with many answer sets — [`testing::run`] — can
+/// resolve once: [`resolve::resolve`] makes a fresh temporary clone every call,
 /// so a resolution per answer set costs a clone each and, worse, could render
 /// two answer sets against two different revisions if the branch moved between
 /// them.
