@@ -206,7 +206,12 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
 }
 
 /// The path a source refers to, if it is one on this machine.
-fn local_path(source: &str) -> Option<PathBuf> {
+///
+/// Public because `--write` in the test runner has to make the same call
+/// `--dirty` does: a snapshot is written to a working tree, and a source with
+/// no working tree must be refused before the first case renders. Two locality
+/// rules would mean the two flags disagreeing about what "local" means.
+pub fn local_path(source: &str) -> Option<PathBuf> {
     if source.contains("://") {
         // `file://` is a URL form of a local path, but treating it as remote
         // means it is cloned rather than opened — which is the safer reading of

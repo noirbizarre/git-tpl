@@ -309,6 +309,45 @@ impl TrustGate for RefuseRemote {
     }
 }
 
+/// Replays a decision already taken, without asking again.
+///
+/// For a caller that renders the same template more than once in one
+/// invocation — `git tpl test`, with a case per answer set. The consent being
+/// sought is "may this template reach these hosts?", and that answer does not
+/// change between two answer sets; asking once per case would train the reader
+/// to say yes without looking.
+///
+/// It carries the decisions rather than granting, so a source the user *skipped*
+/// stays skipped for every case. A gate that replayed "yes" would turn one
+/// refusal into an allowance the second time it was consulted.
+pub struct Decided(BTreeMap<String, Decision>);
+
+impl Decided {
+    /// Replay these decisions.
+    pub fn new(decisions: BTreeMap<String, Decision>) -> Self {
+        Self(decisions)
+    }
+}
+
+impl TrustGate for Decided {
+    fn confirm(
+        &mut self,
+        requests: &[RemoteRequest],
+        _limit_bytes: u64,
+    ) -> Result<BTreeMap<String, Decision>, DataError> {
+        Ok(requests
+            .iter()
+            .map(|request| {
+                // A request nobody decided on is skipped, not allowed. The
+                // decisions were taken over the same manifest, so this cannot
+                // happen — and if it ever does, silence must fail closed.
+                let decision = self.0.get(&request.name).copied().unwrap_or(Decision::Skip);
+                (request.name.clone(), decision)
+            })
+            .collect())
+    }
+}
+
 /// Every data source that is declared remote, in declaration order.
 ///
 /// From the *declaration*, not from a resolved string: this is what the trust
