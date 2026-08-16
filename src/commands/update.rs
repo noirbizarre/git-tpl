@@ -28,8 +28,11 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let overrides = supplied(&args.answers)?;
 
     if args.dry_run {
-        return dry_run(&ctx, &config, &args, overrides, preferences.interactive)
-            .map(|()| crate::exit::SUCCESS);
+        let payload = dry_run(&ctx, &config, &args, overrides, preferences.interactive)?;
+        if global.json {
+            println!("{}", crate::report::success(payload));
+        }
+        return Ok(crate::exit::SUCCESS);
     }
 
     let mut prompter = Interactive;
@@ -49,7 +52,12 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         ),
     )?;
 
-    match outcome {
+    // Built alongside the prose rather than instead of it: `--json` suppresses
+    // `say` but not the work, so the two branches cannot report different
+    // outcomes. Issue #53 was the opposite arrangement — the `UpToDate` arm
+    // said its piece to a silenced stderr and stdout stayed empty, which a
+    // caller could not tell apart from the binary producing nothing at all.
+    let payload = match outcome {
         UpdateOutcome::UpToDate {
             revision_description,
             ignored_answers,
@@ -59,16 +67,28 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 config.template.source
             ));
             report_ignored(&ctx, &ignored_answers);
+
+            // The id is not in the outcome, because nothing was created. It is
+            // still what the caller asked about, so read it back off disk.
+            let (id, ref_name) = ops::identify(&ctx.root)?;
+            serde_json::json!({
+                "result": "upToDate",
+                "id": id.as_str(),
+                "ref": ref_name,
+                "template": config.template.source,
+                "revision": revision_description,
+                "ignoredAnswers": ignored_answers,
+            })
         }
 
         UpdateOutcome::Updated {
             id,
+            commit,
             changes,
             previous_revision_description,
             revision_description,
             answers_changed,
             ignored_answers,
-            ..
         } => {
             report_ignored(&ctx, &ignored_answers);
             ctx.blank();
@@ -76,7 +96,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ctx.say(field(
                 &ctx.theme,
                 "Revision",
-                &match previous_revision_description {
+                &match &previous_revision_description {
                     Some(previous) => format!("{previous} → {revision_description}"),
                     None => revision_description.clone(),
                 },
@@ -107,24 +127,53 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ctx.say(command(&ctx.theme, "git tpl diff"));
             ctx.say(command(&ctx.theme, "git tpl merge"));
 
-            if preferences.auto_push {
+            // The push happens under `--json` too. Only its prose is silenced;
+            // suppressing the push itself would make the flag change behaviour
+            // rather than change output.
+            let pushed = if preferences.auto_push {
                 ctx.blank();
                 let pushed = ops::push(&ctx.repo, &ctx.root, &preferences)?;
                 ctx.say(format!("Pushed {pushed} to {}.", preferences.remote));
-            }
+                Some(preferences.remote.clone())
+            } else {
+                None
+            };
+
+            serde_json::json!({
+                "result": "updated",
+                "id": id.as_str(),
+                "ref": id.ref_name(),
+                "template": config.template.source,
+                "commit": commit.to_hex(),
+                "previousRevision": previous_revision_description,
+                "revision": revision_description,
+                "changes": crate::report::changes(&changes),
+                "answersChanged": answers_changed,
+                "ignoredAnswers": ignored_answers,
+                "pushed": pushed,
+            })
         }
+    };
+
+    if global.json {
+        println!("{}", crate::report::success(payload));
     }
 
     Ok(crate::exit::SUCCESS)
 }
 
+/// Report what would change, without writing anything.
+///
+/// Returns the machine-readable form so that the caller does the single
+/// `println!`: a dry run that stayed silent under `--json` would reopen the
+/// hole this command's payload exists to close.
 fn dry_run(
     ctx: &Session,
     config: &tpl::config::Config,
     args: &UpdateArgs,
     overrides: std::collections::BTreeMap<String, tpl::template::Value>,
     interactive: bool,
-) -> Result<(), OpError> {
+) -> Result<serde_json::Value, OpError> {
     let mut answers = config.answers.clone();
     answers.extend(overrides);
 
@@ -156,21 +205,28 @@ fn dry_run(
         Some(oid) => Some(ctx.repo.commit(oid)?.tree),
         None => None,
     };
+    let revision_description =
+        ops::describe_revision(&rendered.template.reference, rendered.template.revision);
 
     if previous_tree == Some(rendered.tree) {
         ctx.say("Already up to date. Nothing would change.");
-        return Ok(());
+        return Ok(serde_json::json!({
+            "dryRun": true,
+            "result": "upToDate",
+            "id": id.as_str(),
+            "ref": ref_name,
+            "template": config.template.source,
+            "revision": revision_description,
+            "changes": [],
+            "ignoredAnswers": rendered.ignored_answers,
+        }));
     }
 
     let changes = ctx.repo.diff_trees(previous_tree, rendered.tree, &[])?;
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", &config.template.source));
-    ctx.say(field(
-        &ctx.theme,
-        "Revision",
-        &ops::describe_revision(&rendered.template.reference, rendered.template.revision),
-    ));
+    ctx.say(field(&ctx.theme, "Revision", &revision_description));
     ctx.blank();
     ctx.say(headline(&ctx.theme, "Would update", &id.ref_name()));
     ctx.blank();
@@ -179,5 +235,15 @@ fn dry_run(
     }
     ctx.blank();
     ctx.say(muted(&ctx.theme, "Nothing was written."));
-    Ok(())
+
+    Ok(serde_json::json!({
+        "dryRun": true,
+        "result": "wouldUpdate",
+        "id": id.as_str(),
+        "ref": ref_name,
+        "template": config.template.source,
+        "revision": revision_description,
+        "changes": crate::report::changes(&changes),
+        "ignoredAnswers": rendered.ignored_answers,
+    }))
 }

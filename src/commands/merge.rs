@@ -13,6 +13,15 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     if args.abort {
         ctx.repo.abort_merge()?;
         ctx.say("Merge aborted.");
+        if global.json {
+            // Its own `result`, not one of `MergeOutcome`'s: aborting is the
+            // undoing of a merge, and reporting it as `upToDate` would tell a
+            // caller the opposite of what happened.
+            println!(
+                "{}",
+                crate::report::success(serde_json::json!({ "result": "aborted" }))
+            );
+        }
         return Ok(crate::exit::SUCCESS);
     }
 
@@ -23,7 +32,7 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         !args.no_commit,
     )?;
 
-    match outcome {
+    match &outcome {
         MergeOutcome::UpToDate => {
             ctx.say("Already up to date.");
         }
@@ -53,7 +62,7 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         }
         MergeOutcome::Conflicted { paths } => {
             ctx.blank();
-            for path in &paths {
+            for path in paths {
                 ctx.say(format!("CONFLICT (content): Merge conflict in {path}"));
             }
             ctx.blank();
@@ -76,6 +85,15 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ctx.say(command(&ctx.theme, "git commit              finish"));
             ctx.say(command(&ctx.theme, "git merge --abort       start over"));
         }
+    }
+
+    if global.json {
+        let mut payload = crate::report::merge(&outcome);
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("id".into(), id.as_str().into());
+            map.insert("ref".into(), id.ref_name().into());
+        }
+        println!("{}", crate::report::success(payload));
     }
 
     Ok(crate::exit::SUCCESS)

@@ -86,3 +86,9 @@ ambiguous, and genuinely wants a human.
 | `--no-commit` | Merge and stage, but do not commit. |
 | `-m`, `--message <msg>` | Override the merge commit message. |
 | `--abort` | Abort an in-progress merge. Same as `git merge --abort`. |
+
+## Machine-readable output
+
+`git tpl --json merge` emits its outcome on stdout as a single JSON object, with
+the prose on stderr. The payload is described in
+[JSON output](../reference/json.md#merge).

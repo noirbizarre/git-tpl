@@ -141,3 +141,22 @@ fn show_does_not_touch_head_the_index_or_the_worktree() {
     assert_eq!(before.index, after.index, "the index changed");
     assert_eq!(before.worktree, after.worktree, "the worktree changed");
 }
+
+/// The documented exemption from `--json`: this command's stdout *is* the
+/// payload — the file's bytes — and wrapping it in an envelope would mean
+/// nothing could read it.
+#[test]
+fn show_writes_raw_bytes_even_under_json() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let plain = tpl(&world.project, &["show", "Cargo.toml"]).success();
+    let json = tpl(&world.project, &["--json", "show", "Cargo.toml"]).success();
+
+    assert_eq!(plain.stdout, json.stdout);
+    assert!(
+        !json.stdout.contains("\"ok\""),
+        "show wrapped its output:\n{}",
+        json.stdout
+    );
+}

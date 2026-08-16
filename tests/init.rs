@@ -666,3 +666,146 @@ fn a_dry_run_lists_the_files_it_would_render() {
     assert!(!world.project.exists(".config/git.tpl.toml"));
     assert!(!world.project.has_ref(&world.ref_name()));
 }
+
+// --- machine-readable output ------------------------------------------------
+
+#[test]
+fn init_reports_the_created_ref_as_json() {
+    let world = World::new();
+
+    let output = tpl(
+        &world.project,
+        &["--json", "init", &world.template.source(), "--defaults"],
+    )
+    .success();
+
+    let json = output.json();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["ref"], world.ref_name());
+    assert_eq!(json["id"], "template");
+    assert_eq!(json["commit"], world.project.rev_parse(&world.ref_name()));
+    assert_eq!(json["configPath"], ".config/git.tpl.toml");
+    // The merge is `init`'s load-bearing step, so its result is data.
+    assert_eq!(json["merge"]["result"], "merged");
+    assert!(!json["changes"].as_array().expect("changes").is_empty());
+}
+
+/// `null`, not `{"result": "upToDate"}`: no merge was attempted at all, which
+/// is a different thing from one that ran and found nothing to do.
+#[test]
+fn no_merge_reports_a_null_merge_as_json() {
+    let world = World::new();
+
+    let json = tpl(
+        &world.project,
+        &[
+            "--json",
+            "init",
+            &world.template.source(),
+            "--defaults",
+            "--no-merge",
+        ],
+    )
+    .success()
+    .json();
+
+    assert_eq!(json["merge"], serde_json::Value::Null);
+}
+
+#[test]
+fn a_dry_run_reports_the_questions_as_json() {
+    let world = World::new();
+
+    let json = tpl(
+        &world.project,
+        &[
+            "--json",
+            "init",
+            &world.template.source(),
+            "--defaults",
+            "--dry-run",
+        ],
+    )
+    .success()
+    .json();
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["dryRun"], true);
+    let names: Vec<&str> = json["questions"]
+        .as_array()
+        .expect("questions")
+        .iter()
+        .map(|q| q["name"].as_str().expect("name"))
+        .collect();
+    assert!(names.contains(&"project_name"), "{names:?}");
+    // `--defaults` was given, so the file list could be produced without
+    // asking anything.
+    assert!(!json["files"].as_array().expect("files").is_empty());
+
+    assert!(!world.project.has_ref(&world.ref_name()));
+}
+
+/// A branch with nothing of its own to keep: Git moves the pointer rather than
+/// writing a merge commit, and `merge.result` must say which of the two
+/// happened. It is the cleanest history a generated project can have, and a
+/// caller inspecting it should not have to run `git log` to find out.
+#[test]
+fn init_in_an_empty_repository_reports_a_fast_forward_as_json() {
+    let world = World::empty_project();
+
+    let json = tpl(
+        &world.project,
+        &["--json", "init", &world.template.source(), "--defaults"],
+    )
+    .success()
+    .json();
+
+    assert_eq!(json["merge"]["result"], "fastForward");
+    // The full hex, which is what Git will take back.
+    assert_eq!(
+        json["merge"]["commit"],
+        world.project.rev_parse(&world.ref_name())
+    );
+}
+
+/// `supplied` says which answers the caller has already provided, so a driver
+/// knows what it still has to ask. The text output marks the same thing with
+/// a `(supplied)` note.
+#[test]
+fn a_dry_run_marks_the_answers_already_supplied() {
+    let world = World::new();
+
+    let json = tpl(
+        &world.project,
+        &[
+            "--json",
+            "init",
+            &world.template.source(),
+            "--defaults",
+            "--dry-run",
+            "--answer",
+            "project_name=given",
+        ],
+    )
+    .success()
+    .json();
+
+    let supplied: Vec<(&str, bool)> = json["questions"]
+        .as_array()
+        .expect("questions")
+        .iter()
+        .filter(|q| q["kind"] == "question")
+        .map(|q| {
+            (
+                q["name"].as_str().expect("name"),
+                q["supplied"].as_bool().expect("supplied"),
+            )
+        })
+        .collect();
+
+    assert!(supplied.contains(&("project_name", true)), "{supplied:?}");
+    assert!(
+        supplied.iter().any(|(_, supplied)| !supplied),
+        "every question was reported as supplied: {supplied:?}"
+    );
+}

@@ -90,3 +90,9 @@ git config tpl.autoPush true
 ```
 
 Or per-invocation, `git tpl update --push`.
+
+## Machine-readable output
+
+`git tpl --json push` emits its outcome on stdout as a single JSON object, with
+the prose on stderr. The payload is described in
+[JSON output](../reference/json.md#push).

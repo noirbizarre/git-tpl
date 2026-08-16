@@ -33,6 +33,44 @@ pub fn success(mut payload: Value) -> String {
     payload.to_string()
 }
 
+/// The `changes` array, as `init` and `update` report it.
+///
+/// Shared rather than built at each call site so the two commands cannot drift
+/// apart on a key name. `ChangeKind::as_str` and never `label`: the latter is
+/// padded for column alignment, and a consumer matching `"added   "` would be
+/// depending on a presentation decision.
+///
+/// Renaming a key here is a breaking change.
+pub fn changes(changes: &[tpl::git::Change]) -> Value {
+    Value::Array(
+        changes
+            .iter()
+            .map(|change| json!({ "path": change.path, "kind": change.kind.as_str() }))
+            .collect(),
+    )
+}
+
+/// The `merge` object, as `init` and `merge` report it.
+///
+/// Tagged with `result`, so a caller switches on one field rather than probing
+/// for which of `commit` or `conflicts` happens to be present.
+///
+/// Renaming a key or a `result` value here is a breaking change.
+pub fn merge(outcome: &tpl::git::MergeOutcome) -> Value {
+    use tpl::git::MergeOutcome;
+    match outcome {
+        MergeOutcome::UpToDate => json!({ "result": "upToDate" }),
+        MergeOutcome::FastForward { to } => {
+            json!({ "result": "fastForward", "commit": to.to_hex() })
+        }
+        MergeOutcome::Merged { commit } => json!({ "result": "merged", "commit": commit.to_hex() }),
+        MergeOutcome::Staged => json!({ "result": "staged" }),
+        // The paths, not a count: "which files conflicted" is the whole reason
+        // a caller asked, and it is what it needs to drive a resolution.
+        MergeOutcome::Conflicted { paths } => json!({ "result": "conflicted", "conflicts": paths }),
+    }
+}
+
 /// One diagnostic, with its cause chain.
 ///
 /// The chain is where the actionable detail lives: `RenderError::Content` says
@@ -204,5 +242,59 @@ mod tests {
         let json = parse(&success(json!({ "files": [] })));
         assert_eq!(json["ok"], Value::Bool(true));
         assert_eq!(json["files"], json!([]));
+    }
+
+    // The unpadded name, because `label()` pads for column alignment and a
+    // consumer matching `"added   "` would be pinned to a layout decision.
+    #[test]
+    fn a_change_reports_its_unpadded_kind() {
+        let payload = changes(&[
+            tpl::git::Change {
+                kind: tpl::git::ChangeKind::Added,
+                path: "Cargo.toml".into(),
+            },
+            tpl::git::Change {
+                kind: tpl::git::ChangeKind::Deleted,
+                path: "old.rs".into(),
+            },
+        ]);
+        assert_eq!(
+            payload,
+            json!([
+                { "path": "Cargo.toml", "kind": "added" },
+                { "path": "old.rs", "kind": "deleted" },
+            ])
+        );
+    }
+
+    // One field to switch on. A caller should never have to probe for whether
+    // `commit` or `conflicts` happens to be present to learn what happened.
+    #[test]
+    fn every_merge_outcome_is_tagged_with_a_result() {
+        use tpl::git::MergeOutcome;
+        assert_eq!(merge(&MergeOutcome::UpToDate)["result"], "upToDate");
+        assert_eq!(merge(&MergeOutcome::Staged)["result"], "staged");
+
+        let conflicted = merge(&MergeOutcome::Conflicted {
+            paths: vec!["mise.toml".into()],
+        });
+        assert_eq!(conflicted["result"], "conflicted");
+        assert_eq!(conflicted["conflicts"], json!(["mise.toml"]));
+    }
+
+    // The full hex, not the seven characters the prose abbreviates to: a
+    // caller that has to `git cat-file` the commit needs an id Git will take.
+    #[test]
+    fn a_merge_that_moved_the_branch_reports_the_full_commit_id() {
+        use tpl::git::{MergeOutcome, Oid};
+        let oid = Oid::from_bytes([0xab; 20]);
+
+        let fast_forward = merge(&MergeOutcome::FastForward { to: oid });
+        assert_eq!(fast_forward["result"], "fastForward");
+        assert_eq!(fast_forward["commit"], oid.to_hex());
+
+        let merged = merge(&MergeOutcome::Merged { commit: oid });
+        assert_eq!(merged["result"], "merged");
+        assert_eq!(merged["commit"], oid.to_hex());
     }
 }
