@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use demand::{Confirm, DemandOption, Input, MultiSelect, Select};
-use tpl::data::{DataError, Decision, RemoteRequest, TrustGate};
+use tpl::data::{DataError, Decision, RemoteRequest, SourceKind, TrustGate};
 use tpl::eval::{EvalError, Prompter};
 use tpl::template::{Choice, Question, QuestionKind, Value};
 
@@ -153,11 +153,11 @@ fn cancelled(_error: std::io::Error) -> EvalError {
     EvalError::Cancelled
 }
 
-/// Confirms a template's remote data sources on a terminal.
+/// Confirms a template's network data sources on a terminal.
 ///
 /// Rendering never requires trust: no template can execute anything, trusted or
 /// not. This gates only what a template asks *git-tpl* to do on its behalf, and
-/// today that is exactly one thing — fetch a URL.
+/// today that is exactly two things — fetch a URL, and clone a repository.
 pub struct Confirmer;
 
 impl TrustGate for Confirmer {
@@ -171,26 +171,44 @@ impl TrustGate for Confirmer {
         // idea how many follow.
         eprintln!();
         eprintln!(
-            "This template wants to fetch {} remote data source{}:",
+            "This template wants to reach the network for {} data source{}:",
             requests.len(),
             if requests.len() == 1 { "" } else { "s" }
         );
         eprintln!();
         for request in requests {
-            eprintln!("  {}  {}", request.name, request.source);
+            // The verb is per source. A list that said "fetch" throughout would
+            // describe a clone as something it is not, and consent to a
+            // misdescription is not consent.
+            eprintln!("  {}  {}  {}", verb(request), request.name, request.source);
         }
         eprintln!();
-        eprintln!(
-            "Each response is limited to {} KiB and is parsed as data — never executed.",
-            limit_bytes / 1024
-        );
+        // Stated only when it is true. The size bound is enforced while reading
+        // an HTTP body; nothing bounds a clone, and claiming otherwise would be
+        // a promise git-tpl cannot keep.
+        if requests.iter().any(|r| r.kind == SourceKind::Remote) {
+            eprintln!(
+                "Each response is limited to {} KiB and is parsed as data — never executed.",
+                limit_bytes / 1024
+            );
+        }
+        if requests.iter().any(|r| r.kind == SourceKind::Git) {
+            eprintln!(
+                "A repository is cloned with your Git credentials, read, and discarded. \
+                 Nothing in it is executed."
+            );
+        }
         eprintln!();
 
         let mut decisions = BTreeMap::new();
         for request in requests {
-            let choice = Select::new(format!("Fetch `{}`?", request.name))
+            let (question, label) = match request.kind {
+                SourceKind::Git => ("Clone", "Clone it"),
+                _ => ("Fetch", "Fetch it"),
+            };
+            let choice = Select::new(format!("{question} `{}`?", request.name))
                 .description(&request.source)
-                .option(DemandOption::new("fetch").label("Fetch it"))
+                .option(DemandOption::new("fetch").label(label))
                 .option(
                     DemandOption::new("skip")
                         .label("Skip it — the render will fail if it is needed"),
@@ -207,5 +225,13 @@ impl TrustGate for Confirmer {
         }
 
         Ok(decisions)
+    }
+}
+
+/// What git-tpl would do with this source, in one word.
+fn verb(request: &RemoteRequest) -> &'static str {
+    match request.kind {
+        SourceKind::Git => "clone",
+        _ => "fetch",
     }
 }

@@ -119,7 +119,7 @@ Three sections, and deliberately nothing else.
 |---|---|
 | `[defaults]` | Pre-fills a prompt whose question has the same name. |
 | `[shortcuts]` | Expands a leading `<name>:` in a template URL you type. |
-| `[trust]` | Templates whose remote data is fetched without a confirmation. |
+| `[trust]` | Templates whose network data is fetched or cloned without a confirmation. |
 
 ### `[defaults]`
 
@@ -206,8 +206,9 @@ produces incomprehensible authentication errors.
 
 ### `[trust]`
 
-Templates whose [remote data sources](data/remote.md) are fetched without asking
-you first.
+Templates whose network data sources are reached without asking you first —
+both [remote](data/remote.md) URLs and [Git](data/git.md) repositories. An entry
+names a *template*, and covers everything that template declares.
 
 ```toml
 [trust]

@@ -102,9 +102,10 @@ errors before anything is checked:
 | `tpl::data::escapes_root` | A `local` path leaves the project root. |
 | `tpl::data::needs_project` | A `local` source was reached by a command with no project — `render`, `lint`, `context`. Use a `template` source, or run inside a project. |
 | `tpl::data::unknown_setting` | An unknown `kind` or `format`. |
-| `tpl::data::untrusted` | A remote source was not authorised. Pass `--trust`, or add the template to `[trust]`. |
-| `tpl::data::undeclared_remote` | A remote source that the manifest does not declare. |
-| `tpl::data::cancelled` | The user declined a remote fetch. |
+| `tpl::data::invalid_git_source` | A `git` source's `source`, `ref` and `path` do not name a file. Write all three keys, or a `<scheme>://<repo>@<ref>:<path>` source. |
+| `tpl::data::untrusted` | A network source — remote or `git` — was not authorised. Pass `--trust`, or add the template to `[trust]`. |
+| `tpl::data::undeclared_remote` | A source that reached the network only after interpolation, so it could not be confirmed beforehand. Declare its kind. |
+| `tpl::data::cancelled` | The user declined a fetch or a clone. |
 | `tpl::data::checksum` | A remote source did not match its `sha256`. |
 
 ## Configuration

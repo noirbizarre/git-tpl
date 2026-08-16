@@ -1265,6 +1265,38 @@ default = "MIT"
     );
 }
 
+/// Resolving a git source means a clone, and `questions` only reads a manifest.
+/// The source here looks like an ordinary template path, so nothing but `ref`
+/// and `path` says otherwise — which is exactly the case a guard on `source`
+/// alone would miss.
+#[test]
+fn choices_from_a_git_source_are_not_resolved() {
+    let world = World::with_template(
+        r#"
+name = "git-choices"
+
+[data.licenses]
+source = "git@example.invalid:acme/data"
+ref = "v1"
+path = "licenses.toml"
+
+[questions.license]
+type = "choice"
+choices_from = "data.licenses.ids"
+default = "MIT"
+"#,
+        &[("file.txt.jinja", "{{ license }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    let license = question(&json, "license");
+    assert!(
+        license.get("choicesResolved").is_none(),
+        "a git source was resolved, which would mean a clone: {license}"
+    );
+}
+
 /// A leading `./` is a file in the *project*, and there is no project here.
 #[test]
 fn choices_from_a_project_local_source_are_not_resolved() {

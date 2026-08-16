@@ -147,7 +147,16 @@ impl Graph {
         // `data/frameworks/{{ project_type }}.toml` load after `project_type`
         // is known rather than before.
         for (key, decl) in &manifest.data {
-            let deps = references(&decl.source, &format!("data.{key}"), &known)?;
+            let mut deps = references(&decl.source, &format!("data.{key}"), &known)?;
+            // `ref` and `path` are expressions on the same footing, and a
+            // missing edge here does not fail loudly: `path = "{{ lang }}.toml"`
+            // would resolve to `.toml` and read a file nobody named.
+            if let Some(reference) = &decl.reference {
+                deps.extend(references(reference, &format!("data.{key}.ref"), &known)?);
+            }
+            if let Some(path) = &decl.path {
+                deps.extend(references(path, &format!("data.{key}.path"), &known)?);
+            }
             edges.entry(Name::data(key)).or_default().extend(deps);
         }
 

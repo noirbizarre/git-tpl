@@ -54,6 +54,7 @@ nav = [
     { "Overview" = "data/index.md" },
     { "Local data" = "data/local.md" },
     { "Remote data" = "data/remote.md" },
+    { "Git data" = "data/git.md" },
     { "Reproducibility" = "data/reproducibility.md" },
   ] },
   { "Configuration" = "configuration.md" },

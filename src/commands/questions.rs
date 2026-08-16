@@ -178,6 +178,12 @@ fn resolve_template_choices(
     if decl.kind.as_deref().is_some_and(|kind| kind != "template") {
         return None;
     }
+    // A `ref` or a `path` makes it a git source whatever `source` looks like,
+    // and resolving it would mean a clone. A command that only reads a manifest
+    // must not acquire a network call.
+    if decl.reference.is_some() || decl.path.is_some() {
+        return None;
+    }
     if decl.source.contains("://") || decl.source.starts_with('.') {
         return None;
     }

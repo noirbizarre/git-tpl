@@ -12,6 +12,10 @@ an answer. This page is about how much of that answer git-tpl can give.
 is pinned by the template revision. There is no second thing to pin, and no way
 for a template's files and its data to drift apart.
 
+**Git data pinned to a tag or a SHA.** Read from another repository's tree at a
+resolved commit, which is recorded. A `ref` naming a *branch* is the exception,
+and belongs in the next section.
+
 **The answers.** Recorded in `.config/git.tpl.toml`, and digested into
 `Answers-Digest` so a change is detectable without reading the file.
 
@@ -20,10 +24,10 @@ rendering difference caused by a git-tpl change is attributable.
 
 Given those four, a rendering is reproducible — with one exception.
 
-## What is not: remote data
+## What is not: remote data, or a moving ref
 
-A remote URL can serve different bytes tomorrow. Nothing about the template
-revision constrains that.
+A remote URL can serve different bytes tomorrow, and so can a branch. Nothing
+about the template revision constrains either.
 
 Every contributing source is recorded, and for a remote source the digest of the
 bytes actually received is recorded with it — whether or not the template pinned
@@ -85,9 +89,11 @@ change is the next section.
     path = "licenses.toml"
     ```
 
-    **Not implemented.** It would reuse the mechanism the template itself uses,
-    so the pin is a commit SHA and the provenance format already describes it.
-    Tracked in [issue #18](https://github.com/noirbizarre/git-tpl/issues/18).
+    Reuses the mechanism the template itself uses, so the pin is a commit SHA
+    and the provenance format already describes it. A tag or a SHA is a pin; a
+    branch is not, and is as irreproducible as a URL — the trailer records the
+    commit either way, so a difference is at least always explainable. See
+    [Git data](git.md).
 
 ## Determinism is the wider property
 

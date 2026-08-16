@@ -16,9 +16,12 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 pub mod format;
+pub mod repo;
 
 pub use format::Format;
+pub use repo::GitLocation;
 
+use crate::git::libgit2::LibGit2;
 use crate::git::{GitBackend, Oid};
 use crate::template::{DataSourceDecl, Value};
 
@@ -48,6 +51,11 @@ pub enum SourceKind {
     LocalFile,
     /// An `http(s)` URL.
     Remote,
+    /// A file in another Git repository, read from its tree at a revision.
+    ///
+    /// Reuses the mechanism the template itself uses, so the pin is a commit
+    /// SHA and the provenance format already describes it.
+    Git,
 }
 
 impl fmt::Display for SourceKind {
@@ -65,12 +73,42 @@ impl SourceKind {
             SourceKind::TemplateFile => "template",
             SourceKind::LocalFile => "local",
             SourceKind::Remote => "remote",
+            SourceKind::Git => "git",
+        }
+    }
+
+    /// Whether reading this kind leaves the machine.
+    ///
+    /// The trust gate is about that question and no other, so both kinds that
+    /// answer yes go through it — a clone is no less a network call than a
+    /// fetch, and it carries the user's credentials besides.
+    pub fn is_network(&self) -> bool {
+        matches!(self, SourceKind::Remote | SourceKind::Git)
+    }
+
+    /// The kind a whole declaration names.
+    ///
+    /// Separate from [`infer`](Self::infer), which sees only a string: a
+    /// `ref` or a `path` makes a source a Git source without anybody writing
+    /// `kind = "git"`, and that is not visible from `source` alone.
+    ///
+    /// `None` means an explicit `kind` was declared and is not one we know.
+    pub fn of(decl: &DataSourceDecl) -> Option<Self> {
+        match &decl.kind {
+            Some(explicit) => Self::parse(explicit),
+            None if decl.reference.is_some() || decl.path.is_some() => Some(SourceKind::Git),
+            None => Some(Self::infer(&decl.source)),
         }
     }
 
     /// Infer the kind from a resolved source string.
     pub fn infer(source: &str) -> Self {
-        if source.starts_with("http://") || source.starts_with("https://") {
+        // Before the http test, and deliberately: a shorthand is an https URL
+        // with a `@ref:path` suffix, and reading it as a plain URL would fetch
+        // the repository's landing page and try to parse it as TOML.
+        if repo::parse_shorthand(source).is_some() {
+            SourceKind::Git
+        } else if source.starts_with("http://") || source.starts_with("https://") {
             SourceKind::Remote
         } else if source.starts_with("./") || source.starts_with("../") {
             SourceKind::LocalFile
@@ -85,6 +123,7 @@ impl SourceKind {
             "template" => Some(SourceKind::TemplateFile),
             "local" => Some(SourceKind::LocalFile),
             "remote" => Some(SourceKind::Remote),
+            "git" => Some(SourceKind::Git),
             _ => None,
         }
     }
@@ -172,18 +211,18 @@ pub enum DataError {
         accepted: Option<String>,
     },
 
-    /// A remote fetch was not confirmed.
+    /// A network access — a fetch or a clone — was not confirmed.
     ///
     /// Deliberately an error rather than an empty value: a CI runner is the
     /// worst possible place to grant a capability by omission, and a render
     /// that quietly proceeded without the data would produce a plausible tree
     /// that is wrong — and that tree becomes a commit.
-    #[error("data source `{name}` was not fetched, because the template is not trusted")]
+    #[error("data source `{name}` was not loaded, because the template is not trusted")]
     #[diagnostic(
         code(tpl::data::untrusted),
         url("https://noirbizarre.github.io/git-tpl/data/remote/"),
         help(
-            "source: {location}\npass `--trust` to allow this template's remote data sources for this run, or answer the confirmation interactively"
+            "source: {location}\npass `--trust` to allow this template's network data sources for this run, or answer the confirmation interactively"
         )
     )]
     Untrusted {
@@ -193,17 +232,17 @@ pub enum DataError {
         location: String,
     },
 
-    /// A source became a URL only after interpolation.
+    /// A source reached the network only after interpolation.
     ///
-    /// The trust confirmation lists every remote source before any of them is
-    /// fetched, and it can only do that from the declaration. A source whose
+    /// The trust confirmation lists every network source before any of them is
+    /// reached, and it can only do that from the declaration. A source whose
     /// URL appears after an answer is substituted would slip past the list, so
-    /// it is refused rather than fetched unannounced.
-    #[error("data source `{name}` resolved to a URL but is not declared remote")]
+    /// it is refused rather than reached unannounced.
+    #[error("data source `{name}` resolved to a network source but is not declared as one")]
     #[diagnostic(
         code(tpl::data::undeclared_remote),
         help(
-            "resolved: {location}\nadd `kind = \"remote\"` to `[data.{name}]` so the fetch can be confirmed before it happens"
+            "resolved: {location}\ndeclare the kind on `[data.{name}]` — `kind = \"remote\"` for a URL, or `ref` and `path` for a repository — so it can be confirmed before it happens"
         )
     )]
     UndeclaredRemote {
@@ -236,15 +275,49 @@ pub enum DataError {
         /// What was actually received.
         actual: String,
     },
+
+    /// A `git` source's location cannot be determined from the declaration.
+    ///
+    /// Separate from [`UnknownSetting`](Self::UnknownSetting), which is about
+    /// one key holding a value we do not know: this is about the *combination*
+    /// of `source`, `ref` and `path`, and there is no single key to blame.
+    /// Separate from [`Load`](Self::Load) because nothing was attempted —
+    /// reporting a malformed declaration as a failed clone sends the author off
+    /// to check a network that was never involved.
+    ///
+    /// One code rather than one per defect: a code is a public identifier
+    /// callers branch on, and every caller would branch on these identically.
+    /// The granularity belongs in `reason`.
+    #[error("data source `{name}` is not a usable git source")]
+    #[diagnostic(
+        code(tpl::data::invalid_git_source),
+        url("https://noirbizarre.github.io/git-tpl/data/git/"),
+        help("source: {location}\nreason: {reason}")
+    )]
+    InvalidGitSource {
+        /// The declared name.
+        name: String,
+        /// The location as it was declared.
+        location: String,
+        /// What is wrong with it, and what to write instead.
+        reason: String,
+    },
 }
 
-/// A remote source a template wants to fetch, as it was declared.
+/// A data source a template wants to reach over the network, as declared.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteRequest {
     /// The declared name.
     pub name: String,
     /// The source string, before interpolation.
     pub source: String,
+    /// Whether this is an HTTP fetch or a clone.
+    ///
+    /// Carried so the confirmation can describe what it is asking about. It
+    /// used to state a response size bound unconditionally, which is true of a
+    /// fetch and false of a clone — and consent to something described wrongly
+    /// is not consent.
+    pub kind: SourceKind,
 }
 
 /// What to do about one remote source. Per invocation; nothing is remembered.
@@ -348,21 +421,25 @@ impl TrustGate for Decided {
     }
 }
 
-/// Every data source that is declared remote, in declaration order.
+/// Every data source that reaches the network, in declaration order.
 ///
 /// From the *declaration*, not from a resolved string: this is what the trust
 /// confirmation lists, and it has to be computable before anything is
 /// evaluated. A source that only becomes a URL after interpolation is refused
 /// at load time instead — see [`DataError::UndeclaredRemote`].
+///
+/// Git sources are listed alongside remote ones. The consent being sought is
+/// "may this template reach the network on my behalf", and a clone answers that
+/// question the same way a fetch does.
 pub fn declared_remotes(data: &BTreeMap<String, DataSourceDecl>) -> Vec<RemoteRequest> {
     data.iter()
-        .filter(|(_, decl)| match &decl.kind {
-            Some(explicit) => explicit == "remote",
-            None => SourceKind::infer(&decl.source) == SourceKind::Remote,
-        })
-        .map(|(name, decl)| RemoteRequest {
-            name: name.clone(),
-            source: decl.source.clone(),
+        .filter_map(|(name, decl)| {
+            let kind = SourceKind::of(decl)?;
+            kind.is_network().then(|| RemoteRequest {
+                name: name.clone(),
+                source: decl.declared_location(),
+                kind,
+            })
         })
         .collect()
 }
@@ -421,6 +498,43 @@ pub struct TemplateTree<'a> {
     pub revision: Oid,
 }
 
+/// A data repository cloned for this run.
+struct GitClone {
+    // Declared before `dir`, and the order is load-bearing: struct fields drop
+    // in declaration order, so the repository releases its pack files before
+    // the directory holding them is removed. Reversed, Windows refuses the
+    // removal and leaves the clone behind in $TMPDIR.
+    repo: LibGit2,
+    // Never read: held only so the directory outlives the repository reading
+    // out of it.
+    _dir: tempfile::TempDir,
+}
+
+/// A declaration's expression-bearing fields, already rendered.
+///
+/// A carrier rather than three parameters, so a fourth key later is a field
+/// rather than another change to every call site.
+#[derive(Debug, Clone, Copy)]
+pub struct Rendered<'r> {
+    /// The rendered `source`.
+    pub source: &'r str,
+    /// The rendered `ref`, when one was declared.
+    pub reference: Option<&'r str>,
+    /// The rendered `path`, when one was declared.
+    pub path: Option<&'r str>,
+}
+
+impl<'r> Rendered<'r> {
+    /// A source with no `ref` or `path` — every kind but `git`.
+    pub fn source(source: &'r str) -> Self {
+        Self {
+            source,
+            reference: None,
+            path: None,
+        }
+    }
+}
+
 /// Loads and caches data sources.
 ///
 /// Caching is keyed by the *resolved* source string, so several questions
@@ -443,6 +557,12 @@ pub struct Loader<'a> {
     // sources opens one connection pool rather than one per source. `None` for
     // the overwhelmingly common template that has no remote data at all.
     agent: Option<ureq::Agent>,
+    // Cloned on first use and reused within one render, keyed by `repo@ref`, so
+    // a template reading three files out of one data repository clones once.
+    // Nothing is kept between runs, for the reason `ops::resolve` gives: a
+    // stale cache silently rendering old data is a far worse failure than a
+    // slow clone.
+    clones: BTreeMap<String, GitClone>,
 }
 
 impl<'a> Loader<'a> {
@@ -463,6 +583,7 @@ impl<'a> Loader<'a> {
             provenance: Vec::new(),
             decisions: BTreeMap::new(),
             agent: None,
+            clones: BTreeMap::new(),
         }
     }
 
@@ -477,23 +598,60 @@ impl<'a> Loader<'a> {
         &self.provenance
     }
 
-    /// Load a declared source whose `source` has already been rendered.
+    /// Load a declared source whose expressions have already been rendered.
     pub fn load(
         &mut self,
         name: &str,
         decl: &DataSourceDecl,
-        resolved_source: &str,
+        rendered: Rendered<'_>,
     ) -> Result<Value, DataError> {
+        // Not `SourceKind::of`, and the difference is deliberate: `of` runs
+        // before evaluation and can only see the declared `source`, while this
+        // must see the rendered one — an interpolated source is exactly the
+        // case the two are allowed to disagree about, and the disagreement is
+        // what `UndeclaredRemote` reports.
         let kind = match &decl.kind {
             Some(explicit) => {
                 SourceKind::parse(explicit).ok_or_else(|| DataError::UnknownSetting {
                     name: name.to_string(),
                     what: "kind",
                     value: explicit.clone(),
-                    accepted: Some("expected `template`, `local` or `remote`".into()),
+                    accepted: Some("expected `template`, `local`, `remote` or `git`".into()),
                 })?
             }
-            None => SourceKind::infer(resolved_source),
+            None if decl.reference.is_some() || decl.path.is_some() => SourceKind::Git,
+            None => SourceKind::infer(rendered.source),
+        };
+
+        // Resolved before the format, because a git source's format comes from
+        // its `path` and not from `source` — `…@v1:teams.yaml` would otherwise
+        // infer TOML and fail as a parse error a long way from its cause.
+        let git = match kind {
+            SourceKind::Git => Some(self.git_location(name, &rendered)?),
+            _ => {
+                // A `ref` on a template file is not a no-op the user meant; it
+                // is a declaration that does not do what it says. Ignoring it
+                // silently is how someone spends an afternoon.
+                if rendered.reference.is_some() || rendered.path.is_some() {
+                    return Err(DataError::InvalidGitSource {
+                        name: name.to_string(),
+                        location: rendered.source.to_string(),
+                        reason: format!(
+                            "`ref` and `path` only apply to a git source, and this one is `{kind}`"
+                        ),
+                    });
+                }
+                None
+            }
+        };
+
+        let location = match &git {
+            Some(location) => location.to_string(),
+            None => rendered.source.to_string(),
+        };
+        let for_format = match &git {
+            Some(location) => location.path.as_str(),
+            None => rendered.source,
         };
 
         let format = match &decl.format {
@@ -503,26 +661,36 @@ impl<'a> Loader<'a> {
                 value: explicit.clone(),
                 accepted: Some("expected `toml`, `json` or `yaml`".into()),
             })?,
-            None => Format::infer(resolved_source),
+            None => Format::infer(for_format),
         };
 
         // The cache key includes the kind, because `data/x.toml` means
         // different files depending on whether it is a template or local path.
-        let cache_key = format!("{}:{resolved_source}", kind.label());
+        let cache_key = format!("{}:{location}", kind.label());
         if let Some(cached) = self.cache.get(&cache_key) {
             return Ok(cached.clone());
         }
 
+        // Set by the git arm alone: the commit the file was actually read at,
+        // which is what makes a git source's trailer answer "which bytes?".
+        let mut git_revision = None;
         let bytes = match kind {
-            SourceKind::TemplateFile => self.read_template_file(name, resolved_source)?,
-            SourceKind::LocalFile => self.read_local_file(name, resolved_source)?,
-            SourceKind::Remote => self.fetch(name, resolved_source)?,
+            SourceKind::TemplateFile => self.read_template_file(name, rendered.source)?,
+            SourceKind::LocalFile => self.read_local_file(name, rendered.source)?,
+            SourceKind::Remote => self.fetch(name, rendered.source)?,
+            SourceKind::Git => {
+                let location = git.as_ref().expect("a git source has a location");
+                let (bytes, revision) = self.read_git_file(name, location)?;
+                git_revision = Some(revision);
+                bytes
+            }
         };
 
         // Computed for every remote source, pinned or not, because the digest
         // is the only thing that makes a remote trailer reproducible. Skipped
         // for the other kinds unless a pin asked for it: a template file is
-        // already pinned by the template revision.
+        // already pinned by the template revision, and so is a git source once
+        // its ref has been resolved to a commit.
         let expected = expected_digest(name, decl)?;
         let digest = (expected.is_some() || kind == SourceKind::Remote).then(|| digest_of(&bytes));
 
@@ -531,21 +699,22 @@ impl<'a> Loader<'a> {
         {
             return Err(DataError::ChecksumMismatch {
                 name: name.to_string(),
-                location: resolved_source.to_string(),
+                location,
                 expected: expected.clone(),
                 actual: actual.clone(),
             });
         }
 
-        let value = parse(name, resolved_source, format, &bytes)?;
+        let value = parse(name, &location, format, &bytes)?;
 
         self.cache.insert(cache_key, value.clone());
         self.provenance.push(Provenance {
             name: name.to_string(),
             kind,
-            location: resolved_source.to_string(),
+            location,
             revision: match kind {
                 SourceKind::TemplateFile => Some(self.template.revision),
+                SourceKind::Git => git_revision,
                 _ => None,
             },
             checksum: match kind {
@@ -557,6 +726,137 @@ impl<'a> Loader<'a> {
         Ok(value)
     }
 
+    /// Where a `git` source's bytes are, from either spelling.
+    ///
+    /// The explicit `source`/`ref`/`path` triple and the `repo@ref:path`
+    /// shorthand end up in the same place, so everything downstream — the cache
+    /// key, the trailer, the errors — sees one shape.
+    fn git_location(&self, name: &str, rendered: &Rendered<'_>) -> Result<GitLocation, DataError> {
+        let invalid = |reason: String| DataError::InvalidGitSource {
+            name: name.to_string(),
+            location: rendered.source.to_string(),
+            reason,
+        };
+
+        match (rendered.reference, rendered.path) {
+            (Some(reference), Some(path)) => {
+                // The triple wins outright rather than being merged with a
+                // shorthand: two ways of saying the same thing in one
+                // declaration is a question with no right answer.
+                if repo::parse_shorthand(rendered.source).is_some() {
+                    return Err(invalid(
+                        "`source` is already a `<repo>@<ref>:<path>` shorthand; drop it, or drop `ref` and `path`".into(),
+                    ));
+                }
+                repo::check_reference(reference).map_err(&invalid)?;
+                repo::check_path(path).map_err(&invalid)?;
+                Ok(GitLocation {
+                    repo: rendered.source.to_string(),
+                    reference: reference.to_string(),
+                    path: path.to_string(),
+                })
+            }
+            (None, None) => match repo::parse_shorthand(rendered.source) {
+                Some(location) => location.map_err(&invalid),
+                // Reached by `kind = "git"` on a plain URL, and by an
+                // scp-style source that cannot be a shorthand.
+                None => Err(invalid(
+                    "a git source needs `ref` and `path`, or a `<scheme>://<repo>@<ref>:<path>` source".into(),
+                )),
+            },
+            (Some(_), None) => Err(invalid("a git source with a `ref` also needs a `path`".into())),
+            (None, Some(_)) => Err(invalid("a git source with a `path` also needs a `ref`".into())),
+        }
+    }
+
+    /// Read a file out of another repository's tree, at a resolved revision.
+    ///
+    /// The clone is temporary and is not kept between runs. It carries the
+    /// user's SSH agent and credential helper, which is precisely why it is
+    /// behind the same gate an HTTP fetch is.
+    fn read_git_file(
+        &mut self,
+        name: &str,
+        location: &GitLocation,
+    ) -> Result<(Vec<u8>, Oid), DataError> {
+        self.authorised(name, &location.to_string())?;
+
+        let fail = |reason: String| DataError::Load {
+            name: name.to_string(),
+            location: location.to_string(),
+            kind: SourceKind::Git,
+            reason,
+        };
+
+        // Keyed by the reference as written, not by the resolved oid: resolving
+        // first would require the clone this key decides whether to make.
+        let key = format!("{}@{}", location.repo, location.reference);
+        if !self.clones.contains_key(&key) {
+            // `contains_key` then `insert` rather than `entry`, whose closure
+            // cannot be fallible — and both of these steps can fail.
+            //
+            // Created here rather than in `new`, so a template with no git data
+            // never pays for a temporary directory it does not use.
+            let dir = tempfile::tempdir()
+                .map_err(|e| fail(format!("could not create a temporary directory: {e}")))?;
+            let cloned =
+                LibGit2::clone_bare(&location.repo, dir.path()).map_err(|e| fail(e.to_string()))?;
+            self.clones.insert(
+                key.clone(),
+                GitClone {
+                    repo: cloned,
+                    _dir: dir,
+                },
+            );
+        }
+
+        // One shared borrow, ending with this block: `Oid` is `Copy` and the
+        // blob is owned, so nothing borrowed from `self` outlives it and the
+        // caller's `self.provenance.push` needs no dance.
+        let clone = self.clones.get(&key).expect("just inserted");
+        let revision = clone
+            .repo
+            .resolve_revision(&location.reference, &location.repo)
+            .map_err(|e| fail(e.to_string()))?;
+        let tree = clone
+            .repo
+            .commit_tree(revision)
+            .map_err(|e| fail(e.to_string()))?;
+        let bytes = clone
+            .repo
+            .read_path(tree, &location.path)
+            .map_err(|e| fail(e.to_string()))?
+            .ok_or_else(|| {
+                fail(format!(
+                    "no such file in {} at revision {}",
+                    location.repo,
+                    revision.short()
+                ))
+            })?;
+
+        Ok((bytes, revision))
+    }
+
+    /// Whether the trust gate allowed this source.
+    ///
+    /// Shared by every kind that leaves the machine, so a clone can never
+    /// bypass what a fetch cannot. The gate is consulted by name, and a source
+    /// absent from it was never shown to the user — which for a URL produced by
+    /// interpolation is the whole point of refusing it.
+    fn authorised(&self, name: &str, location: &str) -> Result<(), DataError> {
+        match self.decisions.get(name) {
+            Some(Decision::Allow) => Ok(()),
+            Some(Decision::Skip) => Err(DataError::Untrusted {
+                name: name.to_string(),
+                location: location.to_string(),
+            }),
+            None => Err(DataError::UndeclaredRemote {
+                name: name.to_string(),
+                location: location.to_string(),
+            }),
+        }
+    }
+
     /// Fetch a remote source over HTTP.
     ///
     /// The response is untrusted input from a third party: it is bounded, timed
@@ -564,24 +864,7 @@ impl<'a> Loader<'a> {
     /// there is no fallback — a failure stops the render rather than
     /// substituting a cached copy, an empty table, or the last known value.
     fn fetch(&mut self, name: &str, url: &str) -> Result<Vec<u8>, DataError> {
-        // The gate is consulted by name, and a source absent from it was never
-        // shown to the user — which for a URL produced by interpolation is the
-        // whole point of refusing it.
-        match self.decisions.get(name) {
-            Some(Decision::Allow) => {}
-            Some(Decision::Skip) => {
-                return Err(DataError::Untrusted {
-                    name: name.to_string(),
-                    location: url.to_string(),
-                });
-            }
-            None => {
-                return Err(DataError::UndeclaredRemote {
-                    name: name.to_string(),
-                    location: url.to_string(),
-                });
-            }
-        }
+        self.authorised(name, url)?;
 
         // `kind = "remote"` can be declared on any string, so the scheme is
         // checked here rather than relying on the inference that a declared
@@ -769,6 +1052,7 @@ mod tests {
         RemoteRequest {
             name: name.to_string(),
             source: format!("https://example.invalid/{name}.toml"),
+            kind: SourceKind::Remote,
         }
     }
 
@@ -820,8 +1104,85 @@ mod tests {
     #[case("../shared.toml", SourceKind::LocalFile)]
     #[case("https://example.com/licenses.toml", SourceKind::Remote)]
     #[case("http://example.com/licenses.toml", SourceKind::Remote)]
+    // A shorthand is an https URL, so it must be recognised before the plain
+    // remote test — otherwise this fetches a repository's landing page.
+    #[case("https://host/acme/data@v1:licenses.toml", SourceKind::Git)]
+    #[case("ssh://git@host/acme/data@v1:licenses.toml", SourceKind::Git)]
+    // scp-style has no scheme, so it is not a shorthand and stays what it was.
+    #[case("git@host:acme/data@v1:licenses.toml", SourceKind::TemplateFile)]
     fn the_kind_is_inferred_from_the_source(#[case] source: &str, #[case] expected: SourceKind) {
         assert_eq!(SourceKind::infer(source), expected);
+    }
+
+    /// `infer` sees only a string, and the triple spelling puts the giveaway
+    /// in a different key. A source that needed `kind = "git"` written out
+    /// whenever `ref` was present would be a rule with no purpose.
+    #[test]
+    fn a_declared_ref_makes_a_source_a_git_source_without_an_explicit_kind() {
+        let mut decl = decl(None);
+        decl.source = "https://host/acme/data".into();
+        decl.kind = None;
+        decl.reference = Some("v1".into());
+        decl.path = Some("licenses.toml".into());
+
+        assert_eq!(SourceKind::of(&decl), Some(SourceKind::Git));
+    }
+
+    /// The gate exists to answer "may this template reach the network", and a
+    /// clone answers it the same way a fetch does. A git source missing from
+    /// this list would be a network capability with no confirmation at all.
+    #[test]
+    fn declared_remotes_lists_git_sources_alongside_remote_ones() {
+        let mut git = decl(None);
+        git.source = "https://host/acme/data".into();
+        git.kind = None;
+        git.reference = Some("v1".into());
+        git.path = Some("licenses.toml".into());
+
+        let mut local = decl(None);
+        local.source = "data/licenses.toml".into();
+        local.kind = None;
+
+        let data = BTreeMap::from([
+            ("registry".to_string(), decl(None)),
+            ("shared".to_string(), git),
+            ("licenses".to_string(), local),
+        ]);
+
+        let requests = declared_remotes(&data);
+        let names: Vec<&str> = requests.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["registry", "shared"],
+            "a template file is not a network access, and a git source is"
+        );
+        assert_eq!(
+            requests[1].source, "https://host/acme/data@v1:licenses.toml",
+            "the confirmation shows the file it will read, not just the repository"
+        );
+        assert_eq!(requests[1].kind, SourceKind::Git);
+    }
+
+    /// The resolved commit is what makes "which bytes produced this tree?"
+    /// answerable for a git source, exactly as it is for a template file.
+    #[test]
+    fn a_git_trailer_records_the_resolved_commit() {
+        let oid = Oid::parse("4f2c1a9b3d5e7f0a1c2b3d4e5f60718293a4b5c6").unwrap();
+        let provenance = Provenance {
+            name: "shared".into(),
+            kind: SourceKind::Git,
+            location: "https://host/acme/data@v2.1.0:licenses.toml".into(),
+            revision: Some(oid),
+            checksum: None,
+        };
+
+        assert_eq!(
+            provenance.trailer(),
+            format!(
+                "git:https://host/acme/data@v2.1.0:licenses.toml@{}",
+                oid.short()
+            )
+        );
     }
 
     #[rstest]
@@ -1087,6 +1448,8 @@ mod tests {
     fn decl(sha256: Option<String>) -> DataSourceDecl {
         DataSourceDecl {
             source: "https://example.com/x.json".into(),
+            reference: None,
+            path: None,
             kind: Some("remote".into()),
             format: None,
             sha256,
@@ -1135,6 +1498,8 @@ mod tests {
             "by_url".to_string(),
             DataSourceDecl {
                 source: "https://example.com/a.json".into(),
+                reference: None,
+                path: None,
                 kind: None,
                 format: None,
                 sha256: None,
@@ -1144,6 +1509,8 @@ mod tests {
             "by_kind".to_string(),
             DataSourceDecl {
                 source: "{{ registry }}/b.json".into(),
+                reference: None,
+                path: None,
                 kind: Some("remote".into()),
                 format: None,
                 sha256: None,
@@ -1153,6 +1520,8 @@ mod tests {
             "local".to_string(),
             DataSourceDecl {
                 source: "data/c.toml".into(),
+                reference: None,
+                path: None,
                 kind: None,
                 format: None,
                 sha256: None,
@@ -1176,6 +1545,8 @@ mod tests {
             "sneaky".to_string(),
             DataSourceDecl {
                 source: "{{ base }}/licenses.json".into(),
+                reference: None,
+                path: None,
                 kind: None,
                 format: None,
                 sha256: None,

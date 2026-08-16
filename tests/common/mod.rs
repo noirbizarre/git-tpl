@@ -341,6 +341,21 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<String>) {
 }
 
 /// Run `git-tpl` in a repository.
+/// A `file://` URL for a local path, spelled the way libgit2 parses one.
+///
+/// Not `format!("file://{}", path.display())`: on Windows that yields
+/// `file://C:\Users\...`, where `C:` is read as the authority and the
+/// backslashes are not separators, and libgit2 rejects it outright. A drive
+/// path needs the empty authority and forward slashes — `file:///C:/Users/...`.
+///
+/// One form serves both, without a branch that would be dead on whichever
+/// platform is running: a POSIX path's leading `/` and a drive letter's lack of
+/// one are the only difference, so drop it and put it back.
+pub fn file_url(path: &Path) -> String {
+    let path = path.display().to_string().replace('\\', "/");
+    format!("file:///{}", path.trim_start_matches('/'))
+}
+
 pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
     run_tpl(&repo.path, repo.config_home(), args)
 }

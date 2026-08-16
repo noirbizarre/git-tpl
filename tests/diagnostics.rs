@@ -85,6 +85,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::data::cancelled",
     "tpl::data::checksum",
     "tpl::data::escapes_root",
+    "tpl::data::invalid_git_source",
     "tpl::data::load",
     "tpl::data::needs_project",
     "tpl::data::parse",

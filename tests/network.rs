@@ -15,24 +15,10 @@
 //! immediately, which is enough to prove the protocol was understood in the
 //! first place.
 
-use std::path::Path;
+mod common;
 
+use common::file_url;
 use tpl::git::{GitBackend, GitError, LibGit2};
-
-/// A `file://` URL for a local path, spelled the way libgit2 parses one.
-///
-/// Not `format!("file://{}", path.display())`: on Windows that yields
-/// `file://C:\Users\...`, where `C:` is read as the authority and the
-/// backslashes are not separators, and libgit2 rejects it outright. A drive
-/// path needs the empty authority and forward slashes — `file:///C:/Users/...`.
-///
-/// One form serves both, without a branch that would be dead on whichever
-/// platform is running: a POSIX path's leading `/` and a drive letter's lack of
-/// one are the only difference, so drop it and put it back.
-fn file_url(path: &Path) -> String {
-    let path = path.display().to_string().replace('\\', "/");
-    format!("file:///{}", path.trim_start_matches('/'))
-}
 
 /// Reach for a remote that will refuse the connection, and report why.
 fn failure(url: &str) -> String {

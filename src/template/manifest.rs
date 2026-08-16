@@ -77,9 +77,22 @@ pub struct DataSourceDecl {
     /// Where the data comes from. May be an expression.
     pub source: String,
 
-    /// `template`, `local` or `remote`. Inferred from `source` when absent.
+    /// `template`, `local`, `remote` or `git`. Inferred from `source` when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
+
+    /// The revision a `git` source is read at — branch, tag or SHA. May be an
+    /// expression.
+    //
+    // `reference`, not `ref`: `ref` is a Rust keyword, and the one-name-per-
+    // concept rule reserves `revision` for the resolved `Oid`. The TOML key
+    // stays `ref`, because that is what a template author writes.
+    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<String>,
+
+    /// The path inside a `git` source's repository. May be an expression.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 
     /// `toml` or `json`. Inferred from the extension when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -94,6 +107,23 @@ pub struct DataSourceDecl {
     /// explain than the check costs to run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+}
+
+impl DataSourceDecl {
+    /// The location this declaration names, before anything is evaluated.
+    ///
+    /// `repo@ref:path` when the explicit triple is used, and the bare `source`
+    /// otherwise. One producer, so the confirmation prompt, the cache key, the
+    /// provenance trailer and every error's `location:` cannot come to
+    /// disagree about what a source is.
+    pub fn declared_location(&self) -> String {
+        match (&self.reference, &self.path) {
+            (Some(reference), Some(path)) => format!("{}@{reference}:{path}", self.source),
+            // A half-declared triple is refused at load time; showing what was
+            // actually written is more use here than inventing the missing half.
+            _ => self.source.clone(),
+        }
+    }
 }
 
 /// The parsed `template.toml`.
