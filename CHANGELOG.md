@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/noirbizarre/git-tpl/compare/0.4.0..0.5.0) - 2026-08-16
+
+### 💫 Features
+
+- **artwork** A wordmark logo, so the social preview renders the same twice ([#50](https://github.com/noirbizarre/git-tpl/issues/50)) - ([6595b0f](https://github.com/noirbizarre/git-tpl/commit/6595b0f2ea409fecac59c85783355d0d5f65d4dd))
+- **cli** `git tpl test` — a test runner for templates - ([f707200](https://github.com/noirbizarre/git-tpl/commit/f7072003bdd10069999e978bc4244d4af0629c89))
+- **cli** Make git tpl --help work, with a man page and shell completions ([#44](https://github.com/noirbizarre/git-tpl/issues/44)) - ([31597bb](https://github.com/noirbizarre/git-tpl/commit/31597bb331fdb0c620eebc6e536cc0edf5f8a326))
+- **lint** --deny and --allow, by code or by severity ([#48](https://github.com/noirbizarre/git-tpl/issues/48)) - ([d6c6458](https://github.com/noirbizarre/git-tpl/commit/d6c64585eaac4f3d9acb63f2380b04506c1ea2cd))
+
+### 🐛 Bug Fixes
+
+- **git** Restore the https and ssh transports, so a remote can be reached ([#47](https://github.com/noirbizarre/git-tpl/issues/47)) - ([1f32914](https://github.com/noirbizarre/git-tpl/commit/1f329141464522518fbe2f490187dfbdac54c47d))
+
+### 🔨 Refactor
+
+- **ops** Resolve a template once for many renderings - ([353e5dd](https://github.com/noirbizarre/git-tpl/commit/353e5dd15e7ff35f0108c9a0fa8db46138abf1fc))
+
+### 🧪 Tests
+
+- **testing** Cover the paths a broken case or a corrupted snapshot takes - ([3bc5f22](https://github.com/noirbizarre/git-tpl/commit/3bc5f2279f7d35db2e3e1a0670070ab8b1246b74))
+
 ## [0.4.0](https://github.com/noirbizarre/git-tpl/compare/0.3.0..0.4.0) - 2026-08-16
 
 ### 💫 Features
