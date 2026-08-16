@@ -23,8 +23,40 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # The man pages and completion scripts are generated from the `clap::Command`
+  # definition, so they are identical for every target. Generating them once
+  # here — rather than in each matrix leg — is not only cheaper: four of the six
+  # legs cross-compile, and a cross-compiled binary cannot be run on the runner
+  # that produced it.
+  generated:
+    name: 📄 Man pages & completions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate
+        run: |
+          set -euo pipefail
+          cargo build --release
+          ./target/release/git-tpl man --out-dir generated/man/man1
+          mkdir -p generated/completions
+          for shell in bash zsh fish elvish powershell; do
+            ./target/release/git-tpl completion "$shell" > "generated/completions/git-tpl.$shell"
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: generated
+          path: generated/
+          if-no-files-found: error
+
   build:
     name: 🏗️ ${{ matrix.target }}
+    needs: generated
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -63,11 +95,21 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
 
-      # The archive member is always the plain `git-tpl`, never the versioned
-      # asset name. A bare binary asset forces every packaging format — AUR,
-      # Homebrew, ubi, cargo-binstall, a mise registry entry — to rename the
-      # file it downloads, and Git only resolves `git tpl` through an
-      # executable called exactly `git-tpl`.
+      - uses: actions/download-artifact@v8
+        with:
+          name: generated
+          path: staging
+
+      # The binary is always at the archive root, under the plain name
+      # `git-tpl`, never the versioned asset name. A bare binary at the root
+      # is what lets every packaging format — AUR, Homebrew, ubi,
+      # cargo-binstall, a mise registry entry — take the file as it finds it,
+      # and Git only resolves `git tpl` through an executable called exactly
+      # `git-tpl`. `[package.metadata.binstall] bin-dir` names that path.
+      #
+      # Beside it sit `man/man1/*.1` and `completions/*`, which packagers
+      # install and everyone else can ignore. They are why `git tpl --help`
+      # works at all: Git execs `man git-tpl` for it.
       - name: Package the asset
         shell: bash
         run: |
@@ -78,11 +120,11 @@ jobs:
           if [ "${{ matrix.archive }}" = "zip" ]; then
             # `zip` is absent from the Windows runners; 7-Zip is preinstalled.
             # `-tzip` because the default format would be .7z despite the name.
-            (cd staging && 7z a -tzip "../dist/$name.zip" "git-tpl${{ matrix.ext }}")
+            (cd staging && 7z a -tzip "../dist/$name.zip" .)
           else
-            # `-C staging` so the archive holds `git-tpl` at its root rather
+            # `-C staging .` so the archive holds `git-tpl` at its root rather
             # than `staging/git-tpl`, which extractors would recreate.
-            tar -C staging -czf "dist/$name.tar.gz" "git-tpl${{ matrix.ext }}"
+            tar -C staging -czf "dist/$name.tar.gz" .
           fi
 
       - uses: actions/upload-artifact@v7
