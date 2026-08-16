@@ -36,6 +36,7 @@ fn main() -> ExitCode {
         Command::Update(args) => commands::update(args, &cli.global),
         Command::Render(args) => commands::render(args, &cli.global),
         Command::Lint(args) => commands::lint(args, &cli.global),
+        Command::Test(args) => commands::test(args, &cli.global),
         Command::Questions(args) => commands::questions(args, &cli.global),
         Command::Context(args) => commands::context(args, &cli.global),
         Command::Status(args) => commands::status(args, &cli.global),

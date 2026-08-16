@@ -140,6 +140,13 @@ indexmap = { version = "2", features = ["serde"] }
 # and read back to decide whether a re-render is needed.
 sha2 = "0.11"
 hex = "0.4"
+# The unified diff shown when a rendering no longer matches its recorded
+# snapshot. Only the diff engine: the snapshots live in the *user's* template
+# repository and must stay readable without a Rust toolchain, so nothing here
+# owns their format. `GitBackend::diff_patch` was the alternative and needs two
+# trees — using it would mean writing objects into the template repository to
+# answer a question that reads nothing.
+similar = "2.7"
 # A remote template is cloned into a fresh temporary directory per run.
 # Caching between runs would be faster, but a stale cache silently rendering an
 # old template is a far worse failure than a slow fetch — in a tool whose whole

@@ -5,6 +5,7 @@
 //! operations the CLI exposes.
 
 pub mod resolve;
+pub mod testing;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,8 +16,8 @@ use thiserror::Error;
 use crate::config::{CONFIG_PATH, Config, ConfigError};
 use crate::context::Context;
 use crate::data::{
-    AlwaysTrust, DataError, Decision, Loader, REMOTE_LIMIT_BYTES, RefuseRemote, TemplateTree,
-    TrustGate, declared_remotes,
+    AlwaysTrust, DataError, Decided, Decision, Loader, REMOTE_LIMIT_BYTES, RefuseRemote,
+    TemplateTree, TrustGate, declared_remotes,
 };
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Prompter};
 use crate::git::{AheadBehind, Change, FileStat, GitBackend, GitError, MergeOutcome, Oid};
@@ -88,6 +89,15 @@ pub enum OpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Lint(#[from] crate::lint::LintError),
+
+    /// The test runner could not run.
+    ///
+    /// Only failures that stop the run reach here. An unmet expectation is a
+    /// [`testing::Failure`] carried in the report, not an error: twelve failing
+    /// cases must all be reported, and an error would report one.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Test(#[from] testing::TestError),
 
     /// A Git operation failed.
     #[error(transparent)]
@@ -242,6 +252,12 @@ pub enum Trust<'a> {
     Always(AlwaysTrust),
     /// Refuse everything, because there is nobody to ask.
     Refuse(RefuseRemote),
+    /// Replay a decision already taken earlier in this invocation.
+    ///
+    /// For `git tpl test`, which renders one template many times: the consent
+    /// is sought once, before the first case, and every case then honours it —
+    /// including the sources the user refused.
+    Decided(Decided),
 }
 
 impl Trust<'_> {
@@ -255,11 +271,17 @@ impl Trust<'_> {
         Trust::Refuse(RefuseRemote)
     }
 
+    /// Honour a decision taken earlier in this invocation.
+    pub fn decided(decisions: BTreeMap<String, Decision>) -> Self {
+        Trust::Decided(Decided::new(decisions))
+    }
+
     fn gate(&mut self) -> &mut dyn TrustGate {
         match self {
             Trust::Ask(gate) => *gate,
             Trust::Always(always) => always,
             Trust::Refuse(refuse) => refuse,
+            Trust::Decided(decided) => decided,
         }
     }
 }
@@ -327,6 +349,25 @@ impl<'a> Target<'a> {
     }
 }
 
+/// A rendering, against a template somebody else resolved.
+///
+/// [`RenderedFiles`] is this plus the [`Resolved`] that produced it. The two
+/// are split so that a caller with many answer sets — [`testing::run`] — can
+/// resolve once: [`resolve::resolve`] makes a fresh temporary clone every call,
+/// so a resolution per answer set costs a clone each and, worse, could render
+/// two answer sets against two different revisions if the branch moved between
+/// them.
+pub struct RenderedOnce {
+    /// The resolved context.
+    pub context: Context,
+    /// The rendered files, sorted by output path.
+    pub files: Vec<Rendered>,
+    /// What produced them.
+    pub provenance: Provenance,
+    /// Supplied answers that name no question in this template.
+    pub ignored_answers: Vec<String>,
+}
+
 /// Resolve, evaluate and render — to bytes, with no repository required.
 ///
 /// `project` is `None` for a project-free render. Two things depend on it, and
@@ -346,7 +387,7 @@ pub fn render_files(
     project: Option<(&dyn GitBackend, &Path)>,
     supplied: BTreeMap<String, Value>,
     user: &UserConfig,
-    mut answering: Answering<'_>,
+    answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<RenderedFiles, OpError> {
     let template = resolve::resolve(Request {
@@ -356,6 +397,40 @@ pub fn render_files(
         dirty: target.dirty,
     })?;
 
+    let rendered = render_resolved(
+        &template,
+        target.source,
+        project,
+        supplied,
+        user,
+        answering,
+        trust,
+    )?;
+
+    Ok(RenderedFiles {
+        template,
+        context: rendered.context,
+        files: rendered.files,
+        provenance: rendered.provenance,
+        ignored_answers: rendered.ignored_answers,
+    })
+}
+
+/// Evaluate and render an already-resolved template.
+///
+/// The body of [`render_files`] minus the resolution, so that a caller holding
+/// one [`Resolved`] can render it repeatedly against different answer sets
+/// without re-cloning and without risking two revisions in one run.
+#[allow(clippy::too_many_arguments)]
+pub fn render_resolved(
+    template: &Resolved,
+    source: &str,
+    project: Option<(&dyn GitBackend, &Path)>,
+    supplied: BTreeMap<String, Value>,
+    user: &UserConfig,
+    mut answering: Answering<'_>,
+    trust: Trust<'_>,
+) -> Result<RenderedOnce, OpError> {
     // Built and validated before anything is prompted: a cycle or a typo
     // discovered after six answered questions is the worst possible time.
     let graph = Graph::build(&template.manifest)?;
@@ -394,7 +469,7 @@ pub fn render_files(
     //
     // An *unmatched* template is untouched, and `Trust::Refuse` still refuses
     // it loudly. Nothing is granted by omission.
-    let mut trust = if user.trust.allows(target.source) {
+    let mut trust = if user.trust.allows(source) {
         Trust::always()
     } else {
         trust
@@ -464,7 +539,7 @@ pub fn render_files(
     )?;
 
     let provenance = Provenance {
-        source: target.source.to_string(),
+        source: source.to_string(),
         reference: template.reference.clone(),
         commit: template.revision,
         dirty: template.dirty,
@@ -474,8 +549,7 @@ pub fn render_files(
         template_name: template.manifest.name.clone(),
     };
 
-    Ok(RenderedFiles {
-        template,
+    Ok(RenderedOnce {
         context,
         files,
         provenance,

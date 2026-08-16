@@ -25,3 +25,4 @@ existed.
 | [013](013-user-configuration.md) | User preferences live in `~/.config/git-tpl/config.toml` |
 | [014](014-strict-undefined.md) | An undefined name in a rendered file may be an error |
 | [015](015-machine-readable-output.md) | `--json` carries a stable diagnostic code on every failure |
+| [016](016-template-tests-are-data.md) | Template tests are declarative cases in the template repository, with no code execution |

@@ -309,6 +309,45 @@ impl TrustGate for RefuseRemote {
     }
 }
 
+/// Replays a decision already taken, without asking again.
+///
+/// For a caller that renders the same template more than once in one
+/// invocation — `git tpl test`, with a case per answer set. The consent being
+/// sought is "may this template reach these hosts?", and that answer does not
+/// change between two answer sets; asking once per case would train the reader
+/// to say yes without looking.
+///
+/// It carries the decisions rather than granting, so a source the user *skipped*
+/// stays skipped for every case. A gate that replayed "yes" would turn one
+/// refusal into an allowance the second time it was consulted.
+pub struct Decided(BTreeMap<String, Decision>);
+
+impl Decided {
+    /// Replay these decisions.
+    pub fn new(decisions: BTreeMap<String, Decision>) -> Self {
+        Self(decisions)
+    }
+}
+
+impl TrustGate for Decided {
+    fn confirm(
+        &mut self,
+        requests: &[RemoteRequest],
+        _limit_bytes: u64,
+    ) -> Result<BTreeMap<String, Decision>, DataError> {
+        Ok(requests
+            .iter()
+            .map(|request| {
+                // A request nobody decided on is skipped, not allowed. The
+                // decisions were taken over the same manifest, so this cannot
+                // happen — and if it ever does, silence must fail closed.
+                let decision = self.0.get(&request.name).copied().unwrap_or(Decision::Skip);
+                (request.name.clone(), decision)
+            })
+            .collect())
+    }
+}
+
 /// Every data source that is declared remote, in declaration order.
 ///
 /// From the *declaration*, not from a resolved string: this is what the trust
@@ -725,6 +764,54 @@ fn parse(name: &str, location: &str, format: Format, bytes: &[u8]) -> Result<Val
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    fn request(name: &str) -> RemoteRequest {
+        RemoteRequest {
+            name: name.to_string(),
+            source: format!("https://example.invalid/{name}.toml"),
+        }
+    }
+
+    /// The whole point of `Decided`: a decision taken once is honoured
+    /// afterwards, *including* a refusal. A gate that replayed a blanket yes
+    /// would turn one "no" into an allowance the second time it was consulted,
+    /// which is the bug this type exists to make impossible.
+    #[test]
+    fn a_replayed_decision_keeps_both_the_allowance_and_the_refusal() {
+        let mut gate = Decided::new(BTreeMap::from([
+            ("allowed".to_string(), Decision::Allow),
+            ("skipped".to_string(), Decision::Skip),
+        ]));
+
+        let requests = [request("allowed"), request("skipped")];
+        let replayed = gate.confirm(&requests, REMOTE_LIMIT_BYTES).unwrap();
+
+        assert_eq!(replayed["allowed"], Decision::Allow);
+        assert_eq!(replayed["skipped"], Decision::Skip);
+    }
+
+    #[test]
+    fn a_replayed_decision_is_the_same_every_time_it_is_consulted() {
+        let mut gate = Decided::new(BTreeMap::from([("a".to_string(), Decision::Skip)]));
+        let requests = [request("a")];
+
+        let first = gate.confirm(&requests, REMOTE_LIMIT_BYTES).unwrap();
+        let second = gate.confirm(&requests, REMOTE_LIMIT_BYTES).unwrap();
+
+        assert_eq!(first, second, "one consent, however many renderings");
+    }
+
+    /// Fails closed. The decisions are taken over the same manifest, so a
+    /// request nobody decided on cannot arise — and if it ever does, silence
+    /// must not read as consent.
+    #[test]
+    fn a_request_nobody_decided_on_is_skipped_rather_than_allowed() {
+        let mut gate = Decided::new(BTreeMap::new());
+        let replayed = gate
+            .confirm(&[request("unknown")], REMOTE_LIMIT_BYTES)
+            .unwrap();
+        assert_eq!(replayed["unknown"], Decision::Skip);
+    }
 
     #[rstest]
     #[case("data/licenses.toml", SourceKind::TemplateFile)]
