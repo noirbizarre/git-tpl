@@ -102,6 +102,18 @@ pub enum Command {
 
     /// Publish template refs to a remote
     Push(RemoteArgs),
+
+    /// Print a shell completion script
+    Completion(CompletionArgs),
+
+    /// Generate the man pages, in troff
+    //
+    // Hidden because it is a packaging tool, not a user command. `git tpl man`
+    // reads like "show me the manual" and does nothing of the sort — the way a
+    // user reads the manual is `git tpl --help`, which is what the pages this
+    // writes are there to make work.
+    #[command(hide = true)]
+    Man(ManArgs),
 }
 
 /// `git tpl init`
@@ -452,6 +464,21 @@ pub struct RemoteArgs {
     /// Report what would happen; transfer nothing
     #[arg(long)]
     pub dry_run: bool,
+}
+
+/// `git tpl completion`
+#[derive(Debug, clap::Args)]
+pub struct CompletionArgs {
+    /// The shell to generate a script for
+    pub shell: clap_complete::Shell,
+}
+
+/// `git tpl man`
+#[derive(Debug, clap::Args)]
+pub struct ManArgs {
+    /// Write one page per command into this directory instead of stdout
+    #[arg(long, short = 'o', value_name = "DIR")]
+    pub out_dir: Option<PathBuf>,
 }
 
 #[cfg(test)]

@@ -95,7 +95,14 @@ minijinja = { version = "2", features = ["builtins", "loader"] }
 deunicode = "1.6"
 
 # CLI
-clap = { version = "4", features = ["derive", "env", "wrap_help"] }
+clap = { version = "4", features = ["derive", "env", "wrap_help", "string"] }
+# Completions and the man page are generated from the live `clap::Command` at
+# runtime rather than from a checked-in script or a `build.rs`. A generator that
+# reads the same definition the parser uses cannot advertise a flag that no
+# longer exists — and the man page is not a nicety: Git intercepts
+# `git tpl --help` and runs `man git-tpl`, which fails without one.
+clap_complete = "4"
+clap_mangen = "0.2"
 console = "0.16"
 demand = "2"
 

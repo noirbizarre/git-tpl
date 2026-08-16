@@ -119,6 +119,7 @@ Only `severity: "error"` fails the command.
 | `tpl::ops::invalid_argument` | An argument is not usable — see the message. |
 | `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist yet. Run `init` or `update`. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
+| `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
 
 ## Git
 

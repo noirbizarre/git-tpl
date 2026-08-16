@@ -162,6 +162,24 @@ pub enum OpError {
         /// The ref it was looked for in.
         ref_name: String,
     },
+
+    /// Generated output could not be written to disk.
+    ///
+    /// Its own variant rather than a `ConfigError`: nothing about the project
+    /// is at fault. Somebody asked for a file in a directory they cannot write,
+    /// and the two things they do not already know are which path was attempted
+    /// and what the operating system said about it.
+    #[error("could not write `{path}`")]
+    #[diagnostic(
+        code(tpl::ops::write_failed),
+        help("reason: {reason}\ncheck that the directory exists and is writable")
+    )]
+    WriteFailed {
+        /// The path that could not be written.
+        path: String,
+        /// What the operating system reported.
+        reason: String,
+    },
 }
 
 /// How answers are obtained during an operation.
