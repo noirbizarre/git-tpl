@@ -48,6 +48,18 @@ fn template() -> (tempfile::TempDir, Template) {
     (dir, template)
 }
 
+/// The `executable` flag `--json` reports for one rendered path, or `None` if
+/// the path was not rendered at all — which distinguishes "not executable"
+/// from "absent", and those fail for very different reasons.
+fn executable_in(output: &common::Output, path: &str) -> Option<bool> {
+    output.json()["files"]
+        .as_array()
+        .expect("files")
+        .iter()
+        .find(|file| file["path"] == path)
+        .map(|file| file["executable"].as_bool().expect("executable"))
+}
+
 #[test]
 fn a_template_renders_into_a_directory_without_a_repository() {
     let (_keep, template) = template();
@@ -225,13 +237,16 @@ fn an_output_path_that_is_a_file_is_refused_with_the_path_that_failed() {
     );
 }
 
+/// A pinned revision carries the mode in the tree, so it is readable — and
+/// therefore assertable — on a platform that has no such bit on disk.
 #[test]
-fn the_executable_bit_survives() {
+fn an_executable_file_in_a_pinned_revision_renders_executable() {
     let (_keep, template) = template();
     let scratch = Scratch::new();
 
-    scratch
+    let output = scratch
         .run(&[
+            "--json",
             "render",
             &template.source(),
             "--output",
@@ -240,6 +255,12 @@ fn the_executable_bit_survives() {
         ])
         .success();
 
+    assert_eq!(executable_in(&output, "run.sh"), Some(true));
+    assert_eq!(executable_in(&output, "ci.yml"), Some(false));
+
+    // Applying the bit to the output directory is Unix-only, because that is
+    // where a bit exists to apply. `src/commands/render.rs` gates the chmod the
+    // same way.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -249,6 +270,32 @@ fn the_executable_bit_survives() {
             .mode();
         assert!(mode & 0o111 != 0, "run.sh lost its executable bit");
     }
+}
+
+/// The one place the platforms genuinely disagree. A worktree source has no
+/// tree to read the mode from, so it is stat'd — and Windows has nothing to
+/// stat. Reporting `false` there is what Git itself records, so making the two
+/// agree would mean inventing a mode Git does not; deliberately not done.
+///
+/// The consequence for a template author: pin a revision when the mode matters.
+#[test]
+fn a_worktree_source_reads_the_executable_bit_from_the_filesystem() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .run(&[
+            "--json",
+            "render",
+            &template.source(),
+            "--dirty",
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .success();
+
+    assert_eq!(executable_in(&output, "run.sh"), Some(cfg!(unix)));
 }
 
 /// `--dirty` is the edit-and-see loop: without it an author has to commit

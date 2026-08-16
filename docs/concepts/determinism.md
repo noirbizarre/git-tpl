@@ -19,12 +19,29 @@ Each of these is a way the guarantee could be lost, and how it is prevented:
 |---|---|
 | Directory traversal order | The template tree is walked in Git tree order, never filesystem order. `readdir` order varies by filesystem; Git's is sorted and canonical. |
 | Line endings | Bytes are never translated. A `\r\n` in the template stays `\r\n` on Linux and on Windows. |
-| File permissions | Only the executable bit is carried, taken from the source blob's Git mode. Git records nothing else, so nothing else can vary. |
+| File permissions | Only the executable bit is carried, taken from the source blob's Git mode. Git records nothing else, so nothing else can vary. See the caveat below for a worktree source. |
 | Binary files | Detected by a NUL byte in the first 8 KiB and copied verbatim, never rendered. |
 | Timestamps | Never injected. The commit's author and committer time are the only timestamps, and they are metadata, not content. |
 | Environment variables | Not exposed to templates. At all. |
 | Machine-specific values | Not exposed to templates. See below. |
 | Imported partials | A `{% import %}` resolves only against the template tree at the pinned revision, never the filesystem. The loadable set is read in Git tree order into a sorted map, so the names — and the diagnostics that list them — do not vary. See [ADR-012](../adr/012-template-loader.md). |
+
+## The one exception: a worktree source
+
+The guarantee is stated over a template *revision*, and that is not an accident.
+
+A `--dirty` render, or a `<worktree>` reference, has no committed tree to read
+modes from, so the executable bit is read from the filesystem instead. Windows
+has no such bit, and git-tpl reports `false` there — which is exactly what Git
+records for a file created on Windows, so the two agree.
+
+The consequence is narrow but worth knowing: the same uncommitted template can
+render executable on Linux and not on Windows. Commit the template and pin a
+revision — which is what `init` and `update` do anyway — and the mode comes from
+the blob, identical everywhere.
+
+Making the platforms agree would mean recording a mode Git itself does not, so
+it is not done.
 
 ## No runtime context
 

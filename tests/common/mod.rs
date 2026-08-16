@@ -190,19 +190,29 @@ impl Repo {
         self
     }
 
-    /// Make a file executable. No-op off Unix, where Git records no such bit.
-    #[cfg(unix)]
+    /// Make a file executable, in the index as well as on disk.
+    ///
+    /// The index half is what makes this work off Unix, where there is no bit
+    /// on disk to set. Without it a fixture is committed `100644` on Windows
+    /// and every test about the executable bit has to be `#[cfg(unix)]` — which
+    /// hides the thing actually worth pinning, that a *committed* `100755`
+    /// renders to `100755` on every platform.
+    ///
+    /// `commit_all`'s later `git add -A` does not undo it: Windows runners have
+    /// `core.fileMode=false`, so Git keeps the index mode of a file whose
+    /// content has not changed.
     pub fn make_executable(&self, relative: &str) -> &Self {
-        use std::os::unix::fs::PermissionsExt;
-        let path = self.path.join(relative);
-        let mut permissions = std::fs::metadata(&path).expect("stat").permissions();
-        permissions.set_mode(0o755);
-        std::fs::set_permissions(&path, permissions).expect("chmod");
-        self
-    }
-
-    #[cfg(not(unix))]
-    pub fn make_executable(&self, _relative: &str) -> &Self {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = self.path.join(relative);
+            let mut permissions = std::fs::metadata(&path).expect("stat").permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&path, permissions).expect("chmod");
+        }
+        // `update-index` can only speak about a tracked path, so stage it first.
+        self.git(&["add", "--", relative]);
+        self.git(&["update-index", "--chmod=+x", "--", relative]);
         self
     }
 
@@ -280,6 +290,21 @@ impl Repo {
         let mut paths: Vec<String> = listing.lines().map(str::to_string).collect();
         paths.sort();
         paths
+    }
+
+    /// The Git mode of one path in a tree, e.g. `100755`.
+    ///
+    /// Asserted on in preference to the filesystem: the mode that matters is
+    /// the one recorded in the tree, because that is what a second machine
+    /// compares against when deciding whether `git tpl update` has anything to
+    /// commit.
+    pub fn file_mode(&self, revision: &str, path: &str) -> String {
+        let line = self.git(&["ls-tree", revision, "--", path]);
+        line.split_whitespace()
+            .next()
+            .filter(|mode| !mode.is_empty())
+            .unwrap_or_else(|| panic!("no entry for `{path}` in `{revision}`"))
+            .to_string()
     }
 
     /// `git status --porcelain`.
