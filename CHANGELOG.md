@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1](https://github.com/noirbizarre/git-tpl/compare/0.5.0..0.5.1) - 2026-08-16
+
+### 🐛 Bug Fixes
+
+- **cli** A --json payload for every command that had none ([#57](https://github.com/noirbizarre/git-tpl/issues/57)) - ([2b015e2](https://github.com/noirbizarre/git-tpl/commit/2b015e294dbe8f4388910787b1220820118ecc67))
+- **git** Tell a full disk from an unreachable remote ([#54](https://github.com/noirbizarre/git-tpl/issues/54)) - ([ddf2f33](https://github.com/noirbizarre/git-tpl/commit/ddf2f33dd69d77883992a31579e9842cb4b758a9))
+- **git** Honour .gitignore negations over global ignore rules in --dirty ([#55](https://github.com/noirbizarre/git-tpl/issues/55)) - ([3dc18fd](https://github.com/noirbizarre/git-tpl/commit/3dc18fdec4e244ce3bffb057fb92288d29367633))
+
+### 🔧 CI
+
+- **release** A build-only dispatch, so this workflow can be tested - ([2883af1](https://github.com/noirbizarre/git-tpl/commit/2883af1f8df8c95259e5b46f81c7b9c8f2e46d7e))
+- **release** Generate the man pages and completions in each build leg - ([c975efe](https://github.com/noirbizarre/git-tpl/commit/c975efe053312bb95135a18796958a6f051a077e))
+- **ship** Tidy up the Ship PR description ([#58](https://github.com/noirbizarre/git-tpl/issues/58)) - ([3f0eec4](https://github.com/noirbizarre/git-tpl/commit/3f0eec46ac24b568744d67eb302db1298eb313bb))
+
 ## [0.5.0](https://github.com/noirbizarre/git-tpl/compare/0.4.0..0.5.0) - 2026-08-16
 
 ### 💫 Features
