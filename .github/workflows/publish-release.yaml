@@ -23,40 +23,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # The man pages and completion scripts are generated from the `clap::Command`
-  # definition, so they are identical for every target. Generating them once
-  # here — rather than in each matrix leg — is not only cheaper: four of the six
-  # legs cross-compile, and a cross-compiled binary cannot be run on the runner
-  # that produced it.
-  generated:
-    name: 📄 Man pages & completions
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.tag }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Generate
-        run: |
-          set -euo pipefail
-          cargo build --release
-          ./target/release/git-tpl man --out-dir generated/man/man1
-          mkdir -p generated/completions
-          for shell in bash zsh fish elvish powershell; do
-            ./target/release/git-tpl completion "$shell" > "generated/completions/git-tpl.$shell"
-          done
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: generated
-          path: generated/
-          if-no-files-found: error
-
   build:
     name: 🏗️ ${{ matrix.target }}
-    needs: generated
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -65,7 +33,7 @@ jobs:
           - { target: x86_64-unknown-linux-gnu,   runner: ubuntu-latest,  asset: linux-amd64,      cross: true,  archive: tar.gz }
           - { target: aarch64-unknown-linux-gnu,  runner: ubuntu-latest,  asset: linux-arm64,      cross: true,  archive: tar.gz }
           - { target: x86_64-unknown-linux-musl,  runner: ubuntu-latest,  asset: linux-amd64-musl, cross: true,  archive: tar.gz }
-          - { target: x86_64-apple-darwin,        runner: macos-latest,   asset: darwin-amd64,     cross: false, archive: tar.gz }
+          - { target: x86_64-apple-darwin,        runner: macos-15-intel, asset: darwin-amd64,     cross: false, archive: tar.gz }
           - { target: aarch64-apple-darwin,       runner: macos-latest,   asset: darwin-arm64,     cross: false, archive: tar.gz }
           - { target: x86_64-pc-windows-msvc,     runner: windows-latest, asset: windows-amd64,    cross: false, archive: zip, ext: .exe }
     steps:
@@ -95,10 +63,32 @@ jobs:
             cargo build --release --target ${{ matrix.target }}
           fi
 
-      - uses: actions/download-artifact@v8
-        with:
-          name: generated
-          path: staging
+      # Identical for every target — they come from the `clap::Command`, not
+      # from the compilation. Generated here rather than once in a shared job
+      # because that job cost a full LTO release build ahead of the whole
+      # matrix, while every leg has already built a binary it can run: the
+      # `cross` images ship a qemu-user runner, and each native leg targets its
+      # own runner. That is why `x86_64-apple-darwin` builds on an Intel runner
+      # rather than under `macos-latest`, which is arm64 and has no Rosetta.
+      #
+      # `--out-dir` stays inside the workspace: that is what `cross` bind-mounts
+      # into the container, so a path outside it would not be visible there.
+      - name: Generate the man pages and completions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staging/man/man1 staging/completions
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            # The build above already produced the artefacts, so this only
+            # relinks and runs.
+            run=(cross run --quiet --release --target ${{ matrix.target }} --)
+          else
+            run=("target/${{ matrix.target }}/release/git-tpl${{ matrix.ext }}")
+          fi
+          "${run[@]}" man --out-dir staging/man/man1
+          for shell in bash zsh fish elvish powershell; do
+            "${run[@]}" completion "$shell" > "staging/completions/git-tpl.$shell"
+          done
 
       # The binary is always at the archive root, under the plain name
       # `git-tpl`, never the versioned asset name. A bare binary at the root
@@ -114,7 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist staging
+          mkdir -p dist
           cp "target/${{ matrix.target }}/release/git-tpl${{ matrix.ext }}" staging/
           name="git-tpl_${{ inputs.tag }}_${{ matrix.asset }}"
           if [ "${{ matrix.archive }}" = "zip" ]; then
