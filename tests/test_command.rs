@@ -595,6 +595,51 @@ fn a_recorded_snapshot_is_compared_on_the_next_run() {
     assert_eq!(output.json()["summary"]["snapshotsCompared"], 1);
 }
 
+/// #51. `--write` records a snapshot through the filesystem; `--dirty` reads it
+/// back through the working-tree walk. The two halves have to agree, and they
+/// did not: a global `core.excludesFile` hiding `mise.toml` made the walk drop
+/// `files/mise.toml` while leaving the `MANIFEST` that lists it, so recording a
+/// snapshot made every subsequent `--dirty` run fail with `snapshot_read`.
+///
+/// The negation is not contrived. A template that renders a `mise.toml` ships
+/// `!mise.toml` in its `.gitignore`, and the *rendered* `.gitignore` then
+/// governs the snapshot's own `files/` directory. Note the asymmetry that hid
+/// it: in the template the file is `mise.toml.jinja`, which the rule does not
+/// match, so only the snapshot is affected.
+#[test]
+fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = Template::minimal(
+        dir.path(),
+        "name = \"mised\"\n",
+        &[
+            ("mise.toml.jinja", "[tools]\nrust = \"stable\"\n"),
+            (".gitignore", "!mise.toml\n"),
+        ],
+    );
+    template.repo.write("tests/case.toml", "[answers]\n");
+    template.repo.commit_all("test: a case");
+
+    // The rule the whole bug depends on, in an isolated config so the test
+    // never touches the developer's own ignore rules.
+    common::global_gitignore(template.repo.config_home(), "mise.toml\nmise.lock\n");
+
+    run(&template, &["--dirty", "--write"]).success();
+    assert!(
+        template
+            .repo
+            .path
+            .join("tests/__snapshots__/case/files/mise.toml")
+            .exists(),
+        "`--write` did not record the file at all"
+    );
+
+    // The read-back. Before the fix this was `tpl::testing::snapshot_read`:
+    // "`MANIFEST` lists `mise.toml`, which is not under `files/`".
+    let output = run(&template, &["--dirty", "--json"]).success();
+    assert_eq!(output.json()["cases"][0]["snapshot"], "compared");
+}
+
 #[test]
 fn a_changed_template_makes_the_snapshot_diff_name_the_file() {
     let dir = tempfile::tempdir().unwrap();

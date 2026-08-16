@@ -59,6 +59,35 @@ pub fn scrub_git_env(command: &mut Command, config_home: &Path) {
     command.env("GIT_CONFIG_GLOBAL", config_home.join("absent.gitconfig"));
 }
 
+/// Point `core.excludesFile` at a global ignore file holding `rules`.
+///
+/// Written to `<config_home>/git/config`, because that is where libgit2 looks
+/// for a global config. It does *not* read `GIT_CONFIG_GLOBAL`, which is a
+/// git-core environment variable — setting that alone would silently configure
+/// nothing, and a test asserting that a global rule applied would pass by
+/// accident.
+///
+/// The path is written with forward slashes. A backslash begins an escape
+/// sequence in Git's config syntax, so a raw Windows path spells `\U` and
+/// `\R` at libgit2, which rejects the whole file — and a repository whose
+/// global config will not parse cannot be opened at all. Forward slashes are
+/// accepted on Windows and cost nothing elsewhere.
+pub fn global_gitignore(config_home: &Path, rules: &str) {
+    let ignore = config_home.join("global.gitignore");
+    std::fs::write(&ignore, rules).expect("write global ignore");
+
+    let git = config_home.join("git");
+    std::fs::create_dir_all(&git).expect("create git config dir");
+    std::fs::write(
+        git.join("config"),
+        format!(
+            "[core]\n\texcludesFile = {}\n",
+            ignore.display().to_string().replace('\\', "/")
+        ),
+    )
+    .expect("write global config");
+}
+
 /// A Git repository under test.
 pub struct Repo {
     pub path: PathBuf,
