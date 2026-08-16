@@ -136,12 +136,15 @@ impl LibGit2 {
                 path: into.to_path_buf(),
                 reason: e.message().to_string(),
             },
-            // Connecting or negotiating. The wire is the likely cause and
-            // nothing local has been written yet.
-            Stage::Connecting => translate_remote(url, None, &e),
-            // Objects were arriving, so the remote answered. A failure that is
-            // not itself a transport error is the local write.
-            Stage::Receiving => translate_remote(url, Some(into), &e),
+            // Past the creation. The two remaining stages differ only in
+            // whether there is a destination to blame: while connecting there
+            // is nothing written yet, so the wire is the only candidate; once
+            // objects are arriving the remote has demonstrably answered, and a
+            // failure that is not a transport error is the local write.
+            stage => {
+                let destination = matches!(stage, Stage::Receiving).then_some(into);
+                translate_remote(url, destination, &e)
+            }
         })?;
         Ok(Self { repo })
     }
@@ -1659,5 +1662,86 @@ mod tests {
         );
         assert_eq!(repo.config_bool("tpl.autoPush").unwrap(), Some(true));
         assert_eq!(repo.config_string("tpl.absent").unwrap(), None);
+    }
+
+    /// A refused connection and a full disk are both `ErrorClass::Os`, so the
+    /// class alone cannot decide. What decides is whether the caller knows the
+    /// remote already answered — and when it did, an `Os` error is the local
+    /// write, not unreachability. This is the misclassification that reported a
+    /// full `$TMPDIR` as `tpl::git::network`.
+    #[test]
+    fn a_local_failure_after_the_remote_answered_is_a_clone_failure() {
+        let error = git2::Error::new(
+            ErrorCode::GenericError,
+            ErrorClass::Os,
+            "failed to initialize repository with template 'info/exclude': Disk quota exceeded",
+        );
+
+        let error = translate_remote(
+            "https://host.invalid/t.git",
+            Some(Path::new("/tmp/x")),
+            &error,
+        );
+
+        assert!(
+            matches!(&error, GitError::Clone { path, reason, .. }
+                if path == Path::new("/tmp/x") && reason.contains("Disk quota exceeded")),
+            "{error:?}"
+        );
+    }
+
+    /// The converse: a transport class stays a network failure even once the
+    /// remote has answered, because a connection can drop mid-transfer.
+    #[test]
+    fn a_transport_failure_after_the_remote_answered_is_still_a_network_failure() {
+        let error = git2::Error::new(ErrorCode::GenericError, ErrorClass::Net, "connection reset");
+
+        let error = translate_remote(
+            "https://host.invalid/t.git",
+            Some(Path::new("/tmp/x")),
+            &error,
+        );
+
+        assert!(
+            matches!(&error, GitError::Network { reason, .. } if reason == "connection reset"),
+            "{error:?}"
+        );
+    }
+
+    /// Authentication is decided before anything else, and outranks having a
+    /// destination to blame: no amount of disk space fixes a rejected key.
+    #[test]
+    fn a_rejected_credential_is_an_authentication_failure() {
+        let error = git2::Error::new(ErrorCode::Auth, ErrorClass::Http, "401");
+
+        let error = translate_remote(
+            "https://host.invalid/t.git",
+            Some(Path::new("/tmp/x")),
+            &error,
+        );
+
+        assert!(
+            matches!(&error, GitError::Authentication { methods, .. }
+                if methods.contains("credential helper")),
+            "{error:?}"
+        );
+    }
+
+    /// `credential_callbacks` gives up with `Error::from_str`, which carries
+    /// `ErrorCode::Generic` and `ErrorClass::None`. Only the message identifies
+    /// it, so the message sniff is load-bearing rather than belt-and-braces.
+    #[test]
+    fn a_callback_that_ran_out_of_credentials_is_recognised_by_its_message() {
+        let error = git2::Error::from_str(
+            "no usable credentials: tried the SSH agent, the default key paths and the credential helper",
+        );
+        assert!(is_auth(&error));
+
+        let error = translate_remote("git@host.invalid:t.git", None, &error);
+
+        assert!(
+            matches!(&error, GitError::Authentication { methods, .. } if methods.contains("SSH agent")),
+            "{error:?}"
+        );
     }
 }
