@@ -78,8 +78,20 @@ miette = { version = "7", features = ["fancy"] }
 # every developer machine get identical Git semantics.
 # `cred` is what git2 0.21 gates `Cred::credential_helper` behind; without it a
 # private HTTPS template silently loses the credential-helper fallback.
+# `https` and `ssh` are git2 defaults that `default-features = false` removes,
+# and the vendored build then has no TLS backend and no libssh2: *every* remote
+# becomes unreachable, with "there is no TLS stream available" for https and
+# "unsupported URL protocol" for ssh. They are listed explicitly so that turning
+# defaults off again cannot silently take the transports with them.
+# `vendored-openssl` compiles OpenSSL from source next to libgit2, so the Linux
+# and musl binaries carry their own TLS rather than the host's. It is inert on
+# Windows (WinHTTP) and macOS (SecureTransport), where `https` pulls no
+# openssl-sys at all.
 git2 = { version = "0.21", default-features = false, features = [
   "vendored-libgit2",
+  "vendored-openssl",
+  "https",
+  "ssh",
   "cred",
 ] }
 

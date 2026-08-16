@@ -128,7 +128,7 @@ Only `severity: "error"` fails the command.
 | `tpl::git::not_a_repository` | The command needs a repository and there is none. |
 | `tpl::git::no_such_revision` | The requested branch, tag or SHA does not exist. |
 | `tpl::git::auth` | Authentication failed. |
-| `tpl::git::network` | The remote could not be reached. |
+| `tpl::git::network` | The remote could not be reached. The help text carries libgit2's own reason. |
 | `tpl::git::dirty_worktree` | The operation merges, and the worktree has uncommitted changes. |
 | `tpl::git::diverged` | The remote template ref has diverged. Nothing is force-pushed. |
 | `tpl::git::no_identity` | Git has no `user.name` or `user.email` configured. |
