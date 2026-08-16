@@ -66,6 +66,7 @@ src/
 ├── data/            data source abstraction and loaders
 ├── git/             the Git abstraction
 │   ├── mod.rs       the GitBackend trait — our types, never git2's
+│   ├── ignore.rs    .gitignore evaluation, ours not libgit2's (ADR-017)
 │   └── libgit2.rs   the only implementation
 ├── ops/             orchestration, one function per command
 ├── cli.rs           argument types only

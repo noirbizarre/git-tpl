@@ -5,6 +5,10 @@
 //! is enforced by the `git-backend-isolation` prek hook, because a trait alone
 //! enforces nothing — see `docs/adr/011-git-backend-isolation.md`.
 
+// `.gitignore` evaluation is ours rather than libgit2's, because libgit2 will
+// not let a negation override a lower-precedence ignore file — see ADR-017.
+// Private: it answers a question only the working-tree walk asks.
+mod ignore;
 pub mod libgit2;
 
 use std::fmt;
@@ -528,8 +532,9 @@ pub trait GitBackend {
     /// Build a tree from the files in a directory, for `--dirty` renders.
     ///
     /// Reads a working tree rather than a commit, honouring `.gitignore`, so
-    /// the result matches what `git add -A` would have staged.
-    /// Build a tree from a working directory.
+    /// the result matches what `git add -A` would have staged. The rules are
+    /// evaluated by [`ignore`], not by libgit2, which refuses to let a
+    /// negation override `core.excludesFile` — see ADR-017.
     ///
     /// Returns the tree and the paths `.gitignore` removed from it. The second
     /// half is reported rather than discarded: the ignore stack includes

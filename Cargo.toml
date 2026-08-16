@@ -95,6 +95,24 @@ git2 = { version = "0.21", default-features = false, features = [
   "cred",
 ] }
 
+# The `.gitignore` evaluator for `--dirty`, and deliberately not libgit2's.
+# libgit2 will not let a repository `.gitignore` negation override a rule that
+# came from `core.excludesFile`, so a template shipping `!mise.toml` against the
+# common global rule that hides mise configuration loses the file from a
+# `--dirty` render while `git add -A` stages it (#51). libgit2 does not report
+# which rule matched, so there is nothing to post-correct — the stack has to be
+# evaluated here. See ADR-017.
+#
+# Only `gitignore::GitignoreBuilder` is used. The crate's parallel walker is
+# not: it reports nothing about what it skipped, and `--dirty` must name the
+# files a global rule removed. The walk stays ours.
+#
+# This is the one place full `regex-automata` enters the tree. `regex-lite`,
+# chosen below for question patterns, is not a substitute: gitignore globs are
+# not regexes, and hand-translating them is the failure this dependency buys
+# out of.
+ignore = "0.4"
+
 # Templating. The only rendering engine, deliberately.
 # `builtins` provides the filters templates actually reach for (lower, replace,
 # trim). `loader` lets the renderer resolve `{% include %}` within the template

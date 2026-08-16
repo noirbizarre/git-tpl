@@ -14,6 +14,7 @@ use git2::{
     ObjectType, PushOptions, RemoteCallbacks, Repository, RepositoryOpenFlags, ResetType,
 };
 
+use super::ignore::IgnoreStack;
 use super::{
     AheadBehind, Change, ChangeKind, Commit, FileMode, FileStat, GitBackend, GitError,
     MergeOutcome, MergePreview, Oid, TreeEntry,
@@ -815,9 +816,31 @@ impl GitBackend for LibGit2 {
     }
 
     fn tree_from_workdir(&self, root: &Path) -> Result<(Oid, Vec<String>), GitError> {
+        // The rules in force above `root`. `root` is the template source, which
+        // may sit below the working tree, and the outer rules still apply.
+        //
+        // `core.excludesFile` comes from libgit2's own config chain rather than
+        // from the environment, so a repository-local override means here what
+        // it means to Git — and the ignore stack agrees with the value every
+        // other part of the tool would read.
+        let workdir = self
+            .repo
+            .workdir()
+            .ok_or_else(|| GitError::Backend {
+                context: "read the working tree".into(),
+                reason: "the repository is bare".into(),
+            })?
+            .to_path_buf();
+        let excludes_file = self
+            .repo
+            .config()
+            .ok()
+            .and_then(|config| config.get_path("core.excludesFile").ok());
+        let stack = IgnoreStack::new(&workdir, self.repo.path(), excludes_file.as_deref(), root);
+
         let mut entries = Vec::new();
         let mut ignored = Vec::new();
-        collect_workdir(root, root, &self.repo, &mut entries, &mut ignored)?;
+        collect_workdir(root, root, &stack, &mut entries, &mut ignored)?;
         ignored.sort();
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -1139,13 +1162,18 @@ fn credential_callbacks(url: &str) -> RemoteCallbacks<'static> {
 }
 
 /// Walk a working directory, collecting files Git would track.
+///
+/// `stack` holds the ignore rules in force *above* `dir`; this call adds
+/// `dir`'s own `.gitignore` before looking at anything inside it.
 fn collect_workdir(
     root: &Path,
     dir: &Path,
-    repo: &Repository,
+    stack: &IgnoreStack,
     out: &mut Vec<(String, PathBuf, bool)>,
     ignored: &mut Vec<String>,
 ) -> Result<(), GitError> {
+    let stack = stack.entering(dir);
+
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .map_err(|e| GitError::Backend {
             context: format!("read `{}`", dir.display()),
@@ -1165,28 +1193,36 @@ fn collect_workdir(
             continue;
         }
 
-        let relative = path.strip_prefix(root).unwrap_or(&path);
-        // Honour .gitignore, so a `--dirty` render matches what `git add -A`
-        // would have staged rather than including build output.
-        //
-        // Recorded, not just skipped. This consults the whole libgit2 ignore
-        // stack — per-directory `.gitignore`, `.git/info/exclude` *and*
-        // `core.excludesFile` — so a global rule set years ago on an unrelated
-        // project can silently remove a file the author can see on disk. In a
-        // render there is no `git status` to consult, and an unexplained
-        // absence is the hardest kind of bug to find.
-        if repo.is_path_ignored(relative).unwrap_or(false) {
-            ignored.push(relative.to_string_lossy().replace('\\', "/"));
-            continue;
-        }
-
+        // Stat before asking. A rule written `build/` applies to directories
+        // only, and answering without knowing which this is would either keep
+        // an ignored directory or drop a file that merely shares its name.
         let file_type = entry.file_type().map_err(|e| GitError::Backend {
             context: format!("stat `{}`", path.display()),
             reason: e.to_string(),
         })?;
 
+        let relative = path.strip_prefix(root).unwrap_or(&path);
+        // Honour .gitignore, so a `--dirty` render matches what `git add -A`
+        // would have staged rather than including build output.
+        //
+        // Recorded, not just skipped. The stack spans per-directory
+        // `.gitignore`, `.git/info/exclude` *and* `core.excludesFile`, so a
+        // global rule set years ago on an unrelated project can silently
+        // remove a file the author can see on disk. In a render there is no
+        // `git status` to consult, and an unexplained absence is the hardest
+        // kind of bug to find.
+        //
+        // An ignored directory is recorded and left, not walked. That is Git's
+        // rule rather than an optimisation: a file cannot be re-included once
+        // one of its parent directories is excluded, so descending to look for
+        // a negation inside would resurrect files `git add -A` leaves alone.
+        if stack.is_ignored(&path, file_type.is_dir()) {
+            ignored.push(relative.to_string_lossy().replace('\\', "/"));
+            continue;
+        }
+
         if file_type.is_dir() {
-            collect_workdir(root, &path, repo, out, ignored)?;
+            collect_workdir(root, &path, &stack, out, ignored)?;
         } else if file_type.is_file() {
             let relative_str = relative.to_string_lossy().replace('\\', "/");
             out.push((relative_str, path.clone(), is_executable(&path)));

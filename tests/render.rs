@@ -30,6 +30,26 @@ impl Scratch {
         self.dir.path().join("out")
     }
 
+    /// Make `core.excludesFile` name a global ignore file holding `rules`.
+    ///
+    /// Written to `$XDG_CONFIG_HOME/git/config`, which is where libgit2 looks
+    /// for a global config — it does not read `GIT_CONFIG_GLOBAL`, which is a
+    /// git-core environment variable. The harness points `XDG_CONFIG_HOME` at
+    /// a temporary directory, so this is how a test gets a global rule without
+    /// touching the developer's own.
+    fn global_gitignore(&self, rules: &str) -> &Self {
+        let ignore = self.config.path().join("global.gitignore");
+        std::fs::write(&ignore, rules).expect("write global ignore");
+        let git = self.config.path().join("git");
+        std::fs::create_dir_all(&git).expect("create git config dir");
+        std::fs::write(
+            git.join("config"),
+            format!("[core]\n\texcludesFile = {}\n", ignore.display()),
+        )
+        .expect("write global config");
+        self
+    }
+
     fn read(&self, path: &str) -> String {
         std::fs::read_to_string(self.out().join(path))
             .unwrap_or_else(|e| panic!("read {path}: {e}"))
@@ -570,4 +590,86 @@ fn verbose_lists_the_files_gitignore_removed() {
         ])
         .success()
         .says("template/secret.local");
+}
+
+/// The bug behind #51. A global `core.excludesFile` hides `mise.toml` on the
+/// assumption that mise configuration is personal; a project that commits one
+/// re-includes it with `!mise.toml`, and any template rendering a `mise.toml`
+/// ships that negation. Git honours it and stages the file; libgit2 does not,
+/// and dropped it from the render.
+///
+/// A rendering that differs by flag is the one thing `--dirty` is careful
+/// about, so this is pinned rather than left to the ignore crate.
+#[test]
+fn a_gitignore_negation_overrides_a_global_ignore_rule() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+    scratch.global_gitignore("mise.toml\nmise.lock\n");
+
+    // The negation lives beside the files it re-includes, as it would in a
+    // rendered project.
+    template.repo.write("template/.gitignore", "!mise.toml\n");
+    template.repo.write("template/mise.toml", "[tools]\n");
+    template.repo.write("template/mise.lock", "lock\n");
+    template.repo.commit_all("feat: render a mise.toml");
+
+    let output = scratch
+        .run(&[
+            "--json",
+            "render",
+            &template.source(),
+            "--dirty",
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .success();
+
+    assert!(
+        scratch.out().join("mise.toml").exists(),
+        "the negation lost to the global rule, as it did before #51"
+    );
+    let json = output.json();
+    let skipped = json["skippedByGitignore"].as_array().expect("skipped");
+    assert!(
+        !skipped.iter().any(|p| p == "template/mise.toml"),
+        "reported as ignored despite the negation: {skipped:?}"
+    );
+    // The other half of the fix: the global rule still governs everything the
+    // template did not re-include, or this would have been a blunt instrument.
+    assert!(!scratch.out().join("mise.lock").exists());
+    assert!(skipped.iter().any(|p| p == "template/mise.lock"));
+}
+
+/// Git's rule is that a file cannot be re-included once one of its parent
+/// directories is excluded, so an ignored directory is pruned rather than
+/// descended into. A walk that recursed looking for negations inside would
+/// resurrect files `git add -A` leaves alone.
+#[test]
+fn an_ignored_directory_is_pruned_rather_than_descended_into() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+
+    template.repo.write(".gitignore", "build/\n!build/keep\n");
+    template.repo.write("template/build/keep", "not kept\n");
+    // A *file* named `build`. `build/` names a directory only, which the walk
+    // can know only by stat-ing before it asks the ignore stack.
+    template
+        .repo
+        .write("template/sub/build", "a file, not a directory\n");
+    template.repo.commit_all("chore: ignore build output");
+
+    scratch
+        .run(&[
+            "render",
+            &template.source(),
+            "--dirty",
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .success();
+
+    assert!(!scratch.out().join("build/keep").exists());
+    assert_eq!(scratch.read("sub/build"), "a file, not a directory\n");
 }
