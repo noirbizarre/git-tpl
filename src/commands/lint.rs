@@ -7,7 +7,7 @@
 //! never reaches: a syntax error in an untaken branch, a conditional path
 //! segment that renders to `.yaml`, a `${{ }}` MiniJinja quietly ate.
 
-use tpl::lint::{Finding, Severity};
+use tpl::lint::{Levels, Severity, Verdict};
 use tpl::ops::{self, OpError};
 
 use super::Standalone;
@@ -17,6 +17,10 @@ use crate::theme::{heading, muted, warning};
 pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
     let source = ctx.user.expand(&args.template).into_owned();
+
+    // Before anything is resolved or walked: a misspelled `-D` should cost a
+    // message, not a clone of the template repository.
+    let levels = Levels::parse(&args.deny, &args.allow).map_err(OpError::from)?;
 
     let template = ops::resolve::resolve(ops::Request {
         source: &source,
@@ -34,51 +38,63 @@ pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         &partials,
     )?;
 
-    let errors = findings
+    let verdicts = levels.apply(findings);
+
+    let errors = verdicts
         .iter()
-        .filter(|f| f.severity == Severity::Error)
+        .filter(|v| v.finding.severity == Severity::Error)
         .count();
+    let denied = verdicts.iter().filter(|v| v.denied).count();
 
     if global.json {
         println!(
             "{}",
             crate::report::success(serde_json::json!({
                 "template": template.manifest.name,
-                "diagnostics": findings.iter().map(|f| serde_json::json!({
-                    "severity": f.severity.as_str(),
-                    "code": f.code,
-                    "message": f.message,
-                    "help": f.help,
-                    "path": f.path,
+                "diagnostics": verdicts.iter().map(|v| serde_json::json!({
+                    "severity": v.finding.severity.as_str(),
+                    "code": v.finding.code,
+                    "message": v.finding.message,
+                    "help": v.finding.help,
+                    "path": v.finding.path,
+                    // The severity is the template's, `denied` is this run's
+                    // policy. Rewriting the first would lose the difference.
+                    "denied": v.denied,
                 })).collect::<Vec<_>>(),
                 "errors": errors,
-                "warnings": findings.len() - errors,
+                "warnings": verdicts.len() - errors,
+                "denied": denied,
             }))
         );
     } else {
-        report(&ctx, &findings, errors);
+        report(&ctx, &verdicts, errors, denied);
     }
 
-    // Warnings alone are not a failure: they are things a template may
-    // legitimately mean, and a lint that fails on them is a lint people stop
-    // running.
-    Ok(if errors > 0 {
+    // Warnings alone are not a failure by default: they are things a template
+    // may legitimately mean, and a lint that fails on them is a lint people
+    // stop running. `--deny` is how a template that has decided otherwise says
+    // so, per repository rather than for everyone.
+    Ok(if errors > 0 || denied > 0 {
         crate::exit::FAILURE
     } else {
         crate::exit::SUCCESS
     })
 }
 
-fn report(ctx: &Standalone, findings: &[Finding], errors: usize) {
+fn report(ctx: &Standalone, verdicts: &[Verdict], errors: usize, denied: usize) {
     ctx.out.blank();
-    if findings.is_empty() {
+    if verdicts.is_empty() {
         ctx.out.say(muted(&ctx.out.theme, "No problems found."));
         return;
     }
 
-    for finding in findings {
+    for Verdict { finding, denied } in verdicts {
         let label = match finding.severity {
             Severity::Error => format!("error[{}]", finding.code),
+            // Still labelled a warning, with the promotion stated: the code is
+            // what a reader needs to look up, and the marker says why the
+            // command is about to fail on it.
+            Severity::Warning if *denied => format!("warning[{}] (denied)", finding.code),
             Severity::Warning => format!("warning[{}]", finding.code),
         };
         ctx.out.say(heading(&ctx.out.theme, &label));
@@ -91,9 +107,15 @@ fn report(ctx: &Standalone, findings: &[Finding], errors: usize) {
         ctx.out.blank();
     }
 
-    let warnings = findings.len() - errors;
+    let warnings = verdicts.len() - errors;
     ctx.out.say(warning(
         &ctx.out.theme,
         &format!("{errors} error(s), {warnings} warning(s)"),
     ));
+    if denied > 0 {
+        ctx.out.say(warning(
+            &ctx.out.theme,
+            &format!("{denied} warning(s) denied, which fails the lint"),
+        ));
+    }
 }

@@ -63,12 +63,20 @@ full of `${{ }}` was copied rather than rendered-and-survived.
 { "ok": true,
   "template": "rust",
   "diagnostics": [{ "severity": "warning", "code": "tpl::lint::undeclared",
-                    "message": "…", "help": "…", "path": "Cargo.toml.jinja" }],
-  "errors": 0, "warnings": 1 }
+                    "message": "…", "help": "…", "path": "Cargo.toml.jinja",
+                    "denied": false }],
+  "errors": 0, "warnings": 1, "denied": 0 }
 ```
 
-`ok` is about the command, not the template: warnings do not fail it. Check
-`errors`, or the exit code.
+`ok` is about the command, not the template: warnings do not fail it unless
+[`--deny`](../usage/lint.md#choosing-what-fails) says so. Check the exit code,
+or `errors` and `denied` together.
+
+`severity` is the rule's, `denied` is this run's policy. A `--deny` never
+rewrites the severity, so `"severity": "warning", "denied": true` remains
+distinguishable from a native error. `errors` and `warnings` count by severity;
+`denied` counts the warnings promoted, and is what makes the exit code 1 when
+`errors` is 0. An `--allow`ed finding appears nowhere and is counted nowhere.
 
 ### `questions`
 
