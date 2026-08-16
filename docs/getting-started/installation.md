@@ -19,6 +19,34 @@ on.
 
 [tap]: https://github.com/noirbizarre/homebrew-tap
 
+## On Arch Linux
+
+Two packages on the [AUR](https://aur.archlinux.org), differing only in whether
+your machine or GitHub's does the compiling:
+
+=== "Prebuilt"
+
+    ```sh
+    paru -S git-tpl-bin
+    ```
+
+    Repackages the release archive for your architecture — no Rust toolchain
+    involved.
+
+=== "Compiled"
+
+    ```sh
+    paru -S git-tpl
+    ```
+
+    Builds from the tagged source against the `Cargo.lock` this project
+    commits, and runs the test suite before packaging. For people who would
+    rather not run someone else's binary.
+
+Both cover x86-64 and aarch64. They deliberately conflict — both install
+`/usr/bin/git-tpl` — so pick one, and your AUR helper will offer to replace the
+other if it is already there.
+
 ## From source
 
 === "Compiled"
