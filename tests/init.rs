@@ -172,14 +172,28 @@ fn a_non_jinja_file_reaches_the_project_byte_for_byte() {
     );
 }
 
-#[cfg(unix)]
+/// The mode is taken from the source blob, never from a stat of the
+/// filesystem, so it cannot vary by platform. If it ever did, a user who
+/// switched machines would get a spurious commit on `refs/tpl/<id>` for a
+/// template nobody had changed.
 #[test]
-fn the_executable_bit_survives_rendering() {
+fn an_executable_template_file_keeps_its_mode_on_every_platform() {
     let world = World::new();
     world.init(&[]).success();
 
-    let mode = world.project.git(&["ls-files", "-s", "run.sh"]);
-    assert!(mode.starts_with("100755"), "{mode}");
+    assert_eq!(world.project.file_mode("HEAD", "run.sh"), "100755");
+    // The ref tree, not just the checkout: this is the tree a later `update`
+    // diffs against, and the one a divergence would actually be felt through.
+    assert_eq!(
+        world.project.file_mode(&world.ref_name(), "run.sh"),
+        "100755"
+    );
+    // Without this the assertions above would pass just as well if everything
+    // were marked executable.
+    assert_eq!(
+        world.project.file_mode(&world.ref_name(), "ci.yml"),
+        "100644"
+    );
 }
 
 /// The cleanest possible history for a project generated from a template.
