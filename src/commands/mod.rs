@@ -1,10 +1,12 @@
 //! One module per subcommand.
 
+mod completion;
 mod context;
 mod diff;
 mod fetch;
 mod init;
 mod lint;
+mod man;
 mod merge;
 mod push;
 mod questions;
@@ -13,11 +15,13 @@ mod show;
 mod status;
 mod update;
 
+pub use completion::run as completion;
 pub use context::run as context;
 pub use diff::run as diff;
 pub use fetch::run as fetch;
 pub use init::run as init;
 pub use lint::run as lint;
+pub use man::run as man;
 pub use merge::run as merge;
 pub use push::run as push;
 pub use questions::run as questions;

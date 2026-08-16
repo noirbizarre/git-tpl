@@ -43,7 +43,8 @@ your machine or GitHub's does the compiling:
     commits, and runs the test suite before packaging. For people who would
     rather not run someone else's binary.
 
-Both cover x86-64 and aarch64. They deliberately conflict — both install
+Both cover x86-64 and aarch64, and both install the man page and the bash, zsh
+and fish completions. They deliberately conflict — both install
 `/usr/bin/git-tpl` — so pick one, and your AUR helper will offer to replace the
 other if it is already there.
 
@@ -64,6 +65,16 @@ other if it is already there.
     [cargo-binstall](https://github.com/cargo-bins/cargo-binstall) downloads the
     release archive for your platform instead of compiling. Falls back to
     `cargo install` on a target with no published binary.
+
+Neither installs the man page or the shell completions — Cargo only places the
+binary — so `git tpl --help` will report *No manual entry for git-tpl* until you
+generate them:
+
+```sh
+git tpl man --out-dir ~/.local/share/man/man1
+```
+
+See [Shell completion](../usage/completion.md) for the rest.
 
 ## With mise
 
@@ -112,8 +123,10 @@ tar xzf git-tpl_${VERSION}_linux-amd64.tar.gz
 mv git-tpl ~/.local/bin/
 ```
 
-The archive contains a single executable named `git-tpl`, already marked
-executable — nothing to rename and no `chmod` to remember.
+The archive contains the executable `git-tpl` at its root, already marked
+executable — nothing to rename and no `chmod` to remember. Beside it are
+`man/man1/` and `completions/`, which you can install or ignore; the man page is
+what makes `git tpl --help` work, since Git runs `man git-tpl` for it.
 
 Assets are named `git-tpl_<version>_<platform>.tar.gz`, and
 `git-tpl_<version>_windows-amd64.zip` on Windows, so `latest/download/` cannot

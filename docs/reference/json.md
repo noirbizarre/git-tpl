@@ -123,3 +123,9 @@ favour of `--json`; it still works, and warns, for one more minor release.
 `conflicts` names the paths a merge could not resolve on its own. They are
 still reported as changes — the preview contains them with conflict markers,
 which is what a merge would leave in the worktree.
+
+### `completion` and `man`
+
+No success envelope, with or without `--json`. Their output is already a machine
+format — a shell script and troff — and wrapping it in JSON would only mean
+nothing could source or render it. Failures still carry the usual envelope.

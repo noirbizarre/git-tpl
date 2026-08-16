@@ -40,6 +40,7 @@ nav = [
     { "merge" = "usage/merge.md" },
     { "fetch" = "usage/fetch.md" },
     { "push" = "usage/push.md" },
+    { "Shell completion" = "usage/completion.md" },
   ] },
   { "Templates" = [
     { "Format" = "templates/format.md" },

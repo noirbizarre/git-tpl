@@ -122,6 +122,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::ops::invalid_argument",
     "tpl::ops::no_rendered_ref",
     "tpl::ops::no_such_path",
+    "tpl::ops::write_failed",
     "tpl::refs::invalid",
     "tpl::refs::underivable",
     "tpl::render::collision",

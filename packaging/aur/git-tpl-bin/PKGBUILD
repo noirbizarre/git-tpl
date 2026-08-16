@@ -35,16 +35,32 @@ source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/$pkgver
 sha256sums_x86_64=('@SHA256_X86_64@')
 sha256sums_aarch64=('@SHA256_AARCH64@')
 
-# Fetched separately because the release archive holds the binary and nothing
-# else, and MIT is not one of the licences Arch keeps in
-# /usr/share/licenses/common — so the package has to install the file itself.
+# Fetched separately because the release archive carries no licence file, and
+# MIT is not one of the licences Arch keeps in /usr/share/licenses/common — so
+# the package has to install the file itself.
 source=("LICENSE-$pkgver::$url/raw/$pkgver/LICENSE")
 sha256sums=('@SHA256_LICENSE@')
 
 package() {
-	# The archive holds a single entry at its root, named exactly `git-tpl`.
-	# That name is load-bearing: Git resolves `git tpl` only through an
-	# executable called exactly `git-tpl` on PATH.
+	# The archive holds `git-tpl` at its root, named exactly that. The name is
+	# load-bearing: Git resolves `git tpl` only through an executable called
+	# exactly `git-tpl` on PATH.
 	install -Dm755 "$srcdir/git-tpl" "$pkgdir/usr/bin/git-tpl"
 	install -Dm644 "$srcdir/LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+	# Beside the binary, the archive carries the man pages and the completion
+	# scripts, generated at release time. The man page is what makes
+	# `git tpl --help` work: Git execs `man git-tpl` for it, and without a page
+	# that fails with exit 16.
+	install -Dm644 -t "$pkgdir/usr/share/man/man1" "$srcdir"/man/man1/*.1
+
+	# Each under the name its shell looks for — zsh wants a leading underscore,
+	# bash wants none — because a completion script filed under the wrong name
+	# is one nothing ever sources.
+	install -Dm644 "$srcdir/completions/git-tpl.bash" \
+		"$pkgdir/usr/share/bash-completion/completions/git-tpl"
+	install -Dm644 "$srcdir/completions/git-tpl.zsh" \
+		"$pkgdir/usr/share/zsh/site-functions/_git-tpl"
+	install -Dm644 "$srcdir/completions/git-tpl.fish" \
+		"$pkgdir/usr/share/fish/vendor_completions.d/git-tpl.fish"
 }

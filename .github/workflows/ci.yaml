@@ -151,11 +151,21 @@ jobs:
           # Proves Git found and executed our binary as a subcommand.
           git tpl --version
 
-          # NOT `git tpl --help`: Git intercepts `--help` for subcommands and
-          # runs `man git-tpl`, which exits 16 because there is no man page.
-          # That is Git's behaviour, not a fault in the binary, so the help
-          # output is checked by invoking the binary directly.
-          git-tpl --help > /dev/null
+          # `git tpl --help` does not reach the binary at all: Git intercepts
+          # `--help` for a subcommand and execs `man git-tpl`. That is why the
+          # project ships a man page — without one this exits 16 with "No
+          # manual entry for git-tpl", which is a broken first impression for
+          # the invocation the project is named after.
+          git-tpl man --out-dir "$RUNNER_TEMP/man/man1"
+          if command -v man > /dev/null; then
+            MANPATH="$RUNNER_TEMP/man:" git tpl --help > /dev/null
+          else
+            # Guarded rather than assumed: a runner image without man-db would
+            # fail this for a reason that has nothing to do with the change
+            # being tested.
+            echo '::notice::man is not installed; skipping the git tpl --help check'
+            git-tpl --help > /dev/null
+          fi
           # Reaching one of our own diagnostics proves Git dispatched to the
           # binary and the binary ran. The repository has no template attached,
           # so "no git-tpl configuration" is the expected outcome — and so is

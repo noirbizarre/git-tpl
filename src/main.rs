@@ -44,6 +44,8 @@ fn main() -> ExitCode {
         Command::Merge(args) => commands::merge(args, &cli.global),
         Command::Fetch(args) => commands::fetch(args, &cli.global),
         Command::Push(args) => commands::push(args, &cli.global),
+        Command::Completion(args) => commands::completion(args, &cli.global),
+        Command::Man(args) => commands::man(args, &cli.global),
     };
 
     match result {
