@@ -4,14 +4,16 @@
 //! `git-backend-isolation` prek hook fails the commit if `git2::` appears
 //! anywhere else under `src/`. See `docs/adr/011-git-backend-isolation.md`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use git2::build::TreeUpdateBuilder;
 use git2::{
-    AutotagOption, Cred, CredentialType, Delta, DiffFormat, DiffOptions, ErrorCode, FetchOptions,
-    ObjectType, PushOptions, RemoteCallbacks, Repository, RepositoryOpenFlags, ResetType,
+    AutotagOption, Cred, CredentialType, Delta, DiffFormat, DiffOptions, ErrorClass, ErrorCode,
+    FetchOptions, ObjectType, PushOptions, RemoteCallbacks, Repository, RepositoryOpenFlags,
+    ResetType,
 };
 
 use super::ignore::IgnoreStack;
@@ -90,20 +92,61 @@ impl LibGit2 {
     }
 
     /// Clone a template repository into `into`, as a bare mirror.
+    ///
+    /// The callbacks are here to attribute a failure, not to report progress.
+    /// A clone writes a repository as well as reading a remote, and libgit2
+    /// gives both halves `ErrorClass::Os` — "Disk quota exceeded" and
+    /// "Connection refused" are indistinguishable by class or code. So the
+    /// stage is recorded as it is passed: `remote_create` runs once the
+    /// repository exists and before anything connects, and `transfer_progress`
+    /// runs once objects are arriving. Where the clone stopped says which half
+    /// failed, and no message has to be guessed at.
     pub fn clone_bare(url: &str, into: &Path) -> Result<Self, GitError> {
         let mut builder = git2::build::RepoBuilder::new();
         builder.bare(true);
 
+        let stage = Rc::new(Cell::new(Stage::Creating));
+
+        let creating = Rc::clone(&stage);
+        builder.remote_create(move |repo, name, url| {
+            creating.set(Stage::Connecting);
+            repo.remote(name, url)
+        });
+
+        let mut callbacks = credential_callbacks(url);
+        let receiving = Rc::clone(&stage);
+        callbacks.transfer_progress(move |_| {
+            receiving.set(Stage::Receiving);
+            true
+        });
+
         let mut fetch = FetchOptions::new();
-        fetch.remote_callbacks(credential_callbacks(url));
+        fetch.remote_callbacks(callbacks);
         // Tags matter: `ref = "v1.4.0"` is a common way to pin a template, and
         // the default fetch would not bring them.
         fetch.download_tags(AutotagOption::All);
         builder.fetch_options(fetch);
 
-        let repo = builder
-            .clone(url, into)
-            .map_err(|e| translate_network(url, &e))?;
+        let repo = builder.clone(url, into).map_err(|e| match stage.get() {
+            // Never reached `remote_create`, so nothing was sent anywhere: the
+            // repository itself could not be written. This is the case that
+            // used to be reported as `tpl::git::network`, telling a user with a
+            // full $TMPDIR to go and check their proxy.
+            Stage::Creating => GitError::Clone {
+                url: url.to_string(),
+                path: into.to_path_buf(),
+                reason: e.message().to_string(),
+            },
+            // Past the creation. The two remaining stages differ only in
+            // whether there is a destination to blame: while connecting there
+            // is nothing written yet, so the wire is the only candidate; once
+            // objects are arriving the remote has demonstrably answered, and a
+            // failure that is not a transport error is the local write.
+            stage => {
+                let destination = matches!(stage, Stage::Receiving).then_some(into);
+                translate_remote(url, destination, &e)
+            }
+        })?;
         Ok(Self { repo })
     }
 
@@ -707,7 +750,7 @@ impl GitBackend for LibGit2 {
 
         remote_handle
             .fetch(&[refspec], Some(&mut options), None)
-            .map_err(|e| translate_network(&url, &e))
+            .map_err(|e| translate_remote(&url, None, &e))
     }
 
     fn push_refspec(&self, remote: &str, refspec: &str) -> Result<(), GitError> {
@@ -725,7 +768,7 @@ impl GitBackend for LibGit2 {
 
         remote_handle
             .push(&[refspec], Some(&mut options))
-            .map_err(|e| translate_network(&url, &e))
+            .map_err(|e| translate_remote(&url, None, &e))
     }
 
     fn config_string(&self, key: &str) -> Result<Option<String>, GitError> {
@@ -1059,33 +1102,78 @@ fn backend(context: &str, error: &git2::Error) -> GitError {
     }
 }
 
-/// Turn a libgit2 network failure into something a user can act on.
+/// How far a clone got before it failed.
+///
+/// Not progress reporting — attribution. See `LibGit2::clone_bare`.
+#[derive(Clone, Copy)]
+enum Stage {
+    /// Writing the repository. Nothing has been sent anywhere yet.
+    Creating,
+    /// The repository exists; connecting to and negotiating with the remote.
+    Connecting,
+    /// Objects are arriving, so the remote answered.
+    Receiving,
+}
+
+/// Turn a failure from a remote operation into something a user can act on.
 ///
 /// libgit2's own message for a failed SSH handshake is "authentication required
-/// but no callback set", which is both wrong and useless. Distinguishing
-/// authentication from unreachability matters because the remedies share
-/// nothing.
-fn translate_network(url: &str, error: &git2::Error) -> GitError {
+/// but no callback set", which is both wrong and useless, so authentication is
+/// separated first.
+///
+/// `destination` is the path being written, and is `Some` only when the caller
+/// knows the wire already worked — see `Stage` in `clone_bare`. Given that, an
+/// error whose class is not a transport one is the local write, and saying
+/// "could not reach" would be a lie. It is deliberately *not* enough to look at
+/// the class alone: libgit2 reports both a refused connection and a full disk
+/// as `ErrorClass::Os`, which is how a full `$TMPDIR` came to be reported as an
+/// unreachable remote in the first place.
+fn translate_remote(url: &str, destination: Option<&Path>, error: &git2::Error) -> GitError {
+    if is_auth(error) {
+        return GitError::Authentication {
+            url: url.to_string(),
+            methods: describe_attempted_methods(url),
+        };
+    }
+
+    // The classes that can only come from a transport. `Callback` belongs here
+    // because our only callbacks are the credential ones.
+    let on_the_wire = matches!(
+        error.class(),
+        ErrorClass::Net
+            | ErrorClass::Http
+            | ErrorClass::Ssh
+            | ErrorClass::Ssl
+            | ErrorClass::Callback
+    );
+
+    match destination {
+        Some(path) if !on_the_wire => GitError::Clone {
+            url: url.to_string(),
+            path: path.to_path_buf(),
+            reason: error.message().to_string(),
+        },
+        _ => GitError::Network {
+            url: url.to_string(),
+            reason: error.message().to_string(),
+        },
+    }
+}
+
+/// Whether a failure was the remote refusing us rather than anything else.
+///
+/// The message sniff is load-bearing, not belt-and-braces: when
+/// `credential_callbacks` exhausts its options it returns a `from_str` error,
+/// which carries `ErrorCode::Generic` and would otherwise be misread.
+fn is_auth(error: &git2::Error) -> bool {
     let message = error.message().to_lowercase();
-    let is_auth = matches!(error.code(), ErrorCode::Auth)
+    matches!(error.code(), ErrorCode::Auth)
         || message.contains("authentication")
         || message.contains("credentials")
         || message.contains("permission denied")
         || message.contains("access denied")
         || message.contains("401")
-        || message.contains("403");
-
-    if is_auth {
-        GitError::Authentication {
-            url: url.to_string(),
-            methods: describe_attempted_methods(url),
-        }
-    } else {
-        GitError::Network {
-            url: url.to_string(),
-            reason: error.message().to_string(),
-        }
-    }
+        || message.contains("403")
 }
 
 fn describe_attempted_methods(url: &str) -> String {
@@ -1610,5 +1698,86 @@ mod tests {
         );
         assert_eq!(repo.config_bool("tpl.autoPush").unwrap(), Some(true));
         assert_eq!(repo.config_string("tpl.absent").unwrap(), None);
+    }
+
+    /// A refused connection and a full disk are both `ErrorClass::Os`, so the
+    /// class alone cannot decide. What decides is whether the caller knows the
+    /// remote already answered — and when it did, an `Os` error is the local
+    /// write, not unreachability. This is the misclassification that reported a
+    /// full `$TMPDIR` as `tpl::git::network`.
+    #[test]
+    fn a_local_failure_after_the_remote_answered_is_a_clone_failure() {
+        let error = git2::Error::new(
+            ErrorCode::GenericError,
+            ErrorClass::Os,
+            "failed to initialize repository with template 'info/exclude': Disk quota exceeded",
+        );
+
+        let error = translate_remote(
+            "https://host.invalid/t.git",
+            Some(Path::new("/tmp/x")),
+            &error,
+        );
+
+        assert!(
+            matches!(&error, GitError::Clone { path, reason, .. }
+                if path == Path::new("/tmp/x") && reason.contains("Disk quota exceeded")),
+            "{error:?}"
+        );
+    }
+
+    /// The converse: a transport class stays a network failure even once the
+    /// remote has answered, because a connection can drop mid-transfer.
+    #[test]
+    fn a_transport_failure_after_the_remote_answered_is_still_a_network_failure() {
+        let error = git2::Error::new(ErrorCode::GenericError, ErrorClass::Net, "connection reset");
+
+        let error = translate_remote(
+            "https://host.invalid/t.git",
+            Some(Path::new("/tmp/x")),
+            &error,
+        );
+
+        assert!(
+            matches!(&error, GitError::Network { reason, .. } if reason == "connection reset"),
+            "{error:?}"
+        );
+    }
+
+    /// Authentication is decided before anything else, and outranks having a
+    /// destination to blame: no amount of disk space fixes a rejected key.
+    #[test]
+    fn a_rejected_credential_is_an_authentication_failure() {
+        let error = git2::Error::new(ErrorCode::Auth, ErrorClass::Http, "401");
+
+        let error = translate_remote(
+            "https://host.invalid/t.git",
+            Some(Path::new("/tmp/x")),
+            &error,
+        );
+
+        assert!(
+            matches!(&error, GitError::Authentication { methods, .. }
+                if methods.contains("credential helper")),
+            "{error:?}"
+        );
+    }
+
+    /// `credential_callbacks` gives up with `Error::from_str`, which carries
+    /// `ErrorCode::Generic` and `ErrorClass::None`. Only the message identifies
+    /// it, so the message sniff is load-bearing rather than belt-and-braces.
+    #[test]
+    fn a_callback_that_ran_out_of_credentials_is_recognised_by_its_message() {
+        let error = git2::Error::from_str(
+            "no usable credentials: tried the SSH agent, the default key paths and the credential helper",
+        );
+        assert!(is_auth(&error));
+
+        let error = translate_remote("git@host.invalid:t.git", None, &error);
+
+        assert!(
+            matches!(&error, GitError::Authentication { methods, .. } if methods.contains("SSH agent")),
+            "{error:?}"
+        );
     }
 }

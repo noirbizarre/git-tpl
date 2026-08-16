@@ -100,6 +100,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::eval::wrong_type",
     "tpl::git::auth",
     "tpl::git::backend",
+    "tpl::git::clone",
     "tpl::git::dirty_worktree",
     "tpl::git::diverged",
     "tpl::git::network",
