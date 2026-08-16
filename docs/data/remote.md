@@ -38,7 +38,9 @@ The digest is recorded whether or not the template pinned one, so the question
 
 ## Rules
 
-**Only `http` and `https`.** No `file://`, no `git://`, no arbitrary transport.
+**Only `http` and `https`.** No `file://`, no arbitrary transport. Data that
+lives in a Git repository is a [`git` source](git.md), which is cloned rather
+than fetched — and gated the same way.
 
 **Never executable.** The response is parsed as TOML, JSON or YAML into plain
 values.
@@ -127,10 +129,10 @@ the template matches no `[trust]` entry, every remote source is **refused**,
 loudly, naming what was refused:
 
 ```
-x data source `licenses` was not fetched, because the template is not trusted
+x data source `licenses` was not loaded, because the template is not trusted
 help: source: https://example.com/licenses.toml
-      pass `--trust` to allow this template's remote data sources for this run,
-      or answer the confirmation interactively
+      pass `--trust` to allow this template's network data sources for this
+      run, or answer the confirmation interactively
 ```
 
 Never silently accepted: a CI runner is the worst possible place to grant a

@@ -45,7 +45,8 @@ Expressions consume the result. They cannot cause a load.
 DataSource
     ├── TemplateFile   a path in the template repository   (the common case)
     ├── LocalFile      a path in the project               (rare, deliberate)
-    └── Remote         an http(s) URL
+    ├── Remote         an http(s) URL
+    └── Git            a file in another repository, at a revision
 ```
 
 The kind is inferred from `source`:
@@ -55,6 +56,17 @@ The kind is inferred from `source`:
 | `data/licenses.toml` | TemplateFile — relative to the template root |
 | `https://example.com/licenses.toml` | Remote |
 | `./project-data.toml` | LocalFile — relative to the project root |
+| `https://example.com/data@v1:licenses.toml` | Git — a `<repo>@<ref>:<path>` shorthand |
+
+A `ref` or a `path` also makes a source a Git source, without `kind` being
+written out:
+
+```toml
+[data.licenses]
+source = "https://github.com/acme/tpl-data"
+ref    = "v2.1.0"
+path   = "licenses.toml"
+```
 
 An explicit `kind` disambiguates when needed, and is **required** when a `source`
 only becomes a URL after interpolation:
@@ -69,7 +81,7 @@ source = "{{ registry_base }}/languages.json"
 kind = "remote"
 ```
 
-See [Local data](local.md) and [Remote data](remote.md).
+See [Local data](local.md), [Remote data](remote.md) and [Git data](git.md).
 
 ## Pinning
 

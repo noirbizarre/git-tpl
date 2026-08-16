@@ -13,7 +13,7 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::context::Context;
-use crate::data::{DataError, Loader};
+use crate::data::{DataError, Loader, Rendered};
 use crate::graph::{Graph, NodeKind};
 use crate::template::{Choice, Manifest, Question, QuestionKind, Value, is_expression};
 
@@ -215,14 +215,40 @@ pub fn resolve(
                 };
                 // The source may itself be an expression, so it is rendered
                 // against the context as it stands. The graph guarantees
-                // everything it references is already resolved.
+                // everything it references is already resolved — including
+                // through `ref` and `path`, which are expressions too.
                 let resolved = render_string(
                     &decl.source,
                     &context,
                     &format!("data.{}", node.key),
                     partials,
                 )?;
-                let value = loader.load(&node.key, decl, &resolved)?;
+                // The locations name the TOML keys the author wrote, `ref` and
+                // not the Rust field's `reference`, because these strings end
+                // up in the diagnostic.
+                let reference = decl
+                    .reference
+                    .as_deref()
+                    .map(|r| {
+                        render_string(r, &context, &format!("data.{}.ref", node.key), partials)
+                    })
+                    .transpose()?;
+                let path = decl
+                    .path
+                    .as_deref()
+                    .map(|p| {
+                        render_string(p, &context, &format!("data.{}.path", node.key), partials)
+                    })
+                    .transpose()?;
+                let value = loader.load(
+                    &node.key,
+                    decl,
+                    Rendered {
+                        source: &resolved,
+                        reference: reference.as_deref(),
+                        path: path.as_deref(),
+                    },
+                )?;
                 context.set_data(&node.key, value);
             }
 
