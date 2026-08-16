@@ -58,3 +58,9 @@ your decision:
 |---|---|
 | `--remote <name>` | Default `origin`, or `tpl.remote`. |
 | `--dry-run` | Report the refspec and remote; transfer nothing. |
+
+## Machine-readable output
+
+`git tpl --json fetch` emits its outcome on stdout as a single JSON object, with
+the prose on stderr. The payload is described in
+[JSON output](../reference/json.md#fetch).

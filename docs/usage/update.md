@@ -130,3 +130,9 @@ new question with no default is then an error.
 | `--push` | Push the ref afterwards. Same as `tpl.autoPush`. |
 | `--remote <name>` | The remote `--push` uses. Default `origin`, or `tpl.remote`. |
 | `--dry-run` | Report what would change; write nothing. |
+
+## Machine-readable output
+
+`git tpl --json update` emits its outcome on stdout as a single JSON object, with
+the prose on stderr. The payload is described in
+[JSON output](../reference/json.md#update).

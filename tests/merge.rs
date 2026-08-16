@@ -362,3 +362,73 @@ fn a_project_keeps_its_own_files_through_a_template_add_change_and_delete() {
 
     tpl(&world.project, &["status"]).success();
 }
+
+// --- machine-readable output ------------------------------------------------
+
+#[test]
+fn a_merge_reports_its_outcome_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let json = tpl(&world.project, &["--json", "merge"]).success().json();
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["ref"], world.ref_name());
+    assert_eq!(json["id"], "template");
+    // Whatever Git did, it is named by one field a caller can switch on.
+    let result = json["result"].as_str().expect("result");
+    assert!(
+        ["merged", "fastForward", "staged"].contains(&result),
+        "unexpected result {result}"
+    );
+}
+
+/// The `update` hole (issue #53) in its `merge` form: doing nothing is still an
+/// outcome, and a caller must be able to read it.
+#[test]
+fn an_up_to_date_merge_still_emits_an_envelope() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let output = tpl(&world.project, &["--json", "merge"]).success();
+
+    assert!(
+        !output.stdout.trim().is_empty(),
+        "stdout was empty\n--- stderr ---\n{}",
+        output.stderr
+    );
+    assert_eq!(output.json()["result"], "upToDate");
+}
+
+/// A conflict is a success — the index is left for the user to resolve — so
+/// the exit code cannot report it and `result` must.
+#[test]
+fn a_conflicted_merge_is_reported_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world
+        .project
+        .write("README.md", "# mine\n\nentirely different\n");
+    world.project.commit_all("chore: rewrite the readme");
+
+    world.template.repo.write(
+        "template/README.md.jinja",
+        "# {{ project_name }}\n\nentirely other\n",
+    );
+    world.template.repo.commit_all("feat: rewrite the readme");
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let json = tpl(&world.project, &["--json", "merge"]).success().json();
+
+    assert_eq!(json["result"], "conflicted");
+    let conflicts: Vec<&str> = json["conflicts"]
+        .as_array()
+        .expect("conflicts")
+        .iter()
+        .map(|p| p.as_str().expect("path"))
+        .collect();
+    assert!(conflicts.contains(&"README.md"), "{conflicts:?}");
+}

@@ -666,3 +666,81 @@ fn a_dry_run_lists_the_files_it_would_render() {
     assert!(!world.project.exists(".config/git.tpl.toml"));
     assert!(!world.project.has_ref(&world.ref_name()));
 }
+
+// --- machine-readable output ------------------------------------------------
+
+#[test]
+fn init_reports_the_created_ref_as_json() {
+    let world = World::new();
+
+    let output = tpl(
+        &world.project,
+        &["--json", "init", &world.template.source(), "--defaults"],
+    )
+    .success();
+
+    let json = output.json();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["ref"], world.ref_name());
+    assert_eq!(json["id"], "template");
+    assert_eq!(json["commit"], world.project.rev_parse(&world.ref_name()));
+    assert_eq!(json["configPath"], ".config/git.tpl.toml");
+    // The merge is `init`'s load-bearing step, so its result is data.
+    assert_eq!(json["merge"]["result"], "merged");
+    assert!(!json["changes"].as_array().expect("changes").is_empty());
+}
+
+/// `null`, not `{"result": "upToDate"}`: no merge was attempted at all, which
+/// is a different thing from one that ran and found nothing to do.
+#[test]
+fn no_merge_reports_a_null_merge_as_json() {
+    let world = World::new();
+
+    let json = tpl(
+        &world.project,
+        &[
+            "--json",
+            "init",
+            &world.template.source(),
+            "--defaults",
+            "--no-merge",
+        ],
+    )
+    .success()
+    .json();
+
+    assert_eq!(json["merge"], serde_json::Value::Null);
+}
+
+#[test]
+fn a_dry_run_reports_the_questions_as_json() {
+    let world = World::new();
+
+    let json = tpl(
+        &world.project,
+        &[
+            "--json",
+            "init",
+            &world.template.source(),
+            "--defaults",
+            "--dry-run",
+        ],
+    )
+    .success()
+    .json();
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["dryRun"], true);
+    let names: Vec<&str> = json["questions"]
+        .as_array()
+        .expect("questions")
+        .iter()
+        .map(|q| q["name"].as_str().expect("name"))
+        .collect();
+    assert!(names.contains(&"project_name"), "{names:?}");
+    // `--defaults` was given, so the file list could be produced without
+    // asking anything.
+    assert!(!json["files"].as_array().expect("files").is_empty());
+
+    assert!(!world.project.has_ref(&world.ref_name()));
+}

@@ -132,8 +132,92 @@ favour of `--json`; it still works, and warns, for one more minor release.
 still reported as changes — the preview contains them with conflict markers,
 which is what a merge would leave in the worktree.
 
-### `completion` and `man`
+### `init`
 
-No success envelope, with or without `--json`. Their output is already a machine
-format — a shell script and troff — and wrapping it in JSON would only mean
-nothing could source or render it. Failures still carry the usual envelope.
+```json
+{ "ok": true,
+  "id": "rust", "ref": "refs/tpl/rust",
+  "template": "https://github.com/noirbizarre/rust.tpl",
+  "revision": "main (76ec0ea)", "commit": "a17b0b2…",
+  "changes": [{ "path": "Cargo.toml", "kind": "added" }],
+  "merge": { "result": "merged", "commit": "…" },
+  "configPath": ".config/git.tpl.toml", "configCommitted": true,
+  "ignoredAnswers": [] }
+```
+
+`template` is the expanded URL, never the `mine:` shortcut that may have been
+typed: it is what was recorded in the project, and a shortcut means nothing on
+anyone else's machine.
+
+`merge` is `null` under `--no-merge`, which is a different thing from a merge
+that ran and found nothing to do (`{"result": "upToDate"}`).
+
+### `update`
+
+```json
+{ "ok": true, "result": "upToDate",
+  "id": "rust", "ref": "refs/tpl/rust",
+  "template": "https://github.com/noirbizarre/rust.tpl",
+  "revision": "main (76ec0ea)", "ignoredAnswers": [] }
+```
+
+```json
+{ "ok": true, "result": "updated",
+  "id": "rust", "ref": "refs/tpl/rust", "template": "…",
+  "commit": "a17b0b2…",
+  "previousRevision": "main (a1b2c3d)", "revision": "main (76ec0ea)",
+  "changes": [{ "path": "Cargo.toml", "kind": "modified" }],
+  "answersChanged": false, "ignoredAnswers": [], "pushed": null }
+```
+
+Branch on `result`: `upToDate` or `updated`. It is the one thing the exit code
+does not say — both succeed.
+
+`previousRevision` is `null` on the first rendering. `pushed` names the remote
+when [`tpl.push`](../usage/push.md) pushed automatically, `null` otherwise —
+the push still happens under `--json`, only its prose is silenced.
+
+With `--dry-run`, the same shape plus `"dryRun": true`, and `result` is
+`upToDate` or `wouldUpdate`.
+
+### `merge`
+
+```json
+{ "ok": true, "result": "merged", "commit": "a17b0b2…",
+  "id": "rust", "ref": "refs/tpl/rust" }
+```
+
+`result` is one of `upToDate`, `fastForward`, `merged`, `staged`, `conflicted`
+or `aborted`. `commit` accompanies `fastForward` and `merged`; `conflicts`
+accompanies `conflicted`. This is the same object `init` reports under `merge`,
+so a caller handles both with one function.
+
+A conflicted merge is a success, not a failure: the index is left as Git leaves
+it, for the user to resolve. `result` is how a caller finds out.
+
+### `fetch`
+
+```json
+{ "ok": true, "remote": "origin", "ref": "refs/tpl/rust",
+  "state": "behind",
+  "relation": { "ahead": 0, "behind": 2, "synced": false, "diverged": false } }
+```
+
+`state` is one of `absent`, `synced`, `diverged`, `behind` or `ahead`, and
+`relation` is `null` exactly when `state` is `absent` — the remote has no copy
+of the ref, which is a different thing from a copy level with yours.
+
+Fetching never moves the local ref, so `behind` is a report, not an action.
+
+### `push`
+
+```json
+{ "ok": true, "remote": "origin", "ref": "refs/tpl/rust" }
+```
+
+### `show`, `completion` and `man`
+
+No success envelope, with or without `--json`. Their stdout is already the
+payload — a rendered file's bytes, a shell script, troff — and wrapping it in
+JSON would only mean nothing could read, source or render it. Failures still
+carry the usual envelope.

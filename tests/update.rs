@@ -346,3 +346,97 @@ fn update_without_a_configuration_says_what_to_do() {
         .failure()
         .says("git tpl init");
 }
+
+// --- machine-readable output ------------------------------------------------
+
+/// The regression for issue #53.
+///
+/// `--json update` on the *most common* outcome used to print nothing at all,
+/// so `git tpl --json update | jq .ok` failed to parse and a caller could not
+/// tell "up to date" apart from "the binary produced no output".
+#[test]
+fn an_unchanged_template_still_reports_up_to_date_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let output = tpl(&world.project, &["--json", "update", "--defaults"]).success();
+
+    assert!(
+        !output.stdout.trim().is_empty(),
+        "stdout was empty; --json must always emit an envelope\n--- stderr ---\n{}",
+        output.stderr
+    );
+    let json = output.json();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["result"], "upToDate");
+    assert_eq!(json["ref"], world.ref_name());
+}
+
+/// `result` is the field a caller branches on: both outcomes exit zero, so the
+/// exit code cannot tell them apart.
+#[test]
+fn an_update_reports_its_changes_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+
+    let json = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["result"], "updated");
+    assert_eq!(json["ref"], world.ref_name());
+    assert_eq!(json["commit"], world.project.rev_parse(&world.ref_name()));
+    // Nothing was pushed, and `null` says so without a caller having to guess
+    // from an absent key.
+    assert_eq!(json["pushed"], serde_json::Value::Null);
+
+    let paths: Vec<&str> = json["changes"]
+        .as_array()
+        .expect("changes")
+        .iter()
+        .map(|c| c["path"].as_str().expect("path"))
+        .collect();
+    assert!(
+        paths.contains(&".github/workflows/release.yml"),
+        "{paths:?}"
+    );
+
+    // The unpadded kind, never the column-aligned `"added   "` label.
+    let kinds: Vec<&str> = json["changes"]
+        .as_array()
+        .expect("changes")
+        .iter()
+        .map(|c| c["kind"].as_str().expect("kind"))
+        .collect();
+    assert!(kinds.contains(&"added"), "{kinds:?}");
+    assert!(kinds.contains(&"modified"), "{kinds:?}");
+}
+
+/// A dry run is still a run. Leaving it silent under `--json` would reopen the
+/// hole on the path a caller uses precisely because it is safe.
+#[test]
+fn a_dry_run_reports_what_would_change_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    let before = world.project.rev_parse(&world.ref_name());
+
+    let json = tpl(
+        &world.project,
+        &["--json", "update", "--defaults", "--dry-run"],
+    )
+    .success()
+    .json();
+
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["dryRun"], true);
+    assert_eq!(json["result"], "wouldUpdate");
+    assert!(!json["changes"].as_array().expect("changes").is_empty());
+    assert_eq!(
+        world.project.rev_parse(&world.ref_name()),
+        before,
+        "a dry run advanced the ref"
+    );
+}

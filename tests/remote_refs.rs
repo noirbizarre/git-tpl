@@ -331,3 +331,55 @@ fn a_dry_run_transfers_nothing() {
 
     assert!(remote_refs(&remote).is_empty());
 }
+
+// --- machine-readable output ------------------------------------------------
+
+/// `state` and `relation` together: the words on stderr — "in sync", "1 ahead"
+/// — are no way to detect the case that must block a push.
+#[test]
+fn fetch_reports_the_relation_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+
+    // Nothing published yet, so the remote has no copy of the ref at all —
+    // which `null` says, and `{"ahead": 0, "behind": 0}` would not.
+    let json = tpl(&world.project, &["--json", "fetch"]).success().json();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["state"], "absent");
+    assert_eq!(json["relation"], serde_json::Value::Null);
+    assert_eq!(json["remote"], "origin");
+
+    tpl(&world.project, &["push"]).success();
+    let json = tpl(&world.project, &["--json", "fetch"]).success().json();
+    assert_eq!(json["state"], "synced");
+    assert_eq!(json["relation"]["ahead"], 0);
+    assert_eq!(json["relation"]["behind"], 0);
+    assert_eq!(json["relation"]["synced"], true);
+    assert_eq!(json["relation"]["diverged"], false);
+
+    // One local rendering the remote has not seen.
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+    let json = tpl(&world.project, &["--json", "fetch"]).success().json();
+    assert_eq!(json["state"], "ahead");
+    assert_eq!(json["relation"]["ahead"], 1);
+}
+
+#[test]
+fn push_reports_the_ref_as_json() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+
+    let json = tpl(&world.project, &["--json", "push"]).success().json();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["remote"], "origin");
+    assert_eq!(json["ref"], world.ref_name());
+
+    let json = tpl(&world.project, &["--json", "push", "--dry-run"])
+        .success()
+        .json();
+    assert_eq!(json["dryRun"], true);
+    assert_eq!(json["ref"], world.ref_name());
+}

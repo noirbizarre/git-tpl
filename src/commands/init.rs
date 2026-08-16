@@ -44,7 +44,11 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let template = ctx.user.expand(&args.template).into_owned();
 
     if args.dry_run {
-        return dry_run(&ctx, &args, &template, answers).map(|()| crate::exit::SUCCESS);
+        let payload = dry_run(&ctx, &args, &template, answers)?;
+        if global.json {
+            println!("{}", crate::report::success(payload));
+        }
+        return Ok(crate::exit::SUCCESS);
     }
 
     let mut prompter = Interactive;
@@ -131,6 +135,29 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         },
     ));
 
+    if global.json {
+        println!(
+            "{}",
+            crate::report::success(serde_json::json!({
+                "id": outcome.id.as_str(),
+                "ref": outcome.id.ref_name(),
+                // The expanded URL, for the same reason the prose prints it:
+                // it is what was recorded, and a `mine:` shortcut means
+                // nothing on anybody else's machine.
+                "template": template,
+                "revision": outcome.revision_description,
+                "commit": outcome.commit.to_hex(),
+                "changes": crate::report::changes(&outcome.changes),
+                // `null` under `--no-merge`, which is a different thing from
+                // a merge that happened and did nothing.
+                "merge": outcome.merge.as_ref().map(crate::report::merge),
+                "configPath": relative.display().to_string(),
+                "configCommitted": outcome.config_committed,
+                "ignoredAnswers": outcome.ignored_answers,
+            }))
+        );
+    }
+
     Ok(crate::exit::SUCCESS)
 }
 
@@ -138,12 +165,14 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 ///
 /// The cheapest way to find a cycle or a typo in an expression, since both are
 /// caught when the graph is built rather than when a question is reached.
+///
+/// Returns the machine-readable form so the caller does the single `println!`.
 fn dry_run(
     ctx: &Session,
     args: &InitArgs,
     source: &str,
     answers: BTreeMap<String, tpl::template::Value>,
-) -> Result<(), OpError> {
+) -> Result<serde_json::Value, OpError> {
     let template = ops::resolve::resolve(ops::Request {
         source,
         reference: args.r#ref.as_deref(),
@@ -163,11 +192,8 @@ fn dry_run(
 
     ctx.blank();
     ctx.say(field(&ctx.theme, "Template", source));
-    ctx.say(field(
-        &ctx.theme,
-        "Revision",
-        &ops::describe_revision(&template.reference, template.revision),
-    ));
+    let revision_description = ops::describe_revision(&template.reference, template.revision);
+    ctx.say(field(&ctx.theme, "Revision", &revision_description));
     ctx.blank();
     ctx.say(heading(
         &ctx.theme,
@@ -176,22 +202,36 @@ fn dry_run(
     ctx.blank();
 
     let mut asked = 0;
+    // Resolution order, the same order the text list prints: it is the order
+    // the answers must be supplied in when a `when` or a `default` references
+    // an earlier one, so a caller driving the questionnaire needs it too.
+    let mut nodes = Vec::new();
     for node in graph.order() {
         match node.kind {
             tpl::graph::NodeKind::Question => {
-                let supplied_note = if answers.contains_key(&node.key) {
+                let supplied = answers.contains_key(&node.key);
+                let supplied_note = if supplied {
                     muted(&ctx.theme, "  (supplied)")
                 } else {
                     String::new()
                 };
                 ctx.say(format!("  {}{supplied_note}", node.key));
+                nodes.push(
+                    serde_json::json!({ "name": node.key, "kind": "question", "supplied": supplied }),
+                );
                 asked += 1;
             }
             tpl::graph::NodeKind::Computed => {
                 ctx.say(muted(&ctx.theme, &format!("  {} (computed)", node.key)));
+                nodes.push(
+                    serde_json::json!({ "name": node.key, "kind": "computed", "supplied": false }),
+                );
             }
             tpl::graph::NodeKind::Data => {
                 ctx.say(muted(&ctx.theme, &format!("  {} (data source)", node.key)));
+                nodes.push(
+                    serde_json::json!({ "name": node.key, "kind": "data", "supplied": false }),
+                );
             }
         }
     }
@@ -207,6 +247,7 @@ fn dry_run(
     //
     // Only under `--defaults`: otherwise producing the list would mean asking
     // the whole questionnaire, which is precisely what a dry run is avoiding.
+    let mut files = None;
     if args.answers.defaults {
         let mut prompter = tpl::eval::DefaultsOnly;
         let mut confirmer = crate::prompt::Confirmer;
@@ -228,10 +269,27 @@ fn dry_run(
             for file in &rendered.files {
                 ctx.say(muted(&ctx.theme, &format!("  {}", file.path)));
             }
+            files = Some(
+                rendered
+                    .files
+                    .iter()
+                    .map(|file| file.path.clone())
+                    .collect::<Vec<_>>(),
+            );
         }
     }
 
     ctx.blank();
     ctx.say(muted(&ctx.theme, "Nothing was created."));
-    Ok(())
+
+    Ok(serde_json::json!({
+        "dryRun": true,
+        "template": source,
+        "revision": revision_description,
+        "questions": nodes,
+        // `null`, not `[]`: without `--defaults` the list was never computed,
+        // and an empty array would claim it renders nothing.
+        "files": files,
+        "ignoredAnswers": ignored,
+    }))
 }

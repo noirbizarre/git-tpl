@@ -20,6 +20,16 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             preferences.fetch_refspec(),
             preferences.remote
         ));
+        if global.json {
+            println!(
+                "{}",
+                crate::report::success(serde_json::json!({
+                    "dryRun": true,
+                    "remote": preferences.remote,
+                    "refspec": preferences.fetch_refspec(),
+                }))
+            );
+        }
         return Ok(crate::exit::SUCCESS);
     }
 
@@ -29,18 +39,24 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // behind > 0`, so it has to be tested before the plain `behind > 0` arm
     // below, which would otherwise swallow it and tell a diverged user to
     // simply merge.
-    match relation {
+    //
+    // `state` comes out of the *same* match for that reason. Deriving it a
+    // second time somewhere else is how the JSON and the prose come to
+    // disagree about a diverged ref.
+    let state = match &relation {
         None => {
             ctx.say(muted(
                 &ctx.theme,
                 &format!("No shared copy of {ref_name} on {}.", preferences.remote),
             ));
+            "absent"
         }
         Some(relation) if relation.is_synced() => {
             ctx.say(format!(
                 "{ref_name} is in sync with {}.",
                 preferences.remote
             ));
+            "synced"
         }
         Some(relation) if relation.is_diverged() => {
             ctx.blank();
@@ -51,6 +67,7 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 &ctx.theme,
                 &format!("git merge refs/remotes/{}/tpl/...", preferences.remote),
             ));
+            "diverged"
         }
         Some(relation) if relation.behind > 0 => {
             ctx.blank();
@@ -72,6 +89,7 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 ),
             ));
             ctx.say(command(&ctx.theme, "git tpl update"));
+            "behind"
         }
         Some(relation) => {
             ctx.say(format!(
@@ -79,7 +97,27 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 relation.ahead
             ));
             ctx.say(command(&ctx.theme, "git tpl push"));
+            "ahead"
         }
+    };
+
+    if global.json {
+        println!(
+            "{}",
+            crate::report::success(serde_json::json!({
+                "remote": preferences.remote,
+                "ref": ref_name,
+                "state": state,
+                // `null` when the remote has no copy at all, which is a
+                // different thing from a copy that is level with ours.
+                "relation": relation.as_ref().map(|relation| serde_json::json!({
+                    "ahead": relation.ahead,
+                    "behind": relation.behind,
+                    "synced": relation.is_synced(),
+                    "diverged": relation.is_diverged(),
+                })),
+            }))
+        );
     }
 
     Ok(crate::exit::SUCCESS)

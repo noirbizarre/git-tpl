@@ -176,3 +176,9 @@ one.
     `git tpl diff` shows exactly what the merge would reconcile. When you are
     ready, `git tpl merge` performs it. `--dry-run` is smaller still: it reports
     what would be asked and rendered, and creates nothing.
+
+## Machine-readable output
+
+`git tpl --json init` emits its outcome on stdout as a single JSON object, with
+the prose on stderr. The payload is described in
+[JSON output](../reference/json.md#init).
