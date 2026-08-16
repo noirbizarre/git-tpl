@@ -7,8 +7,8 @@
 #
 # Tools no CI job needs are declared on their own task rather than in `[tools]`,
 # because `mise install` — what CI runs — installs `[tools]` only. It matters
-# here: cargo-binstall has no prebuilt artifact for resvg or cargo-insta, so a
-# global entry would make every CI job compile both from source.
+# here: cargo-binstall has no prebuilt artifact for resvg, usvg or cargo-insta,
+# so a global entry would make every CI job compile all three from source.
 #
 # Rust itself is intentionally not managed here: CI needs per-job components
 # (rustfmt, clippy, llvm-tools-preview) and cross-compilation targets, which
@@ -38,8 +38,8 @@ git-cliff = "latest"
 cargo-binstall = "latest"
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-llvm-cov" = "latest"
-# cargo-insta and resvg are declared on the tasks that use them instead of
-# here — see the note in the header.
+# cargo-insta, usvg and resvg are declared on the tasks that use them instead
+# of here — see the note in the header.
 
 # --- Everyday ---------------------------------------------------------------
 
@@ -130,21 +130,55 @@ run = "git cliff --bumped-version"
 
 # --- Artwork ----------------------------------------------------------------
 #
-# Neither of these joins `default`: they rewrite committed binaries, so a
-# routine run would dirty the working tree every time. Run them when the
-# artwork changes — both after editing icon.svg, since the logo embeds the mark
-# and the social preview embeds the logo.
+# Neither of these joins `default`: they rewrite committed files, so a routine
+# run would dirty the working tree every time. Run them when the artwork
+# changes, in order: `logo` re-flattens the wordmark, then `social` re-renders
+# the preview that embeds it.
 
-[tasks.icons]
-description = "Rasterize docs/images/icon.svg into the PNG sizes"
-# resvg is pure Rust, so it needs no system libraries and renders identically on
-# every platform.
-tools = { "cargo:resvg" = "latest" }
+[tasks.logo]
+description = "Flatten the wordmark source into docs/images/logo.svg"
+# logo.svg is committed as paths only, never as live <text>: it is served to
+# every README reader from raw.githubusercontent.com, and a <text> wordmark
+# would be re-set in whatever font the reader happens to have. usvg converts
+# text to paths by default, which is exactly the flattening step, so the
+# editable source stays logo.src.svg and the outlined result is generated.
+#
+# Requires Fira Sans on the machine running it — a missing font silently
+# substitutes another, so check the diff before committing.
+#
+# Declared on the task rather than in `[tools]` for the same reason as resvg —
+# see the note in the header.
+tools = { "cargo:usvg" = "latest" }
 run = """
-for size in 128 256 512; do
-  resvg --width "$size" --height "$size" docs/images/icon.svg "docs/images/icon-$size.png"
-  echo "docs/images/icon-$size.png"
-done
+set -euo pipefail
+
+# logo.src.svg copies icon.svg's paths rather than referencing the file, because
+# usvg embeds a referenced SVG as a base64 data URI instead of inlining it, and
+# GitHub sanitizes the SVGs it serves — the README would risk a blank box. A
+# copy can drift, so it is checked here: every path of the mark must still be
+# present, byte for byte, in the wordmark source.
+drift=$(comm -23 \\
+  <(grep -o 'd="[^"]*"' docs/images/icon.svg | sort) \\
+  <(grep -o 'd="[^"]*"' docs/images/logo.src.svg | sort))
+test -z "$drift" || {
+  echo "logo.src.svg's mark has drifted from icon.svg — re-copy the paths" >&2
+  exit 1
+}
+
+usvg docs/images/logo.src.svg docs/images/logo.svg
+grep -q '<text' docs/images/logo.svg && { echo "logo.svg still carries live text" >&2; exit 1; }
+
+# usvg resolves the viewBox into a transform and emits width/height only. That
+# renders fine on its own but does not scale: social-preview.svg embeds the logo
+# through <image width height>, which needs an intrinsic aspect ratio to fit
+# into. Putting the viewBox back is what keeps the embedded logo from being
+# drawn at 1:1 and clipped.
+read -r w h < <(sed -n 's/.*width="\\([0-9.]*\\)" height="\\([0-9.]*\\)".*/\\1 \\2/p' docs/images/logo.svg | head -n 1)
+test -n "$w" && test -n "$h"
+sed -i "0,/<svg /s|<svg |<svg viewBox=\\"0 0 $w $h\\" |" docs/images/logo.svg
+grep -q 'viewBox=' docs/images/logo.svg
+
+echo "docs/images/logo.svg — ${w}x${h}; re-run 'mise run social' to refresh the preview"
 """
 
 [tasks.social]
@@ -156,7 +190,8 @@ description = "Render the GitHub social preview image"
 # The canvas lives in social-preview.svg rather than being passed as flags:
 # resvg scales to fit rather than padding, so --width 1280 --height 640 on a
 # non-2:1 source yields the wrong size, not GitHub's required 1280x640. The
-# wrapper references icon.svg instead of copying it, so the two cannot drift.
+# wrapper references logo.svg instead of copying it, so the two cannot drift —
+# but it does read what `mise run logo` produces, so run that first.
 tools = { "cargo:resvg" = "latest" }
 run = """
 resvg docs/images/social-preview.svg docs/images/social-preview.png

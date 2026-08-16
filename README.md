@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="docs/images/icon.svg" alt="git-tpl" width="160">
+  <img src="https://raw.githubusercontent.com/noirbizarre/git-tpl/main/docs/images/logo.svg" alt="git-tpl" width="360">
 </p>
-
-<h1 align="center">git-tpl</h1>
 
 <p align="center"><strong>Git-native project templates</strong></p>
 

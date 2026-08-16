@@ -1,5 +1,5 @@
 <p align="center" markdown>
-  ![git-tpl](images/icon.svg){ width="180" }
+  ![git-tpl](images/logo.svg){ width="360" }
 </p>
 
 **Git-native project templates.**
