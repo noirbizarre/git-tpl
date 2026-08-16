@@ -7,12 +7,26 @@ on:
         description: The tag being released
         required: true
         type: string
+      # Unticking this runs the build matrix and stops there, which is the only
+      # way to exercise a change to this workflow without a release: the assets
+      # of an existing tag would otherwise be rebuilt and `--clobber`ed, and a
+      # Rust build is not byte-reproducible, so the published SHA256SUMS — the
+      # ones the Homebrew formula and `git-tpl-bin` pin — would no longer match
+      # what anyone had already downloaded.
+      publish:
+        description: Upload the assets and publish to crates.io
+        type: boolean
+        default: true
 
   workflow_call:
     inputs:
       tag:
         required: true
         type: string
+      # Defaults to true so a caller that says nothing gets a real release.
+      publish:
+        type: boolean
+        default: true
 
 # The upload authenticates as a GitHub App and carries its own permissions.
 # These cover `actions/checkout` alone, which only reads.
@@ -126,6 +140,7 @@ jobs:
   publish:
     name: 🚀 Publish
     needs: build
+    if: inputs.publish
     runs-on: ubuntu-latest
 
     # This is the deployment. Declaring a `url:` registers it in the
@@ -179,6 +194,9 @@ jobs:
   crates:
     name: 📦 crates.io
     needs: [build, publish]
+    # Redundant — a skipped `publish` already skips this — but stated so that
+    # reading the job alone tells you it does not run on a build-only dispatch.
+    if: inputs.publish
     runs-on: ubuntu-latest
 
     # Must match the Environment configured under
