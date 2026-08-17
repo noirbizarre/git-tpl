@@ -81,6 +81,18 @@ A warning, because that is still the default. Set `strict = true` in
 Names that came from a `${{ … }}` are not reported: `matrix` belongs to GitHub
 Actions, and advising an author to declare it would be advice not to take.
 
+## Options
+
+| Flag | Effect |
+|---|---|
+| `<template>` | The template — a Git URL or a path. Defaults to `.`. |
+| `--ref` | Branch, tag or commit to check. Defaults to the remote's default branch. |
+| `--root` | Check this subdirectory instead of the manifest's. |
+| `--dirty` | Include the template's uncommitted changes. Local templates only. |
+| `-D`, `--deny <CODE\|warnings>` | The finding fails the lint. Repeatable. |
+| `-A`, `--allow <CODE\|warnings>` | The finding is not reported at all. Repeatable. |
+| [`--json`](../reference/json.md#lint) | A global flag. The findings on stdout as one object. |
+
 ## Choosing what fails
 
 The default severities are a judgement about templates in general. A given
