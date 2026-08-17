@@ -534,11 +534,17 @@ pub trait GitBackend {
     /// Implemented with the backend's own merge. git-tpl contributes no
     /// conflict resolution of its own — see
     /// `docs/adr/002-no-custom-reconciliation.md`.
+    ///
+    /// `stage` names worktree-relative paths to add to the merge's index before
+    /// its tree is written, so that they land *in* the merge commit. Only
+    /// honoured on a real, conflict-free merge that this call commits: the
+    /// other outcomes produce no commit to carry them. See ADR-021.
     fn merge(
         &self,
         commit: Oid,
         message: &str,
         commit_result: bool,
+        stage: &[&Path],
     ) -> Result<MergeOutcome, GitError>;
 
     /// The tree merging `theirs` into `ours` would produce.

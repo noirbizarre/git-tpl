@@ -15,11 +15,14 @@ git tpl init <template> [--ref <ref>] [--answer k=v]... [options]
 5. Asks the questions, in dependency order.
 6. Resolves computed values.
 7. Renders the template.
-8. Writes `.config/git.tpl.toml`, and stages it. A template that fails to
-   render leaves no half-initialised project behind, which is why this comes
-   after the rendering rather than before it.
+8. Writes `.config/git.tpl.toml`. A template that fails to render leaves no
+   half-initialised project behind, which is why this comes after the rendering
+   rather than before it.
 9. Creates `refs/tpl/<id>` as an **orphan commit**.
-10. Merges that commit into the current branch, allowing unrelated histories.
+10. Merges that commit into the current branch, allowing unrelated histories,
+    with `.config/git.tpl.toml` in the merge commit itself. One `init`, one
+    commit on your branch — see
+    [ADR-021](../adr/021-attachment-in-the-merge-commit.md).
 11. Adds any [`[remotes]`](../templates/format.md#remotes) the template declared.
 12. Shows the template's own [note](../templates/format.md#talking-to-the-user), if it has one.
 
@@ -68,6 +71,18 @@ main:  A ─── M
 
 `git log --graph` shows the template entering your history as a merged parent,
 which is exactly what it is.
+
+`M` carries `.config/git.tpl.toml`, so the attachment is one commit and
+`git show HEAD` shows all of it. Two cases cannot be folded that way, because
+they produce no merge commit to carry the file, and it gets a
+`chore(tpl): attach …` commit of its own instead:
+
+- an empty repository, where the merge fast-forwards and `G0` *becomes* the
+  branch — `G0` is the ref tip and must stay byte-identical to the rendering;
+- `--no-merge`.
+
+A merge that conflicts commits nothing: the configuration is left staged, for
+the resolution commit you are about to make.
 
 Use `--no-merge` to stop after step 9 and wire it up yourself.
 

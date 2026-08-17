@@ -349,6 +349,49 @@ fn update_without_a_configuration_says_what_to_do() {
 
 // --- machine-readable output ------------------------------------------------
 
+/// A ref that is not there is not an error — a clone without `refs/tpl/*` is
+/// the ordinary case — but the resulting commit shares no ancestry with what
+/// the branch merged, so a later `git tpl merge` can conflict on every file.
+/// Said, rather than discovered during that merge.
+#[test]
+fn an_update_with_no_local_ref_says_it_started_a_new_history() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    world.project.git(&["update-ref", "-d", &world.ref_name()]);
+
+    let output = tpl(&world.project, &["--json", "update", "--defaults"]).success();
+
+    assert_eq!(output.json()["startedNewHistory"], true);
+}
+
+/// The same fact, for a person. `--json` silences prose, so it takes a second
+/// run to see it.
+#[test]
+fn an_update_with_no_local_ref_warns_a_human_too() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    world.project.git(&["update-ref", "-d", &world.ref_name()]);
+
+    tpl(&world.project, &["update", "--defaults"])
+        .success()
+        .says("started a new history");
+}
+
+#[test]
+fn an_update_onto_an_existing_ref_does_not_claim_a_new_history() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+
+    let json = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+
+    assert_eq!(json["startedNewHistory"], false);
+}
+
 /// The regression for issue #53.
 ///
 /// `--json update` on the *most common* outcome used to print nothing at all,

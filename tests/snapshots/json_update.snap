@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: output.transcript()
+expression: transcript
 ---
 exit: 0
 --- stdout ---
@@ -23,6 +23,7 @@ exit: 0
     }
   ],
   "answersChanged": false,
+  "startedNewHistory": false,
   "ignoredAnswers": [],
   "pushed": null,
   "ok": true

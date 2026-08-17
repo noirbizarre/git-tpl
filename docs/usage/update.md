@@ -109,6 +109,30 @@ destroy the merge base your branch already shares with it, and the next merge
 would conflict on everything. See
 [The Git model § Append-only](../concepts/git-model.md#append-only).
 
+## When there is no ref to advance
+
+`update` needs `refs/tpl/<id>` to hang the new commit from. If it is not there,
+the commit is written as an orphan and `update` says so:
+
+```console
+$ git tpl update
+...
+No refs/tpl/rust existed here, so this update started a new history.
+If the ref exists on a remote, run `git tpl fetch` before merging: without a
+merge base, `git tpl merge` can conflict on every file.
+```
+
+Two things cause it, and both are legitimate, which is why this is a warning
+and not a refusal:
+
+- **You cloned a project and never fetched the ref.** `refs/tpl/*` is not
+  fetched by default. Run [`git tpl fetch`](fetch.md) first, and the update
+  continues the history everyone else has.
+- **You edited `source` or `id` in `.config/git.tpl.toml`.** The ref name is
+  derived from them, so a new one means a new ref. That is the documented way
+  to [point a project at a different template](../templates/local-development.md#pointing-an-existing-project-at-a-different-template),
+  and starting a fresh history is what you asked for.
+
 ## New questions
 
 A template that added a question since your last render has no recorded answer

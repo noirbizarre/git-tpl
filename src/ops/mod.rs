@@ -882,39 +882,58 @@ pub fn init(
     config.answers = rendered.context.answers().clone();
     let config_path = config.save(project_root)?;
 
+    // `.config/git.tpl.toml` is versioned with the project — a fresh clone must
+    // be understandable from it alone. Leaving it untracked would mean the
+    // template attachment existed only on the machine that ran `init`.
+    //
+    // It rides in the merge commit rather than in one of its own: the merge is
+    // the attachment, and a `chore(tpl): attach` commit on top of it said
+    // nothing the merge did not. See ADR-021.
     let merge = if merge_after {
         let outcome = project.merge(
             commit,
             &format!(
                 "Merge template {} into {}\n\n\
-                 Initial rendering of the template attached by `git tpl init`.\n",
+                 Initial rendering of the template attached by `git tpl init`.\n\
+                 Records the template source and the answers used to render it.\n\
+                 See {CONFIG_PATH}.\n",
                 rendered.template.manifest.name,
                 project
                     .head_branch()?
                     .unwrap_or_else(|| "the branch".into())
             ),
             true,
+            &[Path::new(CONFIG_PATH)],
         )?;
         Some(outcome)
     } else {
         None
     };
 
-    // `.config/git.tpl.toml` is versioned with the project — a fresh clone must
-    // be understandable from it alone. Leaving it untracked would mean the
-    // template attachment existed only on the machine that ran `init`.
-    //
-    // Staged after the merge, not before: a dirty index makes libgit2 refuse to
-    // merge, and the failure would be about the index rather than about
-    // anything the user did.
-    project.stage(Path::new(CONFIG_PATH))?;
-
     let config_committed = match &merge {
+        // The merge commit carries it.
+        Some(MergeOutcome::Merged { .. }) => true,
+
         // Conflicts are the user's to resolve, and their resolution commit is
         // where the configuration belongs. Committing now would make a commit
         // in the middle of a merge they have not finished.
-        Some(MergeOutcome::Conflicted { .. }) => false,
+        Some(MergeOutcome::Conflicted { .. }) => {
+            project.stage(Path::new(CONFIG_PATH))?;
+            false
+        }
+
+        // No merge commit exists to carry it: an empty repository
+        // fast-forwards to the render commit (ADR-009), and `--no-merge` asked
+        // for no merge at all. The render commit itself cannot hold the
+        // configuration — it is the ref tip, and must stay byte-identical to
+        // the rendering, or an unchanged template would stop producing no
+        // commit.
+        //
+        // Staged after the merge, not before: a dirty index makes libgit2
+        // refuse to merge, and the failure would be about the index rather
+        // than about anything the user did.
         _ => {
+            project.stage(Path::new(CONFIG_PATH))?;
             project.commit_index(&format!(
                 "chore(tpl): attach the {} template\n\n\
                  Records the template source and the answers used to render it.\n\
@@ -1115,6 +1134,15 @@ pub enum UpdateOutcome {
         /// template adds a question. Worth telling the user, since it is the
         /// one file `update` does modify.
         answers_changed: bool,
+        /// Whether the commit was written onto an empty ref, and so starts a
+        /// history unrelated to anything the branch has merged.
+        ///
+        /// Two causes, both legitimate and neither obvious: the configuration's
+        /// `source` or `id` was edited, so the ref name changed; or the project
+        /// was cloned without `refs/tpl/*` and never fetched. Either way the
+        /// next `git tpl merge` has no merge base and can conflict on every
+        /// file, which is worth saying before it happens.
+        started_new_history: bool,
         /// Supplied answers that name no question in this template.
         ignored_answers: Vec<String>,
         /// Template files a `.gitignore` removed from the rendering.
@@ -1190,6 +1218,10 @@ pub fn update(
     // would destroy the merge base the branch already shares with the ref.
     // See docs/adr/005-append-only-refs.md.
     let parents: Vec<Oid> = tip.into_iter().collect();
+    // No tip to descend from: this rendering shares no ancestry with whatever
+    // the branch merged before. Not an error — a fresh clone has no
+    // `refs/tpl/*` until it fetches — but the caller must say so.
+    let started_new_history = parents.is_empty();
     let commit =
         project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
     project.set_ref(&ref_name, commit, "tpl: update")?;
@@ -1217,6 +1249,7 @@ pub fn update(
             rendered.template.revision,
         ),
         answers_changed,
+        started_new_history,
         ignored_answers: rendered.ignored_answers,
         ignored: rendered.template.ignored,
     })
@@ -1745,7 +1778,7 @@ pub fn merge(
         format!("Merge {ref_name}\n\nTemplate changes rendered by `git tpl update`.\n")
     });
 
-    let outcome = project.merge(tip, &message, commit_result)?;
+    let outcome = project.merge(tip, &message, commit_result, &[])?;
     Ok((id, outcome))
 }
 

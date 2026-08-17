@@ -110,6 +110,14 @@ one, Git cannot tell your edits from the template's. Every file that differs
 would conflict, including files you customised that the template never changed.
 Which is exactly the failure mode this whole design exists to avoid.
 
+`M` also carries `.config/git.tpl.toml`, the record of which template you
+attached and what you answered. So an `init` is one commit on your branch, and
+`git show HEAD` shows the whole of it. In an empty repository there is no `M` —
+the merge fast-forwards and `G0` *becomes* the branch — so the configuration
+gets a small commit of its own; it cannot go into `G0`, which is the ref tip and
+must stay byte-identical to the rendering. See
+[ADR-021](../adr/021-attachment-in-the-merge-commit.md).
+
 If you would rather wire it up yourself, `git tpl init --no-merge` stops after
 creating the ref.
 
