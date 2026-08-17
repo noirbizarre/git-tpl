@@ -86,6 +86,12 @@ This is [not an omission](../concepts/determinism.md#no-runtime-context). A valu
 that varies by machine belongs in the answers, where it is recorded and shared —
 not in the context, where it is invisible and different for everyone.
 
+The one place a machine fact is legible to a template is
+[`default_from`](questions.md#machine-seeded-defaults), which reads its own small
+[seed context](../adr/018-seed-context.md) — the Git configuration, the
+directory name, the remote. That context is not this one, is reachable from
+nowhere else, and only ever pre-fills a prompt.
+
 ## Imported names
 
 A `{% import %}` brings a [shared partial](format.md#shared-partials)'s macros
@@ -146,7 +152,9 @@ string rather than an error. A filter that raised inside a `when` condition
 would abort the whole render; an empty value is visible immediately.
 
 The filter is available everywhere any other expression is: in a `default`, in a
-`when`, in a computed value, in a file body, and in a templated path.
+`when`, in a computed value, in a file body, in a templated path, and in a
+[`default_from`](questions.md#machine-seeded-defaults) seed expression — which is
+where `{{ remote.name | slugify }}` earns its keep.
 
 **The set of filters is closed.** There is no plugin point, and there will not
 be one — see [ADR-003](../adr/003-minijinja-only.md). A filter is only

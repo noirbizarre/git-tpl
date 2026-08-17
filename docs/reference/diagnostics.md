@@ -33,7 +33,7 @@ Something is wrong with the template itself.
 | `tpl::manifest::missing` | No `template.toml` at the source. |
 | `tpl::manifest::parse` | `template.toml` is not valid TOML, or has an unknown key. |
 | `tpl::manifest::name_collision` | A question and a computed value share a name. |
-| `tpl::manifest::invalid_question` | A question declaration is not coherent — see the message. |
+| `tpl::manifest::invalid_question` | A question declaration is not coherent — see the message. Covers a `default_from` naming no source, one whose expression does not parse, and one referencing something that is not a [seed namespace](../templates/questions.md#machine-seeded-defaults). |
 | `tpl::graph::invalid_expression` | An expression in the manifest does not parse. |
 | `tpl::graph::unknown_reference` | An expression names something the template never declares. Carries a suggestion. |
 | `tpl::graph::cycle` | Questions, computed values or data sources depend on each other in a loop. |
@@ -83,7 +83,7 @@ errors before anything is checked:
 | `tpl::answers::parse` | An answers file is not valid TOML, JSON or YAML. |
 | `tpl::answers::shape` | An answers file is not a table of values. |
 | `tpl::answers::unknown_key` | A supplied answer names no question, under `--strict-answers`. Carries a suggestion. |
-| `tpl::eval::expression` | An expression failed to evaluate. |
+| `tpl::eval::expression` | An expression failed to evaluate. The location names it — `computed.<name>`, `questions.<name>.default`, or `questions.<name>.default_from`. |
 | `tpl::eval::bad_choices` | `choices_from` did not resolve to an array. |
 | `tpl::eval::wrong_type` | An answer is not of the declared type. |
 | `tpl::eval::invalid_choice` | An answer is not one of the choices. |

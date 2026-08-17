@@ -138,7 +138,7 @@ license = "MIT"
 the template's own `default` applies. Anything else would mean the same template
 rendered two different trees on two machines, and then an unchanged template
 would no longer produce no commit. It is the same rule
-[`default_from`](templates/questions.md#git-seeded-defaults) already follows.
+[`default_from`](templates/questions.md#machine-seeded-defaults) already follows.
 
 Any question type may be seeded, not only `string`.
 
@@ -273,11 +273,12 @@ git config tpl.remote upstream
 git config --global tpl.interactive false
 ```
 
-One key outside `tpl.` is read: a question declaring
-[`default_from = "git:<key>"`](templates/questions.md#git-seeded-defaults) has
-that key read, read-only, to pre-fill its prompt. It is never read when nobody
-is being asked, and its value reaches the project only as an answer you
-accepted.
+One family of keys outside `tpl.` is read: a question declaring
+[`default_from`](templates/questions.md#machine-seeded-defaults) has the keys it
+names — `git:user.name`, or `git.user.name` inside an expression — read,
+read-only, to pre-fill its prompt. The same applies to the project's remote URL
+and directory name. None of it is read when nobody is being asked, and a value
+reaches the project only as an answer you accepted.
 
 ### Precedence
 

@@ -186,6 +186,11 @@ impl Graph {
                 )?);
             }
 
+            // `default_from` is deliberately absent from this list. It names
+            // `git`, `dir` and `remote` — facts about the machine, not values
+            // the graph resolves — so an edge would be meaningless and every
+            // seed expression would look like an unknown reference.
+
             edges.insert(node, deps);
         }
 
@@ -437,6 +442,24 @@ mod tests {
 
     fn keys(graph: &Graph) -> Vec<String> {
         graph.order().iter().map(|n| n.key.clone()).collect()
+    }
+
+    /// `default_from` names the machine, not the context. An edge here would
+    /// be meaningless, and `references` would reject `remote` as an unknown
+    /// name — so the graph must not look at it at all.
+    #[test]
+    fn a_default_from_expression_contributes_no_edge() {
+        let graph = graph(
+            r#"
+            name = "t"
+            [questions.slug]
+            type = "string"
+            default_from = "{{ remote.name | default(dir.name) | slugify }}"
+            "#,
+        )
+        .expect("a seed expression is not a graph reference");
+
+        assert_eq!(keys(&graph), vec!["slug"]);
     }
 
     #[test]

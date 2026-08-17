@@ -110,13 +110,19 @@ pub struct Question {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choices_from: Option<String>,
 
-    /// Where the *prompt default* comes from. `git:<key>` only.
+    /// Where the *prompt default* comes from.
     ///
-    /// It seeds the prompt and never the context. A value read from the
-    /// machine's Git configuration reaches the tree only by way of an answer a
-    /// human accepted, which is then recorded like any other answer — so the
-    /// project stays reproducible for someone whose `user.name` differs
-    /// (ADR-006, `docs/concepts/determinism.md`).
+    /// Either the `git:<key>` shorthand, or an expression over the seed
+    /// namespaces — `{{ remote.name | default(dir.name) | slugify }}`. Most of
+    /// what a template asks for at the start of a project (a slug, an owner, a
+    /// repository name) is already knowable from where the project lives, and
+    /// this is how a template guesses it.
+    ///
+    /// It seeds the prompt and never the context. A value read from the machine
+    /// reaches the tree only by way of an answer a human accepted, which is
+    /// then recorded like any other answer — so the project stays reproducible
+    /// for someone whose directory or remote differs (ADR-006, ADR-018,
+    /// `docs/concepts/determinism.md`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_from: Option<String>,
 
@@ -139,11 +145,13 @@ pub struct Question {
     pub message: Option<String>,
 }
 
-/// The only source `default_from` accepts.
+/// The shorthand form of `default_from`.
 ///
-/// A single prefix rather than an open grammar: every other source anyone
-/// would reach for — the environment, the clock — is the runtime context
-/// ADR-006 refuses.
+/// Kept as a prefix rather than folded into the expression form, so that the
+/// manifests written before expressions existed take a path with no engine in
+/// it and cannot change behaviour. The two forms are the whole grammar: every
+/// other source anyone would reach for — the environment, the clock — is the
+/// runtime context ADR-006 refuses.
 pub const GIT_PREFIX: &str = "git:";
 
 impl Question {
@@ -165,12 +173,28 @@ impl Question {
 
     /// The Git configuration key seeding this question's prompt, if any.
     ///
-    /// Never an expression and never evaluated, so it contributes no edge to
-    /// the dependency graph — it references the machine, not the context.
+    /// The `git:<key>` shorthand only. Never an expression and never evaluated,
+    /// so it contributes no edge to the dependency graph — it references the
+    /// machine, not the context.
     pub fn git_config_key(&self) -> Option<&str> {
         self.default_from
             .as_deref()
             .and_then(|source| source.strip_prefix(GIT_PREFIX))
+    }
+
+    /// The seed expression pre-filling this question's prompt, if any.
+    ///
+    /// The counterpart of [`git_config_key`](Self::git_config_key), and
+    /// mutually exclusive with it. Like it, and for the same reason, it
+    /// contributes no edge to the dependency graph: it names `git`, `dir` and
+    /// `remote`, which are facts about the machine and not values the graph
+    /// resolves.
+    pub fn default_from_expression(&self) -> Option<&str> {
+        let source = self.default_from.as_deref()?;
+        if source.starts_with(GIT_PREFIX) {
+            return None;
+        }
+        is_expression(source).then_some(source)
     }
 
     /// What to say when `pattern` rejects an answer.

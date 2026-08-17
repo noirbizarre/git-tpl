@@ -19,7 +19,7 @@ help = "Used for the package name and the README title"
 | `when` | expression | Ask only if this evaluates truthy. |
 | `choices` | array | The offered choices, for `choice` and `multi_choice`. |
 | `choices_from` | string | A reference to a list, instead of `choices`. |
-| `default_from` | string | Where the *prompt default* comes from. `git:<key>` only. |
+| `default_from` | string | Where the *prompt default* comes from. `git:<key>`, or an expression over `git`, `dir` and `remote`. |
 | `pattern` | string | A regular expression every answer must match. `string` only. |
 | `message` | string | What to say when `pattern` rejects an answer. |
 
@@ -126,11 +126,10 @@ default = "{{ project_name | lower | replace(' ', '-') }}"
 It is evaluated at prompt time, after everything it references has been resolved.
 You see the computed value pre-filled and can accept or replace it.
 
-### Git-seeded defaults
+### Machine-seeded defaults
 
-Some values are facts about the person, not about the template. `default_from`
-pre-fills the prompt from the machine's Git configuration, so you press Enter
-and move on:
+Some values are facts about the person or the project, not about the template.
+`default_from` pre-fills the prompt from them, so you press Enter and move on:
 
 ```toml
 [questions.author]
@@ -139,20 +138,74 @@ default_from = "git:user.name"
 default = "anonymous"
 ```
 
-`git:<key>` is the only form, and only `string` questions accept it — a Git
-configuration value is a string, and both rules are enforced when the manifest
-is loaded rather than when the prompt appears.
+`git:<key>` is the shorthand for a Git configuration value. The longer form is
+an expression, which is what you want when the answer has to be derived rather
+than read:
+
+```toml
+[questions.project_slug]
+type = "string"
+default_from = "{{ remote.name | default(dir.name) | slugify }}"
+default = "my-project"
+```
+
+That reads: the repository's name where the project is pushed; failing that,
+the directory it lives in; slugified either way. A project cloned from
+`git@github.com:me/Git Tpl.git` offers `git-tpl`, and one created locally in
+`~/src/My Project` offers `my-project`.
+
+#### What an expression may read
+
+Three namespaces, and only three:
+
+| Namespace | Contents |
+|---|---|
+| `git` | The Git configuration, dotted keys nested: `git.user.name`, `git.user.email`. |
+| `dir` | `dir.name` — the project directory's own name. |
+| `remote` | `remote.name`, `remote.owner`, `remote.slug`, `remote.host`, `remote.url`. |
+
+For `git@github.com:acme/widgets.git`, `remote` is:
+
+| | |
+|---|---|
+| `remote.name` | `widgets` |
+| `remote.owner` | `acme` — the whole path above the name, so a nested GitLab subgroup arrives whole |
+| `remote.slug` | `acme/widgets` |
+| `remote.host` | `github.com` |
+| `remote.url` | the URL as configured, with any credentials removed |
+
+The remote described is the one `tpl.remote` names, which is `origin` unless you
+have said otherwise.
+
+Anything absent — no remote configured, a Git key never set — is *undefined*
+rather than empty, so `| default(...)` fires and the next candidate is used.
+That is why there is no `default_filter` key and no list form: a fallback chain
+is a pipe, and it composes with `slugify` and every other filter without any new
+syntax.
+
+There is deliberately no `dir.path`. An absolute path is the value most likely
+to end up pasted into a rendered file, and a rendered file that contains
+`/home/ada` is a file that differs on every machine. It would also put your home
+directory on screen at a prompt. `dir.name` is already sluggable, which is what
+it is wanted for.
+
+Only `string` questions accept `default_from`, in either form — a seed is text.
+The expression is parsed, and its namespaces checked, when the manifest is
+loaded rather than when the prompt appears, so a typo is your problem on your
+first render and never your users'.
 
 !!! warning "It seeds the prompt, never the context"
 
     If the question is **not asked** — `--defaults`, `tpl.interactive false`,
-    CI — `default_from` is not read at all and `default` applies. Otherwise the
-    same template would render two different trees on two machines, and
-    [determinism](../concepts/determinism.md) is what the whole ref model rests
-    on. The value only becomes part of the render once a human has accepted it,
-    at which point it is recorded in `.config/git.tpl.toml` like any other
-    answer — so the project stays reproducible for someone whose `user.name` is
-    different.
+    CI — `default_from` is not read at all and `default` applies. This is true
+    of every form: the directory name and the remote are as machine-varying as
+    `user.name`, and none of them may reach a rendered file on their own.
+    Otherwise the same template would render two different trees on two
+    machines, and [determinism](../concepts/determinism.md) is what the whole
+    ref model rests on. The value only becomes part of the render once a human
+    has accepted it, at which point it is recorded in `.config/git.tpl.toml`
+    like any other answer — so the project stays reproducible for someone whose
+    checkout, remote or identity is different.
 
 Precedence, highest first:
 
@@ -162,8 +215,8 @@ Precedence, highest first:
           >  default
 ```
 
-A key that is unset, or set to an empty value, is simply absent: the question
-falls back to its `default`.
+A source that is unset, empty, or an expression that renders to nothing, is
+simply absent: the question falls back to its `default`.
 
 The user's own
 [`[defaults]`](../configuration.md#defaults) sits above `default_from` and
@@ -443,7 +496,7 @@ question's declared type.
 `--defaults` accepts every default without prompting; a question with no default
 and no supplied answer is then an error. `default_from` is ignored here, because
 nothing on the machine can answer a question on the user's behalf — see
-[Git-seeded defaults](#git-seeded-defaults).
+[Machine-seeded defaults](#machine-seeded-defaults).
 
 On `update`, answers come from `.config/git.tpl.toml`. A question added to the
 template since the last render has no recorded answer, and is prompted for —

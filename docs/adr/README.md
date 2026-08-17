@@ -27,3 +27,4 @@ existed.
 | [015](015-machine-readable-output.md) | `--json` carries a stable diagnostic code on every failure |
 | [016](016-template-tests-are-data.md) | Template tests are declarative cases in the template repository, with no code execution |
 | [017](017-ignore-evaluation.md) | `.gitignore` is evaluated by us, not by libgit2 |
+| [018](018-seed-context.md) | A prompt seed may be derived from the repository, through a closed context |

@@ -7,7 +7,7 @@ use miette::{Diagnostic, NamedSource, SourceSpan};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::{Question, Value};
+use super::{Question, Value, is_expression};
 
 /// The manifest's filename, at the template repository root.
 pub const MANIFEST_NAME: &str = "template.toml";
@@ -252,28 +252,35 @@ impl Manifest {
             }
 
             if let Some(source) = &question.default_from {
-                // Rejected here rather than at prompt time: a template author
-                // who wrote `env:USER` must find out on the first render, not
-                // on the machine of the user who has that variable set.
-                let Some(key) = source.strip_prefix(super::question::GIT_PREFIX) else {
+                // Everything below is rejected here rather than at prompt time:
+                // a template author who wrote `env:USER` must find out on the
+                // first render, not on the machine of the user who has that
+                // variable set.
+                if let Some(key) = source.strip_prefix(super::question::GIT_PREFIX) {
+                    if key.trim().is_empty() {
+                        return Err(ManifestError::InvalidQuestion {
+                            name: name.clone(),
+                            reason: "`default_from` has no key after `git:`".into(),
+                        });
+                    }
+                } else if is_expression(source) {
+                    validate_seed_expression(name, source)?;
+                } else {
                     return Err(ManifestError::InvalidQuestion {
                         name: name.clone(),
                         reason: format!(
-                            "`default_from = \"{source}\"` names no known source; the only form is `git:<key>`, as in `git:user.name`"
+                            "`default_from = \"{source}\"` names no known source; \
+                             it is either `git:<key>`, as in `git:user.name`, \
+                             or an expression over {}, as in \
+                             `{{{{ remote.name | default(dir.name) | slugify }}}}`",
+                            namespace_list()
                         ),
-                    });
-                };
-
-                if key.trim().is_empty() {
-                    return Err(ManifestError::InvalidQuestion {
-                        name: name.clone(),
-                        reason: "`default_from` has no key after `git:`".into(),
                     });
                 }
 
-                // Git configuration values are strings. Coercing one into a
-                // boolean or a choice would fail at the prompt, on one
-                // machine, for one user — the worst place to discover it.
+                // A seed is text. Coercing it into a boolean or a choice would
+                // fail at the prompt, on one machine, for one user — the worst
+                // place to discover it.
                 if question.kind != super::QuestionKind::String {
                     return Err(ManifestError::InvalidQuestion {
                         name: name.clone(),
@@ -338,6 +345,58 @@ impl Manifest {
         }
         Value::Table(map)
     }
+}
+
+/// The seed namespaces, as an English list for a diagnostic.
+fn namespace_list() -> String {
+    crate::seed::NAMESPACES
+        .iter()
+        .map(|name| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Check a `default_from` expression before anything can be prompted.
+///
+/// Two checks, both of which exist so that the author sees the mistake and not
+/// their user:
+///
+/// 1. It parses, using the same engine that will evaluate it.
+/// 2. Every root it names is a seed namespace. This is what stops
+///    `{{ project_name }}` — a name from the *render* context, which the seed
+///    context deliberately does not have — from silently seeding nothing. The
+///    seed environment is chainable, so without this check the mistake would
+///    produce an empty prompt and no message at all.
+fn validate_seed_expression(name: &str, expression: &str) -> Result<(), ManifestError> {
+    let env = crate::eval::seed_environment();
+    let template =
+        env.template_from_str(expression)
+            .map_err(|error| ManifestError::InvalidQuestion {
+                name: name.to_string(),
+                reason: format!("`default_from` is not a valid expression: {error}"),
+            })?;
+
+    // `nested: false` yields roots only. A missing leaf under a real namespace
+    // is the case `| default(...)` is for, and refusing it here would forbid
+    // the idiom the feature exists to enable.
+    for reference in template.undeclared_variables(false) {
+        if crate::seed::NAMESPACES.contains(&reference.as_str()) {
+            continue;
+        }
+        let suggestion = crate::suggest::closest(&reference, crate::seed::NAMESPACES)
+            .map(|name| format!("; did you mean `{name}`?"))
+            .unwrap_or_default();
+        return Err(ManifestError::InvalidQuestion {
+            name: name.to_string(),
+            reason: format!(
+                "`default_from` references `{reference}`, which is not a seed namespace; \
+                 a seed may read only {}{suggestion}",
+                namespace_list()
+            ),
+        });
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -588,17 +647,22 @@ mod tests {
         assert!(reason.contains(expected), "reason was: {reason}");
     }
 
-    /// Git configuration values are strings. Coercion would fail on one
-    /// machine only, which is the worst place to find out.
-    #[test]
-    fn default_from_is_rejected_on_a_non_string_question() {
+    /// Git configuration values are strings, and so is a rendered seed
+    /// expression. Coercion would fail on one machine only, which is the worst
+    /// place to find out. The rule predates expressions and must survive them.
+    #[rstest]
+    #[case("git:tpl.ci")]
+    #[case("{{ remote.name }}")]
+    fn default_from_is_rejected_on_a_non_string_question(#[case] source: &str) {
         let error = Manifest::parse(
-            r#"
-            name = "x"
-            [questions.ci]
-            type = "boolean"
-            default_from = "git:tpl.ci"
-            "#,
+            &format!(
+                r#"
+                name = "x"
+                [questions.ci]
+                type = "boolean"
+                default_from = "{source}"
+                "#
+            ),
             MANIFEST_NAME,
         )
         .unwrap_err();
@@ -608,6 +672,138 @@ mod tests {
         };
         assert_eq!(name, "ci");
         assert!(reason.contains("only applies to `string` questions"));
+    }
+
+    /// The form every manifest written before expressions existed uses. It must
+    /// keep loading, unchanged, or the feature is a breaking change.
+    #[test]
+    fn the_git_shorthand_is_still_accepted() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.author]
+            type = "string"
+            default_from = "git:user.name"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+
+        let question = &manifest.questions["author"];
+        assert_eq!(question.git_config_key(), Some("user.name"));
+        assert_eq!(question.default_from_expression(), None);
+    }
+
+    #[test]
+    fn a_seed_expression_is_accepted_and_is_not_a_config_key() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.slug]
+            type = "string"
+            default_from = "{{ remote.name | default(dir.name) | slugify }}"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+
+        let question = &manifest.questions["slug"];
+        assert_eq!(question.git_config_key(), None);
+        assert_eq!(
+            question.default_from_expression(),
+            Some("{{ remote.name | default(dir.name) | slugify }}")
+        );
+    }
+
+    /// Parsed with the engine that will evaluate it, so a syntax error is the
+    /// author's problem on their first render and never anybody else's.
+    #[test]
+    fn a_default_from_expression_is_parsed_at_load_time() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.slug]
+            type = "string"
+            default_from = "{{ remote.name | }}"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "slug");
+        assert!(
+            reason.contains("not a valid expression"),
+            "reason was: {reason}"
+        );
+    }
+
+    /// The seed context is not the render context. Without this check the
+    /// mistake is invisible: a chainable environment renders the unknown name
+    /// to nothing, and the author gets an empty prompt with no explanation.
+    #[test]
+    fn a_default_from_expression_may_only_reference_the_seed_namespaces() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.project_name]
+            type = "string"
+            [questions.slug]
+            type = "string"
+            default_from = "{{ project_name | slugify }}"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "slug");
+        assert!(
+            reason.contains("not a seed namespace"),
+            "reason was: {reason}"
+        );
+    }
+
+    #[test]
+    fn a_misspelled_seed_namespace_is_suggested() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.slug]
+            type = "string"
+            default_from = "{{ remotes.name }}"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { reason, .. } = error else {
+            panic!("expected an invalid question");
+        };
+        assert!(
+            reason.contains("did you mean `remote`?"),
+            "reason was: {reason}"
+        );
+    }
+
+    /// A missing *leaf* under a real namespace is the whole point of
+    /// `| default(...)` and must not be confused with a missing namespace.
+    #[test]
+    fn an_unset_key_under_a_real_namespace_is_not_a_load_time_error() {
+        Manifest::parse(
+            r#"
+            name = "x"
+            [questions.author]
+            type = "string"
+            default_from = "{{ git.user.nickname | default(git.user.name) }}"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
     }
 
     /// A pattern is checked against text; on any other kind it would either
