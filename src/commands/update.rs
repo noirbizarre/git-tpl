@@ -90,6 +90,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             previous_revision_description,
             revision_description,
             answers_changed,
+            started_new_history,
             ignored_answers,
             ignored,
         } => {
@@ -130,6 +131,23 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 ));
             }
 
+            if started_new_history {
+                // Said rather than left to be discovered during a merge that
+                // conflicts on every file. Both causes are legitimate — an
+                // edited `source` or `id`, or a clone that never fetched the
+                // ref — so this is a warning and not a refusal.
+                ctx.out.blank();
+                ctx.out.say(muted(
+                    &ctx.out.theme,
+                    &format!(
+                        "No {} existed here, so this update started a new history.\n\
+                         If the ref exists on a remote, run `git tpl fetch` before merging: \
+                         without a merge base, `git tpl merge` can conflict on every file.",
+                        id.ref_name()
+                    ),
+                ));
+            }
+
             ctx.out.blank();
             ctx.out.say("Run:");
             ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
@@ -158,6 +176,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "revision": revision_description,
                 "changes": crate::report::changes(&changes),
                 "answersChanged": answers_changed,
+                "startedNewHistory": started_new_history,
                 "ignoredAnswers": ignored_answers,
                 "pushed": pushed,
             })

@@ -1134,6 +1134,15 @@ pub enum UpdateOutcome {
         /// template adds a question. Worth telling the user, since it is the
         /// one file `update` does modify.
         answers_changed: bool,
+        /// Whether the commit was written onto an empty ref, and so starts a
+        /// history unrelated to anything the branch has merged.
+        ///
+        /// Two causes, both legitimate and neither obvious: the configuration's
+        /// `source` or `id` was edited, so the ref name changed; or the project
+        /// was cloned without `refs/tpl/*` and never fetched. Either way the
+        /// next `git tpl merge` has no merge base and can conflict on every
+        /// file, which is worth saying before it happens.
+        started_new_history: bool,
         /// Supplied answers that name no question in this template.
         ignored_answers: Vec<String>,
         /// Template files a `.gitignore` removed from the rendering.
@@ -1209,6 +1218,10 @@ pub fn update(
     // would destroy the merge base the branch already shares with the ref.
     // See docs/adr/005-append-only-refs.md.
     let parents: Vec<Oid> = tip.into_iter().collect();
+    // No tip to descend from: this rendering shares no ancestry with whatever
+    // the branch merged before. Not an error — a fresh clone has no
+    // `refs/tpl/*` until it fetches — but the caller must say so.
+    let started_new_history = parents.is_empty();
     let commit =
         project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
     project.set_ref(&ref_name, commit, "tpl: update")?;
@@ -1236,6 +1249,7 @@ pub fn update(
             rendered.template.revision,
         ),
         answers_changed,
+        started_new_history,
         ignored_answers: rendered.ignored_answers,
         ignored: rendered.template.ignored,
     })

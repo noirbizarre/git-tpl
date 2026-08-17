@@ -204,11 +204,19 @@ adds a remote nor shows a note.
   "commit": "a17b0b2…",
   "previousRevision": "main (a1b2c3d)", "revision": "main (76ec0ea)",
   "changes": [{ "path": "Cargo.toml", "kind": "modified" }],
-  "answersChanged": false, "ignoredAnswers": [], "pushed": null }
+  "answersChanged": false, "startedNewHistory": false,
+  "ignoredAnswers": [], "pushed": null }
 ```
 
 Branch on `result`: `upToDate` or `updated`. It is the one thing the exit code
 does not say — both succeed.
+
+`startedNewHistory` is `true` when there was no `refs/tpl/<id>` to descend
+from, so the new commit is an orphan sharing no ancestry with anything the
+branch has merged. Two causes, both legitimate: the configuration's `source` or
+`id` was edited, or the project was cloned without `refs/tpl/*` and never
+fetched. Not an error, but a `git tpl merge` from here has no merge base and can
+conflict on every file — fetch first if the ref exists on a remote.
 
 `previousRevision` is `null` on the first rendering. `pushed` names the remote
 when [`tpl.autoPush`](../usage/push.md) pushed automatically, `null` otherwise —
