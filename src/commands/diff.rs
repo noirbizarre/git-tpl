@@ -29,7 +29,8 @@ fn report_conflicts(ctx: &Session, conflicts: &[String]) {
         ),
     ));
     for path in conflicts {
-        ctx.out.say(muted(&ctx.out.theme, &format!("         {path}")));
+        ctx.out
+            .say(muted(&ctx.out.theme, &format!("         {path}")));
     }
     ctx.out.blank();
 }

@@ -143,11 +143,7 @@ fn default_excludes_file() -> Option<PathBuf> {
     // on whether a relative `XDG_CONFIG_HOME` counted and on whether
     // `USERPROFILE` was consulted, so one machine could find a global ignore
     // file and no user configuration.
-    Some(
-        crate::userconfig::config_home()?
-            .join("git")
-            .join("ignore"),
-    )
+    Some(crate::userconfig::config_home()?.join("git").join("ignore"))
 }
 
 #[cfg(test)]

@@ -40,7 +40,8 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
 fn print_text(ctx: &Session, status: &ops::Status) {
     ctx.out.blank();
-    ctx.out.say(field(&ctx.out.theme, "Template", &status.source));
+    ctx.out
+        .say(field(&ctx.out.theme, "Template", &status.source));
     ctx.out.say(field(&ctx.out.theme, "Ref", &status.ref_name));
     ctx.out.blank();
 
@@ -63,7 +64,8 @@ fn print_text(ctx: &Session, status: &ops::Status) {
         (Some(available), false) if status.tip.is_none() => available.clone(),
         (_, _) => rendered.clone(),
     };
-    ctx.out.say(field(&ctx.out.theme, "Revision", &revision_line));
+    ctx.out
+        .say(field(&ctx.out.theme, "Revision", &revision_line));
 
     ctx.out.say(field(
         &ctx.out.theme,
@@ -112,7 +114,8 @@ fn print_text(ctx: &Session, status: &ops::Status) {
         ctx.out.say(command(&ctx.out.theme, "git tpl update"));
     } else if status.tip.is_some() && !status.merged {
         ctx.out.blank();
-        ctx.out.say("There is a rendering you have not merged. Run:");
+        ctx.out
+            .say("There is a rendering you have not merged. Run:");
         ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
         ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
     }

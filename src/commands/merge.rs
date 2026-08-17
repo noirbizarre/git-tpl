@@ -42,7 +42,8 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "Fast-forwarded",
                 &format!("{} into the current branch", id.ref_name()),
             ));
-            ctx.out.say(muted(&ctx.out.theme, &format!("Now at {}.", to.short())));
+            ctx.out
+                .say(muted(&ctx.out.theme, &format!("Now at {}.", to.short())));
         }
         MergeOutcome::Merged { commit } => {
             ctx.out.say(headline(
@@ -63,7 +64,8 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         MergeOutcome::Conflicted { paths } => {
             ctx.out.blank();
             for path in paths {
-                ctx.out.say(format!("CONFLICT (content): Merge conflict in {path}"));
+                ctx.out
+                    .say(format!("CONFLICT (content): Merge conflict in {path}"));
             }
             ctx.out.blank();
             ctx.out.say(warning(
@@ -82,8 +84,12 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 &ctx.out.theme,
                 "git mergetool           resolve interactively",
             ));
-            ctx.out.say(command(&ctx.out.theme, "git commit              finish"));
-            ctx.out.say(command(&ctx.out.theme, "git merge --abort       start over"));
+            ctx.out
+                .say(command(&ctx.out.theme, "git commit              finish"));
+            ctx.out.say(command(
+                &ctx.out.theme,
+                "git merge --abort       start over",
+            ));
         }
     }
 

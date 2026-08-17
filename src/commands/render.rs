@@ -183,4 +183,3 @@ fn io(path: &Path, verb: &str, error: &std::io::Error) -> OpError {
         reason: error.to_string(),
     })
 }
-

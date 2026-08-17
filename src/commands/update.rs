@@ -96,7 +96,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             report_ignored(&ctx.out, &ignored_answers);
             report_ignored_paths(&ctx.out, &ignored);
             ctx.out.blank();
-            ctx.out.say(field(&ctx.out.theme, "Template", &config.template.source));
+            ctx.out
+                .say(field(&ctx.out.theme, "Template", &config.template.source));
             ctx.out.say(field(
                 &ctx.out.theme,
                 "Revision",
@@ -108,7 +109,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 },
             ));
             ctx.out.blank();
-            ctx.out.say(headline(&ctx.out.theme, "Updated", &id.ref_name()));
+            ctx.out
+                .say(headline(&ctx.out.theme, "Updated", &id.ref_name()));
             ctx.out.blank();
             for c in &changes {
                 ctx.out.say(change(&ctx.out.theme, c.kind, &c.path));
@@ -139,7 +141,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             let pushed = if preferences.auto_push {
                 ctx.out.blank();
                 let pushed = ops::push(&ctx.repo, &ctx.root, &preferences)?;
-                ctx.out.say(format!("Pushed {pushed} to {}.", preferences.remote));
+                ctx.out
+                    .say(format!("Pushed {pushed} to {}.", preferences.remote));
                 Some(preferences.remote.clone())
             } else {
                 None
@@ -231,10 +234,13 @@ fn dry_run(
     let changes = ctx.repo.diff_trees(previous_tree, rendered.tree, &[])?;
 
     ctx.out.blank();
-    ctx.out.say(field(&ctx.out.theme, "Template", &config.template.source));
-    ctx.out.say(field(&ctx.out.theme, "Revision", &revision_description));
+    ctx.out
+        .say(field(&ctx.out.theme, "Template", &config.template.source));
+    ctx.out
+        .say(field(&ctx.out.theme, "Revision", &revision_description));
     ctx.out.blank();
-    ctx.out.say(headline(&ctx.out.theme, "Would update", &id.ref_name()));
+    ctx.out
+        .say(headline(&ctx.out.theme, "Would update", &id.ref_name()));
     ctx.out.blank();
     for c in &changes {
         ctx.out.say(change(&ctx.out.theme, c.kind, &c.path));

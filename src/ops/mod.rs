@@ -1092,11 +1092,11 @@ pub enum UpdateOutcome {
         /// even here: a typo'd key is worth reporting whether or not the
         /// rendering changed.
         ignored_answers: Vec<String>,
-    /// Template files a `.gitignore` removed from the rendering.
-    ///
-    /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
-    /// a global `core.excludesFile` rule the author forgot they wrote is
-    /// otherwise invisible, since there is no `git status` inside a render.
+        /// Template files a `.gitignore` removed from the rendering.
+        ///
+        /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
+        /// a global `core.excludesFile` rule the author forgot they wrote is
+        /// otherwise invisible, since there is no `git status` inside a render.
         ignored: Vec<String>,
     },
     /// A new commit was added to the rendered ref.
@@ -1117,11 +1117,11 @@ pub enum UpdateOutcome {
         answers_changed: bool,
         /// Supplied answers that name no question in this template.
         ignored_answers: Vec<String>,
-    /// Template files a `.gitignore` removed from the rendering.
-    ///
-    /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
-    /// a global `core.excludesFile` rule the author forgot they wrote is
-    /// otherwise invisible, since there is no `git status` inside a render.
+        /// Template files a `.gitignore` removed from the rendering.
+        ///
+        /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
+        /// a global `core.excludesFile` rule the author forgot they wrote is
+        /// otherwise invisible, since there is no `git status` inside a render.
         ignored: Vec<String>,
     },
 }
@@ -1426,7 +1426,11 @@ pub fn render_preview(
     let parents: Vec<Oid> = project.resolve_ref(&ref_name)?.into_iter().collect();
 
     Ok(Preview {
-        commit: project.create_commit(rendered.tree, &parents, "preview: uncommitted template\n")?,
+        commit: project.create_commit(
+            rendered.tree,
+            &parents,
+            "preview: uncommitted template\n",
+        )?,
         ignored: rendered.template.ignored,
     })
 }

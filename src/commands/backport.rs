@@ -120,7 +120,11 @@ fn report(ctx: &Session, args: &BackportArgs, result: &Backport) {
     // `-C` wrong the first time.
     match &args.output {
         Some(path) => {
-            ctx.out.say(field(&ctx.out.theme, "written", &path.display().to_string()));
+            ctx.out.say(field(
+                &ctx.out.theme,
+                "written",
+                &path.display().to_string(),
+            ));
             ctx.out.say(field(
                 &ctx.out.theme,
                 "apply",

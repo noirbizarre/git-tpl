@@ -653,10 +653,7 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
     let Some(dir) = template.repo.subtree(template.tree, tests_dir)? else {
         return Err(TestError::NoTests {
             dir: tests_dir.to_string(),
-            revision_description: super::describe_revision(
-                &template.reference,
-                template.revision,
-            ),
+            revision_description: super::describe_revision(&template.reference, template.revision),
         }
         .into());
     };
@@ -712,10 +709,7 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
     if cases.is_empty() {
         return Err(TestError::NoTests {
             dir: tests_dir.to_string(),
-            revision_description: super::describe_revision(
-                &template.reference,
-                template.revision,
-            ),
+            revision_description: super::describe_revision(&template.reference, template.revision),
         }
         .into());
     }

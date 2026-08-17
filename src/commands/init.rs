@@ -82,9 +82,14 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // The expanded URL, not what was typed: this is the line a user copies
     // when reporting a problem, and it is what is now recorded in the project.
     ctx.out.say(field(&ctx.out.theme, "Template", &template));
-    ctx.out.say(field(&ctx.out.theme, "Revision", &outcome.revision_description));
+    ctx.out.say(field(
+        &ctx.out.theme,
+        "Revision",
+        &outcome.revision_description,
+    ));
     ctx.out.blank();
-    ctx.out.say(headline(&ctx.out.theme, "Created", &outcome.id.ref_name()));
+    ctx.out
+        .say(headline(&ctx.out.theme, "Created", &outcome.id.ref_name()));
     ctx.out.blank();
     for c in &outcome.changes {
         ctx.out.say(change(&ctx.out.theme, c.kind, &c.path));
@@ -272,7 +277,8 @@ fn dry_run(
     ctx.out.blank();
     ctx.out.say(field(&ctx.out.theme, "Template", source));
     let revision_description = ops::describe_revision(&template.reference, template.revision);
-    ctx.out.say(field(&ctx.out.theme, "Revision", &revision_description));
+    ctx.out
+        .say(field(&ctx.out.theme, "Revision", &revision_description));
     ctx.out.blank();
     ctx.out.say(heading(
         &ctx.out.theme,
@@ -301,13 +307,17 @@ fn dry_run(
                 asked += 1;
             }
             tpl::graph::NodeKind::Computed => {
-                ctx.out.say(muted(&ctx.out.theme, &format!("  {} (computed)", node.key)));
+                ctx.out
+                    .say(muted(&ctx.out.theme, &format!("  {} (computed)", node.key)));
                 nodes.push(
                     serde_json::json!({ "name": node.key, "kind": "computed", "supplied": false }),
                 );
             }
             tpl::graph::NodeKind::Data => {
-                ctx.out.say(muted(&ctx.out.theme, &format!("  {} (data source)", node.key)));
+                ctx.out.say(muted(
+                    &ctx.out.theme,
+                    &format!("  {} (data source)", node.key),
+                ));
                 nodes.push(
                     serde_json::json!({ "name": node.key, "kind": "data", "supplied": false }),
                 );
@@ -344,9 +354,11 @@ fn dry_run(
             trust(&args.answers, args.trust, false, &mut confirmer),
         ) {
             ctx.out.blank();
-            ctx.out.say(heading(&ctx.out.theme, "Files it would render"));
+            ctx.out
+                .say(heading(&ctx.out.theme, "Files it would render"));
             for file in &rendered.files {
-                ctx.out.say(muted(&ctx.out.theme, &format!("  {}", file.path)));
+                ctx.out
+                    .say(muted(&ctx.out.theme, &format!("  {}", file.path)));
             }
             files = Some(
                 rendered

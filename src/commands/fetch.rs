@@ -60,9 +60,11 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         }
         Some(relation) if relation.is_diverged() => {
             ctx.out.blank();
-            ctx.out.say(format!("{ref_name} has {}.", relation.describe()));
+            ctx.out
+                .say(format!("{ref_name} has {}.", relation.describe()));
             ctx.out.blank();
-            ctx.out.say("Both were rendered independently. Reconcile them:");
+            ctx.out
+                .say("Both were rendered independently. Reconcile them:");
             ctx.out.say(command(
                 &ctx.out.theme,
                 &format!("git merge refs/remotes/{}/tpl/...", preferences.remote),
