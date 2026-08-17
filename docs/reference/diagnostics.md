@@ -31,7 +31,7 @@ Something is wrong with the template itself.
 | Code | Meaning |
 |---|---|
 | `tpl::manifest::missing` | No `template.toml` at the source. |
-| `tpl::manifest::parse` | `template.toml` is not valid TOML, or has an unknown key. |
+| `tpl::manifest::parse` | `template.toml` is not valid TOML, or a key it declares has the wrong type. An unknown key is ignored, not diagnosed, so a misspelled one reads as unset. |
 | `tpl::manifest::name_collision` | A question and a computed value share a name. |
 | `tpl::manifest::invalid_question` | A question declaration is not coherent — see the message. Covers a `default_from` naming no source, one whose expression does not parse, and one referencing something that is not a [seed namespace](../templates/questions.md#machine-seeded-defaults). |
 | `tpl::manifest::conflicting_note` | Both `note` and `note_file` are declared. Keep one. |
