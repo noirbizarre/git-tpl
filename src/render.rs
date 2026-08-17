@@ -155,6 +155,15 @@ pub fn collect_partials(
 pub struct Rendered {
     /// The output path.
     pub path: String,
+    /// The template entry this was rendered from, `.jinja` suffix intact.
+    ///
+    /// The only inverse of [`render_path`] there can be. It cannot be
+    /// recovered by recomputation: a path segment that renders empty erases
+    /// its whole subtree, so the mapping is not onto and inverting it means
+    /// guessing which of the erased sources a name came from. `backport` needs
+    /// to name the `.jinja` its patch edits, so the mapping is kept rather
+    /// than rediscovered.
+    pub source: String,
     /// The output bytes.
     pub content: Vec<u8>,
     /// Whether the executable bit is set.
@@ -279,6 +288,7 @@ pub fn render_entries(
 
         out.push(Rendered {
             path,
+            source: entry.path.clone(),
             content,
             templated,
             // Git records nothing about permissions except the executable bit,
