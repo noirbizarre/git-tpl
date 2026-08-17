@@ -11,6 +11,21 @@ when the command is chatty:
 git tpl --json questions ./template | jq '.questions[] | select(.when == null) | .name'
 ```
 
+## The global flags
+
+Four flags are accepted by every command, before or after the subcommand:
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--json` | off | The payload on stdout as one object, as described here. Silences the prose narration, as `--quiet` does. |
+| `-q`, `--quiet` | off | Suppress everything but errors and warnings. The exit code still says what happened. |
+| `-v`, `--verbose` | off | More detail. Repeatable — `-vv` for more again. |
+| `--color <auto\|always\|never>` | `auto` | `auto` colours only when stderr is a terminal. |
+
+A warning is deliberately louder than the rest: neither `--quiet` nor `--json`
+suppresses one, because a warning names something the caller is getting wrong
+right now. Warnings go to stderr, so a JSON payload on stdout stays parseable.
+
 ## Failure
 
 One shape, from every command:
@@ -196,7 +211,7 @@ Branch on `result`: `upToDate` or `updated`. It is the one thing the exit code
 does not say — both succeed.
 
 `previousRevision` is `null` on the first rendering. `pushed` names the remote
-when [`tpl.push`](../usage/push.md) pushed automatically, `null` otherwise —
+when [`tpl.autoPush`](../usage/push.md) pushed automatically, `null` otherwise —
 the push still happens under `--json`, only its prose is silenced.
 
 With `--dry-run`, the same shape plus `"dryRun": true`, and `result` is
@@ -276,6 +291,11 @@ Fetching never moves the local ref, so `behind` is a report, not an action.
 ```json
 { "ok": true, "remote": "origin", "ref": "refs/tpl/rust" }
 ```
+
+### `test`
+
+Documented with the command, at [`git tpl test`](../usage/test.md). The
+payload carries `summary` and a `cases` array, each with its `failures`.
 
 ### `show`, `completion` and `man`
 

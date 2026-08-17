@@ -13,7 +13,10 @@ use std::path::Path;
 
 use tpl::ops::{self, OpError, Target};
 
-use super::{Standalone, answering, enforce_strict_answers, report_ignored_to, supplied, trust};
+use super::{
+    Standalone, answering, enforce_strict_answers, report_ignored, report_ignored_paths, supplied,
+    trust,
+};
 use crate::cli::{GlobalArgs, RenderArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{field, headline, muted};
@@ -53,8 +56,8 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         &rendered.ignored_answers,
         rendered.template.manifest.questions.keys().cloned(),
     )?;
-    report_ignored_to(&ctx.out, &rendered.ignored_answers);
-    report_ignored_paths(&ctx, &rendered.template.ignored);
+    report_ignored(&ctx.out, &rendered.ignored_answers);
+    report_ignored_paths(&ctx.out, &rendered.template.ignored);
 
     prepare_output(&args.output, args.force)?;
     for file in &rendered.files {
@@ -179,32 +182,4 @@ fn io(path: &Path, verb: &str, error: &std::io::Error) -> OpError {
         context: format!("{verb} `{}`", path.display()),
         reason: error.to_string(),
     })
-}
-
-/// Say what `.gitignore` removed from a `--dirty` render.
-///
-/// A count always, the paths under `-v`. The ignore stack includes
-/// `core.excludesFile`, so this is regularly a global rule the author forgot
-/// they wrote — and inside a render there is no `git status` to reveal it.
-fn report_ignored_paths(ctx: &Standalone, ignored: &[String]) {
-    if ignored.is_empty() {
-        return;
-    }
-    ctx.out.warn(crate::theme::warning(
-        &ctx.out.theme,
-        &format!(
-            "{} file(s) skipped by .gitignore and absent from the rendering",
-            ignored.len()
-        ),
-    ));
-    if ctx.out.global.verbose > 0 {
-        for path in ignored {
-            ctx.out.warn(muted(&ctx.out.theme, &format!("  {path}")));
-        }
-    } else {
-        ctx.out.warn(muted(
-            &ctx.out.theme,
-            "  run with -v to list them, or `git check-ignore -v <path>` to find the rule",
-        ));
-    }
 }

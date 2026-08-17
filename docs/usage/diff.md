@@ -136,4 +136,5 @@ git tpl diff --name-only
 | `--reverse` | Diff the other way, merged → `HEAD`: the inverse patch. |
 | `--exit-code` | Exit `1` when there is a difference, like `git diff --exit-code`. Keyed on difference, not conflict. |
 | `--dirty` | Preview the template's working tree rather than the rendered ref. Local templates only. |
+| `--answer`, `--answers-from`, `--defaults`, `--strict-answers` | Override the recorded answers for a `--dirty` preview. Nothing is recorded and no ref moves. |
 | `-- <path>...` | Limit to these paths. |

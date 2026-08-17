@@ -176,5 +176,4 @@ so honestly.
 A rendered file named `something.jinja` lands in the snapshot as
 `tests/__snapshots__/<case>/files/something.jinja`, and the renderer collects
 every `.jinja` outside the render root as an importable partial. It is keyed by
-its full path, so it shadows nothing and changes no rendering — but it will
-appear in `git tpl context --partials` output.
+its full path, so it shadows nothing and changes no rendering.

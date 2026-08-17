@@ -63,11 +63,16 @@ package_name = "{{ project_name | lower | replace(' ', '-') }}"
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `name` | string | *required* | The template's name. Used in output, and as the default template id. |
+| `name` | string | *required* | The template's name. Used in output, and in the rendered commit subject. |
 | `description` | string | — | One line, shown when prompting. |
 | `root` | string | `"template"` | The subdirectory that gets rendered. |
+| `strict` | bool | `false` | Fail on an undeclared name in a rendered file, rather than rendering it to an empty string. [`git tpl lint`](../usage/lint.md) reports the same names as warnings. |
 | `note` | string | — | A note shown after `init`. May be an expression. Mutually exclusive with `note_file`. |
 | `note_file` | string | — | A path *in the template repository*, relative to its root, whose content is shown after `init`. Rendered if it ends in `.jinja`. The path may be an expression. |
+
+The template **id** — which determines the ref name — is derived from the
+`source` the project records, not from `name`. See
+[Configuration](../configuration.md#template).
 
 `[questions]`, `[computed]` and `[data]` are covered in
 [Questions](questions.md), [Computed values](computed.md) and
@@ -78,9 +83,14 @@ package_name = "{{ project_name | lower | replace(' ', '-') }}"
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `source` | string | *required* | Where the data comes from. May be an expression. |
-| `kind` | string | inferred | `template`, `local` or `remote`. Required when `source` only becomes a URL after interpolation. |
+| `kind` | string | inferred | `template`, `local`, `remote` or [`git`](../data/git.md). Required when `source` only becomes a URL after interpolation. |
+| `ref` | string | — | The revision a `git` source is read at — branch, tag or SHA. May be an expression. |
+| `path` | string | — | The path inside a `git` source's repository. May be an expression. |
 | `format` | string | inferred | `toml`, `json` or `yaml`. Inferred from the extension. |
 | `sha256` | string | — | The expected digest of the content, as 64 hex characters. A mismatch stops the render. |
+
+`ref` and `path` go together: a half-declared triple is refused at load time.
+See [Git data sources](../data/git.md).
 
 ### `[remotes]`
 

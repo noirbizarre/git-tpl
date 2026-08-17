@@ -856,15 +856,15 @@ impl GitBackend for LibGit2 {
         }
     }
 
-    fn resolve_revision(&self, revision: &str, origin: &str) -> Result<Oid, GitError> {
+    fn resolve_revision(&self, reference: &str, origin: &str) -> Result<Oid, GitError> {
         // `revparse_single` handles SHAs, tags and local branches. A bare
         // clone's branches live under `refs/remotes/origin/`, so a plain
         // `main` needs the fallback below.
         let candidates = [
-            revision.to_string(),
-            format!("refs/tags/{revision}"),
-            format!("refs/remotes/origin/{revision}"),
-            format!("refs/heads/{revision}"),
+            reference.to_string(),
+            format!("refs/tags/{reference}"),
+            format!("refs/remotes/origin/{reference}"),
+            format!("refs/heads/{reference}"),
         ];
 
         for candidate in &candidates {
@@ -876,7 +876,7 @@ impl GitBackend for LibGit2 {
         }
 
         Err(GitError::NoSuchRevision {
-            reference: revision.to_string(),
+            reference: reference.to_string(),
             origin: origin.to_string(),
         })
     }

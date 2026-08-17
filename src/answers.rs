@@ -61,6 +61,24 @@ pub enum AnswersError {
         /// The path as it was given on the command line.
         path: String,
     },
+
+    /// A supplied answer names no question, under `--strict-answers`.
+    //
+    // Declared here rather than on `OpError`, where it used to live, because
+    // the code is `tpl::answers::unknown_key` and `<area>` is the declaring
+    // module's own name. Moving the variant keeps the code — a public
+    // identifier callers grep for — exactly as it was.
+    #[error("`{key}` names no question in this template")]
+    #[diagnostic(
+        code(tpl::answers::unknown_key),
+        help("{suggestion}Remove it, or drop --strict-answers to ignore it.")
+    )]
+    UnknownKey {
+        /// The offending key.
+        key: String,
+        /// A "did you mean?" prefix, or empty.
+        suggestion: String,
+    },
 }
 
 /// Read answers from a TOML, JSON or YAML file.

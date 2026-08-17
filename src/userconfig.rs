@@ -228,22 +228,41 @@ fn segment_matches(pattern: &str, value: &str) -> bool {
     }
 }
 
+/// The XDG config directory, if this machine has one.
+///
+/// `$XDG_CONFIG_HOME` first, then `$HOME/.config`. Hand-written rather than
+/// taken from a crate: it is a handful of lines, and a crate would still have
+/// to be told which of the rules below to apply.
+///
+/// One function because there were two, and they disagreed: a relative
+/// `XDG_CONFIG_HOME` found a global ignore file but no user configuration, and
+/// a Windows user with only `USERPROFILE` got the reverse.
+///
+/// `None` when nothing is set.
+pub fn config_home() -> Option<PathBuf> {
+    // An empty or relative value is unset, per the XDG specification.
+    if let Some(value) = std::env::var_os("XDG_CONFIG_HOME")
+        && PathBuf::from(&value).is_absolute()
+    {
+        return Some(PathBuf::from(value));
+    }
+    // `USERPROFILE` is the Windows fallback libgit2 itself uses. Git for
+    // Windows usually exports `HOME`, but nothing guarantees it, and without
+    // this a Windows user's global ignore file would simply not be found —
+    // silently including files `git add -A` leaves out.
+    let home = ["HOME", "USERPROFILE"]
+        .into_iter()
+        .find_map(|name| std::env::var_os(name).filter(|value| !value.is_empty()))?;
+    Some(PathBuf::from(home).join(".config"))
+}
+
 impl UserConfig {
     /// Where the configuration lives, if this machine has a home directory.
     ///
-    /// `$XDG_CONFIG_HOME` first, then `$HOME/.config`. Hand-written rather than
-    /// taken from a crate: it is six lines, and it is the same rule
-    /// `git::libgit2` already applies when looking for SSH keys.
-    ///
-    /// `None` when neither variable is set — a container with no home is a
-    /// normal place to run git-tpl, and it simply has no user configuration.
+    /// `None` when there is no home — a container without one is a normal
+    /// place to run git-tpl, and it simply has no user configuration.
     pub fn path() -> Option<PathBuf> {
-        let base = match std::env::var_os("XDG_CONFIG_HOME") {
-            // An empty or relative value is unset, per the XDG specification.
-            Some(value) if PathBuf::from(&value).is_absolute() => PathBuf::from(value),
-            _ => PathBuf::from(std::env::var_os("HOME")?).join(".config"),
-        };
-        Some(base.join(CONFIG_DIR).join(CONFIG_FILE))
+        Some(config_home()?.join(CONFIG_DIR).join(CONFIG_FILE))
     }
 
     /// Load the user configuration, or the empty one.

@@ -57,6 +57,12 @@ src/
 ├── eval.rs          expression evaluation and prompting
 ├── render.rs        the tree walk
 ├── answers.rs       --answers-from files
+├── userconfig.rs    ~/.config/git-tpl/config.toml
+├── seed.rs          the machine-seeded prompt defaults (ADR-018)
+├── remote.rs        remote URL parts, for seeding
+├── lint.rs          static template analysis
+├── note.rs          terminal-safe rendering of a template's note (ADR-019)
+├── suggest.rs       "did you mean?"
 ├── data/            data sources
 ├── git/             the Git abstraction
 │   ├── mod.rs       GitBackend — our types, never git2's
@@ -64,6 +70,7 @@ src/
 │   └── libgit2.rs   the only implementation
 ├── ops/             orchestration, one function per command
 ├── cli.rs           argument types only
+├── report.rs        the --json envelope, success and failure
 ├── theme.rs         formatting helpers that return String
 ├── prompt.rs        the demand-based prompter
 └── commands/        one module per subcommand

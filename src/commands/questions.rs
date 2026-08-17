@@ -7,7 +7,6 @@
 //! enough to write an answers file, which is what a caller that cannot answer
 //! a prompt actually needs.
 
-use tpl::graph::{Graph, NodeKind};
 use tpl::ops::{self, OpError};
 use tpl::template::{Question, is_expression};
 
@@ -19,7 +18,7 @@ pub fn run(args: QuestionsArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
     let source = ctx.user.expand(&args.template).into_owned();
 
-    let template = ops::resolve::resolve(ops::Request {
+    let ops::Questionnaire { template, order } = ops::questions(ops::Request {
         source: &source,
         reference: args.r#ref.as_deref(),
         root: args.root.as_deref(),
@@ -27,21 +26,14 @@ pub fn run(args: QuestionsArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     })?;
 
     let manifest = &template.manifest;
-    // Resolution order, not declaration order. When a `when` or a `default`
-    // references an earlier answer, this is the order a caller has to answer
-    // in — and it is the order the graph already computes for prompting.
-    let graph = Graph::build(manifest)?;
-
-    let ordered: Vec<(usize, &String, &Question)> = graph
-        .order()
+    let ordered: Vec<(usize, &String, &Question)> = order
         .iter()
-        .filter(|node| node.kind == NodeKind::Question)
         .enumerate()
-        .filter_map(|(index, node)| {
+        .filter_map(|(index, key)| {
             manifest
                 .questions
-                .get(&node.key)
-                .map(|question| (index, &node.key, question))
+                .get_key_value(key)
+                .map(|(name, question)| (index, name, question))
         })
         .collect();
 

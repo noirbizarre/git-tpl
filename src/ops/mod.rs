@@ -127,7 +127,7 @@ pub enum OpError {
     /// ref is created and before the merge, so nothing has been written to the
     /// user's repository yet. Showing nothing instead would leave a template
     /// author with an `init` that succeeds and a note that never appears.
-    #[error("`{path}` is not in the template at {revision}")]
+    #[error("`{path}` is not in the template at {revision_description}")]
     #[diagnostic(
         code(tpl::ops::missing_note_file),
         help(
@@ -140,8 +140,12 @@ pub enum OpError {
     MissingNoteFile {
         /// The path, as it resolved.
         path: String,
-        /// The revision it was looked for at.
-        revision: String,
+        /// The revision it was looked for at, as `reference (revision)`.
+        //
+        // `*_description`, not `revision`: the naming rule reserves `revision`
+        // for an `Oid`, and this is the printable pair `describe_revision`
+        // produces.
+        revision_description: String,
     },
 
     /// A `note_file` is not valid UTF-8.
@@ -190,19 +194,6 @@ pub enum OpError {
     NoRenderedRef {
         /// The ref that was looked for.
         ref_name: String,
-    },
-
-    /// A supplied answer names no question, under `--strict-answers`.
-    #[error("`{key}` names no question in this template")]
-    #[diagnostic(
-        code(tpl::answers::unknown_key),
-        help("{suggestion}Remove it, or drop --strict-answers to ignore it.")
-    )]
-    UnknownAnswer {
-        /// The offending key.
-        key: String,
-        /// A "did you mean?" prefix, or empty.
-        suggestion: String,
     },
 
     /// The path is not in the rendering.
@@ -802,6 +793,12 @@ pub struct InitOutcome {
     pub revision_description: String,
     /// Supplied answers that name no question in this template.
     pub ignored_answers: Vec<String>,
+    /// Template files a `.gitignore` removed from the rendering.
+    ///
+    /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
+    /// a global `core.excludesFile` rule the author forgot they wrote is
+    /// otherwise invisible, since there is no `git status` inside a render.
+    pub ignored: Vec<String>,
     /// The template's own note to the user, raw and unsanitised.
     ///
     /// Sanitised where it is shown, not here: this layer does not print, and a
@@ -949,6 +946,7 @@ pub fn init(
             rendered.template.revision,
         ),
         ignored_answers: rendered.ignored_answers,
+        ignored: rendered.template.ignored,
         note,
         remotes,
     })
@@ -1002,7 +1000,10 @@ fn template_note(rendered: &Render) -> Result<Option<String>, OpError> {
     else {
         return Err(OpError::MissingNoteFile {
             path: path.to_string(),
-            revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+            revision_description: describe_revision(
+                &rendered.template.reference,
+                rendered.template.revision,
+            ),
         });
     };
 
@@ -1091,6 +1092,12 @@ pub enum UpdateOutcome {
         /// even here: a typo'd key is worth reporting whether or not the
         /// rendering changed.
         ignored_answers: Vec<String>,
+        /// Template files a `.gitignore` removed from the rendering.
+        ///
+        /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
+        /// a global `core.excludesFile` rule the author forgot they wrote is
+        /// otherwise invisible, since there is no `git status` inside a render.
+        ignored: Vec<String>,
     },
     /// A new commit was added to the rendered ref.
     Updated {
@@ -1110,6 +1117,12 @@ pub enum UpdateOutcome {
         answers_changed: bool,
         /// Supplied answers that name no question in this template.
         ignored_answers: Vec<String>,
+        /// Template files a `.gitignore` removed from the rendering.
+        ///
+        /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
+        /// a global `core.excludesFile` rule the author forgot they wrote is
+        /// otherwise invisible, since there is no `git status` inside a render.
+        ignored: Vec<String>,
     },
 }
 
@@ -1168,6 +1181,7 @@ pub fn update(
                 rendered.template.revision,
             ),
             ignored_answers: rendered.ignored_answers,
+            ignored: rendered.template.ignored,
         });
     }
 
@@ -1204,6 +1218,7 @@ pub fn update(
         ),
         answers_changed,
         ignored_answers: rendered.ignored_answers,
+        ignored: rendered.template.ignored,
     })
 }
 
@@ -1351,6 +1366,19 @@ fn count_renderings(project: &dyn GitBackend, tip: Oid) -> Result<usize, GitErro
     Ok(count)
 }
 
+/// A `--dirty` preview: the commit, and what `.gitignore` kept out of it.
+///
+/// A struct rather than a bare `Oid` so that the ignored paths reach the
+/// caller. They are only ever non-empty under `--dirty`, which is exactly when
+/// a preview is being taken, and a preview that silently omitted files would
+/// be answering a different question than the one asked.
+pub struct Preview {
+    /// The commit the preview was rendered into. No ref points at it.
+    pub commit: Oid,
+    /// Template files a `.gitignore` removed from the rendering.
+    pub ignored: Vec<String>,
+}
+
 /// Render the configured template now, as a commit nothing points at.
 ///
 /// This is what `diff --dirty` and `show --dirty` preview against. The commit
@@ -1369,7 +1397,7 @@ pub fn render_preview(
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
-) -> Result<Oid, OpError> {
+) -> Result<Preview, OpError> {
     let config = Config::load(project_root)?;
 
     // Recorded answers first, then command-line overrides — the same order
@@ -1397,7 +1425,89 @@ pub fn render_preview(
     let (_, ref_name) = identify(project_root)?;
     let parents: Vec<Oid> = project.resolve_ref(&ref_name)?.into_iter().collect();
 
-    Ok(project.create_commit(rendered.tree, &parents, "preview: uncommitted template\n")?)
+    Ok(Preview {
+        commit: project.create_commit(
+            rendered.tree,
+            &parents,
+            "preview: uncommitted template\n",
+        )?,
+        ignored: rendered.template.ignored,
+    })
+}
+
+/// A template, statically analysed.
+///
+/// The resolution is carried alongside the findings because every caller needs
+/// both: the findings to report, and the manifest's name to head the report
+/// with.
+pub struct Linted {
+    /// The template the findings are about.
+    pub template: Resolved,
+    /// What the analysis found, before any `--deny`/`--allow` policy.
+    pub findings: Vec<crate::lint::Finding>,
+}
+
+/// Resolve a template and analyse it, without rendering it.
+///
+/// Here rather than in the command module so that `lint`'s semantics can be
+/// exercised without going through the CLI, and so that nothing below `ops`
+/// has to know a `lint` command exists.
+///
+/// Severity policy — `--deny` and `--allow` — is deliberately *not* applied
+/// here. It is a decision about how to present findings, not about what the
+/// template contains, and the command layer owns presentation.
+pub fn lint(request: Request<'_>) -> Result<Linted, OpError> {
+    let template = resolve::resolve(request)?;
+
+    let entries = template.entries()?;
+    // The whole repository, not just the render root: a `note_file` names a
+    // path beside the manifest, in the same namespace a partial lives in.
+    let repo_entries = template.repo.list_tree(template.tree)?;
+    let partials = template.partials()?;
+
+    let findings = crate::lint::lint(
+        template.repo.as_ref(),
+        &template.manifest,
+        &entries,
+        &repo_entries,
+        &partials,
+    )?;
+
+    Ok(Linted { template, findings })
+}
+
+/// A template's answer schema, in the order the questions are asked.
+pub struct Questionnaire {
+    /// The template the questions belong to.
+    pub template: Resolved,
+    /// Question names in resolution order.
+    ///
+    /// Names rather than borrowed `Question`s, so this does not borrow from
+    /// the `Resolved` it travels with. The caller looks each one up in
+    /// `template.manifest.questions`.
+    pub order: Vec<String>,
+}
+
+/// Resolve a template and compute the order its questions are asked in.
+///
+/// Resolution order, not declaration order: when a `when` or a `default`
+/// references an earlier answer, this is the order a caller has to answer in,
+/// and it is the order the graph already computes for prompting.
+pub fn questions(request: Request<'_>) -> Result<Questionnaire, OpError> {
+    let template = resolve::resolve(request)?;
+    let graph = Graph::build(&template.manifest)?;
+
+    let order: Vec<String> = graph
+        .order()
+        .iter()
+        .filter(|node| node.kind == crate::graph::NodeKind::Question)
+        .map(|node| node.key.clone())
+        // A node the manifest does not declare as a question cannot be
+        // answered, so it has no place in an answer schema.
+        .filter(|key| template.manifest.questions.contains_key(key))
+        .collect();
+
+    Ok(Questionnaire { template, order })
 }
 
 /// The rendered ref's tip, or a helpful error.

@@ -42,5 +42,17 @@ worse than none, because it would be believed.
 
 ## Options
 
-Takes the same answer flags as [`render`](render.md), including `--dirty`,
-so you can inspect a context an uncommitted template edit would produce.
+Takes the same answer flags as [`render`](render.md) — `--answer`,
+`--answers-from`, `--defaults`, `--strict-answers` — along with:
+
+| Option | Meaning |
+|---|---|
+| `--ref` | Branch, tag or commit to read. |
+| `--root` | Use this subdirectory instead of the manifest's. |
+| `--dirty` | Inspect the context an uncommitted template edit would produce. Local templates only. |
+| `--trust` | Allow [network data sources](../data/index.md) without asking. |
+| `--eval` | Evaluate one expression against the context and print the result. |
+
+`--trust` is not an answer flag, and it matters here: a template with a network
+data source will otherwise prompt, or fail outright where there is nobody to
+ask — which is exactly the case this command is used to debug.

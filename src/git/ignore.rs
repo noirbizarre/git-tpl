@@ -139,22 +139,11 @@ impl IgnoreStack {
 /// obviously a repository-local `core.excludesFile`, which no amount of
 /// environment inspection would find.
 fn default_excludes_file() -> Option<PathBuf> {
-    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
-        return Some(PathBuf::from(xdg).join("git").join("ignore"));
-    }
-    // `USERPROFILE` is the Windows fallback libgit2 itself uses. Git for
-    // Windows usually exports `HOME`, but nothing guarantees it, and without
-    // this a Windows user's global ignore file would simply not be found —
-    // silently including files `git add -A` leaves out.
-    let home = ["HOME", "USERPROFILE"]
-        .into_iter()
-        .find_map(|name| std::env::var_os(name).filter(|value| !value.is_empty()))?;
-    Some(
-        PathBuf::from(home)
-            .join(".config")
-            .join("git")
-            .join("ignore"),
-    )
+    // `userconfig::config_home`, not a second XDG rule: the two used to differ
+    // on whether a relative `XDG_CONFIG_HOME` counted and on whether
+    // `USERPROFILE` was consulted, so one machine could find a global ignore
+    // file and no user configuration.
+    Some(crate::userconfig::config_home()?.join("git").join("ignore"))
 }
 
 #[cfg(test)]

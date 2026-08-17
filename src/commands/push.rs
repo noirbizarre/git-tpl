@@ -15,7 +15,8 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
     if args.dry_run {
         let (_, ref_name) = ops::identify(&ctx.root)?;
-        ctx.say(format!("Would push {ref_name} to {}", preferences.remote));
+        ctx.out
+            .say(format!("Would push {ref_name} to {}", preferences.remote));
         if global.json {
             println!(
                 "{}",
@@ -30,7 +31,8 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     }
 
     let ref_name = ops::push(&ctx.repo, &ctx.root, &preferences)?;
-    ctx.say(format!("Pushed {ref_name} to {}.", preferences.remote));
+    ctx.out
+        .say(format!("Pushed {ref_name} to {}.", preferences.remote));
     if global.json {
         println!(
             "{}",

@@ -6,7 +6,7 @@
 use tpl::ops::testing::{CaseOutcome, Failure, Report, SnapshotOutcome};
 use tpl::ops::{self, OpError, Target};
 
-use super::Standalone;
+use super::{Standalone, report_ignored_paths};
 use crate::cli::{GlobalArgs, TestArgs};
 use crate::prompt::Confirmer;
 use crate::theme::{field, heading, muted, warning};
@@ -31,6 +31,8 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         // at most once however many cases there are.
         trust_for(args.trust, &mut confirmer),
     )?;
+
+    report_ignored_paths(&ctx.out, &report.template.ignored);
 
     if global.json {
         println!("{}", crate::report::success(json(&report)));

@@ -3,7 +3,7 @@
 What is attached, where it is, and whether anything is pending.
 
 ```sh
-git tpl status [--format text|json]
+git tpl status [--dirty]
 ```
 
 ```console
@@ -52,7 +52,18 @@ shown when a remote copy exists. `ahead` means you have renderings to
 
 | Option | Meaning |
 |---|---|
-| `--format text\|json` | Default `text`. `json` goes to stdout; everything else is on stderr. |
+| `--dirty` | Compare against the template's working tree rather than the revision its `ref` resolves to. Local templates only. |
+| [`--json`](../reference/json.md) | A global flag. The report on stdout as one object; everything else on stderr. |
+
+`--dirty` answers "does my uncommitted template edit change anything here?"
+without committing it first. It is how an author checks a work-in-progress
+against a real project.
+
+!!! warning "`--format text\|json` is deprecated"
+
+    It still works and still warns, but it is hidden from `--help` and will be
+    removed. Use the global `--json`. See
+    [Machine-readable output](../reference/json.md).
 
 ## Exit codes
 
@@ -72,11 +83,12 @@ git tpl status --quiet || echo "template drift detected"
 ## JSON
 
 ```sh
-git tpl status --format json
+git tpl --json status
 ```
 
 ```json
 {
+  "ok": true,
   "source": "https://github.com/noirbizarre/rust-library-template",
   "id": "github-com-noirbizarre-rust-library-template",
   "ref": "refs/tpl/github-com-noirbizarre-rust-library-template",
@@ -98,5 +110,6 @@ git tpl status --format json
 }
 ```
 
-`remote` is `null` when no remote copy exists. Human output goes to stderr, so
-`--format json` leaves stdout machine-readable.
+`remote` is `null` when no remote copy exists. `dirty` records whether the
+rendering on the ref was produced from a template working tree rather than a
+commit. Human output goes to stderr, so `--json` leaves stdout machine-readable.

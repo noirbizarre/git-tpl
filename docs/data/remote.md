@@ -74,9 +74,10 @@ make the list a half-truth.
 
 ## Confirmation
 
-Fetching is the one thing a template asks git-tpl to do on its behalf, so it is
-shown in full before it happens. Rendering itself never requires trust: no
-template can execute anything, confirmed or not.
+Fetching is one of the two things a template asks git-tpl to do on its behalf
+— a [`git` source's clone](git.md) is the other — so it is shown in full before
+it happens. Rendering itself never requires trust: no template can execute
+anything, confirmed or not.
 
 ```console
 $ git tpl init https://github.com/org/template
