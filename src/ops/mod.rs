@@ -882,39 +882,58 @@ pub fn init(
     config.answers = rendered.context.answers().clone();
     let config_path = config.save(project_root)?;
 
+    // `.config/git.tpl.toml` is versioned with the project — a fresh clone must
+    // be understandable from it alone. Leaving it untracked would mean the
+    // template attachment existed only on the machine that ran `init`.
+    //
+    // It rides in the merge commit rather than in one of its own: the merge is
+    // the attachment, and a `chore(tpl): attach` commit on top of it said
+    // nothing the merge did not. See ADR-021.
     let merge = if merge_after {
         let outcome = project.merge(
             commit,
             &format!(
                 "Merge template {} into {}\n\n\
-                 Initial rendering of the template attached by `git tpl init`.\n",
+                 Initial rendering of the template attached by `git tpl init`.\n\
+                 Records the template source and the answers used to render it.\n\
+                 See {CONFIG_PATH}.\n",
                 rendered.template.manifest.name,
                 project
                     .head_branch()?
                     .unwrap_or_else(|| "the branch".into())
             ),
             true,
+            &[Path::new(CONFIG_PATH)],
         )?;
         Some(outcome)
     } else {
         None
     };
 
-    // `.config/git.tpl.toml` is versioned with the project — a fresh clone must
-    // be understandable from it alone. Leaving it untracked would mean the
-    // template attachment existed only on the machine that ran `init`.
-    //
-    // Staged after the merge, not before: a dirty index makes libgit2 refuse to
-    // merge, and the failure would be about the index rather than about
-    // anything the user did.
-    project.stage(Path::new(CONFIG_PATH))?;
-
     let config_committed = match &merge {
+        // The merge commit carries it.
+        Some(MergeOutcome::Merged { .. }) => true,
+
         // Conflicts are the user's to resolve, and their resolution commit is
         // where the configuration belongs. Committing now would make a commit
         // in the middle of a merge they have not finished.
-        Some(MergeOutcome::Conflicted { .. }) => false,
+        Some(MergeOutcome::Conflicted { .. }) => {
+            project.stage(Path::new(CONFIG_PATH))?;
+            false
+        }
+
+        // No merge commit exists to carry it: an empty repository
+        // fast-forwards to the render commit (ADR-009), and `--no-merge` asked
+        // for no merge at all. The render commit itself cannot hold the
+        // configuration — it is the ref tip, and must stay byte-identical to
+        // the rendering, or an unchanged template would stop producing no
+        // commit.
+        //
+        // Staged after the merge, not before: a dirty index makes libgit2
+        // refuse to merge, and the failure would be about the index rather
+        // than about anything the user did.
         _ => {
+            project.stage(Path::new(CONFIG_PATH))?;
             project.commit_index(&format!(
                 "chore(tpl): attach the {} template\n\n\
                  Records the template source and the answers used to render it.\n\
@@ -1745,7 +1764,7 @@ pub fn merge(
         format!("Merge {ref_name}\n\nTemplate changes rendered by `git tpl update`.\n")
     });
 
-    let outcome = project.merge(tip, &message, commit_result)?;
+    let outcome = project.merge(tip, &message, commit_result, &[])?;
     Ok((id, outcome))
 }
 

@@ -479,6 +479,7 @@ impl GitBackend for LibGit2 {
         commit: Oid,
         message: &str,
         commit_result: bool,
+        stage: &[&Path],
     ) -> Result<MergeOutcome, GitError> {
         let their_commit = self
             .repo
@@ -571,6 +572,23 @@ impl GitBackend for LibGit2 {
 
         if !commit_result {
             return Ok(MergeOutcome::Staged);
+        }
+
+        // Staged into the merge's own index rather than committed on top of the
+        // merge afterwards: a second commit adding only the attachment said
+        // nothing the merge did not, and made every `init` two commits deep.
+        // See ADR-021.
+        //
+        // `write` as well as `add_path`, or the on-disk index disagrees with
+        // the commit about to be made and the file reads as modified in
+        // `git status`.
+        if !stage.is_empty() {
+            for path in stage {
+                index
+                    .add_path(path)
+                    .map_err(|e| backend("stage the file", &e))?;
+            }
+            index.write().map_err(|e| backend("write the index", &e))?;
         }
 
         let tree_oid = index

@@ -76,6 +76,55 @@ fn the_configuration_is_written_and_committed() {
     assert!(config.contains("license = \"MIT\""), "{config}");
 }
 
+/// One `init`, one commit. The attachment used to arrive as a `chore(tpl):
+/// attach` commit sitting on top of the merge, saying nothing the merge did
+/// not. See ADR-021.
+#[test]
+fn init_adds_exactly_one_commit_to_the_branch() {
+    let world = World::new();
+    let before: usize = world
+        .project
+        .git(&["rev-list", "--count", "HEAD"])
+        .parse()
+        .expect("a commit count");
+
+    world.init(&[]).success();
+
+    let after: usize = world
+        .project
+        .git(&["rev-list", "--count", "--first-parent", "HEAD"])
+        .parse()
+        .expect("a commit count");
+    assert_eq!(
+        after,
+        before + 1,
+        "init must add one commit to the branch, not two"
+    );
+}
+
+/// The corollary: `git show HEAD` shows the whole attachment, because there is
+/// no second commit holding the half of it that says where the files came from.
+#[test]
+fn the_configuration_is_part_of_the_merge_commit() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let parents = world
+        .project
+        .git(&["rev-list", "--parents", "-n", "1", "HEAD"]);
+    assert_eq!(
+        parents.split_whitespace().count(),
+        3,
+        "HEAD must be the merge commit itself: {parents}"
+    );
+
+    let committed = world.project.git(&["show", "HEAD:.config/git.tpl.toml"]);
+    assert!(
+        committed.contains("project_name = \"demo\""),
+        "the merge commit must carry the attachment:\n{committed}"
+    );
+}
+
 /// Only answers are recorded. Computed values are a function of them and are
 /// recomputed on every render.
 #[test]
@@ -212,6 +261,14 @@ fn init_in_an_empty_repository_needs_no_merge() {
             .project
             .try_git(&["merge-base", "--is-ancestor", &template_commit, "HEAD"]);
     assert!(is_ancestor);
+
+    // Two commits here, and deliberately: the merge fast-forwards, so there is
+    // no merge commit to carry the attachment, and the render commit cannot
+    // carry it either — it is the ref tip, and must stay byte-identical to the
+    // rendering. See ADR-021.
+    let count = world.project.git(&["rev-list", "--count", "HEAD"]);
+    assert_eq!(count, "2", "expected the render commit and the attachment");
+    assert_eq!(world.project.status(), "");
 }
 
 #[test]
@@ -418,6 +475,26 @@ fn a_file_identical_on_both_sides_does_not_conflict() {
         !world.project.status().contains("src/lib.rs"),
         "an identical file was left unresolved"
     );
+}
+
+/// A conflicted merge commits nothing at all — not even the attachment. The
+/// user's resolution commit is where it belongs; committing here would leave a
+/// commit in the middle of a merge they have not finished.
+#[test]
+fn a_conflicted_merge_leaves_the_configuration_staged() {
+    let world = populated_project();
+    world.init(&[]).success();
+
+    let staged = world.project.git(&["diff", "--cached", "--name-only"]);
+    assert!(
+        staged.contains(".config/git.tpl.toml"),
+        "the attachment must be staged for the resolution commit: {staged}"
+    );
+
+    let (committed, _) = world
+        .project
+        .try_git(&["cat-file", "-e", "HEAD:.config/git.tpl.toml"]);
+    assert!(!committed, "nothing may be committed during a conflict");
 }
 
 #[test]
