@@ -376,6 +376,22 @@ pub enum GitError {
         reason: String,
     },
 
+    /// A remote of that name already exists.
+    ///
+    /// Its own variant because [`GitBackend::remote_url`] reports a non-UTF-8
+    /// URL as *absent*, so a caller that checked first can still arrive here.
+    /// Distinguishing it lets `ops` leave the existing remote alone, which is
+    /// what it would have done had it been able to read the URL.
+    #[error("a remote named `{name}` already exists")]
+    #[diagnostic(
+        code(tpl::git::remote_exists),
+        help("inspect it with `git remote -v`; git-tpl never repoints an existing remote")
+    )]
+    RemoteExists {
+        /// The remote's name.
+        name: String,
+    },
+
     /// The worktree has uncommitted changes and the operation needs it clean.
     #[error("the working tree has uncommitted changes")]
     #[diagnostic(
@@ -538,6 +554,19 @@ pub trait GitBackend {
 
     /// Push refs matching a refspec to a remote.
     fn push_refspec(&self, remote: &str, refspec: &str) -> Result<(), GitError>;
+
+    /// Add a remote. Neither fetches nor pushes.
+    ///
+    /// Admitted under ADR-019's closure rule: a Git operation, idempotent,
+    /// touching no worktree file and spawning no process. Fetching or pushing
+    /// here would make a template's declaration reach the network, which is a
+    /// different decision and is not this one.
+    ///
+    /// Paired with [`Self::remote_url`], which `ops` asks first so that a
+    /// declared `origin` the repository already has is told apart from a new
+    /// one. Note that `remote_url` reports a non-UTF-8 URL as absent, so an
+    /// add can still find a remote already there; see `ops::add_remotes`.
+    fn add_remote(&self, name: &str, url: &str) -> Result<(), GitError>;
 
     /// Read a `tpl.*` configuration value.
     fn config_string(&self, key: &str) -> Result<Option<String>, GitError>;

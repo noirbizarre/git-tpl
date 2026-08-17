@@ -771,6 +771,21 @@ impl GitBackend for LibGit2 {
             .map_err(|e| translate_remote(&url, None, &e))
     }
 
+    fn add_remote(&self, name: &str, url: &str) -> Result<(), GitError> {
+        self.repo.remote(name, url).map(|_| ()).map_err(|e| {
+            // Reported as its own kind rather than as a backend failure: the
+            // caller asks `remote_url` first, but that reports a non-UTF-8 URL
+            // as absent, so an existing remote can still surface here and is
+            // not an error the user did anything to cause.
+            if e.code() == ErrorCode::Exists {
+                return GitError::RemoteExists {
+                    name: name.to_string(),
+                };
+            }
+            backend(&format!("add the remote `{name}`"), &e)
+        })
+    }
+
     fn config_string(&self, key: &str) -> Result<Option<String>, GitError> {
         // A snapshot reads through Git's own precedence — repository, then
         // user, then system — so `git config tpl.remote` and git-tpl always

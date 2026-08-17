@@ -66,6 +66,8 @@ package_name = "{{ project_name | lower | replace(' ', '-') }}"
 | `name` | string | *required* | The template's name. Used in output, and as the default template id. |
 | `description` | string | — | One line, shown when prompting. |
 | `root` | string | `"template"` | The subdirectory that gets rendered. |
+| `note` | string | — | A note shown after `init`. May be an expression. Mutually exclusive with `note_file`. |
+| `note_file` | string | — | A path *in the template repository*, relative to its root, whose content is shown after `init`. Rendered if it ends in `.jinja`. The path may be an expression. |
 
 `[questions]`, `[computed]` and `[data]` are covered in
 [Questions](questions.md), [Computed values](computed.md) and
@@ -79,6 +81,85 @@ package_name = "{{ project_name | lower | replace(' ', '-') }}"
 | `kind` | string | inferred | `template`, `local` or `remote`. Required when `source` only becomes a URL after interpolation. |
 | `format` | string | inferred | `toml`, `json` or `yaml`. Inferred from the extension. |
 | `sha256` | string | — | The expected digest of the content, as 64 hex characters. A mismatch stops the render. |
+
+### `[remotes]`
+
+Git remotes to add on `init`, as `<name> = "<url>"`. The URL may be an
+expression, which is the point — a remote a template can usefully declare is one
+derived from the answers.
+
+```toml
+[remotes]
+origin = "git@github.com:{{ github_org }}/{{ project_name }}.git"
+```
+
+Added in declaration order, on `init` only, and **never fetched or pushed**.
+
+If the repository already has a remote of that name pointing somewhere else, it
+is left alone and a warning names both URLs. git-tpl does not repoint an
+existing `origin`: the one in the repository was put there by a person, and a
+template that could redirect it could redirect a push.
+
+These are Git remotes. A `remote` *data source* under `[data]` is an unrelated
+thing — an HTTP URL the loader reads.
+
+## Talking to the user
+
+A template can show one note after `init`, and only after `init`. Two forms,
+mutually exclusive:
+
+```toml
+# A literal, for a line or two.
+note = "Next: run scripts/bootstrap.sh"
+
+# A file in the template repository, for more than fits in a TOML string.
+note_file = "NEXT-STEPS.md"
+```
+
+The key is `note` and not `message` because `[questions.<name>].message` already
+exists — it explains a `pattern`. TOML would fold a top-level `message =`
+written after any table into that question, silently.
+
+### `note_file`
+
+The path is relative to the **template repository root**, not to the render
+root. A note beside `template.toml` is `"NEXT-STEPS.md"`, never
+`"template/NEXT-STEPS.md"`. This is the same namespace
+[partials](#shared-partials) live in.
+
+The file is read from the template and **never rendered into the project**. A
+note is guidance, not an artifact — if you want a file the user keeps, render
+one and let the note say to read it.
+
+It is rendered if and only if the path ends in `.jinja`, exactly as a file is:
+
+```toml
+note_file = "NEXT-STEPS.md"        # shown verbatim, braces and all
+note_file = "NEXT-STEPS.md.jinja"  # rendered with the answers
+```
+
+The path itself may be an expression, so a template can choose its note:
+
+```toml
+note_file = "notes/{{ language }}.md"
+note_file = "{% if ci %}notes/ci.md{% endif %}"   # renders empty: no note
+```
+
+A path that renders to nothing means no note. A non-empty path naming nothing
+is an **error**, and `init` refuses before it writes anything —
+`git tpl lint` reports the same thing without a repository.
+
+### What a note cannot do
+
+Nothing here runs. git-tpl executes no command a note names, and a note saying
+"run `curl … | sh`" is exactly as dangerous as a `README.md` saying it —
+which is to say the user has to do it themselves. See
+[ADR-019](../adr/019-templates-address-never-act.md).
+
+The note is shown in a block attributed to the template, and is sanitised
+first: colour and `https` links survive, and everything else a terminal could
+act on does not. Under `--json`, when piped, or under `NO_COLOR`, it is plain
+text.
 
 ## Rendering rules
 

@@ -203,6 +203,48 @@ pub fn warning(theme: &Theme, text: &str) -> String {
     format!("{} {text}", theme.warning.apply_to("warning:"))
 }
 
+/// The template's own words, framed and attributed to it.
+///
+/// The frame is load-bearing, not decoration. A note is untrusted text from a
+/// template repository, and the mechanical half of the risk — escape sequences
+/// — is handled by [`tpl::note::sanitise`], which every caller must have
+/// applied before reaching here. What is left is the social half: an unframed
+/// line reading `Run: curl … | sh` in git-tpl's own [`command`] styling would
+/// appear to be git-tpl's own advice. The rule stays true whatever the note
+/// says. See ADR-019.
+///
+/// Returns the whole block, lines included, because the frame's width depends
+/// on the content and a caller printing line by line could not know it.
+pub fn note_block(theme: &Theme, sanitised: &str) -> String {
+    const LABEL: &str = " from the template ";
+    // Wide enough for the label and for what is inside it, and capped so that a
+    // long line does not draw a rule off the edge of a narrow terminal.
+    let width = sanitised
+        .lines()
+        .map(|line| console::measure_text_width(line) + 2)
+        .chain(std::iter::once(LABEL.len() + 4))
+        .max()
+        .unwrap_or(LABEL.len() + 4)
+        .min(76);
+
+    let mut out = String::new();
+    out.push_str(&muted(
+        theme,
+        &format!(
+            "──{LABEL}{}",
+            "─".repeat(width.saturating_sub(LABEL.len() + 2))
+        ),
+    ));
+    out.push('\n');
+    for line in sanitised.lines() {
+        // Indented, so that even a line the template styled to look like a
+        // git-tpl heading sits visibly inside the frame rather than beside it.
+        out.push_str(&format!("  {line}\n"));
+    }
+    out.push_str(&muted(theme, &"─".repeat(width)));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

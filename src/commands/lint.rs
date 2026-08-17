@@ -30,11 +30,15 @@ pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     })?;
 
     let entries = template.entries()?;
+    // The whole repository, not just the render root: a `note_file` names a
+    // path beside the manifest, in the same namespace a partial lives in.
+    let repo_entries = template.repo.list_tree(template.tree)?;
     let partials = template.partials()?;
     let findings = tpl::lint::lint(
         template.repo.as_ref(),
         &template.manifest,
         &entries,
+        &repo_entries,
         &partials,
     )?;
 

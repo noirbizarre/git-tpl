@@ -34,6 +34,8 @@ Something is wrong with the template itself.
 | `tpl::manifest::parse` | `template.toml` is not valid TOML, or has an unknown key. |
 | `tpl::manifest::name_collision` | A question and a computed value share a name. |
 | `tpl::manifest::invalid_question` | A question declaration is not coherent — see the message. Covers a `default_from` naming no source, one whose expression does not parse, and one referencing something that is not a [seed namespace](../templates/questions.md#machine-seeded-defaults). |
+| `tpl::manifest::conflicting_note` | Both `note` and `note_file` are declared. Keep one. |
+| `tpl::manifest::invalid_remote` | A `[remotes]` entry has no name, no URL, or a name Git will not accept. |
 | `tpl::graph::invalid_expression` | An expression in the manifest does not parse. |
 | `tpl::graph::unknown_reference` | An expression names something the template never declares. Carries a suggestion. |
 | `tpl::graph::cycle` | Questions, computed values or data sources depend on each other in a loop. |
@@ -66,6 +68,7 @@ severity.
 | `tpl::lint::syntax` | error | A `.jinja` file does not parse, including in branches no answer set reaches. |
 | `tpl::lint::foreign_expression` | warning | A `${{ ... }}` MiniJinja will consume, rendering it to `$`. |
 | `tpl::lint::undeclared` | warning | A file body uses a name the template does not declare. Renders empty unless `strict = true`. |
+| `tpl::lint::missing_note_file` | error | `note_file` names a path the template repository does not contain. Reported without a repository, before an `init` refuses. |
 
 These two are about the flags rather than the template, so they are raised as
 errors before anything is checked:
@@ -128,6 +131,8 @@ errors before anything is checked:
 |---|---|
 | `tpl::ops::already_initialised` | A template is already attached. Use `update`, or `init --force` to re-ask. |
 | `tpl::ops::invalid_argument` | An argument is not usable — see the message. |
+| `tpl::ops::missing_note_file` | `note_file` names nothing at the template revision. The path is relative to the repository root, not the render root. |
+| `tpl::ops::note_file_not_utf8` | `note_file` names a binary file. A note is text. |
 | `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist yet. Run `init` or `update`. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
 | `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
@@ -160,6 +165,7 @@ fixtures in `src/report.rs`.
 | `tpl::git::auth` | Authentication failed. |
 | `tpl::git::network` | The remote could not be reached. The help text carries libgit2's own reason. |
 | `tpl::git::clone` | The remote answered, but the clone could not be written — usually no space or no permission on the temporary directory. |
+| `tpl::git::remote_exists` | A remote of that name already exists. git-tpl never repoints one. |
 | `tpl::git::dirty_worktree` | The operation merges, and the worktree has uncommitted changes. |
 | `tpl::git::diverged` | The remote template ref has diverged. Nothing is force-pushed. |
 | `tpl::git::no_identity` | Git has no `user.name` or `user.email` configured. |

@@ -382,7 +382,17 @@ pub fn file_url(path: &Path) -> String {
 }
 
 pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
-    run_tpl(&repo.path, repo.config_home(), args)
+    run_tpl(&repo.path, repo.config_home(), args, "never")
+}
+
+/// The same, but with colour forced on.
+///
+/// A test cannot simply pass `--color always`, because clap refuses the flag
+/// twice and [`tpl`] has already supplied it. Needed by anything asserting on
+/// styled output — without it the branch that *chooses* to style is never
+/// taken, and could be inverted without failing a single test.
+pub fn tpl_colored(repo: &Repo, args: &[&str]) -> Output {
+    run_tpl(&repo.path, repo.config_home(), args, "always")
 }
 
 /// Run `git-tpl` in a plain directory, with no repository.
@@ -390,14 +400,16 @@ pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
 /// The project-free commands — `render`, `lint`, `questions`, `context` — must
 /// work here, and a test that ran them inside a repository would not prove it.
 pub fn tpl_outside(dir: &Path, config_home: &Path, args: &[&str]) -> Output {
-    run_tpl(dir, config_home, args)
+    run_tpl(dir, config_home, args, "never")
 }
 
-fn run_tpl(cwd: &Path, config_home: &Path, args: &[&str]) -> Output {
+fn run_tpl(cwd: &Path, config_home: &Path, args: &[&str], color: &str) -> Output {
     let mut command = Command::cargo_bin("git-tpl").expect("built binary");
     command.current_dir(cwd);
     // Deterministic output, whatever the developer's terminal or CI is doing.
-    command.arg("--color").arg("never");
+    // Explicit rather than inherited, so `always` means the same on a CI
+    // runner with no tty as it does in a terminal.
+    command.arg("--color").arg(color);
     command.args(args);
     // A template repository is resolved relative to the project, and a stray
     // ambient config would change what the tests exercise.

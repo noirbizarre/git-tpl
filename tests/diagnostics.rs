@@ -108,6 +108,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::git::no_identity",
     "tpl::git::no_such_revision",
     "tpl::git::not_a_repository",
+    "tpl::git::remote_exists",
     "tpl::graph::cycle",
     "tpl::graph::invalid_expression",
     "tpl::graph::unknown_reference",
@@ -115,17 +116,22 @@ const DOCUMENTED: &[&str] = &[
     "tpl::lint::conflicting_level",
     "tpl::lint::degenerate_path",
     "tpl::lint::foreign_expression",
+    "tpl::lint::missing_note_file",
     "tpl::lint::syntax",
     "tpl::lint::undeclared",
     "tpl::lint::unknown_code",
+    "tpl::manifest::conflicting_note",
     "tpl::manifest::invalid_question",
+    "tpl::manifest::invalid_remote",
     "tpl::manifest::missing",
     "tpl::manifest::name_collision",
     "tpl::manifest::parse",
     "tpl::ops::already_initialised",
     "tpl::ops::invalid_argument",
+    "tpl::ops::missing_note_file",
     "tpl::ops::no_rendered_ref",
     "tpl::ops::no_such_path",
+    "tpl::ops::note_file_not_utf8",
     "tpl::ops::write_failed",
     "tpl::refs::invalid",
     "tpl::refs::underivable",
@@ -185,6 +191,39 @@ fn the_reference_page_lists_every_code() {
     assert!(
         missing.is_empty(),
         "not mentioned in docs/reference/diagnostics.md:\n{missing:#?}"
+    );
+}
+
+/// A finding code `--deny` does not accept is a rule nobody can enforce, and
+/// `lint::every_rule_code_is_denyable` cannot see one that was never registered
+/// — it iterates `CODES`, so an omission is invisible to it. This compares the
+/// codes the rules actually emit against the list the flag validates against.
+///
+/// Written after `tpl::lint::missing_note_file` shipped with a working rule and
+/// no way to deny it.
+#[test]
+fn every_lint_finding_code_is_denyable() {
+    // `LintError` diagnostics, not findings. They can never be produced by a
+    // rule, so denying one would name something that cannot be reported.
+    const NOT_FINDINGS: &[&str] = &["tpl::lint::conflicting_level", "tpl::lint::unknown_code"];
+
+    let emitted: BTreeSet<String> = defined_codes()
+        .into_iter()
+        .filter(|code| code.starts_with("tpl::lint::"))
+        .filter(|code| !NOT_FINDINGS.contains(&code.as_str()))
+        .collect();
+    let denyable: BTreeSet<String> = tpl::lint::CODES.iter().map(|s| s.to_string()).collect();
+
+    let unregistered: Vec<&String> = emitted.difference(&denyable).collect();
+    assert!(
+        unregistered.is_empty(),
+        "these lint rules emit a code that `--deny` rejects as unknown — add          them to `lint::CODES`:\n{unregistered:#?}"
+    );
+
+    let phantom: Vec<&String> = denyable.difference(&emitted).collect();
+    assert!(
+        phantom.is_empty(),
+        "these codes are denyable but no rule emits them:\n{phantom:#?}"
     );
 }
 
