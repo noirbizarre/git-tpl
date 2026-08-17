@@ -59,7 +59,7 @@ const BINARY_SNIFF_LEN: usize = 8000;
 #[derive(Debug, Error, Diagnostic)]
 pub enum TestError {
     /// The tests directory does not exist at the resolved revision.
-    #[error("`{dir}` does not exist in the template at {revision}")]
+    #[error("`{dir}` does not exist in the template at {revision_description}")]
     #[diagnostic(
         code(tpl::testing::no_tests),
         help(
@@ -70,8 +70,12 @@ pub enum TestError {
     NoTests {
         /// The directory that was looked for.
         dir: String,
-        /// The revision it was looked for at.
-        revision: String,
+        /// The revision it was looked for at, as `reference (revision)`.
+        //
+        // `*_description`, not `revision`: the naming rule reserves `revision`
+        // for an `Oid`, and this is the printable pair `describe_revision`
+        // produces.
+        revision_description: String,
     },
 
     /// A positional filter matches no case.
@@ -649,7 +653,10 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
     let Some(dir) = template.repo.subtree(template.tree, tests_dir)? else {
         return Err(TestError::NoTests {
             dir: tests_dir.to_string(),
-            revision: super::describe_revision(&template.reference, template.revision),
+            revision_description: super::describe_revision(
+                &template.reference,
+                template.revision,
+            ),
         }
         .into());
     };
@@ -705,7 +712,10 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
     if cases.is_empty() {
         return Err(TestError::NoTests {
             dir: tests_dir.to_string(),
-            revision: super::describe_revision(&template.reference, template.revision),
+            revision_description: super::describe_revision(
+                &template.reference,
+                template.revision,
+            ),
         }
         .into());
     }

@@ -127,7 +127,7 @@ pub enum OpError {
     /// ref is created and before the merge, so nothing has been written to the
     /// user's repository yet. Showing nothing instead would leave a template
     /// author with an `init` that succeeds and a note that never appears.
-    #[error("`{path}` is not in the template at {revision}")]
+    #[error("`{path}` is not in the template at {revision_description}")]
     #[diagnostic(
         code(tpl::ops::missing_note_file),
         help(
@@ -140,8 +140,12 @@ pub enum OpError {
     MissingNoteFile {
         /// The path, as it resolved.
         path: String,
-        /// The revision it was looked for at.
-        revision: String,
+        /// The revision it was looked for at, as `reference (revision)`.
+        //
+        // `*_description`, not `revision`: the naming rule reserves `revision`
+        // for an `Oid`, and this is the printable pair `describe_revision`
+        // produces.
+        revision_description: String,
     },
 
     /// A `note_file` is not valid UTF-8.
@@ -1002,7 +1006,10 @@ fn template_note(rendered: &Render) -> Result<Option<String>, OpError> {
     else {
         return Err(OpError::MissingNoteFile {
             path: path.to_string(),
-            revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+            revision_description: describe_revision(
+                &rendered.template.reference,
+                rendered.template.revision,
+            ),
         });
     };
 
