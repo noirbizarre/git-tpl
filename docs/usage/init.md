@@ -87,6 +87,7 @@ shortcut never leaves your machine.
 | `--defaults` | Accept every default without prompting. |
 | `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--id <id>` | Override the derived template id, and so the ref name. |
+| `--force` | Re-ask the questions and re-render over an existing attachment. |
 | `--no-merge` | Create the ref, do not merge it. |
 | `--dirty` | Render the template's working tree rather than its `HEAD`. Local templates only. |
 | `--dry-run` | Report what would be asked and rendered; create nothing. |
@@ -125,8 +126,13 @@ it is what `.config/git.tpl.toml` will record, and what a later `--ref` or
 create one, or run `git init` first.
 
 **No existing `.config/git.tpl.toml`.** A project has one template. Re-running
-`init` is refused, because it would silently discard the recorded answers; run
-`git tpl update` instead.
+`init` is refused with `tpl::ops::already_initialised`, because it would
+silently discard the recorded answers. To take a newer template revision with
+the answers you already gave, run `git tpl update`. To *change* those answers,
+run `git tpl init --force`, which re-asks every question and re-renders over
+the existing attachment — `update` cannot do that, since it re-renders with the
+recorded answers and there is otherwise no way to change them short of editing
+the config by hand.
 
 **A clean worktree**, because step 10 is a merge. Uncommitted changes are
 refused with the same message Git would give you.
