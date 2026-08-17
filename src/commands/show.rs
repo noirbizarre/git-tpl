@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use tpl::ops::{self, OpError, Shown};
 
-use super::{Session, answering, supplied, trust};
+use super::{Session, answering, report_ignored_paths, supplied, trust};
 use crate::cli::{GlobalArgs, ShowArgs};
 use crate::prompt::{Confirmer, Interactive};
 
@@ -18,7 +18,7 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         let preferences = tpl::gitconfig::Preferences::load(&ctx.repo)?;
         let mut prompter = Interactive;
         let mut confirmer = Confirmer;
-        Some(ops::render_preview(
+        let preview = ops::render_preview(
             &ctx.repo,
             &ctx.root,
             supplied(&args.answers)?,
@@ -31,7 +31,10 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 preferences.interactive,
                 &mut confirmer,
             ),
-        )?)
+        )?;
+        // stderr, so the file bytes on stdout stay exactly the file bytes.
+        report_ignored_paths(&ctx.out, &preview.ignored);
+        Some(preview.commit)
     } else {
         None
     };

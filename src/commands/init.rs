@@ -7,7 +7,9 @@ use tpl::git::{GitBackend, MergeOutcome};
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError};
 
-use super::{Session, answering, current_dir, report_ignored, supplied, trust};
+use super::{
+    Session, answering, current_dir, report_ignored, report_ignored_paths, supplied, trust,
+};
 use crate::cli::{GlobalArgs, InitArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, heading, headline, muted, note_block, warning};
@@ -74,6 +76,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     )?;
 
     report_ignored(&ctx.out, &outcome.ignored_answers);
+    report_ignored_paths(&ctx.out, &outcome.ignored);
 
     ctx.out.blank();
     // The expanded URL, not what was typed: this is the line a user copies

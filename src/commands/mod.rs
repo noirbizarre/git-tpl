@@ -244,6 +244,39 @@ pub fn enforce_strict_answers(
     .into())
 }
 
+/// Say what `.gitignore` removed from a `--dirty` render.
+///
+/// A count always, the paths under `-v`. The ignore stack includes
+/// `core.excludesFile`, so this is regularly a global rule the author forgot
+/// they wrote — and inside a render there is no `git status` to reveal it.
+///
+/// Called by every command that resolves with `--dirty`, not just `render`:
+/// the field is populated identically for all of them, and an `init --dirty`
+/// that silently dropped the files `render --dirty` warns about is the same
+/// afternoon lost.
+pub fn report_ignored_paths(out: &Reporter, ignored: &[String]) {
+    if ignored.is_empty() {
+        return;
+    }
+    out.warn(crate::theme::warning(
+        &out.theme,
+        &format!(
+            "{} file(s) skipped by .gitignore and absent from the rendering",
+            ignored.len()
+        ),
+    ));
+    if out.global.verbose > 0 {
+        for path in ignored {
+            out.warn(crate::theme::muted(&out.theme, &format!("  {path}")));
+        }
+    } else {
+        out.warn(crate::theme::muted(
+            &out.theme,
+            "  run with -v to list them, or `git check-ignore -v <path>` to find the rule",
+        ));
+    }
+}
+
 /// Report supplied answers that name no question in the template.
 ///
 /// Not an error: an answers file carried over from another generator has

@@ -4,7 +4,7 @@ use tpl::git::GitBackend;
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError, UpdateOutcome};
 
-use super::{Session, answering, report_ignored, supplied, trust};
+use super::{Session, answering, report_ignored, report_ignored_paths, supplied, trust};
 use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, headline, muted};
@@ -61,12 +61,14 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         UpdateOutcome::UpToDate {
             revision_description,
             ignored_answers,
+            ignored,
         } => {
             ctx.out.say(format!(
                 "Already up to date with {} at {revision_description}.",
                 config.template.source
             ));
             report_ignored(&ctx.out, &ignored_answers);
+            report_ignored_paths(&ctx.out, &ignored);
 
             // The id is not in the outcome, because nothing was created. It is
             // still what the caller asked about, so read it back off disk.
@@ -89,8 +91,10 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             revision_description,
             answers_changed,
             ignored_answers,
+            ignored,
         } => {
             report_ignored(&ctx.out, &ignored_answers);
+            report_ignored_paths(&ctx.out, &ignored);
             ctx.out.blank();
             ctx.out.say(field(&ctx.out.theme, "Template", &config.template.source));
             ctx.out.say(field(

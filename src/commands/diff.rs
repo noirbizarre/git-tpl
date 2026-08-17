@@ -2,7 +2,7 @@
 
 use tpl::ops::{self, OpError};
 
-use super::{Session, answering, supplied, trust};
+use super::{Session, answering, report_ignored_paths, supplied, trust};
 use crate::cli::{DiffArgs, GlobalArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change_stat, diff_summary, muted, warning};
@@ -155,5 +155,10 @@ fn preview(
         answering(answers, preferences.interactive, &mut prompter),
         trust(answers, false, preferences.interactive, &mut confirmer),
     )
-    .map(Some)
+    .map(|preview| {
+        // Warned here rather than swallowed: a `--dirty` diff that quietly
+        // omitted the files a `.gitignore` removed would understate the change.
+        report_ignored_paths(&ctx.out, &preview.ignored);
+        Some(preview.commit)
+    })
 }

@@ -793,6 +793,12 @@ pub struct InitOutcome {
     pub revision_description: String,
     /// Supplied answers that name no question in this template.
     pub ignored_answers: Vec<String>,
+    /// Template files a `.gitignore` removed from the rendering.
+    ///
+    /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
+    /// a global `core.excludesFile` rule the author forgot they wrote is
+    /// otherwise invisible, since there is no `git status` inside a render.
+    pub ignored: Vec<String>,
     /// The template's own note to the user, raw and unsanitised.
     ///
     /// Sanitised where it is shown, not here: this layer does not print, and a
@@ -940,6 +946,7 @@ pub fn init(
             rendered.template.revision,
         ),
         ignored_answers: rendered.ignored_answers,
+        ignored: rendered.template.ignored,
         note,
         remotes,
     })
@@ -1085,6 +1092,12 @@ pub enum UpdateOutcome {
         /// even here: a typo'd key is worth reporting whether or not the
         /// rendering changed.
         ignored_answers: Vec<String>,
+    /// Template files a `.gitignore` removed from the rendering.
+    ///
+    /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
+    /// a global `core.excludesFile` rule the author forgot they wrote is
+    /// otherwise invisible, since there is no `git status` inside a render.
+        ignored: Vec<String>,
     },
     /// A new commit was added to the rendered ref.
     Updated {
@@ -1104,6 +1117,12 @@ pub enum UpdateOutcome {
         answers_changed: bool,
         /// Supplied answers that name no question in this template.
         ignored_answers: Vec<String>,
+    /// Template files a `.gitignore` removed from the rendering.
+    ///
+    /// Only ever non-empty under `--dirty`, and surfaced rather than silent:
+    /// a global `core.excludesFile` rule the author forgot they wrote is
+    /// otherwise invisible, since there is no `git status` inside a render.
+        ignored: Vec<String>,
     },
 }
 
@@ -1162,6 +1181,7 @@ pub fn update(
                 rendered.template.revision,
             ),
             ignored_answers: rendered.ignored_answers,
+            ignored: rendered.template.ignored,
         });
     }
 
@@ -1198,6 +1218,7 @@ pub fn update(
         ),
         answers_changed,
         ignored_answers: rendered.ignored_answers,
+        ignored: rendered.template.ignored,
     })
 }
 
@@ -1345,6 +1366,19 @@ fn count_renderings(project: &dyn GitBackend, tip: Oid) -> Result<usize, GitErro
     Ok(count)
 }
 
+/// A `--dirty` preview: the commit, and what `.gitignore` kept out of it.
+///
+/// A struct rather than a bare `Oid` so that the ignored paths reach the
+/// caller. They are only ever non-empty under `--dirty`, which is exactly when
+/// a preview is being taken, and a preview that silently omitted files would
+/// be answering a different question than the one asked.
+pub struct Preview {
+    /// The commit the preview was rendered into. No ref points at it.
+    pub commit: Oid,
+    /// Template files a `.gitignore` removed from the rendering.
+    pub ignored: Vec<String>,
+}
+
 /// Render the configured template now, as a commit nothing points at.
 ///
 /// This is what `diff --dirty` and `show --dirty` preview against. The commit
@@ -1363,7 +1397,7 @@ pub fn render_preview(
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
-) -> Result<Oid, OpError> {
+) -> Result<Preview, OpError> {
     let config = Config::load(project_root)?;
 
     // Recorded answers first, then command-line overrides — the same order
@@ -1391,7 +1425,10 @@ pub fn render_preview(
     let (_, ref_name) = identify(project_root)?;
     let parents: Vec<Oid> = project.resolve_ref(&ref_name)?.into_iter().collect();
 
-    Ok(project.create_commit(rendered.tree, &parents, "preview: uncommitted template\n")?)
+    Ok(Preview {
+        commit: project.create_commit(rendered.tree, &parents, "preview: uncommitted template\n")?,
+        ignored: rendered.template.ignored,
+    })
 }
 
 /// The rendered ref's tip, or a helpful error.
