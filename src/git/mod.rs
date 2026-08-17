@@ -590,11 +590,15 @@ pub trait GitBackend {
     /// prompt from the remote must still render there.
     fn remote_url(&self, name: &str) -> Result<Option<String>, GitError>;
 
-    /// Resolve a revision — branch, tag or SHA — to a commit.
+    /// Resolve a reference — branch, tag or SHA — to the commit it names.
+    ///
+    /// The parameter is a `reference`, not a `revision`: it is the name asked
+    /// for, and the `Oid` returned is the revision. The function name says
+    /// which direction that goes.
     ///
     /// `origin` names the repository only so that a failure can say where it
     /// looked; it takes no part in the resolution.
-    fn resolve_revision(&self, revision: &str, origin: &str) -> Result<Oid, GitError>;
+    fn resolve_revision(&self, reference: &str, origin: &str) -> Result<Oid, GitError>;
 
     /// The default branch, used when no `ref` is configured.
     fn default_branch(&self) -> Result<String, GitError>;
