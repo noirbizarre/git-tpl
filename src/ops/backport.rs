@@ -762,7 +762,7 @@ fn relative_to(path: &Path, from: &Path) -> String {
     // Nothing in common means different roots — on Windows, different drives.
     // There is no relative spelling, and inventing one would be wrong.
     if common == 0 {
-        return target.display().to_string();
+        return slashed(&target);
     }
 
     let mut out = std::path::PathBuf::new();
@@ -773,7 +773,7 @@ fn relative_to(path: &Path, from: &Path) -> String {
         out.push(part);
     }
 
-    let relative = out.display().to_string();
+    let relative = slashed(&out);
     if relative.is_empty() {
         return ".".to_string();
     }
@@ -784,6 +784,19 @@ fn relative_to(path: &Path, from: &Path) -> String {
     } else {
         format!("./{relative}")
     }
+}
+
+/// A path spelled with `/`, on every platform.
+///
+/// The result is printed to be pasted into a shell. Git accepts forward
+/// slashes on Windows, and in Git Bash — the shell a Windows user most likely
+/// has open — a backslash is an escape character, so `git -C ..\tpl am` is not
+/// the command it looks like.
+fn slashed(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// `<root>/<path>`, the path as the template repository knows it.
@@ -1099,5 +1112,20 @@ mod tests {
         std::fs::create_dir_all(&template).unwrap();
 
         assert_eq!(relative_to(&template, &project), "./vendor/tpl");
+    }
+
+    /// The hint is pasted into a shell, and on Windows the native separator is
+    /// an escape character in the shell most likely to be open.
+    #[test]
+    fn a_path_in_the_hint_is_spelled_with_forward_slashes() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("a/project");
+        let template = dir.path().join("b/template");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&template).unwrap();
+
+        let spelled = relative_to(&template, &project);
+        assert!(!spelled.contains('\\'), "{spelled}");
+        assert_eq!(spelled, "../../b/template");
     }
 }

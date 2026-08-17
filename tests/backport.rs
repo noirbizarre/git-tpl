@@ -37,15 +37,23 @@ default = "acme"
 /// keeps beside their project. `git am` runs here, never in the original.
 fn clone_of_template(world: &World) -> Repo {
     let path = world.dir.path().join("upstream");
-    Repo::init(".");
-    let repo = Repo::at(path.clone());
     let source = world.template.source();
     std::process::Command::new("git")
         .args(["clone", "-q", &source, &path.to_string_lossy()])
         .status()
         .expect("clone the template");
+
+    let repo = Repo::at(path);
     repo.git(&["config", "user.name", "Test"]);
-    repo.git(&["config", "user.email", "test@example.com"]);
+    repo.git(&["config", "user.email", "test@example.invalid"]);
+    repo.git(&["config", "commit.gpgsign", "false"]);
+    // The same pinning `Repo::configure` does, and for the same reason: a
+    // Windows runner has `core.autocrlf=true` globally, so this checkout would
+    // materialise CRLF while the patch we emit carries the template's LF, and
+    // `git am` would fail to match its context lines. `git clone` does not go
+    // through the harness's constructor, so it has to be said again here.
+    repo.git(&["config", "core.autocrlf", "false"]);
+    repo.git(&["config", "core.eol", "lf"]);
     repo
 }
 
