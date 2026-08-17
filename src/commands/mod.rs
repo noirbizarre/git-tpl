@@ -237,10 +237,11 @@ pub fn enforce_strict_answers(
     let suggestion = tpl::suggest::closest(key, known.iter().map(String::as_str))
         .map(|close| format!("Did you mean `{close}`? "))
         .unwrap_or_default();
-    Err(OpError::UnknownAnswer {
+    Err(tpl::answers::AnswersError::UnknownKey {
         key: key.clone(),
         suggestion,
-    })
+    }
+    .into())
 }
 
 /// Report supplied answers that name no question in the template.
