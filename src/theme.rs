@@ -193,6 +193,20 @@ pub fn headline(theme: &Theme, verb: &str, subject: &str) -> String {
     format!("{} {subject}", heading(theme, verb))
 }
 
+/// A revision transition: `from → to`, with an optional muted note.
+///
+/// One producer, because there were two and they had already diverged —
+/// `status` appended a muted "template has moved" and `update` did not. The
+/// arrow, its spacing and the note's styling are one decision, and the two
+/// ends of the line are produced by `ops::describe_revision` for the same
+/// reason.
+pub fn transition(theme: &Theme, from: &str, to: &str, note: Option<&str>) -> String {
+    match note {
+        Some(note) => format!("{from} → {to}   {}", muted(theme, note)),
+        None => format!("{from} → {to}"),
+    }
+}
+
 /// A dimmed note.
 pub fn muted(theme: &Theme, text: &str) -> String {
     theme.muted.apply_to(text).to_string()

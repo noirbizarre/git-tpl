@@ -5,7 +5,7 @@ use tpl::ops::{self, OpError};
 
 use super::Session;
 use crate::cli::{Format, GlobalArgs, StatusArgs};
-use crate::theme::{command, field, muted, warning};
+use crate::theme::{command, field, transition, warning};
 
 pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -54,9 +54,11 @@ fn print_text(ctx: &Session, status: &ops::Status) {
         &status.available_revision_description,
         status.template_moved,
     ) {
-        (Some(available), true) => format!(
-            "{rendered} → {available}   {}",
-            muted(&ctx.out.theme, "template has moved")
+        (Some(available), true) => transition(
+            &ctx.out.theme,
+            &rendered,
+            available,
+            Some("template has moved"),
         ),
         (Some(available), false) if status.tip.is_none() => available.clone(),
         (_, _) => rendered.clone(),

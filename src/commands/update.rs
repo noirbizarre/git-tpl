@@ -7,7 +7,7 @@ use tpl::ops::{self, OpError, UpdateOutcome};
 use super::{Session, answering, report_ignored, report_ignored_paths, supplied, trust};
 use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, headline, muted};
+use crate::theme::{change, command, field, headline, muted, transition};
 
 pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -101,7 +101,9 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 &ctx.out.theme,
                 "Revision",
                 &match &previous_revision_description {
-                    Some(previous) => format!("{previous} → {revision_description}"),
+                    Some(previous) => {
+                        transition(&ctx.out.theme, previous, &revision_description, None)
+                    }
                     None => revision_description.clone(),
                 },
             ));
