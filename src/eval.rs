@@ -15,6 +15,7 @@ use thiserror::Error;
 use crate::context::Context;
 use crate::data::{DataError, Loader, Rendered};
 use crate::graph::{Graph, NodeKind};
+use crate::seed::SeedContext;
 use crate::template::{Choice, Manifest, Question, QuestionKind, Value, is_expression};
 
 /// Errors from evaluating a template.
@@ -800,6 +801,47 @@ pub fn render_string_with(
             location: location.to_string(),
             expression: template.to_string(),
             reason: describe_lookup(&error, partials),
+        })
+}
+
+/// The environment a `default_from` expression is evaluated in.
+///
+/// Two deliberate differences from [`environment`], both load-bearing:
+///
+/// - **Chainable**, not lenient. Lenient *raises* when you index into an
+///   undefined value, so `{{ remote.name | default(dir.name) }}` on a project
+///   that has never been pushed would fail instead of falling back. Falling
+///   back is the entire point of the feature.
+/// - **No partials.** A seed is not a rendering. Allowing `{% import %}` would
+///   let machine values be laundered through arbitrary template code, widening
+///   the narrow ADR-006 escape hatch into a general one — and there is nothing
+///   here worth importing. Seeds are also built before the partials are read
+///   out of the tree, so there would be none to offer.
+///
+/// Filters are inherited from [`environment_with`], so `slugify` — and anything
+/// added to the closed set later — works here with no second registration site.
+pub fn seed_environment() -> minijinja::Environment<'static> {
+    let mut env = environment_with(no_partials(), Undefined::Lenient);
+    env.set_undefined_behavior(minijinja::UndefinedBehavior::Chainable);
+    env
+}
+
+/// Render a `default_from` expression against the machine's seed context.
+///
+/// Always to a `String`. A seed is text a human is about to edit at a prompt,
+/// and preserving a richer type would only reintroduce the coercion problem
+/// that keeps `default_from` to `string` questions.
+pub fn render_seed(
+    expression: &str,
+    seeds: &SeedContext,
+    location: &str,
+) -> Result<String, EvalError> {
+    seed_environment()
+        .render_str(expression, seeds.to_minijinja())
+        .map_err(|error| EvalError::Expression {
+            location: location.to_string(),
+            expression: expression.to_string(),
+            reason: describe(&error),
         })
 }
 
@@ -1667,6 +1709,64 @@ mod tests {
 
         assert_eq!(once, twice);
         assert_eq!(once, Value::String("unicode-project".into()));
+    }
+
+    /// The seed environment's reason to exist. Under MiniJinja's lenient
+    /// behaviour, indexing into an undefined value *raises*, so this would
+    /// abort instead of falling back — and a project that has never been pushed
+    /// is exactly when a template most wants the directory name.
+    #[test]
+    fn an_absent_seed_namespace_falls_through_to_default() {
+        let seeds = SeedContext::from_roots(BTreeMap::from([
+            ("remote".to_string(), Value::Table(BTreeMap::new())),
+            (
+                "dir".to_string(),
+                Value::Table(BTreeMap::from([(
+                    "name".to_string(),
+                    Value::String("My Project".into()),
+                )])),
+            ),
+        ]));
+
+        let rendered = render_seed(
+            "{{ remote.name | default(dir.name) | slugify }}",
+            &seeds,
+            "questions.slug.default_from",
+        )
+        .unwrap();
+
+        assert_eq!(rendered, "my-project");
+    }
+
+    /// And when the remote is there, it wins — otherwise the fallback would be
+    /// the only branch anyone ever exercised.
+    #[test]
+    fn a_present_seed_value_is_preferred_to_its_fallback() {
+        let seeds = SeedContext::from_roots(BTreeMap::from([
+            (
+                "remote".to_string(),
+                Value::Table(BTreeMap::from([(
+                    "name".to_string(),
+                    Value::String("git-tpl".into()),
+                )])),
+            ),
+            (
+                "dir".to_string(),
+                Value::Table(BTreeMap::from([(
+                    "name".to_string(),
+                    Value::String("checkout".into()),
+                )])),
+            ),
+        ]));
+
+        let rendered = render_seed(
+            "{{ remote.name | default(dir.name) | slugify }}",
+            &seeds,
+            "questions.slug.default_from",
+        )
+        .unwrap();
+
+        assert_eq!(rendered, "git-tpl");
     }
 
     /// A non-string argument slugs rather than raising, so a `slugify` in a

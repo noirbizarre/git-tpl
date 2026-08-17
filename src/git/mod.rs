@@ -545,6 +545,22 @@ pub trait GitBackend {
     /// Read a boolean `tpl.*` configuration value.
     fn config_bool(&self, key: &str) -> Result<Option<bool>, GitError>;
 
+    /// Every configuration entry, in Git's own precedence order.
+    ///
+    /// For prompt seeds only. Enumerated rather than read key by key so that a
+    /// `default_from` expression asking for a key that is not set gets
+    /// *undefined* — which is what `| default(...)` needs in order to fire.
+    /// Reading key by key cannot distinguish "unset" from "a section with no
+    /// such leaf", and the fallback would never trigger.
+    fn config_entries(&self) -> Result<Vec<(String, String)>, GitError>;
+
+    /// A remote's fetch URL, if that remote exists.
+    ///
+    /// `Ok(None)` rather than an error for an unknown remote: a project that
+    /// has not been pushed yet is an ordinary state, and a template seeding a
+    /// prompt from the remote must still render there.
+    fn remote_url(&self, name: &str) -> Result<Option<String>, GitError>;
+
     /// Resolve a revision — branch, tag or SHA — to a commit.
     ///
     /// `origin` names the repository only so that a failure can say where it

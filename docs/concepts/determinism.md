@@ -59,13 +59,15 @@ The usual motivations have better answers:
 correct in every year.
 
 **The author's name and email.** Ask a question, with
-[`default_from = "git:user.name"`](../templates/questions.md#git-seeded-defaults),
+[`default_from = "git:user.name"`](../templates/questions.md#machine-seeded-defaults),
 which offers the value from your Git configuration as the *prompt default* — you
-press Enter and move on. The difference is that the answer is then recorded in
-`.config/git.tpl.toml`, and the next person to render gets your project's author
-rather than their own. When nobody is asked, the seed is not read at all and the
-question's own `default` applies, so the rule above is not weakened: nothing
-machine-specific ever reaches a tree without a human accepting it first.
+press Enter and move on. The same field derives a project slug from the remote
+or the directory name, `{{ remote.name | default(dir.name) | slugify }}`. The
+difference is that the answer is then recorded in `.config/git.tpl.toml`, and
+the next person to render gets your project's author rather than their own. When
+nobody is asked, the seed is not read at all and the question's own `default`
+applies, so the rule above is not weakened: nothing machine-specific ever
+reaches a tree without a human accepting it first.
 
 That is the general shape of the answer: a value that varies by machine belongs
 in the answers, where it is recorded and shared, not in the context, where it is

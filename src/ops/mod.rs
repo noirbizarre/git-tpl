@@ -26,6 +26,7 @@ use crate::graph::{Graph, GraphError};
 use crate::provenance::{Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
 use crate::render::{RenderError, Rendered, render_entries, write_tree};
+use crate::seed::SeedContext;
 use crate::template::{Manifest, Value};
 use crate::userconfig::UserConfig;
 
@@ -493,7 +494,9 @@ pub fn render_resolved(
 
     // Built only when somebody is going to be asked. When nobody is, the map
     // is empty *and* `DefaultsOnly` ignores it — two guards, because a machine
-    // value reaching the tree would end invariant 2.
+    // value reaching the tree would end invariant 2. A derived seed is still
+    // just a seed: widening what a `default_from` may read does not widen where
+    // the result may go, and both guards stay exactly here.
     let seeds = match project {
         Some((repo, _)) if answering.is_interactive() => {
             prompt_seeds(repo, &template.manifest, user)?
@@ -617,7 +620,7 @@ pub fn render(
 ///
 /// A source that is simply unset is absent: a template suggesting `user.name`
 /// must still work for someone who has never set one, and the question's own
-/// `default` covers that.
+/// `default` covers that. The same goes for an expression rendering to nothing.
 fn prompt_seeds(
     project: &dyn GitBackend,
     manifest: &Manifest,
@@ -625,12 +628,45 @@ fn prompt_seeds(
 ) -> Result<BTreeMap<String, Value>, OpError> {
     let mut seeds = BTreeMap::new();
 
+    // Built at most once, and only if some question actually asks for it. A
+    // template with no expression seed must not pay for a configuration
+    // snapshot and a remote lookup.
+    let mut machine: Option<SeedContext> = None;
+
     for (name, question) in &manifest.questions {
-        let Some(key) = question.git_config_key() else {
+        // The shorthand keeps its own path: no engine, no parse, and exactly
+        // the behaviour it had before expressions existed.
+        if let Some(key) = question.git_config_key() {
+            if let Some(value) = seed(project, key)? {
+                seeds.insert(name.clone(), Value::String(value));
+            }
+            continue;
+        }
+
+        let Some(expression) = question.default_from_expression() else {
             continue;
         };
-        if let Some(value) = seed(project, key)? {
-            seeds.insert(name.clone(), Value::String(value));
+
+        let machine = match machine {
+            Some(ref built) => built,
+            None => {
+                // `tpl.remote` and not `--remote`: a flag about where template
+                // refs are pushed must not silently change a prompt default.
+                let remote = Preferences::load(project)?.remote;
+                machine.insert(crate::seed::collect(project, &remote)?)
+            }
+        };
+
+        let rendered = crate::eval::render_seed(
+            expression,
+            machine,
+            &format!("questions.{name}.default_from"),
+        )?;
+
+        // An expression resolving to nothing is an absent seed, not an empty
+        // prompt — the same rule `gitconfig::seed` applies to an unset key.
+        if !rendered.trim().is_empty() {
+            seeds.insert(name.clone(), Value::String(rendered));
         }
     }
 
@@ -1457,6 +1493,84 @@ mod tests {
             seeds.get("author"),
             Some(&Value::String("From The File".into()))
         );
+    }
+
+    mod derived_seeds {
+        use super::*;
+        use crate::git::libgit2::LibGit2;
+
+        fn project(name: &str) -> (tempfile::TempDir, LibGit2) {
+            let parent = tempfile::tempdir().unwrap();
+            let path = parent.path().join(name);
+            std::fs::create_dir(&path).unwrap();
+            let repo = LibGit2::init(&path).unwrap();
+            (parent, repo)
+        }
+
+        const SLUG: &str = "[questions.slug]\ntype = \"string\"\n\
+             default_from = \"{{ remote.name | default(dir.name) | slugify }}\"\n";
+
+        #[test]
+        fn a_remote_seeds_the_prompt() {
+            let (_dir, repo) = project("some-checkout");
+            repo.set_config_str("remote.origin.url", "git@github.com:me/Git Tpl.git")
+                .unwrap();
+
+            let seeds = prompt_seeds(&repo, &manifest_with(SLUG), &user_with("")).unwrap();
+
+            assert_eq!(seeds.get("slug"), Some(&Value::String("git-tpl".into())));
+        }
+
+        /// The case the fallback exists for: a project created locally and not
+        /// yet pushed anywhere.
+        #[test]
+        fn without_a_remote_the_directory_name_seeds_the_prompt() {
+            let (_dir, repo) = project("My Project");
+
+            let seeds = prompt_seeds(&repo, &manifest_with(SLUG), &user_with("")).unwrap();
+
+            assert_eq!(seeds.get("slug"), Some(&Value::String("my-project".into())));
+        }
+
+        /// Precedence is unchanged by the new form: the person at the keyboard
+        /// still outranks the template author's guess.
+        #[test]
+        fn a_user_default_still_beats_a_derived_seed() {
+            let (_dir, repo) = project("some-checkout");
+            repo.set_config_str("remote.origin.url", "git@github.com:me/guessed.git")
+                .unwrap();
+
+            let seeds = prompt_seeds(
+                &repo,
+                &manifest_with(SLUG),
+                &user_with("slug = \"stated-outright\"\n"),
+            )
+            .unwrap();
+
+            assert_eq!(
+                seeds.get("slug"),
+                Some(&Value::String("stated-outright".into()))
+            );
+        }
+
+        /// An expression yielding nothing is an absent seed, not an empty
+        /// prompt — the same rule an unset configuration key follows.
+        #[test]
+        fn an_expression_resolving_to_nothing_seeds_nothing() {
+            let (_dir, repo) = project("whatever");
+
+            let seeds = prompt_seeds(
+                &repo,
+                &manifest_with(
+                    "[questions.author]\ntype = \"string\"\n\
+                     default_from = \"{{ git.user.nickname }}\"\n",
+                ),
+                &user_with(""),
+            )
+            .unwrap();
+
+            assert!(seeds.is_empty(), "expected no seed, got {seeds:?}");
+        }
     }
 
     #[test]

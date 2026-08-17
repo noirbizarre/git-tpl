@@ -730,6 +730,108 @@ default_from = "git:tpl.ci"
         .says("only applies to `string` questions");
 }
 
+// --- seeds derived from the repository ---------------------------------------
+
+/// The case the feature exists for: a template asks for a slug, and the project
+/// already knows one — from where it is pushed, or failing that from what the
+/// directory is called.
+const DERIVED: &str = r#"
+name = "derived"
+
+[questions.slug]
+type = "string"
+default = "placeholder"
+default_from = "{{ remote.name | default(dir.name) | slugify }}"
+"#;
+
+fn derived_world(remote: Option<&str>) -> World {
+    let world = World::with_template(DERIVED, &[("SLUG.jinja", "{{ slug }}\n")]);
+    if let Some(url) = remote {
+        world.project.git(&["remote", "add", "origin", url]);
+    }
+    world
+}
+
+/// The same guard `git:user.name` has, for the wider set of sources. Under
+/// `--defaults` nobody confirms anything, so nothing read from the machine may
+/// become an answer — otherwise two developers commit two different trees.
+#[test]
+fn a_derived_seed_is_not_used_when_questions_are_not_asked() {
+    let world = derived_world(Some("git@github.com:me/guessed-name.git"));
+
+    let output = world.init(&[]).success();
+
+    assert_eq!(world.project.read("SLUG"), "placeholder\n");
+    assert!(
+        world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("slug = \"placeholder\""),
+        "the recorded answer must be the template's own default"
+    );
+    output.silent_about("guessed-name");
+}
+
+/// The claim in one assertion: two projects that would be *seeded* differently
+/// — one from a remote, one with no remote at all — still render the same tree,
+/// because neither seed was used.
+#[test]
+fn two_machines_render_the_same_tree_from_a_derived_default() {
+    let one = derived_world(Some("git@github.com:me/one.git"));
+    let two = derived_world(None);
+
+    one.init(&[]).success();
+    two.init(&[]).success();
+
+    assert_eq!(
+        one.project
+            .git(&["rev-parse", &format!("{}^{{tree}}", one.ref_name())]),
+        two.project
+            .git(&["rev-parse", &format!("{}^{{tree}}", two.ref_name())]),
+    );
+}
+
+/// A syntax error in a seed expression belongs to the template author, and they
+/// must meet it on their own first render rather than on a user's machine.
+#[test]
+fn a_broken_default_from_expression_is_reported_before_any_prompt() {
+    let world = World::with_template(
+        r#"
+name = "bad"
+
+[questions.slug]
+type = "string"
+default_from = "{{ remote.name | }}"
+"#,
+        &[("out.txt.jinja", "x\n")],
+    );
+
+    world.init(&[]).failure().says("not a valid expression");
+}
+
+/// The seed context is not the render context, and a template author reaching
+/// for an answer inside a `default_from` has misunderstood which is which. A
+/// chainable environment would render it to nothing and say so never.
+#[test]
+fn a_default_from_expression_referencing_a_question_is_refused() {
+    let world = World::with_template(
+        r#"
+name = "bad"
+
+[questions.project_name]
+type = "string"
+default = "demo"
+
+[questions.slug]
+type = "string"
+default_from = "{{ project_name | slugify }}"
+"#,
+        &[("out.txt.jinja", "x\n")],
+    );
+
+    world.init(&[]).failure().says("seed namespace");
+}
+
 /// The manifest field that stops a bad distribution name reaching the first
 /// build. A pattern, never an expression: an arbitrary validator would be code
 /// running on a template's behalf, and invariant 5 says no.

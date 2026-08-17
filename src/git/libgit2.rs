@@ -803,6 +803,44 @@ impl GitBackend for LibGit2 {
             Err(e) => Err(backend("read a configuration value", &e)),
         }
     }
+
+    fn config_entries(&self) -> Result<Vec<(String, String)>, GitError> {
+        let mut config = self
+            .repo
+            .config()
+            .map_err(|e| backend("read the Git configuration", &e))?;
+        // The snapshot must outlive the iterator, which borrows it.
+        let snapshot = config
+            .snapshot()
+            .map_err(|e| backend("snapshot the Git configuration", &e))?;
+        let entries = snapshot
+            .entries(None)
+            .map_err(|e| backend("list the Git configuration", &e))?;
+
+        let mut collected = Vec::new();
+        entries
+            .for_each(|entry| {
+                // Non-UTF-8 keys and values are skipped rather than lossily
+                // converted: a mangled seed is worse than an absent one,
+                // because the user would have to notice and correct it.
+                if let (Ok(name), Ok(value)) = (entry.name(), entry.value()) {
+                    collected.push((name.to_string(), value.to_string()));
+                }
+            })
+            .map_err(|e| backend("read a configuration entry", &e))?;
+        Ok(collected)
+    }
+
+    fn remote_url(&self, name: &str) -> Result<Option<String>, GitError> {
+        match self.repo.find_remote(name) {
+            // A non-UTF-8 URL is skipped for the same reason a non-UTF-8
+            // configuration value is: it cannot be shown at a prompt.
+            Ok(remote) => Ok(remote.url().ok().map(str::to_string)),
+            Err(e) if e.code() == ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(backend("read a remote", &e)),
+        }
+    }
+
     fn resolve_revision(&self, revision: &str, origin: &str) -> Result<Oid, GitError> {
         // `revparse_single` handles SHAs, tags and local branches. A bare
         // clone's branches live under `refs/remotes/origin/`, so a plain
