@@ -1,0 +1,1103 @@
+//! `backport` — the patch that carries a local fix back to the template.
+//!
+//! The whole design is ADR-020, and it rests on one sentence: rendering is
+//! deterministic, so a candidate template source can be *verified* by
+//! rendering it rather than inferred by pattern-matching. Read the ADR before
+//! changing anything here — every refusal below buys out a way of shipping a
+//! plausible-looking wrong patch to every downstream project at once.
+
+use std::collections::BTreeMap;
+use std::path::Path;
+
+use miette::Diagnostic;
+use similar::{ChangeTag, TextDiff};
+use thiserror::Error;
+
+use crate::config::{CONFIG_PATH, Config};
+use crate::context::Context;
+use crate::eval::{Partials, Undefined, render_string_with};
+use crate::git::{ChangeKind, GitBackend, Oid};
+use crate::provenance::Provenance;
+use crate::render::Rendered;
+use crate::userconfig::UserConfig;
+
+use super::{Answering, OpError, Target, Trust, describe_revision, identify, render_files};
+use std::sync::Arc;
+
+/// Why a backport could not be produced.
+///
+/// Every variant is a refusal rather than a wrong answer, and every `help`
+/// names editing the template by hand — the status quo, and therefore the
+/// floor no refusal can fall below. See ADR-020.
+#[derive(Debug, Error, Diagnostic)]
+pub enum BackportError {
+    /// A change lands on a line that rendering substituted into.
+    ///
+    /// The expected refusal, and the one users will meet most. Reversing the
+    /// substitution is not attempted, because at the level of bytes a
+    /// substitution and a coincidence are indistinguishable — see ADR-020.
+    #[error("`{path}` was changed where the template substitutes a value")]
+    #[diagnostic(
+        code(tpl::backport::substituted_region),
+        help(
+            "line {line} of `{path}` is produced by an expression in `{template_path}`, not copied \
+             from it, so there is no one-to-one change to send upstream. Edit `{template_path}` by \
+             hand, or restrict the backport with a pathspec."
+        )
+    )]
+    SubstitutedRegion {
+        /// The rendered path, as the user sees it.
+        path: String,
+        /// The template source that produced it.
+        template_path: String,
+        /// The first offending line, 1-based, in the rendered file.
+        line: usize,
+    },
+
+    /// A changed file is binary on one side or the other.
+    #[error("`{path}` is binary, and cannot be backported as a patch")]
+    #[diagnostic(
+        code(tpl::backport::binary),
+        help(
+            "a text patch cannot carry it. Copy the file into `{template_path}` in the template by \
+             hand, or exclude it with `--exclude {path}`."
+        )
+    )]
+    Binary {
+        /// The rendered path.
+        path: String,
+        /// The template source that produced it.
+        template_path: String,
+    },
+
+    /// The patched source did not render back to what the project has.
+    ///
+    /// The proof failing. It means the change could not be placed in the
+    /// source without altering something else — most often because it landed
+    /// against a region a conditional collapsed.
+    #[error("the backported change to `{template_path}` does not render back to `{path}`")]
+    #[diagnostic(
+        code(tpl::backport::round_trip),
+        help(
+            "the patch was built and then re-rendered to check it, and the result differed \
+             from your file. Sending it would change what `{template_path}` produces for everyone. \
+             Edit `{template_path}` by hand."
+        )
+    )]
+    RoundTrip {
+        /// The rendered path.
+        path: String,
+        /// The template source that would have been patched.
+        template_path: String,
+    },
+
+    /// Re-rendering the recorded revision did not reproduce the recorded tree.
+    #[error("the recorded answers no longer reproduce `{ref_name}`")]
+    #[diagnostic(
+        code(tpl::backport::stale_rendering),
+        help(
+            "`{CONFIG_PATH}` has been edited since the last render, so the ref is not what the \
+             answers produce and every line of a backport would be measured against the \
+             wrong file. Run `git tpl update` first."
+        ),
+        url("https://noirbizarre.github.io/git-tpl/usage/backport/")
+    )]
+    StaleRendering {
+        /// The ref that disagreed.
+        ref_name: String,
+    },
+
+    /// A path was named that the template does not own and does not exist.
+    #[error("`{path}` is neither produced by the template nor present in the project")]
+    #[diagnostic(
+        code(tpl::backport::unknown_path),
+        help("check the spelling. `git tpl status` lists what the template owns.")
+    )]
+    UnknownPath {
+        /// The path as the user wrote it.
+        path: String,
+    },
+
+    /// The patch could not be written to `--output`.
+    #[error("could not write the patch to `{path}`")]
+    #[diagnostic(code(tpl::backport::output_write), help("{reason}"))]
+    OutputWrite {
+        /// The path that could not be written.
+        path: String,
+        /// The underlying failure.
+        reason: String,
+    },
+}
+
+/// One file's worth of backported change.
+#[derive(Debug, Clone)]
+pub struct BackportedFile {
+    /// The path in the project, as the user knows it.
+    pub rendered: String,
+    /// The path in the template repository, `.jinja` intact, `root` prefixed.
+    pub source: String,
+    /// Lines added to the template source.
+    pub insertions: usize,
+    /// Lines removed from the template source.
+    pub deletions: usize,
+    /// Whether the template source is new.
+    pub added: bool,
+}
+
+/// A path that was considered and left out, with the reason.
+#[derive(Debug, Clone)]
+pub struct Skipped {
+    /// The rendered path.
+    pub path: String,
+    /// A one-line reason, already user-facing.
+    pub reason: String,
+}
+
+/// The outcome of a backport.
+pub struct Backport {
+    /// The mailbox, ready for `git am`. Empty when `files` is empty.
+    pub patch: String,
+    /// What the patch carries.
+    pub files: Vec<BackportedFile>,
+    /// What was considered and deliberately left out.
+    pub skipped: Vec<Skipped>,
+    /// The template revision the patch applies to, as `<ref> (<short>)`.
+    pub revision_description: String,
+    /// The template source, as configured.
+    pub source: String,
+    /// The command that would apply this patch, ready to paste.
+    ///
+    /// git-tpl does not run it — ADR-002 and ADR-020 — but it knows enough to
+    /// spell it, and a user who has to reconstruct it from prose will get the
+    /// `-C` wrong the first time.
+    pub apply_command: String,
+}
+
+/// Produce the patch that carries the project's local divergence upstream.
+///
+/// Writes nothing, anywhere: not the project, not the template, not even a
+/// loose object. The two trees compared both already exist in the project
+/// repository, and the patch is formatted in process.
+///
+/// There is no `supplied` parameter, unlike every other rendering entry point.
+/// The rendering here is not a rendering the user is choosing — it exists to
+/// reproduce the tree the project was given, so the recorded answers are the
+/// only admissible ones, and the check against the ref below would reject any
+/// others anyway.
+pub fn backport(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    paths: &[String],
+    exclude: &[String],
+    user: &UserConfig,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+) -> Result<Backport, OpError> {
+    let config = Config::load(project_root)?;
+    let (_, ref_name) = identify(project_root)?;
+    let tip = super::require_tip(project, &ref_name)?;
+    let recorded = Provenance::parse(&project.commit(tip)?.message);
+
+    // The recorded revision, not the configured one. A backport diffs the
+    // user's divergence, and rendering anything else folds the template's own
+    // movement into the patch — which would send upstream a revert of upstream.
+    let reference = recorded
+        .as_ref()
+        .and_then(|r| r.reference.clone())
+        .or_else(|| config.template.r#ref.clone());
+    let revision = recorded.as_ref().and_then(|r| r.commit);
+
+    let rendered = render_files(
+        Target {
+            source: &config.template.source,
+            // A SHA if we have one: a branch name would follow the branch, and
+            // the whole point is to reproduce what the user actually has.
+            reference: revision
+                .map(|oid| oid.to_string())
+                .as_deref()
+                .or(reference.as_deref()),
+            root: config.template.root.as_deref(),
+            dirty: false,
+        },
+        Some((project, project_root)),
+        config.answers.clone(),
+        user,
+        answering,
+        trust,
+    )?;
+
+    // The proof depends on the rendering we hold matching the one the ref
+    // records. If it does not, the alignment below is against the wrong file
+    // and every line number in the patch is wrong. Checked by writing the
+    // rendered bytes into the *project* — never the template — as `render`
+    // already does.
+    let rendered_tree = crate::render::write_tree(project, &rendered.files)?;
+    if rendered_tree != project.commit(tip)?.tree {
+        return Err(BackportError::StaleRendering {
+            ref_name: ref_name.clone(),
+        }
+        .into());
+    }
+
+    let (workdir_tree, _ignored) = project.tree_from_workdir(project_root)?;
+
+    // libgit2 does the pathspec matching, because both trees are here and
+    // reimplementing Git's pathspec rules is the kind of thing that is subtly
+    // wrong for years.
+    let changes = project.diff_trees(Some(rendered_tree), workdir_tree, paths)?;
+
+    let by_output: BTreeMap<&str, &Rendered> = rendered
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file))
+        .collect();
+
+    let partials = rendered.template.partials()?;
+    let undefined = if rendered.template.manifest.strict.unwrap_or(false) {
+        Undefined::Strict
+    } else {
+        Undefined::Lenient
+    };
+    let root = rendered.template.root.clone();
+
+    let mut files = Vec::new();
+    let mut skipped = Vec::new();
+    let mut diffs = Vec::new();
+
+    for change in changes {
+        if excluded(&change.path, exclude) {
+            continue;
+        }
+
+        match change.kind {
+            ChangeKind::Deleted => {
+                // Deleting a file from a template deletes it from every project
+                // that renders it. Far too blunt to infer from one project's
+                // working tree, where a file may be absent for a dozen local
+                // reasons. Named explicitly, it is still only reported.
+                skipped.push(Skipped {
+                    path: change.path.clone(),
+                    reason: "deleted locally; removing it from the template would remove it \
+                             from every project"
+                        .to_string(),
+                });
+                continue;
+            }
+            ChangeKind::Added => {
+                // Not template-owned. Only carried when the user named it, and
+                // `paths` being empty means they named nothing.
+                //
+                // Silently, unlike a deletion: every project has files the
+                // template never produced — its own source, its notes, its
+                // `.config/git.tpl.toml` — and listing them all as "skipped"
+                // would bury the one line that matters under the whole
+                // repository. `skipped` means "you might have expected this
+                // and did not get it", which a file the template has never
+                // seen is not.
+                if paths.is_empty() {
+                    continue;
+                }
+                let project_bytes = read_required(project, workdir_tree, &change.path)?;
+                if is_binary(&project_bytes) {
+                    return Err(BackportError::Binary {
+                        path: change.path.clone(),
+                        template_path: change.path.clone(),
+                    }
+                    .into());
+                }
+                let text = to_text(&project_bytes, &change.path, &change.path)?;
+                // No `.jinja`: nothing was substituted into a file the template
+                // has never seen, and naming it `.jinja` would render it —
+                // turning any `{{` the user wrote into a template expression.
+                let source = join_root(&root, &change.path);
+                diffs.push(file_diff(&source, "", &text, true));
+                files.push(BackportedFile {
+                    rendered: change.path.clone(),
+                    source,
+                    insertions: line_count(&text),
+                    deletions: 0,
+                    added: true,
+                });
+            }
+            ChangeKind::Modified => {
+                let Some(file) = by_output.get(change.path.as_str()) else {
+                    return Err(BackportError::UnknownPath {
+                        path: change.path.clone(),
+                    }
+                    .into());
+                };
+
+                let template_bytes = rendered
+                    .template
+                    .repo
+                    .read_path(rendered.template.root_tree, &file.source)?;
+                let Some(template_bytes) = template_bytes else {
+                    return Err(BackportError::UnknownPath {
+                        path: file.source.clone(),
+                    }
+                    .into());
+                };
+                let project_bytes = read_required(project, workdir_tree, &change.path)?;
+
+                if is_binary(&template_bytes)
+                    || is_binary(&file.content)
+                    || is_binary(&project_bytes)
+                {
+                    return Err(BackportError::Binary {
+                        path: change.path.clone(),
+                        template_path: file.source.clone(),
+                    }
+                    .into());
+                }
+
+                let source_text = to_text(&template_bytes, &change.path, &file.source)?;
+                let rendered_text = to_text(&file.content, &change.path, &file.source)?;
+                let project_text = to_text(&project_bytes, &change.path, &file.source)?;
+
+                let patched = transpose(
+                    &source_text,
+                    &rendered_text,
+                    &project_text,
+                    &change.path,
+                    &file.source,
+                )?;
+
+                // The proof. Determinism (invariant 2) is what makes a passing
+                // re-render mean something: the patched source demonstrably
+                // produces the user's file, rather than looking as though it
+                // might.
+                verify(
+                    &patched,
+                    &project_text,
+                    file,
+                    &rendered.context,
+                    &partials,
+                    undefined,
+                    &change.path,
+                )?;
+
+                let (insertions, deletions) = counts(&source_text, &patched);
+                let source = join_root(&root, &file.source);
+                diffs.push(file_diff(&source, &source_text, &patched, false));
+                files.push(BackportedFile {
+                    rendered: change.path.clone(),
+                    source,
+                    insertions,
+                    deletions,
+                    added: false,
+                });
+            }
+        }
+    }
+
+    let revision_description = match (&reference, revision) {
+        (Some(reference), Some(revision)) => describe_revision(reference, revision),
+        _ => rendered.template.reference.clone(),
+    };
+
+    let apply_command = apply_command(&config.template.source, project_root);
+
+    let patch = if files.is_empty() {
+        String::new()
+    } else {
+        mailbox(project, project_root, &revision_description, &files, &diffs)?
+    };
+
+    Ok(Backport {
+        patch,
+        files,
+        skipped,
+        revision_description,
+        source: config.template.source.clone(),
+        apply_command,
+    })
+}
+
+/// Map a change to the rendered file onto the template source that produced it.
+///
+/// Returns the patched source, or refuses. The alignment is what makes this
+/// possible at all: a run of lines that survived rendering byte-for-byte is a
+/// region where the source and the output are the same text, so a change to
+/// the output is unambiguously a change to the source.
+fn transpose(
+    source: &str,
+    rendered: &str,
+    project: &str,
+    path: &str,
+    source_path: &str,
+) -> Result<String, BackportError> {
+    // Which rendered lines came from which source lines. Only `Equal` runs
+    // carry a mapping; everything else is a region rendering changed, and a
+    // change landing there has no one-to-one image in the source.
+    let mut map: BTreeMap<usize, usize> = BTreeMap::new();
+    let alignment = TextDiff::from_lines(source, rendered);
+    let (mut s, mut r) = (0usize, 0usize);
+    for change in alignment.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Equal => {
+                map.insert(r, s);
+                s += 1;
+                r += 1;
+            }
+            ChangeTag::Delete => s += 1,
+            ChangeTag::Insert => r += 1,
+        }
+    }
+
+    let source_lines: Vec<&str> = split_lines(source);
+    let rendered_lines: Vec<&str> = split_lines(rendered);
+    let project_lines: Vec<&str> = split_lines(project);
+
+    // Rebuild the source by walking the rendered→project diff and echoing each
+    // change onto the source line it maps to. Equal lines are emitted from the
+    // *source*, not the rendering, so untouched substitutions keep their
+    // `{{ }}` — that is the whole trick.
+    let mut out: Vec<String> = Vec::new();
+    let mut emitted = 0usize; // next unemitted source line
+    let mut r = 0usize; // next rendered line
+    let mut p = 0usize; // next project line
+
+    let diff = TextDiff::from_slices(&rendered_lines, &project_lines);
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Equal => {
+                if let Some(&mapped) = map.get(&r) {
+                    // Emit everything the rendering dropped between the last
+                    // mapped line and this one — the substituted regions in
+                    // between, verbatim from the source.
+                    while emitted <= mapped {
+                        out.push(source_lines[emitted].to_string());
+                        emitted += 1;
+                    }
+                }
+                r += 1;
+                p += 1;
+            }
+            ChangeTag::Delete => {
+                let Some(&mapped) = map.get(&r) else {
+                    return Err(BackportError::SubstitutedRegion {
+                        path: path.to_string(),
+                        template_path: source_path.to_string(),
+                        line: r + 1,
+                    });
+                };
+                // Skip it: catch the source up to just before the mapped line,
+                // then step over the line itself without emitting it.
+                while emitted < mapped {
+                    out.push(source_lines[emitted].to_string());
+                    emitted += 1;
+                }
+                emitted = mapped + 1;
+                r += 1;
+            }
+            ChangeTag::Insert => {
+                // An insertion has no rendered line of its own, so it is
+                // anchored on the line it precedes. That line must be mapped,
+                // or we would be inserting into a region the render produced.
+                if r < rendered_lines.len() && !map.contains_key(&r) {
+                    return Err(BackportError::SubstitutedRegion {
+                        path: path.to_string(),
+                        template_path: source_path.to_string(),
+                        line: r + 1,
+                    });
+                }
+                if let Some(&mapped) = map.get(&r) {
+                    while emitted < mapped {
+                        out.push(source_lines[emitted].to_string());
+                        emitted += 1;
+                    }
+                }
+                out.push(project_lines[p].to_string());
+                p += 1;
+            }
+        }
+    }
+
+    // Whatever the rendering dropped after the last mapped line.
+    while emitted < source_lines.len() {
+        out.push(source_lines[emitted].to_string());
+        emitted += 1;
+    }
+
+    Ok(out.concat())
+}
+
+/// Render the patched source and require it to equal what the project has.
+fn verify(
+    patched: &str,
+    project: &str,
+    file: &Rendered,
+    context: &Context,
+    partials: &Arc<Partials>,
+    undefined: Undefined,
+    path: &str,
+) -> Result<(), BackportError> {
+    let refuse = || BackportError::RoundTrip {
+        path: path.to_string(),
+        template_path: file.source.clone(),
+    };
+
+    // A file copied byte-for-byte is not rendered, so its own bytes are the
+    // rendering. Passing it through MiniJinja here would render a template the
+    // real render never did.
+    if !file.templated {
+        return if patched == project {
+            Ok(())
+        } else {
+            Err(refuse())
+        };
+    }
+
+    let produced = render_string_with(patched, context, &file.source, partials, undefined)
+        .map_err(|_| refuse())?;
+
+    if produced == project {
+        Ok(())
+    } else {
+        Err(refuse())
+    }
+}
+
+/// Split keeping line terminators, so a file with no trailing newline stays
+/// that way and `\r\n` survives (invariant 2 applies to what we emit, too).
+fn split_lines(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        match rest.find('\n') {
+            Some(at) => {
+                out.push(&rest[..=at]);
+                rest = &rest[at + 1..];
+            }
+            None => {
+                out.push(rest);
+                rest = "";
+            }
+        }
+    }
+    out
+}
+
+fn line_count(text: &str) -> usize {
+    split_lines(text).len()
+}
+
+fn counts(before: &str, after: &str) -> (usize, usize) {
+    let diff = TextDiff::from_lines(before, after);
+    let mut insertions = 0;
+    let mut deletions = 0;
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Insert => insertions += 1,
+            ChangeTag::Delete => deletions += 1,
+            ChangeTag::Equal => {}
+        }
+    }
+    (insertions, deletions)
+}
+
+/// A `git diff`-shaped section for one file.
+///
+/// Formatted here rather than by `GitBackend::diff_patch`, which needs two
+/// *trees*: producing them would mean writing blobs and trees to answer a
+/// question that reads nothing. `git tpl test` does the same, for the same
+/// reason.
+fn file_diff(path: &str, before: &str, after: &str, added: bool) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("diff --git a/{path} b/{path}\n"));
+    if added {
+        out.push_str("new file mode 100644\n");
+        out.push_str("--- /dev/null\n");
+    } else {
+        out.push_str(&format!("--- a/{path}\n"));
+    }
+    out.push_str(&format!("+++ b/{path}\n"));
+
+    let diff = TextDiff::from_lines(before, after);
+    let mut unified = diff.unified_diff();
+    unified.context_radius(3);
+    // The `---`/`+++` pair is written above, in git's `a/`,`b/` form, which
+    // `similar`'s header would duplicate in its own.
+    //
+    // `similar` emits `\ No newline at end of file` itself, so a file whose
+    // last line has no terminator is already marked — and it must be, or
+    // `git apply` silently adds one. Pinned by
+    // `a_missing_final_newline_is_marked_in_the_patch`.
+    out.push_str(&unified.to_string());
+    out
+}
+
+/// Assemble the mailbox `git am` reads.
+fn mailbox(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    revision_description: &str,
+    files: &[BackportedFile],
+    diffs: &[String],
+) -> Result<String, OpError> {
+    // The project's identity, because the project is where the work was done.
+    // A backport is the user's patch; signing it with anything else would
+    // misattribute it in the template's history.
+    let name = project
+        .config_string("user.name")?
+        .unwrap_or_else(|| "git-tpl".to_string());
+    let email = project
+        .config_string("user.email")?
+        .unwrap_or_else(|| "git-tpl@localhost".to_string());
+
+    let project_name = project_root
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "the project".to_string());
+
+    let mut out = String::new();
+    // The magic date `git format-patch` uses to mark a synthesised mailbox.
+    out.push_str("From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001\n");
+    out.push_str(&format!("From: {name} <{email}>\n"));
+    out.push_str(&format!("Date: {}\n", rfc2822_now()));
+    out.push_str(&format!(
+        "Subject: [PATCH] tpl: backport from {project_name}\n\n"
+    ));
+    out.push_str(&format!(
+        "Backported by git-tpl {} from {project_name}, rendered at {revision_description}.\n\n",
+        crate::VERSION
+    ));
+    for file in files {
+        out.push_str(&format!("  {} <- {}\n", file.source, file.rendered));
+    }
+    out.push('\n');
+    for diff in diffs {
+        out.push_str(diff);
+    }
+    out.push_str(&format!("-- \ngit-tpl {}\n\n", crate::VERSION));
+    Ok(out)
+}
+
+/// The current time in the form a mailbox header wants.
+///
+/// The one clock read in this file, and it is metadata rather than content:
+/// invariant 2 governs what a template *renders*, and the patch body is
+/// byte-identical between two runs a second apart.
+fn rfc2822_now() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0);
+    rfc2822(seconds)
+}
+
+/// A Unix timestamp as `Thu, 1 Jan 1970 00:00:00 +0000`.
+///
+/// Hand-rolled because the tree has no date crate and this is the only date it
+/// formats; pulling one in for eight lines would be the larger cost. Always
+/// UTC, so there is no zone database to be wrong about.
+fn rfc2822(seconds: i64) -> String {
+    const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+
+    let days = seconds.div_euclid(86_400);
+    let rest = seconds.rem_euclid(86_400);
+    let (hour, minute, second) = (rest / 3600, (rest % 3600) / 60, rest % 60);
+    // 1970-01-01 was a Thursday, which is why `DAYS` starts there.
+    let weekday = DAYS[days.rem_euclid(7) as usize];
+
+    // Howard Hinnant's `civil_from_days`, with the era shifted so that the
+    // leap-day lands at the end of the cycle and no special-casing is needed.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    // `mp` counts from March; `+ 2` and the wrap put January back at 0.
+    let month = if mp < 10 { mp + 2 } else { mp - 10 };
+    let year = era * 400 + yoe + i64::from(month < 2);
+
+    format!(
+        "{weekday}, {day} {} {year} {hour:02}:{minute:02}:{second:02} +0000",
+        MONTHS[month as usize]
+    )
+}
+
+/// The `git am` invocation git-tpl declines to run.
+///
+/// Built from the configured source, not from `Resolved::repo.workdir()`: a
+/// resolved template is very often a throwaway clone in `/tmp`, and naming it
+/// would send the user to apply their patch into a directory that is about to
+/// be deleted.
+fn apply_command(source: &str, project_root: &Path) -> String {
+    let target = match super::resolve::local_path(source) {
+        Some(path) => relative_to(&path, project_root),
+        // A URL has no local clone to name, so the placeholder says so rather
+        // than pretending to know.
+        None => "<your-template-clone>".to_string(),
+    };
+    format!("git tpl backport | git -C {target} am")
+}
+
+/// A short spelling of `path` from `from`, falling back to the absolute form.
+///
+/// Walks up as well as down, because the overwhelmingly common layout is the
+/// template beside the project rather than inside it, and `/tmp/w/tpl` is a
+/// worse thing to paste than `../tpl`.
+fn relative_to(path: &Path, from: &Path) -> String {
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let base = std::fs::canonicalize(from).unwrap_or_else(|_| from.to_path_buf());
+
+    let mut target_parts = target.components();
+    let mut base_parts = base.components();
+    let mut common = 0;
+    while let (Some(a), Some(b)) = (target_parts.clone().next(), base_parts.clone().next()) {
+        if a != b {
+            break;
+        }
+        target_parts.next();
+        base_parts.next();
+        common += 1;
+    }
+
+    // Nothing in common means different roots — on Windows, different drives.
+    // There is no relative spelling, and inventing one would be wrong.
+    if common == 0 {
+        return target.display().to_string();
+    }
+
+    let mut out = std::path::PathBuf::new();
+    for _ in base_parts {
+        out.push("..");
+    }
+    for part in target_parts {
+        out.push(part);
+    }
+
+    let relative = out.display().to_string();
+    if relative.is_empty() {
+        return ".".to_string();
+    }
+    // A path with no `..` still needs a leading `./` to read as a path rather
+    // than as a remote name.
+    if relative.starts_with("..") {
+        relative
+    } else {
+        format!("./{relative}")
+    }
+}
+
+/// `<root>/<path>`, the path as the template repository knows it.
+fn join_root(root: &str, path: &str) -> String {
+    let root = root.trim_matches('/');
+    if root.is_empty() {
+        path.to_string()
+    } else {
+        format!("{root}/{path}")
+    }
+}
+
+fn excluded(path: &str, exclude: &[String]) -> bool {
+    exclude.iter().any(|pattern| glob_matches(pattern, path))
+}
+
+/// A `fnmatch`-shaped match, where `*` does not cross a `/` and `**` does.
+///
+/// Deliberately not the pathspec matcher libgit2 applies to `paths`: those are
+/// *inclusions*, where Git's own semantics are what a user expects, and this
+/// is an exclusion list git-tpl owns.
+fn glob_matches(pattern: &str, path: &str) -> bool {
+    // A bare name matches at any depth, which is what `--exclude Cargo.lock`
+    // obviously means.
+    if !pattern.contains('/') && !pattern.contains('*') && path.rsplit('/').next() == Some(pattern)
+    {
+        return true;
+    }
+    glob_rec(pattern.as_bytes(), path.as_bytes())
+}
+
+fn glob_rec(pattern: &[u8], path: &[u8]) -> bool {
+    if pattern.is_empty() {
+        return path.is_empty();
+    }
+    if pattern.starts_with(b"**") {
+        let rest = &pattern[2..];
+        let rest = rest.strip_prefix(b"/").unwrap_or(rest);
+        for at in 0..=path.len() {
+            if glob_rec(rest, &path[at..]) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if pattern[0] == b'*' {
+        for at in 0..=path.len() {
+            // A single `*` stops at a separator.
+            if path[..at].contains(&b'/') {
+                break;
+            }
+            if glob_rec(&pattern[1..], &path[at..]) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if !path.is_empty() && (pattern[0] == b'?' || pattern[0] == path[0]) {
+        return glob_rec(&pattern[1..], &path[1..]);
+    }
+    false
+}
+
+fn read_required(project: &dyn GitBackend, tree: Oid, path: &str) -> Result<Vec<u8>, OpError> {
+    project.read_path(tree, path)?.ok_or_else(|| {
+        BackportError::UnknownPath {
+            path: path.to_string(),
+        }
+        .into()
+    })
+}
+
+fn to_text(bytes: &[u8], path: &str, template_path: &str) -> Result<String, BackportError> {
+    String::from_utf8(bytes.to_vec()).map_err(|_| BackportError::Binary {
+        path: path.to_string(),
+        template_path: template_path.to_string(),
+    })
+}
+
+/// The same sniff `render` uses, so "binary" means one thing in this tree.
+fn is_binary(content: &[u8]) -> bool {
+    content.iter().take(8000).any(|byte| *byte == 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case(0, "Thu, 1 Jan 1970 00:00:00 +0000")]
+    #[case(1_000_000_000, "Sun, 9 Sep 2001 01:46:40 +0000")]
+    // A leap day, which is the case the era arithmetic exists for.
+    #[case(1_709_164_800, "Thu, 29 Feb 2024 00:00:00 +0000")]
+    #[case(1_735_689_599, "Tue, 31 Dec 2024 23:59:59 +0000")]
+    fn a_timestamp_formats_as_an_rfc2822_date(#[case] seconds: i64, #[case] expected: &str) {
+        assert_eq!(rfc2822(seconds), expected);
+    }
+
+    #[rstest]
+    #[case("Cargo.lock", "Cargo.lock", true)]
+    // A bare name matches at any depth, because that is what a user writing
+    // `--exclude Cargo.lock` plainly means.
+    #[case("Cargo.lock", "nested/Cargo.lock", true)]
+    #[case("*.md", "README.md", true)]
+    // A single star does not cross a separator.
+    #[case("*.md", "docs/README.md", false)]
+    #[case("**/*.md", "docs/deep/README.md", true)]
+    #[case("docs/*", "docs/README.md", true)]
+    #[case("docs/*", "docs/a/b.md", false)]
+    #[case("src/**", "src/a/b.rs", true)]
+    #[case("*.md", "README.mdx", false)]
+    // A `**` that matches nothing still has to say so.
+    #[case("**/*.md", "docs/deep/README.txt", false)]
+    #[case("docs/**", "src/a.rs", false)]
+    fn a_glob_matches_what_a_user_would_expect(
+        #[case] pattern: &str,
+        #[case] path: &str,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(glob_matches(pattern, path), expected);
+    }
+
+    #[test]
+    fn lines_keep_their_terminators_so_a_missing_final_newline_survives() {
+        assert_eq!(split_lines("a\nb"), vec!["a\n", "b"]);
+        assert_eq!(split_lines("a\nb\n"), vec!["a\n", "b\n"]);
+        assert_eq!(split_lines("a\r\n"), vec!["a\r\n"]);
+        assert_eq!(split_lines(""), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_change_to_a_verbatim_line_lands_on_the_source_line() {
+        // The substituted line is untouched, so it must come back out of the
+        // patched source with its placeholder intact.
+        let source = "# {{ name }}\n\nA project.\n";
+        let rendered = "# acme\n\nA project.\n";
+        let project = "# acme\n\nA fine project.\n";
+
+        let patched = transpose(source, rendered, project, "README.md", "README.md.jinja").unwrap();
+        assert_eq!(patched, "# {{ name }}\n\nA fine project.\n");
+    }
+
+    #[test]
+    fn an_insertion_between_verbatim_lines_is_placed_in_the_source() {
+        let source = "# {{ name }}\n\nA project.\n";
+        let rendered = "# acme\n\nA project.\n";
+        let project = "# acme\n\nA project.\nAnd more.\n";
+
+        let patched = transpose(source, rendered, project, "README.md", "README.md.jinja").unwrap();
+        assert_eq!(patched, "# {{ name }}\n\nA project.\nAnd more.\n");
+    }
+
+    #[test]
+    fn editing_a_substituted_line_is_refused_rather_than_guessed() {
+        // The user renamed the project in the rendered file. Reversing that
+        // into `{{ name }}` would be a guess, and a wrong one: they meant to
+        // change their answer, not the template.
+        let source = "# {{ name }}\n\nA project.\n";
+        let rendered = "# acme\n\nA project.\n";
+        let project = "# widgets\n\nA project.\n";
+
+        let error =
+            transpose(source, rendered, project, "README.md", "README.md.jinja").unwrap_err();
+        assert!(matches!(
+            error,
+            BackportError::SubstitutedRegion { line: 1, .. }
+        ));
+    }
+
+    #[test]
+    fn a_deletion_of_a_verbatim_line_removes_that_source_line() {
+        let source = "{{ name }}\nkeep\ndrop\n";
+        let rendered = "acme\nkeep\ndrop\n";
+        let project = "acme\nkeep\n";
+
+        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        assert_eq!(patched, "{{ name }}\nkeep\n");
+    }
+
+    /// An insertion after a collapsed region lands below it, not above it.
+    ///
+    /// The rendering dropped the `{% if %}`, so the source line the insert
+    /// anchors on is four lines further down than the rendered one. Getting
+    /// this wrong puts the user's new line *inside* the conditional, where it
+    /// would appear for some projects and not others.
+    #[test]
+    fn an_insertion_after_a_collapsed_region_is_placed_below_it() {
+        let source = "one\n{% if extra %}\ngone\n{% endif %}\ntwo\n";
+        let rendered = "one\ntwo\n";
+        let project = "one\nadded\ntwo\n";
+
+        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        assert_eq!(
+            patched,
+            "one\n{% if extra %}\ngone\n{% endif %}\nadded\ntwo\n"
+        );
+    }
+
+    /// A deletion after a collapsed region catches the source up first.
+    ///
+    /// Without the catch-up the `{% if %}` between the last mapped line and
+    /// the deleted one is swallowed along with it, and the template stops
+    /// parsing — a failure that would reach every downstream project.
+    #[test]
+    fn a_deletion_after_a_collapsed_region_keeps_the_region() {
+        let source = "one\n{% if extra %}\ngone\n{% endif %}\ndrop\n";
+        let rendered = "one\ndrop\n";
+        let project = "one\n";
+
+        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        assert_eq!(patched, "one\n{% if extra %}\ngone\n{% endif %}\n");
+    }
+
+    #[test]
+    fn a_collapsed_conditional_keeps_its_source_lines() {
+        // `{% if %}` produced nothing, so the source has lines the rendering
+        // does not. A change elsewhere must not delete them.
+        let source = "one\n{% if extra %}\nextra\n{% endif %}\ntwo\n";
+        let rendered = "one\n\ntwo\n";
+        let project = "one\n\ntwo point five\n";
+
+        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        assert!(patched.contains("{% if extra %}"), "{patched}");
+        assert!(patched.contains("two point five\n"), "{patched}");
+    }
+
+    #[rstest]
+    #[case("", "a/b.md", "a/b.md")]
+    #[case("template", "a/b.md", "template/a/b.md")]
+    #[case("/template/", "a/b.md", "template/a/b.md")]
+    fn a_render_root_prefixes_the_patch_path(
+        #[case] root: &str,
+        #[case] path: &str,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(join_root(root, path), expected);
+    }
+
+    /// An insertion adjacent to a rendered line has no anchor in the source.
+    ///
+    /// The `Delete` path is covered above; this is the other way in, and it is
+    /// the one a user hits by adding a line right under a substituted heading.
+    #[test]
+    fn an_insertion_against_a_substituted_line_is_refused() {
+        let source = "# {{ name }}\n{{ tagline }}\n";
+        let rendered = "# acme\na fine thing\n";
+        let project = "# acme\nadded\na fine thing\n";
+
+        let error =
+            transpose(source, rendered, project, "README.md", "README.md.jinja").unwrap_err();
+        assert!(matches!(
+            error,
+            BackportError::SubstitutedRegion { line: 2, .. }
+        ));
+    }
+
+    /// Source lines the rendering dropped after the last mapped line survive.
+    ///
+    /// The tail of a file is the easiest place to lose a `{% endif %}`, and
+    /// losing one produces a template that no longer parses.
+    #[test]
+    fn a_trailing_collapsed_region_is_kept() {
+        let source = "keep\n{% if extra %}\ngone\n{% endif %}\n";
+        let rendered = "keep\n";
+        let project = "changed\n";
+
+        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        assert_eq!(patched, "changed\n{% if extra %}\ngone\n{% endif %}\n");
+    }
+
+    /// A file with no trailing newline keeps that property through the patch.
+    ///
+    /// The marker comes from `similar`, not from us — this pins that it is
+    /// still there, because without it `git apply` silently appends a newline
+    /// the user never wrote.
+    #[test]
+    fn a_missing_final_newline_is_marked_in_the_patch() {
+        let diff = file_diff("f", "a\nb\n", "a\nc", false);
+        assert!(diff.ends_with("\\ No newline at end of file\n"), "{diff}");
+    }
+
+    /// A template beside its own project is `.`, not the empty string.
+    #[test]
+    fn a_template_that_is_the_project_is_a_dot() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(relative_to(dir.path(), dir.path()), ".");
+    }
+
+    #[test]
+    fn a_url_source_has_no_local_clone_to_name() {
+        let command = apply_command("https://example.com/t.git", Path::new("/tmp"));
+        assert!(command.contains("<your-template-clone>"), "{command}");
+    }
+
+    #[test]
+    fn a_sibling_template_is_named_relatively() {
+        let dir = tempfile::tempdir().unwrap();
+        let template = dir.path().join("my-template");
+        let project = dir.path().join("my-service");
+        std::fs::create_dir_all(&template).unwrap();
+        std::fs::create_dir_all(&project).unwrap();
+
+        // The common layout, and the one an absolute path serves worst.
+        assert_eq!(relative_to(&template, &project), "../my-template");
+    }
+
+    #[test]
+    fn a_nested_template_keeps_its_leading_dot() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().to_path_buf();
+        let template = project.join("vendor/tpl");
+        std::fs::create_dir_all(&template).unwrap();
+
+        assert_eq!(relative_to(&template, &project), "./vendor/tpl");
+    }
+}

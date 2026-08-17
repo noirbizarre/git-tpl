@@ -100,6 +100,9 @@ pub enum Command {
     /// Merge refs/tpl/<id> into the current branch
     Merge(MergeArgs),
 
+    /// Emit a patch carrying a local fix back to the template
+    Backport(BackportArgs),
+
     /// Retrieve template refs from a remote
     Fetch(RemoteArgs),
 
@@ -361,6 +364,43 @@ pub struct TestArgs {
     pub write: bool,
 
     /// Allow the template's remote data sources without asking
+    #[arg(long)]
+    pub trust: bool,
+}
+
+/// `git tpl backport`
+///
+/// Deliberately carries no [`AnswerArgs`], for `test`'s reason rather than
+/// `push`'s: it renders, so the flags would not be *ignored* — they would be
+/// obeyed, and that is worse. The rendering exists to reproduce the tree the
+/// project was given, so it must use the recorded answers; a `--answer` would
+/// produce a different tree, fail the check against the ref and refuse. A flag
+/// whose only possible effect is to break the command does not belong on it.
+///
+/// Deliberately carries no `--ref`, for the same shape of reason. The
+/// comparison is against the revision the project actually rendered; anything
+/// else folds the template's own movement into the patch, which sends upstream
+/// a revert of upstream.
+#[derive(Debug, clap::Args)]
+pub struct BackportArgs {
+    /// Limit the backport to these paths
+    ///
+    /// Git pathspecs, matched against the rendered paths. A file the template
+    /// does not produce is only considered when named here.
+    #[arg(value_name = "PATHSPEC")]
+    pub paths: Vec<String>,
+
+    /// Leave these paths out; repeatable
+    #[arg(long, value_name = "GLOB")]
+    pub exclude: Vec<String>,
+
+    /// Write the patch here instead of to stdout
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+
+    /// Fetch remote data sources without confirming
+    ///
+    /// Per invocation: nothing is recorded, and the next run asks again.
     #[arg(long)]
     pub trust: bool,
 }
@@ -651,6 +691,46 @@ mod tests {
         assert!(Cli::try_parse_from(["git-tpl", "diff", "--dirty", "--answer", "a=b"]).is_ok());
         assert!(Cli::try_parse_from(["git-tpl", "show", "x", "--dirty", "--defaults"]).is_ok());
         assert!(Cli::try_parse_from(["git-tpl", "render", "t", "-o", "out", "--defaults"]).is_ok());
+    }
+
+    /// `backport` is the fourth case, and its reason is `test`'s, not `push`'s.
+    ///
+    /// It renders, so the flags would not be ignored — they would be obeyed.
+    /// The rendering exists to reproduce the tree the project was given, so a
+    /// `--answer` would produce a different one, fail the check against the
+    /// ref, and refuse. A flag whose only possible effect is to break the
+    /// command is refused at the parser instead.
+    ///
+    /// `--ref` goes the same way: the recorded revision is the only baseline
+    /// that yields the user's divergence rather than the template's movement.
+    #[test]
+    fn backport_refuses_the_flags_that_would_change_its_baseline() {
+        assert!(Cli::try_parse_from(["git-tpl", "backport", "--answer", "a=b"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "backport", "--defaults"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "backport", "--answers-from", "a.toml"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "backport", "--ref", "main"]).is_err());
+    }
+
+    /// Selection is positional, exclusion is a repeatable flag.
+    #[test]
+    fn backport_takes_pathspecs_and_repeatable_excludes() {
+        let cli = Cli::try_parse_from([
+            "git-tpl",
+            "backport",
+            "README.md",
+            "src/",
+            "--exclude",
+            "*.lock",
+            "--exclude",
+            "docs/**",
+        ])
+        .unwrap();
+        let Command::Backport(args) = cli.command else {
+            panic!("expected backport")
+        };
+        assert_eq!(args.paths, ["README.md", "src/"]);
+        assert_eq!(args.exclude, ["*.lock", "docs/**"]);
+        assert!(args.output.is_none());
     }
 
     /// `test` is the third case, and its reason is neither of the other two.
