@@ -489,6 +489,31 @@ impl Output {
         format!("{}{}", self.stdout, self.stderr)
     }
 
+    /// The whole run as a reviewable block: the exit code, then each stream
+    /// under its own heading.
+    ///
+    /// `all()` concatenates the two streams, and the boundary between them is
+    /// exactly what the snapshots exist to pin: `--json` owns stdout and human
+    /// prose owns stderr, so a snapshot that could not tell them apart would
+    /// keep passing while that broke.
+    ///
+    /// Stdout is pretty-printed when it parses as JSON. The binary emits the
+    /// compact form on purpose (`report::success` calls `Value::to_string`),
+    /// and `tests/json.rs` still pins that; the expansion here is so a reviewer
+    /// can see which key changed rather than diffing one very long line.
+    ///
+    /// An empty stream is written as `<empty>` rather than left blank, because
+    /// insta trims trailing whitespace and would otherwise absorb an empty
+    /// stream turning into a stray newline.
+    pub fn transcript(&self) -> String {
+        format!(
+            "exit: {}\n--- stdout ---\n{}\n--- stderr ---\n{}",
+            self.code,
+            section(&pretty_json(&self.stdout)),
+            section(&self.stderr),
+        )
+    }
+
     /// Assert some text appears in the output.
     pub fn says(self, needle: &str) -> Self {
         assert!(
@@ -508,6 +533,121 @@ impl Output {
         );
         self
     }
+}
+
+/// A stream as it appears in a transcript.
+fn section(stream: &str) -> String {
+    if stream.is_empty() {
+        "<empty>".to_string()
+    } else {
+        stream.trim_end_matches('\n').to_string()
+    }
+}
+
+/// Expand JSON for review, and leave anything else exactly as it was.
+fn pretty_json(stdout: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(stdout) {
+        Ok(value) => serde_json::to_string_pretty(&value).expect("re-serialise JSON"),
+        Err(_) => stdout.to_string(),
+    }
+}
+
+/// Snapshot settings for the object ids.
+///
+/// Paths are *not* filtered here — see `redact_paths`, which has to rewrite
+/// what it matches rather than merely replace it, and so cannot be expressed as
+/// an `insta` filter.
+pub fn snapshot_settings() -> insta::Settings {
+    let mut settings = insta::Settings::clone_current();
+
+    // Full object ids first: the short rule below would otherwise consume the
+    // leading seven characters of one and leave a fragment behind.
+    settings.add_filter(r"\b[0-9a-f]{40}\b", "[sha]");
+    // `Oid::short` is `to_hex()[..7]`, and it reaches the prose through
+    // `ops::describe_revision` — `main (7fa834c)` and the `X → Y` form.
+    settings.add_filter(r"\b[0-9a-f]{7,8}\b", "[short]");
+
+    // One file, one snapshot per test: the module prefix would repeat
+    // `snapshots__` in every name without distinguishing anything.
+    settings.set_prepend_module_to_snapshot(false);
+
+    settings
+}
+
+/// The temporary directory of this world, in every form the binary might have
+/// resolved it to.
+///
+/// macOS resolves `/var/folders/...` to `/private/var/folders/...`, and Windows
+/// resolves the 8.3 short name `RUNNER~1` to `runneradmin` — in both cases the
+/// path printed is not the path `TempDir` handed us. `canonicalize` gives the
+/// resolved form back with a `\\?\` verbatim prefix nothing else ever prints,
+/// so it goes.
+fn temporary_directories(world: &World) -> Vec<String> {
+    let root = world.dir.path().to_path_buf();
+    let canonical = root.canonicalize().unwrap_or_else(|_| root.clone());
+
+    [&root, &canonical]
+        .into_iter()
+        .map(|path| {
+            let text = path.display().to_string();
+            text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+        })
+        .collect()
+}
+
+/// Replace this world's temporary directory with `[tmp]`, and write whatever
+/// follows it with `/` separators.
+///
+/// Not an `insta` filter, because a filter can only substitute what it matched
+/// and this has to *rewrite* it: on Windows the tail is `\template` in prose
+/// and `\\template` inside a JSON string, and a snapshot that recorded either
+/// would fail everywhere else.
+pub fn redact_paths(world: &World, text: &str) -> String {
+    redact_roots(&temporary_directories(world), text)
+}
+
+/// The substitution itself, over roots supplied by the caller.
+///
+/// Split out from `redact_paths` so it can be tested against the macOS and
+/// Windows spellings from a Linux machine — every bug this function exists to
+/// fix was found by CI on a platform the author could not run.
+pub fn redact_roots(roots: &[String], text: &str) -> String {
+    // Each root reaches the output in three spellings: as given, with `/`
+    // separators, and `\\`-escaped inside a JSON string.
+    let mut spellings: Vec<String> = roots
+        .iter()
+        .flat_map(|root| {
+            [
+                root.replace('\\', "/"),
+                root.replace('\\', r"\\"),
+                root.clone(),
+            ]
+        })
+        .collect();
+    // Longest first. `/var/folders/...` is a suffix of `/private/var/...`, so
+    // matching the short one first would redact the middle of the long one and
+    // leave `/private[tmp]` behind — which is what CI caught.
+    spellings.sort_by_key(|spelling| std::cmp::Reverse(spelling.len()));
+    spellings.dedup();
+
+    let alternation = spellings
+        .iter()
+        .map(|spelling| regex::escape(spelling))
+        .collect::<Vec<_>>()
+        .join("|");
+    // The tail is bounded by a character class rather than by `.*`, so a
+    // redaction stops at the quote or backtick a message wraps the path in.
+    let pattern = format!(r"(?i)(?:{alternation})((?:(?:\\{{1,2}}|/)[\w.@~+-]+)*)");
+    let paths = regex::Regex::new(&pattern).expect("a path pattern");
+
+    paths
+        .replace_all(text, |captured: &regex::Captures| {
+            format!(
+                "[tmp]{}",
+                captured[1].replace(r"\\", "/").replace('\\', "/")
+            )
+        })
+        .into_owned()
 }
 
 // --- template builders ------------------------------------------------------

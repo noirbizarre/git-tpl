@@ -1,0 +1,25 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 2
+--- stdout ---
+{
+  "source": "[tmp]/template",
+  "id": "template",
+  "ref": "refs/tpl/template",
+  "tip": "[sha]",
+  "renderedRevision": "main",
+  "renderedCommit": "[sha]",
+  "dirty": false,
+  "availableRevision": "main ([short])",
+  "templateMoved": true,
+  "merged": true,
+  "renderingCount": 1,
+  "remote": null,
+  "worktreeClean": true,
+  "pending": true,
+  "ok": true
+}
+--- stderr ---
+<empty>

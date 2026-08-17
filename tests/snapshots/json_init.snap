@@ -1,0 +1,45 @@
+---
+source: tests/snapshots.rs
+expression: output.transcript()
+---
+exit: 0
+--- stdout ---
+{
+  "id": "template",
+  "ref": "refs/tpl/template",
+  "template": "[tmp]/template",
+  "revision": "main ([short])",
+  "commit": "[sha]",
+  "changes": [
+    {
+      "path": "Cargo.toml",
+      "kind": "added"
+    },
+    {
+      "path": "README.md",
+      "kind": "added"
+    },
+    {
+      "path": "ci.yml",
+      "kind": "added"
+    },
+    {
+      "path": "run.sh",
+      "kind": "added"
+    },
+    {
+      "path": "src/lib.rs",
+      "kind": "added"
+    }
+  ],
+  "merge": {
+    "result": "merged",
+    "commit": "[sha]"
+  },
+  "configPath": ".config/git.tpl.toml",
+  "configCommitted": true,
+  "ignoredAnswers": [],
+  "ok": true
+}
+--- stderr ---
+<empty>

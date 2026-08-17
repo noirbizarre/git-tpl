@@ -125,6 +125,12 @@ Snapshots use `insta`:
 mise run snapshots     # cargo insta review
 ```
 
+They live in `tests/snapshots.rs`, and they pin the transcripts quoted by
+`docs/usage/` and the envelopes described in `docs/reference/json.md`. A failing
+snapshot there is not necessarily a bug: it means documented output changed, and
+accepting it commits you to the matching documentation edit in the same pull
+request.
+
 ### Git identity
 
 The integration tests commit, and libgit2 refuses to build a signature without
