@@ -13,7 +13,7 @@ use std::path::Path;
 
 use tpl::ops::{self, OpError, Target};
 
-use super::{Standalone, answering, enforce_strict_answers, report_ignored_to, supplied, trust};
+use super::{Standalone, answering, enforce_strict_answers, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, RenderArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{field, headline, muted};
@@ -53,7 +53,7 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         &rendered.ignored_answers,
         rendered.template.manifest.questions.keys().cloned(),
     )?;
-    report_ignored_to(&ctx.out, &rendered.ignored_answers);
+    report_ignored(&ctx.out, &rendered.ignored_answers);
     report_ignored_paths(&ctx, &rendered.template.ignored);
 
     prepare_output(&args.output, args.force)?;

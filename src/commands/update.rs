@@ -62,11 +62,11 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             revision_description,
             ignored_answers,
         } => {
-            ctx.say(format!(
+            ctx.out.say(format!(
                 "Already up to date with {} at {revision_description}.",
                 config.template.source
             ));
-            report_ignored(&ctx, &ignored_answers);
+            report_ignored(&ctx.out, &ignored_answers);
 
             // The id is not in the outcome, because nothing was created. It is
             // still what the caller asked about, so read it back off disk.
@@ -90,50 +90,50 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             answers_changed,
             ignored_answers,
         } => {
-            report_ignored(&ctx, &ignored_answers);
-            ctx.blank();
-            ctx.say(field(&ctx.theme, "Template", &config.template.source));
-            ctx.say(field(
-                &ctx.theme,
+            report_ignored(&ctx.out, &ignored_answers);
+            ctx.out.blank();
+            ctx.out.say(field(&ctx.out.theme, "Template", &config.template.source));
+            ctx.out.say(field(
+                &ctx.out.theme,
                 "Revision",
                 &match &previous_revision_description {
                     Some(previous) => format!("{previous} → {revision_description}"),
                     None => revision_description.clone(),
                 },
             ));
-            ctx.blank();
-            ctx.say(headline(&ctx.theme, "Updated", &id.ref_name()));
-            ctx.blank();
+            ctx.out.blank();
+            ctx.out.say(headline(&ctx.out.theme, "Updated", &id.ref_name()));
+            ctx.out.blank();
             for c in &changes {
-                ctx.say(change(&ctx.theme, c.kind, &c.path));
+                ctx.out.say(change(&ctx.out.theme, c.kind, &c.path));
             }
-            ctx.blank();
+            ctx.out.blank();
 
             // Stated every time. It is the single most surprising property of
             // the tool, and a user who does not believe it will not use it.
-            ctx.say("Your working tree was not modified.");
+            ctx.out.say("Your working tree was not modified.");
 
             if answers_changed {
                 // The one exception, so it must be said rather than discovered
                 // in `git status`.
-                ctx.say(muted(
-                    &ctx.theme,
+                ctx.out.say(muted(
+                    &ctx.out.theme,
                     "The template added a question, so .config/git.tpl.toml was updated.",
                 ));
             }
 
-            ctx.blank();
-            ctx.say("Run:");
-            ctx.say(command(&ctx.theme, "git tpl diff"));
-            ctx.say(command(&ctx.theme, "git tpl merge"));
+            ctx.out.blank();
+            ctx.out.say("Run:");
+            ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
+            ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
 
             // The push happens under `--json` too. Only its prose is silenced;
             // suppressing the push itself would make the flag change behaviour
             // rather than change output.
             let pushed = if preferences.auto_push {
-                ctx.blank();
+                ctx.out.blank();
                 let pushed = ops::push(&ctx.repo, &ctx.root, &preferences)?;
-                ctx.say(format!("Pushed {pushed} to {}.", preferences.remote));
+                ctx.out.say(format!("Pushed {pushed} to {}.", preferences.remote));
                 Some(preferences.remote.clone())
             } else {
                 None
@@ -197,7 +197,7 @@ fn dry_run(
         trust(&args.answers, args.trust, interactive, &mut confirmer),
     )?;
 
-    report_ignored(ctx, &rendered.ignored_answers);
+    report_ignored(&ctx.out, &rendered.ignored_answers);
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
     let tip = ctx.repo.resolve_ref(&ref_name)?;
@@ -209,7 +209,7 @@ fn dry_run(
         ops::describe_revision(&rendered.template.reference, rendered.template.revision);
 
     if previous_tree == Some(rendered.tree) {
-        ctx.say("Already up to date. Nothing would change.");
+        ctx.out.say("Already up to date. Nothing would change.");
         return Ok(serde_json::json!({
             "dryRun": true,
             "result": "upToDate",
@@ -224,17 +224,17 @@ fn dry_run(
 
     let changes = ctx.repo.diff_trees(previous_tree, rendered.tree, &[])?;
 
-    ctx.blank();
-    ctx.say(field(&ctx.theme, "Template", &config.template.source));
-    ctx.say(field(&ctx.theme, "Revision", &revision_description));
-    ctx.blank();
-    ctx.say(headline(&ctx.theme, "Would update", &id.ref_name()));
-    ctx.blank();
+    ctx.out.blank();
+    ctx.out.say(field(&ctx.out.theme, "Template", &config.template.source));
+    ctx.out.say(field(&ctx.out.theme, "Revision", &revision_description));
+    ctx.out.blank();
+    ctx.out.say(headline(&ctx.out.theme, "Would update", &id.ref_name()));
+    ctx.out.blank();
     for c in &changes {
-        ctx.say(change(&ctx.theme, c.kind, &c.path));
+        ctx.out.say(change(&ctx.out.theme, c.kind, &c.path));
     }
-    ctx.blank();
-    ctx.say(muted(&ctx.theme, "Nothing was written."));
+    ctx.out.blank();
+    ctx.out.say(muted(&ctx.out.theme, "Nothing was written."));
 
     Ok(serde_json::json!({
         "dryRun": true,

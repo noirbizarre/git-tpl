@@ -78,35 +78,35 @@ fn report(ctx: &Session, args: &BackportArgs, result: &Backport) {
     // something the user is getting wrong right now, and a silent omission
     // from a patch is discovered only by the template's maintainer.
     for skipped in &result.skipped {
-        ctx.warn(warning(
-            &ctx.theme,
+        ctx.out.warn(warning(
+            &ctx.out.theme,
             &format!("skipped {}: {}", skipped.path, skipped.reason),
         ));
     }
 
     if result.files.is_empty() {
-        ctx.say(muted(
-            &ctx.theme,
+        ctx.out.say(muted(
+            &ctx.out.theme,
             "Nothing to backport: the project matches the template's rendering.",
         ));
         return;
     }
 
-    ctx.say(headline(
-        &ctx.theme,
+    ctx.out.say(headline(
+        &ctx.out.theme,
         "backport",
         &result.revision_description,
     ));
-    ctx.blank();
+    ctx.out.blank();
     for file in &result.files {
-        ctx.say(muted(
-            &ctx.theme,
+        ctx.out.say(muted(
+            &ctx.out.theme,
             &format!("  {} <- {}", file.source, file.rendered),
         ));
     }
-    ctx.blank();
-    ctx.say(muted(
-        &ctx.theme,
+    ctx.out.blank();
+    ctx.out.say(muted(
+        &ctx.out.theme,
         &diff_summary(
             result.files.len(),
             result.files.iter().map(|f| f.insertions).sum(),
@@ -114,18 +114,18 @@ fn report(ctx: &Session, args: &BackportArgs, result: &Backport) {
         ),
     ));
 
-    ctx.blank();
+    ctx.out.blank();
     // git-tpl will not apply the patch — ADR-002 and ADR-020 — but it knows
     // exactly what would, and a user reconstructing this from prose gets the
     // `-C` wrong the first time.
     match &args.output {
         Some(path) => {
-            ctx.say(field(&ctx.theme, "written", &path.display().to_string()));
-            ctx.say(field(
-                &ctx.theme,
+            ctx.out.say(field(&ctx.out.theme, "written", &path.display().to_string()));
+            ctx.out.say(field(
+                &ctx.out.theme,
                 "apply",
                 &command(
-                    &ctx.theme,
+                    &ctx.out.theme,
                     &result
                         .apply_command
                         .replace("git tpl backport | ", "")
@@ -133,10 +133,10 @@ fn report(ctx: &Session, args: &BackportArgs, result: &Backport) {
                 ),
             ));
         }
-        None => ctx.say(field(
-            &ctx.theme,
+        None => ctx.out.say(field(
+            &ctx.out.theme,
             "apply",
-            &command(&ctx.theme, &result.apply_command),
+            &command(&ctx.out.theme, &result.apply_command),
         )),
     }
 }

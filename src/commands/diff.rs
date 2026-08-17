@@ -21,17 +21,17 @@ fn report_conflicts(ctx: &Session, conflicts: &[String]) {
     } else {
         "files"
     };
-    ctx.say(warning(
-        &ctx.theme,
+    ctx.out.say(warning(
+        &ctx.out.theme,
         &format!(
             "{} {files} would conflict; shown with conflict markers",
             conflicts.len()
         ),
     ));
     for path in conflicts {
-        ctx.say(muted(&ctx.theme, &format!("         {path}")));
+        ctx.out.say(muted(&ctx.out.theme, &format!("         {path}")));
     }
-    ctx.blank();
+    ctx.out.blank();
 }
 
 pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
@@ -82,7 +82,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     if args.name_only {
         let preview = ops::diff_changes(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
         if preview.changes.is_empty() {
-            ctx.say(muted(&ctx.theme, "No differences."));
+            ctx.out.say(muted(&ctx.out.theme, "No differences."));
             return Ok(code(false));
         }
         report_conflicts(&ctx, &preview.conflicts);
@@ -98,7 +98,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         let preview = ops::diff_stat(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
         let stats = &preview.changes;
         if stats.is_empty() {
-            ctx.say(muted(&ctx.theme, "No differences."));
+            ctx.out.say(muted(&ctx.out.theme, "No differences."));
             return Ok(code(false));
         }
 
@@ -106,14 +106,14 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
         let width = stats.iter().map(|s| s.path.len()).max().unwrap_or(0);
         for s in stats {
-            ctx.say(change_stat(&ctx.theme, s, width));
+            ctx.out.say(change_stat(&ctx.out.theme, s, width));
         }
 
         let insertions = stats.iter().map(|s| s.insertions).sum();
         let deletions = stats.iter().map(|s| s.deletions).sum();
-        ctx.blank();
-        ctx.say(muted(
-            &ctx.theme,
+        ctx.out.blank();
+        ctx.out.say(muted(
+            &ctx.out.theme,
             &diff_summary(stats.len(), insertions, deletions),
         ));
         return Ok(code(true));
@@ -126,7 +126,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         // A patch is data. It goes to stdout so it can be piped into `git apply`.
         print!("{}", preview.changes);
     } else {
-        ctx.say(muted(&ctx.theme, "No differences."));
+        ctx.out.say(muted(&ctx.out.theme, "No differences."));
     }
     Ok(code(changed))
 }

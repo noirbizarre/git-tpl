@@ -15,7 +15,7 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     });
 
     if args.dry_run {
-        ctx.say(format!(
+        ctx.out.say(format!(
             "Would fetch {} from {}",
             preferences.fetch_refspec(),
             preferences.remote
@@ -45,58 +45,58 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // disagree about a diverged ref.
     let state = match &relation {
         None => {
-            ctx.say(muted(
-                &ctx.theme,
+            ctx.out.say(muted(
+                &ctx.out.theme,
                 &format!("No shared copy of {ref_name} on {}.", preferences.remote),
             ));
             "absent"
         }
         Some(relation) if relation.is_synced() => {
-            ctx.say(format!(
+            ctx.out.say(format!(
                 "{ref_name} is in sync with {}.",
                 preferences.remote
             ));
             "synced"
         }
         Some(relation) if relation.is_diverged() => {
-            ctx.blank();
-            ctx.say(format!("{ref_name} has {}.", relation.describe()));
-            ctx.blank();
-            ctx.say("Both were rendered independently. Reconcile them:");
-            ctx.say(command(
-                &ctx.theme,
+            ctx.out.blank();
+            ctx.out.say(format!("{ref_name} has {}.", relation.describe()));
+            ctx.out.blank();
+            ctx.out.say("Both were rendered independently. Reconcile them:");
+            ctx.out.say(command(
+                &ctx.out.theme,
                 &format!("git merge refs/remotes/{}/tpl/...", preferences.remote),
             ));
             "diverged"
         }
         Some(relation) if relation.behind > 0 => {
-            ctx.blank();
-            ctx.say(format!(
+            ctx.out.blank();
+            ctx.out.say(format!(
                 "The remote copy is {} commit(s) ahead of your local ref.",
                 relation.behind
             ));
-            ctx.blank();
+            ctx.out.blank();
             // Fetching never moves the local ref. What to do about a newer
             // remote copy is a decision, and adopting someone else's rendering
             // silently would be a surprising thing for a fetch to do.
-            ctx.say("Adopt it, or render your own:");
-            ctx.say(command(
-                &ctx.theme,
+            ctx.out.say("Adopt it, or render your own:");
+            ctx.out.say(command(
+                &ctx.out.theme,
                 &format!(
                     "git merge refs/remotes/{}/tpl/{}",
                     preferences.remote,
                     ref_name.trim_start_matches("refs/tpl/")
                 ),
             ));
-            ctx.say(command(&ctx.theme, "git tpl update"));
+            ctx.out.say(command(&ctx.out.theme, "git tpl update"));
             "behind"
         }
         Some(relation) => {
-            ctx.say(format!(
+            ctx.out.say(format!(
                 "You have {} rendering(s) the remote does not.",
                 relation.ahead
             ));
-            ctx.say(command(&ctx.theme, "git tpl push"));
+            ctx.out.say(command(&ctx.out.theme, "git tpl push"));
             "ahead"
         }
     };

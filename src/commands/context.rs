@@ -8,7 +8,7 @@
 
 use tpl::ops::{self, OpError, Target};
 
-use super::{Standalone, answering, report_ignored_to, supplied, trust};
+use super::{Standalone, answering, report_ignored, supplied, trust};
 use crate::cli::{ContextArgs, GlobalArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{heading, muted};
@@ -34,7 +34,7 @@ pub fn run(args: ContextArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         trust(&args.answers, args.trust, true, &mut confirmer),
     )?;
 
-    report_ignored_to(&ctx.out, &rendered.ignored_answers);
+    report_ignored(&ctx.out, &rendered.ignored_answers);
 
     // One expression, evaluated against the resolved context. This is the REPL
     // a templating language otherwise makes you do without, and it is the

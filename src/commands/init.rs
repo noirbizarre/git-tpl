@@ -73,61 +73,61 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         ),
     )?;
 
-    report_ignored(&ctx, &outcome.ignored_answers);
+    report_ignored(&ctx.out, &outcome.ignored_answers);
 
-    ctx.blank();
+    ctx.out.blank();
     // The expanded URL, not what was typed: this is the line a user copies
     // when reporting a problem, and it is what is now recorded in the project.
-    ctx.say(field(&ctx.theme, "Template", &template));
-    ctx.say(field(&ctx.theme, "Revision", &outcome.revision_description));
-    ctx.blank();
-    ctx.say(headline(&ctx.theme, "Created", &outcome.id.ref_name()));
-    ctx.blank();
+    ctx.out.say(field(&ctx.out.theme, "Template", &template));
+    ctx.out.say(field(&ctx.out.theme, "Revision", &outcome.revision_description));
+    ctx.out.blank();
+    ctx.out.say(headline(&ctx.out.theme, "Created", &outcome.id.ref_name()));
+    ctx.out.blank();
     for c in &outcome.changes {
-        ctx.say(change(&ctx.theme, c.kind, &c.path));
+        ctx.out.say(change(&ctx.out.theme, c.kind, &c.path));
     }
-    ctx.blank();
+    ctx.out.blank();
 
     match &outcome.merge {
         Some(MergeOutcome::Conflicted { paths }) => {
-            ctx.say(warning(
-                &ctx.theme,
+            ctx.out.say(warning(
+                &ctx.out.theme,
                 "the merge left conflicts. Resolve them and commit:",
             ));
-            ctx.blank();
+            ctx.out.blank();
             for path in paths {
-                ctx.say(format!("  {path}"));
+                ctx.out.say(format!("  {path}"));
             }
-            ctx.blank();
-            ctx.say(command(&ctx.theme, "git status"));
-            ctx.say(command(&ctx.theme, "git commit"));
+            ctx.out.blank();
+            ctx.out.say(command(&ctx.out.theme, "git status"));
+            ctx.out.say(command(&ctx.out.theme, "git commit"));
         }
         Some(_) => {
             let branch = ctx
                 .repo
                 .head_branch()?
                 .unwrap_or_else(|| "the branch".into());
-            ctx.say(format!("Merged into {branch}."));
+            ctx.out.say(format!("Merged into {branch}."));
         }
         None => {
-            ctx.say(muted(
-                &ctx.theme,
+            ctx.out.say(muted(
+                &ctx.out.theme,
                 "The rendered ref was created but not merged.",
             ));
-            ctx.blank();
-            ctx.say("Run:");
-            ctx.say(command(&ctx.theme, "git tpl diff"));
-            ctx.say(command(&ctx.theme, "git tpl merge"));
+            ctx.out.blank();
+            ctx.out.say("Run:");
+            ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
+            ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
         }
     }
 
-    ctx.blank();
+    ctx.out.blank();
     let relative = outcome
         .config_path
         .strip_prefix(&ctx.root)
         .unwrap_or(&outcome.config_path);
-    ctx.say(muted(
-        &ctx.theme,
+    ctx.out.say(muted(
+        &ctx.out.theme,
         &if outcome.config_committed {
             format!("Answers recorded in {} and committed.", relative.display())
         } else {
@@ -140,11 +140,11 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // would let it be read as a preamble to git-tpl's output rather than as an
     // appendix to it.
     if !outcome.remotes.is_empty() {
-        ctx.blank();
+        ctx.out.blank();
         for remote in &outcome.remotes {
             match &remote.outcome {
                 ops::RemoteOutcome::Added => {
-                    ctx.say(format!("Remote {} added.", remote.name));
+                    ctx.out.say(format!("Remote {} added.", remote.name));
                 }
                 // Silent. Reporting "nothing happened" on every re-init is the
                 // kind of line that trains people to stop reading them.
@@ -154,8 +154,8 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     // did not get it, and the user is the only one who can
                     // decide which URL is right. Both are shown, because that
                     // decision cannot be made without seeing them together.
-                    ctx.warn(warning(
-                        &ctx.theme,
+                    ctx.out.warn(warning(
+                        &ctx.out.theme,
                         &format!(
                             "remote {} was left alone.\n  it points at {existing}\n  \
                              the template asked for {}",
@@ -171,7 +171,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         // Sanitised at the last possible moment and only for the human stream.
         // `--json` gets the text as written, below, because a consumer is not a
         // terminal and has no escape sequences to be attacked through.
-        let formatting = if ctx.theme.is_colored() {
+        let formatting = if ctx.out.theme.is_colored() {
             tpl::note::Formatting::Allowed
         } else {
             // Covers `--color never`, `NO_COLOR`, `TERM=dumb` and a piped
@@ -182,8 +182,8 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         };
         let sanitised = tpl::note::sanitise(raw, formatting);
         if !sanitised.trim().is_empty() {
-            ctx.blank();
-            ctx.say(note_block(&ctx.theme, &sanitised));
+            ctx.out.blank();
+            ctx.out.say(note_block(&ctx.out.theme, &sanitised));
         }
     }
 
@@ -264,18 +264,18 @@ fn dry_run(
         .filter(|key| !template.manifest.questions.contains_key(*key))
         .cloned()
         .collect();
-    report_ignored(ctx, &ignored);
+    report_ignored(&ctx.out, &ignored);
 
-    ctx.blank();
-    ctx.say(field(&ctx.theme, "Template", source));
+    ctx.out.blank();
+    ctx.out.say(field(&ctx.out.theme, "Template", source));
     let revision_description = ops::describe_revision(&template.reference, template.revision);
-    ctx.say(field(&ctx.theme, "Revision", &revision_description));
-    ctx.blank();
-    ctx.say(heading(
-        &ctx.theme,
+    ctx.out.say(field(&ctx.out.theme, "Revision", &revision_description));
+    ctx.out.blank();
+    ctx.out.say(heading(
+        &ctx.out.theme,
         "Questions, in the order they would be asked",
     ));
-    ctx.blank();
+    ctx.out.blank();
 
     let mut asked = 0;
     // Resolution order, the same order the text list prints: it is the order
@@ -287,24 +287,24 @@ fn dry_run(
             tpl::graph::NodeKind::Question => {
                 let supplied = answers.contains_key(&node.key);
                 let supplied_note = if supplied {
-                    muted(&ctx.theme, "  (supplied)")
+                    muted(&ctx.out.theme, "  (supplied)")
                 } else {
                     String::new()
                 };
-                ctx.say(format!("  {}{supplied_note}", node.key));
+                ctx.out.say(format!("  {}{supplied_note}", node.key));
                 nodes.push(
                     serde_json::json!({ "name": node.key, "kind": "question", "supplied": supplied }),
                 );
                 asked += 1;
             }
             tpl::graph::NodeKind::Computed => {
-                ctx.say(muted(&ctx.theme, &format!("  {} (computed)", node.key)));
+                ctx.out.say(muted(&ctx.out.theme, &format!("  {} (computed)", node.key)));
                 nodes.push(
                     serde_json::json!({ "name": node.key, "kind": "computed", "supplied": false }),
                 );
             }
             tpl::graph::NodeKind::Data => {
-                ctx.say(muted(&ctx.theme, &format!("  {} (data source)", node.key)));
+                ctx.out.say(muted(&ctx.out.theme, &format!("  {} (data source)", node.key)));
                 nodes.push(
                     serde_json::json!({ "name": node.key, "kind": "data", "supplied": false }),
                 );
@@ -313,7 +313,7 @@ fn dry_run(
     }
 
     if asked == 0 {
-        ctx.say(muted(&ctx.theme, "  (none)"));
+        ctx.out.say(muted(&ctx.out.theme, "  (none)"));
     }
 
     // The file list, when the answers are complete enough to render without
@@ -340,10 +340,10 @@ fn dry_run(
             tpl::ops::Answering::Interactive(&mut prompter),
             trust(&args.answers, args.trust, false, &mut confirmer),
         ) {
-            ctx.blank();
-            ctx.say(heading(&ctx.theme, "Files it would render"));
+            ctx.out.blank();
+            ctx.out.say(heading(&ctx.out.theme, "Files it would render"));
             for file in &rendered.files {
-                ctx.say(muted(&ctx.theme, &format!("  {}", file.path)));
+                ctx.out.say(muted(&ctx.out.theme, &format!("  {}", file.path)));
             }
             files = Some(
                 rendered
@@ -355,8 +355,8 @@ fn dry_run(
         }
     }
 
-    ctx.blank();
-    ctx.say(muted(&ctx.theme, "Nothing was created."));
+    ctx.out.blank();
+    ctx.out.say(muted(&ctx.out.theme, "Nothing was created."));
 
     Ok(serde_json::json!({
         "dryRun": true,

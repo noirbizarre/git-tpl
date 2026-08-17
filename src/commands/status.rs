@@ -19,8 +19,8 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let deprecated_json = args.format == Some(Format::Json);
     if args.format.is_some() {
         // stderr, so it cannot corrupt the JSON the caller came for.
-        ctx.warn(warning(
-            &ctx.theme,
+        ctx.out.warn(warning(
+            &ctx.out.theme,
             "`--format` is deprecated and will be removed; use `--json`",
         ));
     }
@@ -39,10 +39,10 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 }
 
 fn print_text(ctx: &Session, status: &ops::Status) {
-    ctx.blank();
-    ctx.say(field(&ctx.theme, "Template", &status.source));
-    ctx.say(field(&ctx.theme, "Ref", &status.ref_name));
-    ctx.blank();
+    ctx.out.blank();
+    ctx.out.say(field(&ctx.out.theme, "Template", &status.source));
+    ctx.out.say(field(&ctx.out.theme, "Ref", &status.ref_name));
+    ctx.out.blank();
 
     let rendered = status
         .recorded
@@ -56,15 +56,15 @@ fn print_text(ctx: &Session, status: &ops::Status) {
     ) {
         (Some(available), true) => format!(
             "{rendered} → {available}   {}",
-            muted(&ctx.theme, "template has moved")
+            muted(&ctx.out.theme, "template has moved")
         ),
         (Some(available), false) if status.tip.is_none() => available.clone(),
         (_, _) => rendered.clone(),
     };
-    ctx.say(field(&ctx.theme, "Revision", &revision_line));
+    ctx.out.say(field(&ctx.out.theme, "Revision", &revision_line));
 
-    ctx.say(field(
-        &ctx.theme,
+    ctx.out.say(field(
+        &ctx.out.theme,
         "Rendered",
         &match status.rendering_count {
             0 => "nothing yet".to_string(),
@@ -73,8 +73,8 @@ fn print_text(ctx: &Session, status: &ops::Status) {
         },
     ));
 
-    ctx.say(field(
-        &ctx.theme,
+    ctx.out.say(field(
+        &ctx.out.theme,
         "Merged",
         if status.tip.is_none() {
             "n/a"
@@ -86,15 +86,15 @@ fn print_text(ctx: &Session, status: &ops::Status) {
     ));
 
     if let Some((remote_ref, relation)) = &status.remote {
-        ctx.say(field(
-            &ctx.theme,
+        ctx.out.say(field(
+            &ctx.out.theme,
             "Remote",
             &format!("{remote_ref} — {}", relation.describe()),
         ));
     }
 
-    ctx.say(field(
-        &ctx.theme,
+    ctx.out.say(field(
+        &ctx.out.theme,
         "Worktree",
         if status.worktree_clean {
             "clean"
@@ -105,14 +105,14 @@ fn print_text(ctx: &Session, status: &ops::Status) {
 
     // Say what to do next, rather than leaving the reader to infer it.
     if status.template_moved {
-        ctx.blank();
-        ctx.say("The template has moved. Run:");
-        ctx.say(command(&ctx.theme, "git tpl update"));
+        ctx.out.blank();
+        ctx.out.say("The template has moved. Run:");
+        ctx.out.say(command(&ctx.out.theme, "git tpl update"));
     } else if status.tip.is_some() && !status.merged {
-        ctx.blank();
-        ctx.say("There is a rendering you have not merged. Run:");
-        ctx.say(command(&ctx.theme, "git tpl diff"));
-        ctx.say(command(&ctx.theme, "git tpl merge"));
+        ctx.out.blank();
+        ctx.out.say("There is a rendering you have not merged. Run:");
+        ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
+        ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
     }
 }
 

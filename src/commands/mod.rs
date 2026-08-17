@@ -133,10 +133,12 @@ pub struct Session {
     pub repo: LibGit2,
     /// Its working directory — where `.config/git.tpl.toml` lives.
     pub root: PathBuf,
-    /// How to present output.
-    pub theme: Theme,
-    /// Global flags.
-    pub global: GlobalArgs,
+    /// How to talk.
+    //
+    // The `Reporter` itself rather than a copy of its fields: verbosity policy
+    // is one decision, and a `Session` that reimplemented `say`/`warn`/`blank`
+    // meant changing it in two places. The doc comments had already drifted.
+    pub out: Reporter,
     /// The user's own preferences, read once per command.
     ///
     /// Read here rather than in `ops` so that the library never touches the
@@ -157,58 +159,12 @@ impl Session {
         Ok(Self {
             repo,
             root,
-            theme: Theme::resolve(global.color),
-            global: global.clone(),
+            out: Reporter {
+                theme: Theme::resolve(global.color),
+                global: global.clone(),
+            },
             user: UserConfig::load()?,
         })
-    }
-
-    /// How this session talks, without the repository.
-    ///
-    /// So that a helper shared with the project-free commands takes one type
-    /// rather than being written twice.
-    pub fn reporter(&self) -> Reporter {
-        Reporter {
-            theme: self.theme.clone(),
-            global: self.global.clone(),
-        }
-    }
-
-    /// Whether to print anything beyond errors.
-    ///
-    /// `--json` silences the prose as well as `--quiet` does: a caller asking
-    /// for a machine-readable answer did not also ask for a narration of how it
-    /// was reached, and warnings still get through via [`warn`](Self::warn).
-    pub fn speaks(&self) -> bool {
-        !self.global.quiet && !self.global.json
-    }
-
-    /// Print a line to stderr, unless quiet.
-    ///
-    /// Human output goes to stderr so that `--json` keeps stdout
-    /// machine-readable.
-    pub fn say(&self, line: impl AsRef<str>) {
-        if self.speaks() {
-            eprintln!("{}", line.as_ref());
-        }
-    }
-
-    /// Print a warning to stderr, whatever the verbosity.
-    ///
-    /// Deliberately louder than [`say`](Self::say). A warning that `--quiet` or
-    /// `--json` swallows is a warning nobody reads, and the two cases that use
-    /// this — a deprecated flag, and answers that name no question — are both
-    /// things a caller is getting wrong right now. stderr, so a JSON payload on
-    /// stdout stays parseable.
-    pub fn warn(&self, line: impl AsRef<str>) {
-        eprintln!("{}", line.as_ref());
-    }
-
-    /// Print a blank line, unless quiet.
-    pub fn blank(&self) {
-        if self.speaks() {
-            eprintln!();
-        }
     }
 }
 
@@ -293,12 +249,10 @@ pub fn enforce_strict_answers(
 /// `_src_path` in it, and a template drops questions over time. Not silent
 /// either, because that is how a typo'd key becomes an afternoon spent
 /// wondering why an answer had no effect.
-pub fn report_ignored(ctx: &Session, ignored: &[String]) {
-    report_ignored_to(&ctx.reporter(), ignored);
-}
-
-/// [`report_ignored`], for a command with no repository.
-pub fn report_ignored_to(out: &Reporter, ignored: &[String]) {
+///
+/// Takes the `Reporter` rather than the `Session`, so the project-free
+/// commands reach the same function: there is one wording for this warning.
+pub fn report_ignored(out: &Reporter, ignored: &[String]) {
     if ignored.is_empty() {
         return;
     }
