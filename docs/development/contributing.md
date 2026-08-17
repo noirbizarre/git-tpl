@@ -66,6 +66,18 @@ interpreters. Templates are untrusted input. This includes a `command` key in a
 `git tpl test` case, which is where the rule is most tempting to break —
 [ADR-016](../adr/016-template-tests-are-data.md).
 
+**Post-render tasks**, reviewed under issue #32 and declined. The proposal was
+narrow — a confirmed, `init`-only command list, run after the merge, leaving
+rendering untouched — and it still does not pay for itself. Of the five commands
+real templates run after a first render, `git init` and `git add` are already
+done by `git tpl init`, the two installs can never be run at all, and only
+`git remote add` was left. A trust model and a confirmation prompt to serve one
+command, while every template needing an install ships `scripts/bootstrap.sh`
+anyway, is a mechanism buying nothing. What the surveyed templates actually
+wanted — a way to *tell* the user about `bootstrap.sh`, and a declared `origin` —
+is [ADR-019](../adr/019-templates-address-never-act.md): a template may address
+the user and declare Git remotes, and still runs nothing.
+
 **A matrix language for test cases.** Three files beat a combinatorial block
 whose expansion nobody can predict. If a template needs twelve cases, twelve
 files say so honestly.
