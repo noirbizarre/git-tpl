@@ -22,26 +22,15 @@ pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // message, not a clone of the template repository.
     let levels = Levels::parse(&args.deny, &args.allow).map_err(OpError::from)?;
 
-    let template = ops::resolve::resolve(ops::Request {
+    let ops::Linted { template, findings } = ops::lint(ops::Request {
         source: &source,
         reference: args.r#ref.as_deref(),
         root: args.root.as_deref(),
         dirty: args.dirty,
     })?;
 
-    let entries = template.entries()?;
-    // The whole repository, not just the render root: a `note_file` names a
-    // path beside the manifest, in the same namespace a partial lives in.
-    let repo_entries = template.repo.list_tree(template.tree)?;
-    let partials = template.partials()?;
-    let findings = tpl::lint::lint(
-        template.repo.as_ref(),
-        &template.manifest,
-        &entries,
-        &repo_entries,
-        &partials,
-    )?;
-
+    // Policy is applied here and not in `ops`: which findings fail this run is
+    // a presentation decision, not a fact about the template.
     let verdicts = levels.apply(findings);
 
     let errors = verdicts
