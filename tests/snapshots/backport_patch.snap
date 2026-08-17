@@ -9,7 +9,7 @@ From: Test <test@example.invalid>
 Date: [date]
 Subject: [PATCH] tpl: backport from project
 
-Backported by git-tpl 0.5.1 from project, rendered at main ([short]).
+Backported by git-tpl [version] from project, rendered at main ([short]).
 
   template/ci.yml <- ci.yml
 
@@ -23,7 +23,7 @@ diff --git a/template/ci.yml b/template/ci.yml
    test:
      steps:
 -- 
-git-tpl 0.5.1
+git-tpl [version]
 --- stderr ---
 backport main ([short])
 

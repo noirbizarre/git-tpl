@@ -587,6 +587,16 @@ pub fn snapshot_settings() -> insta::Settings {
         "[date]",
     );
 
+    // The version reaches the `backport` mailbox preamble and signature. It
+    // changes on every release, and a release must not have to re-accept
+    // snapshots to go out. Matched literally, from the constant the binary
+    // itself prints, so a bump needs no edit here and no version-shaped string
+    // in rendered content is redacted by accident.
+    settings.add_filter(
+        &format!(r"git-tpl {}", regex::escape(tpl::VERSION)),
+        "git-tpl [version]",
+    );
+
     // One file, one snapshot per test: the module prefix would repeat
     // `snapshots__` in every name without distinguishing anything.
     settings.set_prepend_module_to_snapshot(false);
