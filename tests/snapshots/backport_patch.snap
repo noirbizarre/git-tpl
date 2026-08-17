@@ -1,0 +1,34 @@
+---
+source: tests/snapshots.rs
+expression: transcript
+---
+exit: 0
+--- stdout ---
+From [sha] Mon Sep 17 00:00:00 2001
+From: Test <test@example.invalid>
+Date: [date]
+Subject: [PATCH] tpl: backport from project
+
+Backported by git-tpl 0.5.1 from project, rendered at main ([short]).
+
+  template/ci.yml <- ci.yml
+
+diff --git a/template/ci.yml b/template/ci.yml
+--- a/template/ci.yml
++++ b/template/ci.yml
+@@ -1,4 +1,5 @@
+ name: CI
++on: [push, pull_request]
+ jobs:
+   test:
+     steps:
+-- 
+git-tpl 0.5.1
+--- stderr ---
+backport main ([short])
+
+  template/ci.yml <- ci.yml
+
+1 file changed, 1 insertion(+)
+
+apply:       git tpl backport | git -C ../template am

@@ -4,6 +4,7 @@
 //! functions compose resolution, evaluation, rendering and Git into the
 //! operations the CLI exposes.
 
+pub mod backport;
 pub mod resolve;
 pub mod testing;
 
@@ -31,6 +32,8 @@ use crate::template::{Manifest, Value};
 use crate::userconfig::UserConfig;
 
 pub use resolve::{Request, ResolveError, Resolved};
+
+pub use backport::{Backport, BackportError, BackportedFile, Skipped, backport};
 
 /// Errors from any operation.
 #[derive(Debug, Error, Diagnostic)]
@@ -99,6 +102,14 @@ pub enum OpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Test(#[from] testing::TestError),
+
+    /// A backport could not be produced.
+    ///
+    /// Always a refusal, never a wrong patch: a backport that guesses ships a
+    /// broken template to every downstream project at once. See ADR-020.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Backport(#[from] BackportError),
 
     /// A Git operation failed.
     #[error(transparent)]

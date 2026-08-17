@@ -43,6 +43,7 @@ fn main() -> ExitCode {
         Command::Diff(args) => commands::diff(args, &cli.global),
         Command::Show(args) => commands::show(args, &cli.global),
         Command::Merge(args) => commands::merge(args, &cli.global),
+        Command::Backport(args) => commands::backport(args, &cli.global),
         Command::Fetch(args) => commands::fetch(args, &cli.global),
         Command::Push(args) => commands::push(args, &cli.global),
         Command::Completion(args) => commands::completion(args, &cli.global),

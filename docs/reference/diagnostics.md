@@ -137,6 +137,23 @@ errors before anything is checked:
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
 | `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
 
+## Backport
+
+Raised by [`git tpl backport`](../usage/backport.md). Every one of these is a
+refusal, never a wrong patch, and every one names editing the template by hand
+as the fallback — which is the status quo, so a refusal never leaves you worse
+off than not having run the command. The reasoning is
+[ADR-020](../adr/020-backport-is-a-patch.md).
+
+| Code | Meaning |
+|---|---|
+| `tpl::backport::substituted_region` | A change lands on a line the template renders rather than copies, so there is no one-to-one change to send upstream. The expected refusal. |
+| `tpl::backport::round_trip` | The patched template source did not render back to your file, so sending it would change what the template produces for everyone. |
+| `tpl::backport::binary` | A changed file is binary, and a text patch cannot carry it. |
+| `tpl::backport::stale_rendering` | The recorded answers no longer reproduce `refs/tpl/<id>`, so every line of the patch would be measured against the wrong file. Run `update` first. |
+| `tpl::backport::unknown_path` | A named path is neither produced by the template nor present in the project. |
+| `tpl::backport::output_write` | The patch could not be written to `--output`. |
+
 ## Template tests
 
 Raised by [`git tpl test`](../usage/test.md) when the *run* cannot proceed. A

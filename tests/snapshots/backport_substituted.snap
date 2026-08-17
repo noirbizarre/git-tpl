@@ -1,0 +1,15 @@
+---
+source: tests/snapshots.rs
+expression: transcript
+---
+exit: 1
+--- stdout ---
+<empty>
+--- stderr ---
+tpl::backport::substituted_region
+
+  x `README.md` was changed where the template substitutes a value
+  help: line 1 of `README.md` is produced by an expression in
+        `README.md.jinja`, not copied from it, so there is no one-to-one
+        change to send upstream. Edit `README.md.jinja` by hand, or restrict
+        the backport with a pathspec.

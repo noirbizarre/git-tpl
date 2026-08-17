@@ -1,5 +1,6 @@
 //! One module per subcommand.
 
+mod backport;
 mod completion;
 mod context;
 mod diff;
@@ -16,6 +17,7 @@ mod status;
 mod test;
 mod update;
 
+pub use backport::run as backport;
 pub use completion::run as completion;
 pub use context::run as context;
 pub use diff::run as diff;
