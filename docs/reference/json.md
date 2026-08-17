@@ -217,6 +217,46 @@ so a caller handles both with one function.
 A conflicted merge is a success, not a failure: the index is left as Git leaves
 it, for the user to resolve. `result` is how a caller finds out.
 
+### `backport`
+
+```json
+{ "ok": true, "result": "patched",
+  "template": "../my-template", "revision": "main (937573e)",
+  "patch": "From 0000000…\nSubject: [PATCH] tpl: backport from my-service\n…",
+  "output": null,
+  "applyCommand": "git tpl backport | git -C ../my-template am",
+  "files": [ { "rendered": "README.md", "source": "template/README.md.jinja",
+               "insertions": 1, "deletions": 1, "added": false } ],
+  "skipped": [], "insertions": 1, "deletions": 1 }
+```
+
+`result` is `patched` or `nothingToBackport`.
+
+`patch` carries the mailbox itself, rather than it going to stdout beside the
+payload: under `--json`, stdout is one JSON object, always. It is `""` when
+there is nothing to backport. `output` is the `--output` path, or `null` when
+the patch went to stdout.
+
+`files[].source` is the path in the *template repository*, render root and
+`.jinja` suffix included — the path the patch edits. `files[].rendered` is the
+path in the project. `added` marks a file the template did not previously
+produce.
+
+`skipped` carries paths that were considered and deliberately not backported,
+each with a `reason` — currently only files deleted locally, which would remove
+them from every project rendering the template. Files the template never
+produced are not listed: they are out of scope rather than skipped.
+
+`applyCommand` is the `git am` invocation git-tpl declines to run
+([ADR-020](../adr/020-backport-is-a-patch.md)), built from the configured
+source. When the template is a URL it contains the literal
+`<your-template-clone>`, because there is no local clone to name.
+
+A refusal is a failure, with a `tpl::backport::*`
+[code](diagnostics.md#backport). Branch on the code: `substituted_region` is
+routine and means "edit the template by hand", while `stale_rendering` means
+"run `update` first".
+
 ### `fetch`
 
 ```json

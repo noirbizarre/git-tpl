@@ -39,6 +39,7 @@ nav = [
     { "diff" = "usage/diff.md" },
     { "show" = "usage/show.md" },
     { "merge" = "usage/merge.md" },
+    { "backport" = "usage/backport.md" },
     { "fetch" = "usage/fetch.md" },
     { "push" = "usage/push.md" },
     { "Shell completion" = "usage/completion.md" },
