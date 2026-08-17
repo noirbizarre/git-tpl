@@ -93,7 +93,7 @@ Granting it:
 - answer the prompt;
 - pass `--trust` for one run;
 - add the template to `[trust]` in `~/.config/git-tpl/config.toml` — see
-  [Configuration](../reference/configuration.md). A `[trust]` entry names the
+  [Configuration](../configuration.md#trust). A `[trust]` entry names the
   *template*, and covers everything that template declares.
 
 A refused source is [`tpl::data::untrusted`](../reference/diagnostics.md), and
