@@ -44,7 +44,7 @@ twelve files say so honestly.
 
 ```toml
 [expect]
-error = "tpl::questions::type"
+error = "tpl::eval::wrong_type"
 ```
 
 A suite that pinned error prose would make every diagnostic improvement a

@@ -1,7 +1,8 @@
 # Answers from a file
 
 `--answers-from <path>` supplies answers from a TOML, JSON or YAML file, on
-both `git tpl init` and `git tpl update`.
+`git tpl init`, `git tpl update`, `git tpl render`, `git tpl context`, and on
+the `--dirty` previews of `git tpl diff` and `git tpl show`.
 
 ```console
 $ git tpl init https://github.com/noirbizarre/rust-library-template \
@@ -118,12 +119,24 @@ The whole chain, highest first:
   >  the last --answers-from
   >  earlier --answers-from
   >  answers recorded in .config/git.tpl.toml   (update only)
+  >  [defaults] in ~/.config/git-tpl/config.toml
+  >  the question's default_from
   >  the question's default
 ```
+
+The last three are the [user configuration](../configuration.md#defaults) and
+the question's own declarations; that page is the authoritative statement of
+the chain.
 
 A question covered by none of them is asked as usual, unless `--defaults` or
 `tpl.interactive false` is in force — in which case its default is taken, and a
 question with no default is an error (`tpl::eval::unanswered`).
+
+Pass `--strict-answers` to turn that warning into an error, which is what a
+CI job wants: a key that names no question is a typo, and a run that renders
+anyway has silently ignored an instruction. Recorded answers stay lenient
+whatever the flag says — a template drops questions over time, and a project
+that answered one is not at fault for it.
 
 ## Failures
 
@@ -132,6 +145,7 @@ question with no default is an error (`tpl::eval::unanswered`).
 | `tpl::answers::read` | The file could not be read. The path is in the help. |
 | `tpl::answers::parse` | It is not valid TOML, JSON or YAML. |
 | `tpl::answers::shape` | It is not a table of answers. |
+| `tpl::answers::unknown_key` | A supplied answer names no question, under `--strict-answers`. |
 | `tpl::eval::wrong_type` | A value does not match the question's declared type. |
 
 The path is resolved relative to your working directory, and is used as given.

@@ -7,6 +7,19 @@ git tpl questions ./my-template
 git tpl --json questions ./my-template
 ```
 
+## Options
+
+| Option | Meaning |
+|---|---|
+| `<template>` | The template — a Git URL or a path. Defaults to `.`. |
+| `--ref` | Branch, tag or commit to read the schema from. |
+| `--root` | Read the manifest for this subdirectory instead. |
+| `--dirty` | Read the template's working tree rather than its `HEAD`. Local templates only. |
+| [`--json`](../reference/json.md#questions) | A global flag. The schema on stdout as one object. |
+
+`--dirty` is the one to reach for while authoring: it shows the schema a
+question you have just added produces, before you commit it.
+
 `init --dry-run` lists question *names*, on stderr, and needs a repository and
 a network fetch to do it. That is enough to reassure a human and not enough to
 write an answers file with — which is what anything driving git-tpl

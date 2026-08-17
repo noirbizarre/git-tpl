@@ -6,7 +6,9 @@ Accepted.
 
 ## Context
 
-git-tpl defines 59 diagnostic codes of the form `tpl::<area>::<kind>`. They are
+git-tpl defines several dozen diagnostic codes of the form
+`tpl::<area>::<kind>` — see [the catalogue](../reference/diagnostics.md) for
+the current set. They are
 carefully chosen, they are stable, and until now nothing could read them: every
 failure was rendered by miette to stderr as prose, and every failure exited 1.
 
@@ -38,8 +40,8 @@ solved.
 
 The alternative was distinct exit codes per category. It is strictly worse: an
 exit code is a coarse enum that needs extending forever and can never be
-precise, while `error.code` is already a 59-member vocabulary that says exactly
-what happened.
+precise, while `error.code` is already a vocabulary of several dozen terms that says
+exactly what happened.
 
 `SUCCESS`, `FAILURE` and `PENDING` are unchanged. Reading the code to decide
 *what* went wrong and the exit status to decide *whether* it did are different
@@ -47,8 +49,8 @@ jobs, and neither substitutes for the other.
 
 ### `--format json` becomes `--json`
 
-Two spellings for one idea, on one command out of twelve, is not a surface
-worth keeping. `--format` is hidden, warns on stderr, and is removed in the
+Two spellings for one idea, on a single command out of all of them, is not a
+surface worth keeping. `--format` is hidden, warns on stderr, and is removed in the
 next minor.
 
 ### stdout and stderr keep their jobs

@@ -75,10 +75,11 @@ src/
 └── commands/        one module per subcommand
 ```
 
-`ops/` is a module with one *function* per command — `init`, `update`,
-`status`, `diff`, `merge`, `fetch`, `push` — plus `resolve` for fetching a
-template. `commands/` is the directory with one module per subcommand; that is
-where argument handling and output formatting live, and nothing else.
+`ops/` is a module with one *function* per command — `init`, `update`, `status`,
+`diff`, `merge`, `fetch`, `push`, `lint`, `questions` and the rest — plus
+`resolve` for fetching a template. `commands/` is the directory with one module
+per subcommand; that is where argument handling and output formatting live, and
+nothing else.
 
 Dependencies point inward. `ops` uses `render`, `graph`, `git`; nothing in
 `template/` or `render.rs` knows a command exists.
