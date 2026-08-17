@@ -4,6 +4,61 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/noirbizarre/git-tpl/compare/0.5.1..0.6.0) - 2026-08-17
+
+### 💫 Features
+
+- **cli** `git tpl backport` — emit a patch for the upstream template - ([e47aa75](https://github.com/noirbizarre/git-tpl/commit/e47aa75805bdd689c54d547a22466f06057a7307))
+- **commands** Report gitignore-skipped paths from every dirty command - ([6381f2c](https://github.com/noirbizarre/git-tpl/commit/6381f2cd18e4a0d99cd15ca681e4ed4e909124bb))
+- **data** Git-hosted data sources (source + ref + path) ([#59](https://github.com/noirbizarre/git-tpl/issues/59)) - ([32cdf38](https://github.com/noirbizarre/git-tpl/commit/32cdf3812ea6e25540c0c5ae80625b13d0b8314e))
+- **questions** Derive a prompt seed from the repository ([#70](https://github.com/noirbizarre/git-tpl/issues/70)) - ([500c96b](https://github.com/noirbizarre/git-tpl/commit/500c96bbabc3c51a639295e3d1659777f33178a4))
+- **render** Carry the template source path on a rendered file - ([239ce32](https://github.com/noirbizarre/git-tpl/commit/239ce32826c020d75adddc805bfb696e95313272))
+- **template** A template may address the user and declare git remotes - ([41ab169](https://github.com/noirbizarre/git-tpl/commit/41ab1694fd7b27e4250e8365fc800b82037b4127))
+
+### 🐛 Bug Fixes
+
+- **cli** A mode-only difference is not a change to backport - ([52002dc](https://github.com/noirbizarre/git-tpl/commit/52002dca0dacdf8aa70c908ca13c59aab0528381))
+- **cli** Spell the backport apply hint with forward slashes on Windows - ([a7ab3b0](https://github.com/noirbizarre/git-tpl/commit/a7ab3b000553c6a2807dd5b4167e4a7b8367d7f0))
+
+### 🔨 Refactor
+
+- **answers** Declare unknown_key in its own module - ([e3638ff](https://github.com/noirbizarre/git-tpl/commit/e3638fff522475c29d8724c3df146235445f5962))
+- **commands** Session delegates output to Reporter - ([843b81b](https://github.com/noirbizarre/git-tpl/commit/843b81bc4d2d82954b22265ae7b94247aa7dfa3d))
+- **config** One XDG config-home rule - ([566c5d2](https://github.com/noirbizarre/git-tpl/commit/566c5d2157de8aac2ccac87a5ab956b9a6d898a8))
+- **git** Resolve_revision takes a reference, not a revision - ([d2508c5](https://github.com/noirbizarre/git-tpl/commit/d2508c56b6959958343fc279984da454d547ca69))
+- **ops** Add ops::lint and ops::questions - ([6f845ad](https://github.com/noirbizarre/git-tpl/commit/6f845adcd7df97dc9608686598149b6f44efbfd7))
+- **ops** Name describe_revision output revision_description - ([5190066](https://github.com/noirbizarre/git-tpl/commit/5190066521a8c272672e2a12e48f3b126ac944f9))
+- **theme** Add transition() for the A → B line - ([a107bdf](https://github.com/noirbizarre/git-tpl/commit/a107bdf54da4a65626711904ac642ad0c719812d))
+
+### 📚 Documentation
+
+- **adr** ADR-020 — backport emits a patch, and proves it by re-rendering - ([25f4bf7](https://github.com/noirbizarre/git-tpl/commit/25f4bf79cff852976a031f7952af240263077959))
+- **adr** Decline post-render tasks, and state what replaces them - ([40f9ddb](https://github.com/noirbizarre/git-tpl/commit/40f9ddb9bf6a29407955af4763b6dd7e26624457))
+- **cli** Document `git tpl backport` and the loop it closes - ([6abe181](https://github.com/noirbizarre/git-tpl/commit/6abe181c5fed77628ecaa2bafa0a55c461e9dc01))
+- **data** Link the git source's trust note to the page that exists ([#69](https://github.com/noirbizarre/git-tpl/issues/69)) - ([5e698b9](https://github.com/noirbizarre/git-tpl/commit/5e698b972f61d46a56930ab115fb22238cd096d7))
+- **diagnostics** Template.toml does not reject unknown keys - ([ec3d23b](https://github.com/noirbizarre/git-tpl/commit/ec3d23b7c6bf391e9c537c2ffc5fc4a6a7329c1d))
+- **init** Document --force - ([822eacb](https://github.com/noirbizarre/git-tpl/commit/822eacba8d71a4215709003f708d2b2ec1220267))
+- **lint** Add an options table - ([bb736ed](https://github.com/noirbizarre/git-tpl/commit/bb736edb68cdfc5e544cee039c257375c11e75fd))
+- **readme** Fix the underlined spaces around the header badges ([#72](https://github.com/noirbizarre/git-tpl/issues/72)) - ([24262a8](https://github.com/noirbizarre/git-tpl/commit/24262a82f0c16866d330fe9f448cb5d0880de645))
+- **show** Document --dirty and the answer flags - ([40958eb](https://github.com/noirbizarre/git-tpl/commit/40958eba810091d510d348097680b8786523aa98))
+- **status** Lead with --json, and document --dirty - ([dc4e2e3](https://github.com/noirbizarre/git-tpl/commit/dc4e2e351ae8be295d3eccd0003be6b9a27a0e22))
+- **templates** Correct the manifest schema - ([3e33a57](https://github.com/noirbizarre/git-tpl/commit/3e33a5788a30381ee28830d78dd80d9c4cf7d347))
+- **test** Drop the nonexistent context --partials flag - ([9fc9e64](https://github.com/noirbizarre/git-tpl/commit/9fc9e6447506f93f0e74d58afb95e6a012ea91fd))
+- **trust** Trust gates a git source's clone too - ([a428df0](https://github.com/noirbizarre/git-tpl/commit/a428df006034f75e80ea6fe4044c3f2d2e02401d))
+- Fix stale keys, versions, counts and missing options - ([3b30275](https://github.com/noirbizarre/git-tpl/commit/3b302756c5d707649843c9b8cfb218e29df512e2))
+
+### 🧪 Tests
+
+- **cli** Redact the version from the backport snapshots ([#71](https://github.com/noirbizarre/git-tpl/issues/71)) - ([40ed77d](https://github.com/noirbizarre/git-tpl/commit/40ed77d6e29f844403c349c577538aca674205dc))
+- **cli** Pin line endings for the backport clone before it checks out - ([d9345d8](https://github.com/noirbizarre/git-tpl/commit/d9345d8f89d6c67180a26d99894e88633e6a92cd))
+- **cli** Pin the backport transcripts, and redact the mailbox date - ([3fdf701](https://github.com/noirbizarre/git-tpl/commit/3fdf7017ba621765f21b94c27b109368e28df885))
+- **cli** Snapshot the documented CLI output ([#62](https://github.com/noirbizarre/git-tpl/issues/62)) - ([b777c49](https://github.com/noirbizarre/git-tpl/commit/b777c494751edc797a35a5dfa3b6276461126fbb))
+- **render** Pin the executable-bit behaviour on every platform ([#61](https://github.com/noirbizarre/git-tpl/issues/61)) - ([313d6cd](https://github.com/noirbizarre/git-tpl/commit/313d6cd19f6308609e6ed6b1e96684fd8e9217f9))
+
+### 🎨 Style
+
+- Apply rustfmt after the Reporter and ops refactors - ([6af94d5](https://github.com/noirbizarre/git-tpl/commit/6af94d5c1bedead788829d68d0cb87f53ac821e8))
+
 ## [0.5.1](https://github.com/noirbizarre/git-tpl/compare/0.5.0..0.5.1) - 2026-08-16
 
 ### 🐛 Bug Fixes
