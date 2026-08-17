@@ -395,6 +395,67 @@ fn an_unchanged_project_produces_no_patch() {
     output.says("Nothing to backport");
 }
 
+/// A mode-only difference carries no content, so it carries nothing.
+///
+/// Windows cannot represent the executable bit, so *every* executable file a
+/// template ships looks modified there. Emitting it produced a file section
+/// with no hunks — a malformed patch that `git am` rejects outright, taking
+/// the rest of the patch down with it.
+#[test]
+fn a_mode_only_difference_is_not_a_change_to_backport() {
+    let world = World::with_template(
+        r#"
+name = "demo"
+
+[questions.project_name]
+type = "string"
+prompt = "Project name"
+default = "acme"
+"#,
+        &[
+            ("run.sh", "#!/bin/sh\necho run\n"),
+            ("ci.yml", "name: CI\n"),
+        ],
+    );
+    world.template.repo.make_executable("template/run.sh");
+    world
+        .template
+        .repo
+        .commit_all("chore: make run.sh executable");
+    world.init(&[]).success();
+
+    // Drop the executable bit without touching a byte of the content.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = world.project.path.join("run.sh");
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o644);
+        std::fs::set_permissions(&path, permissions).unwrap();
+    }
+
+    let output = tpl(&world.project, &["--json", "backport"]).success();
+    let json = output.json();
+    assert_eq!(json["result"], "nothingToBackport");
+    assert_eq!(json["patch"], "");
+
+    // And with a real change beside it, the patch carries only that file —
+    // never an empty section for the mode.
+    world.project.write("ci.yml", "name: CI\non: [push]\n");
+    let output = tpl(&world.project, &["backport"]).success();
+    assert!(
+        !output.stdout.contains("run.sh"),
+        "a mode-only difference leaked into the patch: {}",
+        output.transcript()
+    );
+
+    let upstream = clone_of_template(&world);
+    let patch = upstream.path.join("backport.mbox");
+    std::fs::write(&patch, &output.stdout).expect("write the patch");
+    let (ok, message) = upstream.try_git(&["am", &patch.to_string_lossy()]);
+    assert!(ok, "git am refused the patch: {message}");
+}
+
 #[test]
 fn excluded_paths_are_left_out() {
     let world = world();

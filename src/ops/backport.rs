@@ -339,6 +339,21 @@ pub fn backport(
                 };
                 let project_bytes = read_required(project, workdir_tree, &change.path)?;
 
+                // A change with no change to the content: `diff_trees` reports
+                // a differing *mode* too, and on Windows it always does — the
+                // filesystem cannot represent the executable bit, so every
+                // executable file the template ships looks modified there.
+                //
+                // Backport carries content. There is nothing here to carry, so
+                // this is silence rather than a `skipped` entry: the file was
+                // not considered and dropped, it simply has no change. Leaving
+                // it in emitted a file section with no hunks, which is a
+                // malformed patch that `git am` rejects outright — taking the
+                // rest of the patch down with it.
+                if project_bytes == file.content {
+                    continue;
+                }
+
                 if is_binary(&template_bytes)
                     || is_binary(&file.content)
                     || is_binary(&project_bytes)
