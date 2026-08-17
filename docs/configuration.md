@@ -251,8 +251,10 @@ anywhere. The entry is prior consent, deliberately written, and no weaker than
 there is nobody to ask: nothing is granted by omission.
 
 **What trust gates.** Only what a template asks git-tpl to do on its behalf,
-which today is one thing: a remote data fetch. Rendering never requires trust,
-because a template cannot execute anything, trusted or not.
+which today means any network access its data sources require: a
+[remote](data/remote.md) fetch, and a [Git](data/git.md) source's clone.
+Rendering never requires trust, because a template cannot execute anything,
+trusted or not.
 
 Note the name: the project file is `git.tpl.toml`, mirroring `git tpl`; this one
 is named after the binary. Two shapes, so a stray copy of one is never mistaken

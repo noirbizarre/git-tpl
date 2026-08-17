@@ -164,9 +164,11 @@ prompt stays meaningful: a prompt answered `yes` twenty times a day is not a
 decision, it is a keystroke.
 
 Rendering is untouched. Trust gates only what a template asks git-tpl to do on
-its behalf — currently one thing, a remote data fetch. It grants no new
-capability, and invariant 5 is unchanged: no subprocess, no shell, no eval, from
-a trusted template or any other.
+its behalf — any network access its data sources require. At the time of this
+decision that was one thing, a remote data fetch; the [`git` data
+source](../data/git.md) added later goes through the same gate, for the same
+reason. It grants no new capability, and invariant 5 is unchanged: no
+subprocess, no shell, no eval, from a trusted template or any other.
 
 Determinism is preserved by construction rather than by care: the user file
 reaches only the prompt seed channel, which `DefaultsOnly` ignores outright and
