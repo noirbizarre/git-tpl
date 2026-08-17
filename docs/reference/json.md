@@ -142,7 +142,10 @@ which is what a merge would leave in the worktree.
   "changes": [{ "path": "Cargo.toml", "kind": "added" }],
   "merge": { "result": "merged", "commit": "…" },
   "configPath": ".config/git.tpl.toml", "configCommitted": true,
-  "ignoredAnswers": [] }
+  "ignoredAnswers": [],
+  "note": "Next: run scripts/bootstrap.sh",
+  "remotes": [{ "name": "origin", "url": "git@github.com:acme/demo.git",
+                "status": "added", "existing": null }] }
 ```
 
 `template` is the expanded URL, never the `mine:` shortcut that may have been
@@ -151,6 +154,25 @@ anyone else's machine.
 
 `merge` is `null` under `--no-merge`, which is a different thing from a merge
 that ran and found nothing to do (`{"result": "upToDate"}`).
+
+`note` is the template's own note, `null` when it declares none. It is
+**unsanitised** — escape sequences are a terminal's problem and this stream
+reaches no terminal, so strip them yourself if you are going to print it.
+Branch on its presence, never on its text: note prose is not a contract.
+
+`remotes` lists the `[remotes]` a template declared, in declaration order, with
+what became of each:
+
+| `status` | Meaning |
+|---|---|
+| `added` | It was not configured, and now is. |
+| `unchanged` | It was already configured with this URL. |
+| `skipped` | A remote of that name exists with a *different* URL, and was left alone. `existing` names it. |
+
+`url` is always what the template asked for, including when it was refused —
+which is the case you most need it in. `existing` is `null` unless the two
+disagree, so its presence is the signal. Both are `init`-only: `update` neither
+adds a remote nor shows a note.
 
 ### `update`
 

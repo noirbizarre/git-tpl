@@ -110,6 +110,43 @@ pub enum OpError {
     #[diagnostic(transparent)]
     TemplateId(#[from] TemplateIdError),
 
+    /// A `note_file` names nothing at the template revision.
+    ///
+    /// Fatal rather than silent, and it can be: the note is resolved before the
+    /// ref is created and before the merge, so nothing has been written to the
+    /// user's repository yet. Showing nothing instead would leave a template
+    /// author with an `init` that succeeds and a note that never appears.
+    #[error("`{path}` is not in the template at {revision}")]
+    #[diagnostic(
+        code(tpl::ops::missing_note_file),
+        help(
+            "`note_file` is relative to the template repository root, not to the \
+             render root — a note beside the manifest is `NEXT-STEPS.md`, not \
+             `template/NEXT-STEPS.md`. `git tpl lint` reports this without a \
+             repository."
+        )
+    )]
+    MissingNoteFile {
+        /// The path, as it resolved.
+        path: String,
+        /// The revision it was looked for at.
+        revision: String,
+    },
+
+    /// A `note_file` is not valid UTF-8.
+    ///
+    /// Refused rather than decoded lossily, for the same reason a binary
+    /// partial is: replacement characters would look like something was shown.
+    #[error("`{path}` is not valid UTF-8")]
+    #[diagnostic(
+        code(tpl::ops::note_file_not_utf8),
+        help("a note is text; this path names a binary file")
+    )]
+    NoteFileNotUtf8 {
+        /// The path, as it resolved.
+        path: String,
+    },
+
     /// `init` was run on a project that already has a template.
     #[error("this repository already has a template attached")]
     #[diagnostic(
@@ -698,6 +735,43 @@ fn apply_user_defaults(
     }
 }
 
+/// What happened to one declared remote.
+///
+/// A template declares Git remotes under `[remotes]`; git-tpl adds them on
+/// `init` and never fetches or pushes them. See ADR-019.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RemoteOutcome {
+    /// It was not configured, and now is.
+    Added,
+    /// It was already configured with this URL, so nothing was done.
+    Unchanged,
+    /// It was configured with a *different* URL and was left alone.
+    ///
+    /// Never overwritten. A template that could repoint an existing `origin` is
+    /// a template that could redirect the user's next push, and the URL in the
+    /// repository was put there by a person.
+    Skipped {
+        /// The URL the repository already had.
+        existing: String,
+    },
+}
+
+/// One declared remote and what became of it.
+///
+/// Not `Remote`: [`crate::remote::Remote`] is a *parsed remote URL*, taken
+/// apart to seed a prompt. This is a template's declaration and its fate, which
+/// is a different thing, and two types called `Remote` would be one concept
+/// wearing two meanings.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DeclaredRemote {
+    /// The remote's name, as declared.
+    pub name: String,
+    /// The URL the template asked for, with its expression evaluated.
+    pub url: String,
+    /// What happened.
+    pub outcome: RemoteOutcome,
+}
+
 /// The result of an `init`.
 pub struct InitOutcome {
     /// The template id, and so the ref name.
@@ -717,6 +791,14 @@ pub struct InitOutcome {
     pub revision_description: String,
     /// Supplied answers that name no question in this template.
     pub ignored_answers: Vec<String>,
+    /// The template's own note to the user, raw and unsanitised.
+    ///
+    /// Sanitised where it is shown, not here: this layer does not print, and a
+    /// `--json` consumer is not a terminal and must get the text as written.
+    /// See [`crate::note`].
+    pub note: Option<String>,
+    /// The declared remotes, in declaration order, and what became of each.
+    pub remotes: Vec<DeclaredRemote>,
 }
 
 /// Attach a template to a repository and merge the initial rendering.
@@ -774,6 +856,12 @@ pub fn init(
     let id = TemplateId::resolve(source, explicit_id)?;
     let ref_name = id.ref_name();
 
+    // Before the ref, before the configuration, before the merge. A `note_file`
+    // that names nothing is an authoring mistake, and this is the last moment
+    // at which saying so costs the user nothing: after the next line there is a
+    // commit in their repository to explain away.
+    let note = template_note(&rendered)?;
+
     // An orphan commit: the template has no history in this project before
     // now, and inventing a parent would be a lie.
     let commit = project.create_commit(rendered.tree, &[], &rendered.provenance.to_message())?;
@@ -829,6 +917,15 @@ pub fn init(
         }
     };
 
+    // After the ref, the merge and the configuration, so a template's own
+    // additions cannot get between the user and a rendering that already
+    // succeeded. `init`-only: `update` being a ref-only operation is most of
+    // its value. See ADR-019.
+    //
+    // The note is resolved much earlier, above — it can fail, and this is past
+    // the point where failing is free.
+    let remotes = add_remotes(project, &rendered)?;
+
     Ok(InitOutcome {
         id,
         commit,
@@ -841,7 +938,133 @@ pub fn init(
             rendered.template.revision,
         ),
         ignored_answers: rendered.ignored_answers,
+        note,
+        remotes,
     })
+}
+
+/// The template's note to the user, with its expression evaluated.
+///
+/// Evaluated here rather than in `render.rs`: nothing about a note reaches the
+/// tree, and running it through the renderer would put a value that is never
+/// written to a file inside the code path invariant 2 guards.
+///
+/// Called *before* the ref is created and before the merge, which is what makes
+/// a missing file an error rather than a shrug. While the note was read out of
+/// the rendered tree it could only be resolved after the merge, and failing an
+/// `init` that had already written to the user's repository would have been a
+/// worse outcome than showing nothing.
+fn template_note(rendered: &Render) -> Result<Option<String>, OpError> {
+    let manifest = &rendered.template.manifest;
+    if manifest.note.is_none() && manifest.note_file.is_none() {
+        return Ok(None);
+    }
+
+    let partials = rendered.template.partials()?;
+
+    let Some(declared) = &manifest.note_file else {
+        return manifest
+            .note
+            .as_ref()
+            .map(|text| crate::eval::render_string(text, &rendered.context, "note", &partials))
+            .transpose()
+            .map_err(Into::into);
+    };
+
+    let path = crate::eval::render_string(declared, &rendered.context, "note_file", &partials)?;
+    let path = path.trim();
+
+    // A path that renders to nothing is a template choosing to say nothing for
+    // these answers — `note_file = "{% if ci %}notes/ci.md{% endif %}"`. That is
+    // a decision, not a mistake, and is the one absence not worth reporting.
+    if path.is_empty() {
+        return Ok(None);
+    }
+
+    // Repository-root-relative, read from the whole template tree rather than
+    // the rendered subtree — the same namespace partials live in. The note is
+    // read from the template and never written into the project.
+    let Some(bytes) = rendered
+        .template
+        .repo
+        .read_path(rendered.template.tree, path)?
+    else {
+        return Err(OpError::MissingNoteFile {
+            path: path.to_string(),
+            revision: describe_revision(&rendered.template.reference, rendered.template.revision),
+        });
+    };
+
+    // Not `from_utf8_lossy`: a binary note is an authoring mistake, and printing
+    // replacement characters would hide it behind something that looks shown.
+    let text = String::from_utf8(bytes).map_err(|_| OpError::NoteFileNotUtf8 {
+        path: path.to_string(),
+    })?;
+
+    // Rendered if and only if it is a template, which is the rule the renderer
+    // applies to files. Nothing is inferred from the content: an author who
+    // wants interpolation names the `.jinja`.
+    if path.ends_with(crate::render::TEMPLATE_SUFFIX) {
+        return crate::eval::render_string(&text, &rendered.context, path, &partials)
+            .map(Some)
+            .map_err(Into::into);
+    }
+
+    Ok(Some(text))
+}
+
+/// Add the remotes a template declares, reporting what happened to each.
+///
+/// Never fetches and never pushes — ADR-019's closure rule admits the addition
+/// and nothing beyond it.
+fn add_remotes(
+    project: &dyn GitBackend,
+    rendered: &Render,
+) -> Result<Vec<DeclaredRemote>, OpError> {
+    let declared = &rendered.template.manifest.remotes;
+    if declared.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let partials = rendered.template.partials()?;
+    let mut remotes = Vec::with_capacity(declared.len());
+
+    for (name, url) in declared {
+        let url = crate::eval::render_string(
+            url,
+            &rendered.context,
+            &format!("remotes.{name}"),
+            &partials,
+        )?;
+
+        let outcome = match project.remote_url(name)? {
+            // Already exactly this. Reported as unchanged rather than added, so
+            // a second `init --force` does not claim to have done something.
+            Some(existing) if existing == url => RemoteOutcome::Unchanged,
+            // Left alone, loudly. Overwriting would let a template redirect a
+            // push the user is about to make.
+            Some(existing) => RemoteOutcome::Skipped { existing },
+            // Absent — or present with a URL that is not UTF-8, which
+            // `remote_url` cannot tell apart from absent. The add settles it.
+            None => match project.add_remote(name, &url) {
+                Ok(()) => RemoteOutcome::Added,
+                // There after all. Left alone, exactly as a readable one would
+                // have been; the URL cannot be shown because it is not text.
+                Err(GitError::RemoteExists { .. }) => RemoteOutcome::Skipped {
+                    existing: "(not valid UTF-8)".to_string(),
+                },
+                Err(error) => return Err(error.into()),
+            },
+        };
+
+        remotes.push(DeclaredRemote {
+            name: name.clone(),
+            url,
+            outcome,
+        });
+    }
+
+    Ok(remotes)
 }
 
 /// The result of an `update`.

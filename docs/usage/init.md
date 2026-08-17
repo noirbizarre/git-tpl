@@ -20,6 +20,37 @@ git tpl init <template> [--ref <ref>] [--answer k=v]... [options]
    after the rendering rather than before it.
 9. Creates `refs/tpl/<id>` as an **orphan commit**.
 10. Merges that commit into the current branch, allowing unrelated histories.
+11. Adds any [`[remotes]`](../templates/format.md#remotes) the template declared.
+12. Shows the template's own [note](../templates/format.md#talking-to-the-user), if it has one.
+
+Steps 11 and 12 come last, after everything git-tpl did itself, and happen on
+`init` only. `git tpl update` does neither: it is a ref-only operation, and that
+is most of its value.
+
+## What a template may and may not do afterwards
+
+It may add a Git remote, and it may say something to you. That is the whole
+list, and it is closed —
+[ADR-019](../adr/019-templates-address-never-act.md) states the bar for
+anything joining it.
+
+It may **not** run anything. There are no hooks, no scripts and no post-render
+commands, on `init` or ever. A template that needs `npm install` renders a
+`scripts/bootstrap.sh` and now, at last, has a way to tell you it is there; you
+run it. A note that says "run `curl … | sh`" is exactly as trustworthy as a
+`README.md` that says it.
+
+A note is shown in a block attributed to the template, so it cannot be mistaken
+for git-tpl's own output, and it is stripped of everything a terminal would act
+on beyond colour and an `https` link. It is read from the template repository
+and is never written into your project.
+
+A `note_file` naming nothing is refused, and refused *early*: the note is
+resolved before the rendered ref is created and before the merge, so a template
+with a wrong path leaves your repository exactly as it found it.
+
+An existing remote is never repointed. If the template declares an `origin` and
+you already have one somewhere else, yours stays and a warning names both.
 
 ## The merge is the point
 

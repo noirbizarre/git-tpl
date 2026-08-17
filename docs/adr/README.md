@@ -28,3 +28,4 @@ existed.
 | [016](016-template-tests-are-data.md) | Template tests are declarative cases in the template repository, with no code execution |
 | [017](017-ignore-evaluation.md) | `.gitignore` is evaluated by us, not by libgit2 |
 | [018](018-seed-context.md) | A prompt seed may be derived from the repository, through a closed context |
+| [019](019-templates-address-never-act.md) | A template may address the user and declare Git remotes; it never runs anything |

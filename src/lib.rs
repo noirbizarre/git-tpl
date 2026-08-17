@@ -38,6 +38,7 @@ pub mod git;
 pub mod gitconfig;
 pub mod graph;
 pub mod lint;
+pub mod note;
 pub mod ops;
 pub mod provenance;
 pub mod refs;

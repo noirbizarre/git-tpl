@@ -69,6 +69,31 @@ pub enum ManifestError {
         /// What is wrong with it.
         reason: String,
     },
+
+    /// Both note forms are declared.
+    #[error("`note` and `note_file` are mutually exclusive")]
+    #[diagnostic(
+        code(tpl::manifest::conflicting_note),
+        help(
+            "keep one. `note_file` names a path in the template repository, \
+             read once and shown after `init`; `note` is a literal, and is \
+             better for a single line."
+        )
+    )]
+    ConflictingNote,
+
+    /// A declared remote is unusable.
+    #[error("remote `{name}`: {reason}")]
+    #[diagnostic(
+        code(tpl::manifest::invalid_remote),
+        help("a remote is `<name> = \"<url>\"` under `[remotes]`; the URL may be an expression")
+    )]
+    InvalidRemote {
+        /// The remote's name, as written.
+        name: String,
+        /// What is wrong with it.
+        reason: String,
+    },
 }
 
 /// A declared data source.
@@ -171,6 +196,48 @@ pub struct Manifest {
     /// Computed values, by name.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub computed: IndexMap<String, String>,
+
+    /// A note shown to the user once, after `init`. May be an expression.
+    ///
+    /// The one thing a template could not previously do: say anything at all.
+    /// A template that renders a `scripts/bootstrap.sh` had no way to mention
+    /// it, which is most of what motivated the post-render tasks declined in
+    /// ADR-019.
+    ///
+    /// A literal, and so bounded by what fits comfortably in a TOML string.
+    /// [`Self::note_file`] is the choice for anything longer.
+    ///
+    /// Not named `message`: `message` is already a *question's* key, the one
+    /// that explains its `pattern`. TOML being what it is, a top-level
+    /// `message =` written after any table would silently become that
+    /// question's, which is a mistake nothing could diagnose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+
+    /// A path in the *template repository* whose content is shown after `init`.
+    ///
+    /// Repository-root-relative, like a partial and unlike a rendered file —
+    /// the note is read from the template, never written into the project. A
+    /// note is guidance, and a template that wants a durable file renders one
+    /// and says so in the note.
+    ///
+    /// Rendered if and only if the path ends in `.jinja`, which is the same
+    /// rule the renderer applies to files. The path itself may be an
+    /// expression, so a template can choose its note by the answers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_file: Option<String>,
+
+    /// Git remotes to add on `init`, by name. URLs may be expressions.
+    ///
+    /// Not to be confused with a `remote` *data source*, which is an HTTP URL
+    /// the loader reads. These are Git remotes, added through `GitBackend` —
+    /// never fetched and never pushed.
+    ///
+    /// An `IndexMap`, so the order they are added and reported in is the order
+    /// they were written: the only ordering a template author controls, and one
+    /// a `BTreeMap` would silently replace with alphabetical.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub remotes: IndexMap<String, String>,
 }
 
 fn default_root() -> String {
@@ -200,6 +267,40 @@ impl Manifest {
     /// Run at load time so a broken manifest fails before any prompt appears,
     /// rather than after the user has answered six questions.
     fn validate(&self) -> Result<(), ManifestError> {
+        // One note, or none. A manifest declaring both is not ambiguous by
+        // accident — it is a `note` that was moved into a file and left
+        // behind, and picking one silently would show the stale half.
+        if self.note.is_some() && self.note_file.is_some() {
+            return Err(ManifestError::ConflictingNote);
+        }
+
+        for (name, url) in &self.remotes {
+            // Checked at load time because the failure is otherwise discovered
+            // after the render, after the merge, at the very last step of an
+            // `init` that has already written to the user's repository.
+            if name.trim().is_empty() {
+                return Err(ManifestError::InvalidRemote {
+                    name: name.clone(),
+                    reason: "a remote needs a name".into(),
+                });
+            }
+            if url.trim().is_empty() {
+                return Err(ManifestError::InvalidRemote {
+                    name: name.clone(),
+                    reason: "the URL is empty".into(),
+                });
+            }
+            // Git's own restriction, applied here so that the diagnostic names
+            // the manifest rather than surfacing from libgit2 at the end of an
+            // `init`.
+            if name.contains(['/', ' ', '\t']) {
+                return Err(ManifestError::InvalidRemote {
+                    name: name.clone(),
+                    reason: "a remote name may not contain a slash or whitespace".into(),
+                });
+            }
+        }
+
         for name in self.computed.keys() {
             if self.questions.contains_key(name) {
                 return Err(ManifestError::NameCollision { name: name.clone() });
@@ -891,5 +992,126 @@ mod tests {
         assert_eq!(table.len(), 2);
         assert!(table.contains_key("name"));
         assert!(table.contains_key("description"));
+    }
+
+    /// ADR-019. A template may address the user; the note is not in the
+    /// render context and a rendered file cannot read it.
+    #[test]
+    fn a_note_is_not_exposed_to_the_render_context() {
+        let manifest =
+            Manifest::parse("name = \"x\"\nnote = \"run bootstrap.sh\"", MANIFEST_NAME).unwrap();
+        let table = manifest.metadata();
+        let table = table.as_table().unwrap();
+        assert!(!table.contains_key("note"));
+    }
+
+    #[test]
+    fn both_note_forms_at_once_are_rejected() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            note = "hi"
+            note_file = "docs/NEXT.md"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+        assert!(matches!(error, ManifestError::ConflictingNote));
+    }
+
+    #[test]
+    fn either_note_form_alone_parses() {
+        let inline = Manifest::parse("name = \"x\"\nnote = \"hi\"", MANIFEST_NAME).unwrap();
+        assert_eq!(inline.note.as_deref(), Some("hi"));
+        assert_eq!(inline.note_file, None);
+
+        let from_file =
+            Manifest::parse("name = \"x\"\nnote_file = \"docs/N.md\"", MANIFEST_NAME).unwrap();
+        assert_eq!(from_file.note_file.as_deref(), Some("docs/N.md"));
+        assert_eq!(from_file.note, None);
+    }
+
+    /// The rename exists because of exactly this: TOML would fold a top-level
+    /// `message` written after a table into that question, silently.
+    #[test]
+    fn a_top_level_note_does_not_collide_with_a_questions_own_message() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+
+            [questions.slug]
+            type = "string"
+            pattern = "^[a-z]+$"
+            message = "lowercase only"
+
+            [remotes]
+            origin = "https://example.invalid/x.git"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.note, None);
+        assert_eq!(
+            manifest.questions["slug"].message.as_deref(),
+            Some("lowercase only")
+        );
+    }
+
+    /// Declaration order is the only ordering a template author controls, and
+    /// it is the order the remotes are added and reported in.
+    #[test]
+    fn remotes_keep_their_declaration_order() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+            [remotes]
+            upstream = "https://example.invalid/up.git"
+            origin = "https://example.invalid/origin.git"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+        let names: Vec<_> = manifest.remotes.keys().cloned().collect();
+        assert_eq!(names, ["upstream", "origin"]);
+    }
+
+    /// Caught at load time, because the alternative is finding out after the
+    /// render and after the merge, at the last step of an `init`.
+    #[rstest]
+    #[case("\"\"", "https://x.invalid/r.git", "needs a name")]
+    #[case("origin", "", "URL is empty")]
+    #[case("or/igin", "https://x.invalid/r.git", "slash or whitespace")]
+    fn an_unusable_remote_is_rejected_at_load_time(
+        #[case] name: &str,
+        #[case] url: &str,
+        #[case] expected: &str,
+    ) {
+        // The empty-name case has to be written as a quoted key.
+        let key = if name == "\"\"" {
+            name.to_string()
+        } else {
+            format!("\"{name}\"")
+        };
+        let error = Manifest::parse(
+            &format!("name = \"x\"\n[remotes]\n{key} = \"{url}\""),
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidRemote { reason, .. } = error else {
+            panic!("expected an invalid remote, got {error:?}");
+        };
+        assert!(reason.contains(expected), "reason was: {reason}");
+    }
+
+    /// The keys are additive: a manifest written before ADR-019 still parses,
+    /// and declares neither.
+    #[test]
+    fn a_manifest_without_a_note_or_remotes_still_parses() {
+        let manifest = Manifest::parse(FULL, MANIFEST_NAME).unwrap();
+        assert_eq!(manifest.note, None);
+        assert_eq!(manifest.note_file, None);
+        assert!(manifest.remotes.is_empty());
     }
 }

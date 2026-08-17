@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: output.transcript()
+expression: transcript
 ---
 exit: 0
 --- stdout ---
@@ -39,6 +39,8 @@ exit: 0
   "configPath": ".config/git.tpl.toml",
   "configCommitted": true,
   "ignoredAnswers": [],
+  "note": null,
+  "remotes": [],
   "ok": true
 }
 --- stderr ---

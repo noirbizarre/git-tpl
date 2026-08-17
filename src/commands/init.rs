@@ -10,7 +10,7 @@ use tpl::ops::{self, OpError};
 use super::{Session, answering, current_dir, report_ignored, supplied, trust};
 use crate::cli::{GlobalArgs, InitArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, heading, headline, muted, warning};
+use crate::theme::{change, command, field, heading, headline, muted, note_block, warning};
 
 pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // `--init` has to happen before discovery, since there may be no
@@ -135,6 +135,58 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         },
     ));
 
+    // The template's own additions come last, below everything git-tpl did
+    // itself. A message is untrusted text, and putting it above the change list
+    // would let it be read as a preamble to git-tpl's output rather than as an
+    // appendix to it.
+    if !outcome.remotes.is_empty() {
+        ctx.blank();
+        for remote in &outcome.remotes {
+            match &remote.outcome {
+                ops::RemoteOutcome::Added => {
+                    ctx.say(format!("Remote {} added.", remote.name));
+                }
+                // Silent. Reporting "nothing happened" on every re-init is the
+                // kind of line that trains people to stop reading them.
+                ops::RemoteOutcome::Unchanged => {}
+                ops::RemoteOutcome::Skipped { existing } => {
+                    // `warn`, not `say`: the template asked for something and
+                    // did not get it, and the user is the only one who can
+                    // decide which URL is right. Both are shown, because that
+                    // decision cannot be made without seeing them together.
+                    ctx.warn(warning(
+                        &ctx.theme,
+                        &format!(
+                            "remote {} was left alone.\n  it points at {existing}\n  \
+                             the template asked for {}",
+                            remote.name, remote.url
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    if let Some(raw) = &outcome.note {
+        // Sanitised at the last possible moment and only for the human stream.
+        // `--json` gets the text as written, below, because a consumer is not a
+        // terminal and has no escape sequences to be attacked through.
+        let formatting = if ctx.theme.is_colored() {
+            tpl::note::Formatting::Allowed
+        } else {
+            // Covers `--color never`, `NO_COLOR`, `TERM=dumb` and a piped
+            // stderr, all of which `Theme::resolve` has already decided. One
+            // decision, so the message cannot come to disagree with the rest of
+            // the output about whether this is a terminal.
+            tpl::note::Formatting::Stripped
+        };
+        let sanitised = tpl::note::sanitise(raw, formatting);
+        if !sanitised.trim().is_empty() {
+            ctx.blank();
+            ctx.say(note_block(&ctx.theme, &sanitised));
+        }
+    }
+
     if global.json {
         println!(
             "{}",
@@ -154,11 +206,35 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "configPath": relative.display().to_string(),
                 "configCommitted": outcome.config_committed,
                 "ignoredAnswers": outcome.ignored_answers,
+                // Raw, unsanitised: escape sequences are a terminal's problem
+                // and this stream reaches no terminal. Its prose is not a
+                // contract — ADR-016's "no message matching" applies here too,
+                // so branch on its presence, never on its text.
+                "note": outcome.note,
+                "remotes": outcome.remotes.iter().map(declared_remote).collect::<Vec<_>>(),
             }))
         );
     }
 
     Ok(crate::exit::SUCCESS)
+}
+
+/// One declared remote, for `--json`.
+fn declared_remote(remote: &ops::DeclaredRemote) -> serde_json::Value {
+    let (status, existing) = match &remote.outcome {
+        ops::RemoteOutcome::Added => ("added", None),
+        ops::RemoteOutcome::Unchanged => ("unchanged", None),
+        ops::RemoteOutcome::Skipped { existing } => ("skipped", Some(existing.clone())),
+    };
+    serde_json::json!({
+        "name": remote.name,
+        // What the template asked for, always — including when it was refused,
+        // which is the case a caller most needs to see it in.
+        "url": remote.url,
+        "status": status,
+        // `null` unless the two disagree, so its presence is the signal.
+        "existing": existing,
+    })
 }
 
 /// Report what would be asked and rendered, without creating anything.

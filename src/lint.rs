@@ -33,6 +33,7 @@ pub const CODES: &[&str] = &[
     "tpl::lint::collision",
     "tpl::lint::degenerate_path",
     "tpl::lint::foreign_expression",
+    "tpl::lint::missing_note_file",
     "tpl::lint::syntax",
     "tpl::lint::undeclared",
 ];
@@ -286,12 +287,15 @@ fn check(spelling: &str) -> Result<Selector<'_>, LintError> {
 
 /// Lint a resolved template.
 ///
-/// `entries` is the render root, flattened. `partials` are the importable
-/// `.jinja` blobs from outside it.
+/// `entries` is the render root, flattened. `repo_entries` is the whole
+/// repository, flattened — a `note_file` and a partial live there rather than
+/// in the render root, and the two are different path namespaces. `partials`
+/// are the importable `.jinja` blobs from outside the root.
 pub fn lint(
     template: &dyn GitBackend,
     manifest: &Manifest,
     entries: &[TreeEntry],
+    repo_entries: &[TreeEntry],
     partials: &std::sync::Arc<Partials>,
 ) -> Result<Vec<Finding>, LintError> {
     // The manifest and its graph first: a cycle or an unknown reference makes
@@ -336,8 +340,54 @@ pub fn lint(
     }
 
     findings.extend(check_path_collisions(entries));
+    findings.extend(check_note_file(manifest, repo_entries));
 
     Ok(findings)
+}
+
+/// A `note_file` that names nothing in the template repository.
+///
+/// A render will not tell the author: the path is checked at `init`, which is
+/// the one place they are unlikely to be. This reports it without a repository
+/// and without answers, which is what `lint` is for.
+///
+/// Matched exactly. Unlike a rendered file, no `.jinja` suffix is stripped —
+/// `note_file = "N.md.jinja"` is how an author asks for a rendered note, and
+/// treating `N.md` as a match for it would make the two indistinguishable.
+///
+/// Only a literal path can be checked. One containing an expression depends on
+/// the answers, and a lint has none.
+fn check_note_file(manifest: &Manifest, repo_entries: &[TreeEntry]) -> Vec<Finding> {
+    let Some(declared) = &manifest.note_file else {
+        return Vec::new();
+    };
+
+    if declared.contains("{{") || declared.contains("{%") {
+        return Vec::new();
+    }
+
+    let wanted = declared.trim();
+    // Against the *repository* tree, not the render root: a note is read from
+    // the template and never rendered into the project, so it is in the same
+    // path namespace as a partial.
+    let exists = repo_entries
+        .iter()
+        .any(|entry| entry.mode.is_blob() && entry.path == wanted);
+
+    if exists {
+        return Vec::new();
+    }
+
+    vec![Finding::error(
+        "tpl::lint::missing_note_file",
+        wanted,
+        format!("`note_file` names `{wanted}`, which the template repository does not contain"),
+        "the path is relative to the repository root, not to the render root — \
+         a note beside the manifest is `NEXT-STEPS.md`, not \
+         `template/NEXT-STEPS.md`. An `init` will refuse rather than show \
+         nothing."
+            .into(),
+    )]
 }
 
 /// The trap: a conditional segment whose suffix sits outside the block.
@@ -869,6 +919,92 @@ mod tests {
         let deny: Vec<String> = deny.iter().map(|s| s.to_string()).collect();
         let allow: Vec<String> = allow.iter().map(|s| s.to_string()).collect();
         Levels::parse(&deny, &allow)
+    }
+
+    /// A manifest with just enough in it to reach one rule.
+    fn manifest_with(body: &str) -> Manifest {
+        Manifest::parse(&format!("name = \"x\"\n{body}"), "template.toml").expect("valid manifest")
+    }
+
+    /// The repository tree, not the render root: a note is read from the
+    /// template and never rendered into the project.
+    #[rstest]
+    #[case("NEXT-STEPS.md", "NEXT-STEPS.md")]
+    #[case("docs/NEXT.md", "docs/NEXT.md")]
+    // `.jinja` is how an author asks for a rendered note, so it is matched
+    // literally rather than stripped.
+    #[case("NEXT.md.jinja", "NEXT.md.jinja")]
+    // Allowed, and pointless but harmless: the file is also rendered into the
+    // project. Policing it would cost more to explain than it saves.
+    #[case("template/NEXT.md", "template/NEXT.md")]
+    fn a_note_file_the_template_contains_is_not_flagged(
+        #[case] declared: &str,
+        #[case] present: &str,
+    ) {
+        let manifest = manifest_with(&format!("note_file = \"{declared}\""));
+        assert!(check_note_file(&manifest, &[entry(present)]).is_empty());
+    }
+
+    /// The mistake this rule exists for: `note_file` is repository-root
+    /// relative, so an author who writes the render-root path gets nothing.
+    #[test]
+    fn a_note_file_naming_nothing_is_an_error() {
+        let manifest = manifest_with("note_file = \"NEXT-STEPS.md\"");
+        let findings = check_note_file(&manifest, &[entry("template/NEXT-STEPS.md")]);
+
+        assert_eq!(codes(&findings), ["tpl::lint::missing_note_file"]);
+        assert!(findings[0].message.contains("NEXT-STEPS.md"));
+        // The help has to name the trap, or the finding restates the message.
+        assert!(
+            findings[0].help.contains("repository root"),
+            "{:?}",
+            findings[0].help
+        );
+    }
+
+    /// A `.jinja` note is a different file from the same path without it, and
+    /// treating one as the other would make them indistinguishable.
+    #[test]
+    fn a_jinja_note_file_is_not_satisfied_by_the_stripped_path() {
+        let manifest = manifest_with("note_file = \"NEXT.md.jinja\"");
+        assert_eq!(
+            codes(&check_note_file(&manifest, &[entry("NEXT.md")])),
+            ["tpl::lint::missing_note_file"]
+        );
+    }
+
+    /// A lint has no answers, so a path that depends on them cannot be
+    /// resolved. Skipped rather than guessed — a false error here would make
+    /// the rule unusable on exactly the templates that need it.
+    #[rstest]
+    #[case("notes/{{ language }}.md")]
+    #[case("{% if ci %}notes/ci.md{% endif %}")]
+    fn a_note_file_path_that_is_an_expression_is_not_checked(#[case] declared: &str) {
+        let manifest = manifest_with(&format!("note_file = \"{declared}\""));
+        assert!(check_note_file(&manifest, &[]).is_empty());
+    }
+
+    #[test]
+    fn a_template_without_a_note_file_is_not_flagged() {
+        assert!(check_note_file(&manifest_with(""), &[]).is_empty());
+        // An inline `note` names no path and so has nothing to check.
+        assert!(check_note_file(&manifest_with("note = \"hi\""), &[]).is_empty());
+    }
+
+    /// A tree entry is not necessarily a blob, and a directory named
+    /// `NEXT-STEPS.md` is not a note.
+    #[test]
+    fn a_directory_does_not_satisfy_a_note_file() {
+        let manifest = manifest_with("note_file = \"NEXT-STEPS.md\"");
+        let tree = TreeEntry {
+            path: "NEXT-STEPS.md".to_string(),
+            oid: crate::git::Oid::from_bytes([0; 20]),
+            mode: crate::git::FileMode::Tree,
+        };
+        assert_eq!(
+            codes(&check_note_file(&manifest, &[tree])),
+            ["tpl::lint::missing_note_file"]
+        );
     }
 
     fn sample() -> Vec<Finding> {
