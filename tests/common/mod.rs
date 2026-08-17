@@ -579,6 +579,14 @@ pub fn snapshot_settings() -> insta::Settings {
     // `ops::describe_revision` — `main (7fa834c)` and the `X → Y` form.
     settings.add_filter(r"\b[0-9a-f]{7,8}\b", "[short]");
 
+    // The `Date:` header of a `git tpl backport` mailbox, which is the one
+    // thing this project prints that is different on every run. Without this
+    // the snapshot passes on the day it is taken and never again.
+    settings.add_filter(
+        r"\w{3}, \d{1,2} \w{3} \d{4} \d{2}:\d{2}:\d{2} \+0000",
+        "[date]",
+    );
+
     // One file, one snapshot per test: the module prefix would repeat
     // `snapshots__` in every name without distinguishing anything.
     settings.set_prepend_module_to_snapshot(false);

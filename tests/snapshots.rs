@@ -181,6 +181,43 @@ fn init_reports_what_it_created() {
     snapshot("init_created", &world, &output);
 }
 
+/// `docs/usage/backport.md` — the summary, and the `git am` line it ends on.
+///
+/// The whole transcript, patch included, because that page's claim is that the
+/// last line is exactly what you run next. If the summary and the patch ever
+/// swap streams, the documented pipe stops working and this is what says so.
+#[test]
+fn backport_reports_the_patch_and_how_to_apply_it() {
+    let world = World::new();
+    world.init(&[]).success();
+    // A file the standard template copies byte-for-byte: the easy path, and
+    // the one the page opens with.
+    world.project.write(
+        "ci.yml",
+        "name: CI\non: [push, pull_request]\njobs:\n  test:\n    steps:\n      - run: echo ${{ github.sha }}\n",
+    );
+
+    let output = tpl(&world.project, &["backport"]).success();
+
+    snapshot("backport_patch", &world, &output);
+}
+
+/// `docs/usage/backport.md` — the refusal a user meets most.
+#[test]
+fn backport_refuses_a_change_to_a_substituted_line() {
+    let world = World::new();
+    world.init(&[]).success();
+    // The heading comes from `project_name`, so this is a changed *answer*,
+    // not a change to the template.
+    world
+        .project
+        .write("README.md", "# renamed\n\nLicensed under MIT License.\n");
+
+    let output = tpl(&world.project, &["backport"]).failure();
+
+    snapshot("backport_substituted", &world, &output);
+}
+
 // --- JSON envelopes ---------------------------------------------------------
 
 /// `docs/reference/json.md` — the `status` payload.
@@ -241,4 +278,22 @@ fn a_failure_envelope_has_a_code_and_a_help() {
     let output = tpl(&world.project, &["--json", "update"]).failure();
 
     snapshot("json_failure", &world, &output);
+}
+
+/// `docs/reference/json.md` — the `backport` payload, patch and all.
+///
+/// The `patch` key is the whole point of this one: it pins that the mailbox
+/// travels *inside* the envelope, because stdout under `--json` is one object.
+#[test]
+fn backport_json_envelope() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.project.write(
+        "ci.yml",
+        "name: CI\non: [push, pull_request]\njobs:\n  test:\n    steps:\n      - run: echo ${{ github.sha }}\n",
+    );
+
+    let output = tpl(&world.project, &["--json", "backport"]).success();
+
+    snapshot("json_backport", &world, &output);
 }
