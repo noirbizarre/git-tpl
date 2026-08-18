@@ -60,9 +60,14 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     report_ignored_paths(&ctx.out, &rendered.template.ignored);
 
     prepare_output(&args.output, args.force)?;
-    for file in &rendered.files {
-        write_file(&args.output, file)?;
-    }
+    ops::materialise(
+        &args.output,
+        rendered
+            .files
+            .iter()
+            .map(|file| (file.path.as_str(), file.content.as_slice(), file.executable)),
+        &io,
+    )?;
 
     if global.json {
         println!(
@@ -126,10 +131,11 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
 /// Make `output` exist and be empty.
 ///
-/// Cleared rather than merged into, because a template that stops producing a
-/// file must be seen to stop: rendering over a previous run would leave the
-/// old file behind, and the author would conclude the conditional works.
-fn prepare_output(output: &Path, force: bool) -> Result<u8, OpError> {
+/// The `--force` guard is here rather than in `ops::clear_directory` because
+/// it is a policy of this command: refusing to replace a directory somebody
+/// did not say could be replaced. Clearing it, once permitted, is the shared
+/// operation.
+fn prepare_output(output: &Path, force: bool) -> Result<(), OpError> {
     match std::fs::read_dir(output) {
         Ok(mut entries) => {
             if entries.next().is_some() {
@@ -141,8 +147,7 @@ fn prepare_output(output: &Path, force: bool) -> Result<u8, OpError> {
                         ),
                     });
                 }
-                std::fs::remove_dir_all(output).map_err(|e| io(output, "clear", &e))?;
-                std::fs::create_dir_all(output).map_err(|e| io(output, "create", &e))?;
+                ops::clear_directory(output, &io)?;
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -150,30 +155,6 @@ fn prepare_output(output: &Path, force: bool) -> Result<u8, OpError> {
         }
         Err(error) => return Err(io(output, "read", &error)),
     }
-    Ok(crate::exit::SUCCESS)
-}
-
-fn write_file(output: &Path, file: &tpl::render::Rendered) -> Result<(), OpError> {
-    // `Rendered::path` is already validated by the renderer: no absolute
-    // segment, no `..`, no separator inside a segment. Joining is safe because
-    // of that check, not in spite of it.
-    let target = output.join(&file.path);
-    if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| io(parent, "create", &e))?;
-    }
-    std::fs::write(&target, &file.content).map_err(|e| io(&target, "write", &e))?;
-
-    #[cfg(unix)]
-    if file.executable {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(&target)
-            .map_err(|e| io(&target, "read the permissions of", &e))?
-            .permissions();
-        permissions.set_mode(permissions.mode() | 0o111);
-        std::fs::set_permissions(&target, permissions)
-            .map_err(|e| io(&target, "set the permissions of", &e))?;
-    }
-
     Ok(())
 }
 

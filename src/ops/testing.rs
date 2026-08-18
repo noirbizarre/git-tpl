@@ -1205,62 +1205,26 @@ fn write_snapshot(
     let workdir = template.repo.workdir()?;
     let dir = workdir.join(snapshot_path(tests_dir, &case.name));
 
-    let failed = |path: &Path, error: &std::io::Error| TestError::SnapshotWrite {
+    let failed = |path: &Path, verb: &str, error: &std::io::Error| TestError::SnapshotWrite {
         case: case.name.clone(),
         path: path.display().to_string(),
-        reason: error.to_string(),
+        reason: format!("could not {verb} it: {error}"),
     };
 
-    // Cleared, not merged into. A template that stops producing a file has to
-    // be seen to stop; leaving the old one behind would let an author conclude
-    // their conditional works.
-    match std::fs::remove_dir_all(&dir) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(failed(&dir, &error).into()),
-    }
-    std::fs::create_dir_all(&dir).map_err(|error| failed(&dir, &error))?;
+    super::clear_directory(&dir, &failed)?;
 
-    for (path, entry) in files {
-        // Safe to join: every rendered path was validated by `render_path`,
-        // which rejects `.`, `..` and absolute segments.
-        let target = dir.join(SNAPSHOT_FILES).join(path);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| failed(parent, &error))?;
-        }
-        std::fs::write(&target, &entry.content).map_err(|error| failed(&target, &error))?;
-        set_executable(&target, entry.executable).map_err(|error| failed(&target, &error))?;
-    }
+    super::materialise(
+        &dir.join(SNAPSHOT_FILES),
+        files
+            .iter()
+            .map(|(path, entry)| (path.as_str(), entry.content.as_slice(), entry.executable)),
+        &failed,
+    )?;
 
     let manifest = dir.join(SNAPSHOT_MANIFEST);
     std::fs::write(&manifest, render_manifest(&case.name, files))
-        .map_err(|error| failed(&manifest, &error))?;
+        .map_err(|error| failed(&manifest, "write", &error))?;
 
-    Ok(())
-}
-
-/// Apply the executable bit, on the platforms that have one.
-///
-/// Git records nothing else about permissions, so this is the whole of what a
-/// snapshot has to reproduce. On Windows there is no bit to set, which is
-/// exactly why the manifest records the mode separately.
-fn set_executable(path: &Path, executable: bool) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = std::fs::metadata(path)?.permissions();
-        let mode = permissions.mode();
-        permissions.set_mode(if executable {
-            mode | 0o111
-        } else {
-            mode & !0o111
-        });
-        std::fs::set_permissions(path, permissions)?;
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, executable);
-    }
     Ok(())
 }
 

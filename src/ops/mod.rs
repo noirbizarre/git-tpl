@@ -283,6 +283,82 @@ pub fn describe_revision(reference: &str, commit: Oid) -> String {
     }
 }
 
+/// Make `dir` exist and be empty.
+///
+/// Cleared rather than merged into, because a template that stops producing a
+/// file must be seen to stop: writing over a previous run would leave the old
+/// file behind, and the author would conclude the conditional works.
+///
+/// `failed` names the caller's own diagnostic, because "could not write your
+/// output directory" and "could not write a snapshot" are different failures
+/// to the person reading them.
+pub fn clear_directory<E>(
+    dir: &Path,
+    failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
+) -> Result<(), E> {
+    match std::fs::remove_dir_all(dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(failed(dir, "clear", &error)),
+    }
+    std::fs::create_dir_all(dir).map_err(|error| failed(dir, "create", &error))
+}
+
+/// Write a rendered tree onto the filesystem under `root`.
+///
+/// The one place that turns rendered bytes into files, so that the executable
+/// bit is applied identically wherever a tree lands on disk. It had two
+/// implementations and they had already diverged: one set the bit and never
+/// cleared it, so a non-executable file written over an executable one kept a
+/// mode the rendering does not have.
+///
+/// Safe to join `root` with each path: every rendered path was validated by
+/// `render_path`, which rejects `.`, `..`, absolute segments and separators
+/// inside a segment. Joining is safe because of that check, not in spite of it.
+pub fn materialise<'a, E>(
+    root: &Path,
+    files: impl IntoIterator<Item = (&'a str, &'a [u8], bool)>,
+    failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
+) -> Result<(), E> {
+    for (path, content, executable) in files {
+        let target = root.join(path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|error| failed(parent, "create", &error))?;
+        }
+        std::fs::write(&target, content).map_err(|error| failed(&target, "write", &error))?;
+        set_executable(&target, executable)
+            .map_err(|error| failed(&target, "set the permissions of", &error))?;
+    }
+    Ok(())
+}
+
+/// Apply the executable bit, on the platforms that have one.
+///
+/// Git records nothing else about permissions, so this is the whole of what a
+/// materialised tree has to reproduce. On Windows there is no bit to set,
+/// which is why a snapshot records the mode separately.
+fn set_executable(path: &Path, executable: bool) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(path)?.permissions();
+        let mode = permissions.mode();
+        // Cleared as well as set. Only ever setting it means a file that stops
+        // being executable keeps a mode the rendering does not have.
+        permissions.set_mode(if executable {
+            mode | 0o111
+        } else {
+            mode & !0o111
+        });
+        std::fs::set_permissions(path, permissions)?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, executable);
+    }
+    Ok(())
+}
+
 /// How a template's remote data sources are authorised.
 ///
 /// Per invocation, and nothing is recorded: the next run asks again. A
