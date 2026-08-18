@@ -177,39 +177,11 @@ Three kinds of change are handled specially:
 | You **deleted** a file the template produces | reported, not backported | Removing a file from a template removes it from every project that renders it. Far too blunt to infer from one project's worktree. |
 | You **added** a file the template does not produce | ignored, unless you name it | Otherwise every file your project owns would be a candidate. Named explicitly, it becomes a new template file — and *not* a `.jinja`, since nothing was substituted into a file the template has never seen. |
 
-## When it refuses
+## Changing a line that holds a placeholder
 
-A backport that guesses ships a broken template to every downstream project at
-once. That is strictly worse than editing the template by hand, which is what
-you would have done anyway — so `backport` refuses rather than guessing, and
-every refusal names that fallback.
-
-### The change is on a line the template renders
-
-The commonest one. Here the heading comes from a question:
-
-```jinja
-# {{ project_name }}
-```
-
-If you rename the project by editing the rendered `README.md`, there is no
-change to send: you changed an *answer*, not the template. Reversing `acme`
-back into `{{ project_name }}` would rename the heading for everyone.
-
-```console
-$ git tpl backport
-tpl::backport::substituted_region
-
-  x `README.md` was changed where the template substitutes a value
-  help: line 1 of `README.md` is produced by an expression in
-        `README.md.jinja`, not copied from it, so there is no one-to-one
-        change to send upstream. Edit `README.md.jinja` by hand, or restrict
-        the backport with a pathspec.
-```
-
-Note that this is per *line*, not per file. A `.jinja` file backports fine as
-long as your change lands on lines it copies verbatim — which most prose and
-most configuration is:
+Backporting works per *line*, not per file. A `.jinja` backports fine as long
+as your change lands on lines it copies verbatim — which most prose and most
+configuration is:
 
 ```console
 $ git tpl backport
@@ -232,6 +204,121 @@ backport main (937573e)
 ```
 
 The `{{ project_name }}` heading is untouched and still a placeholder.
+
+Often, though, the fix *is* on a line with a `{{ }}` in it — a heading you want
+to reword, a flag you want to add to a command. `backport` carries those too,
+keeping the placeholder and sending only the change around it. Because that is
+the one thing it does which cannot be proved right for anyone but you, it asks
+first:
+
+```console
+$ git tpl backport
+
+`README.md` line 1 was changed around a value the template substitutes.
+
+  rendered  # acme — a service
+  yours     # acme — a web service
+  upstream  # {{ project_name }} — a web service
+
+It keeps `{{ project_name }}` and sends the rest of the line to
+`README.md.jinja`.
+
+Send this line upstream? [yes/no]
+```
+
+Answer **no** and the file refuses with `substituted_region`, exactly as it
+would have without the offer.
+
+### Why it asks
+
+Every patch is proved to render back to *your* file (see
+[below](#the-patch-does-not-render-back-to-your-file)). That is not the same as
+being right for everyone else's answers, and reversing a substitution is the
+first thing `backport` does where the two come apart:
+
+```text
+source    version = "{{ version }}"      with version = "1.0"
+rendered  version = "1.0"
+project   version = "1.0.0"
+```
+
+The `.0` you added sits right against the value. Attributing it to the text
+around the placeholder gives `version = "{{ version }}.0"` — which renders back
+to your file perfectly, and appends `.0` to every other project's version. You
+meant to change your *answer*.
+
+`backport` refuses that particular one, because the edit could equally have
+been an edit to the value and there is nothing in the bytes to choose between
+them. But the class as a whole is not decidable, so the last word is yours.
+
+Nothing here searches your file for an answer's value, which is why a value
+that happens to coincide with ordinary text is not a problem:
+
+```jinja
+Written by {{ author }} in June.
+```
+
+With `author = "June"`, editing the month carries cleanly and the placeholder
+survives; editing the *author* is refused. The two "June"s are simply different
+ranges of the line — one produced by the expression, one copied from the
+source. [ADR-022](../adr/022-backport-unsubstitutes.md) has the whole argument.
+
+### Without a terminal
+
+With nobody to ask — under `--json`, in a script, on CI, or with
+`tpl.interactive` set to `false` — no substitution is reversed and the line
+refuses as it always did. Pass `--unsubstitute` to take every reversal without
+asking:
+
+```sh
+git tpl backport --unsubstitute | git -C ../my-template am
+```
+
+Under `--json` the payload's `unsubstituted` array names every line that was
+reversed, so a reviewer can gate on it. See
+[JSON output](../reference/json.md#backport).
+
+## When it refuses
+
+A backport that guesses ships a broken template to every downstream project at
+once. That is strictly worse than editing the template by hand, which is what
+you would have done anyway — so `backport` refuses rather than guessing, and
+every refusal names that fallback.
+
+### The change is on a line the template renders
+
+The commonest one, and what you get whenever the reversal above is declined or
+not available. Here the heading comes from a question:
+
+```jinja
+# {{ project_name }}
+```
+
+If you rename the project by editing the rendered `README.md`, there is no
+change to send: you changed an *answer*, not the template. Reversing `acme`
+back into `{{ project_name }}` would rename the heading for everyone.
+
+```console
+$ git tpl backport
+tpl::backport::substituted_region
+
+  x `README.md` was changed where the template substitutes a value
+  help: line 1 of `README.md` is produced by an expression in
+        `README.md.jinja`, not copied from it, so there is no one-to-one
+        change to send upstream. Edit `README.md.jinja` by hand, or restrict
+        the backport with a pathspec.
+```
+
+The same code covers every line whose provenance is not exact enough to
+reverse:
+
+- a change that replaces the whole value, or any part of it
+- a change whose placement is ambiguous, as in the `version` case above
+- a line holding a `{% … %}` block tag or a `{# … #}` comment
+- a line using whitespace control, `{{- … }}` or `{{ … -}}`
+- a line inside a `{% for %}` body, or any line whose expressions do not
+  reassemble into exactly what the template produced
+- a line where an expression rendered to nothing
 
 ### The patch does not render back to your file
 
@@ -262,6 +349,7 @@ and the reasoning behind all of it is
 | `--exclude <glob>` | Leave these paths out. Repeatable. `*` does not cross a `/`, `**` does. |
 | `-o`, `--output <file>` | Write the patch here instead of to stdout. |
 | `--trust` | Fetch the template's [remote data sources](../data/index.md) without confirming. Per invocation; nothing is recorded. |
+| `--unsubstitute` | Reverse changed template expressions without confirming. Also the only way to reverse one at all with nobody to ask — under `--json`, or on CI. See [Changing a line that holds a placeholder](#changing-a-line-that-holds-a-placeholder). |
 
 There is deliberately no `--ref` and no `--answer`: both would change the
 baseline the patch is measured against. See [What it compares](#what-it-compares).

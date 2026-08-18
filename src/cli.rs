@@ -403,6 +403,17 @@ pub struct BackportArgs {
     /// Per invocation: nothing is recorded, and the next run asks again.
     #[arg(long)]
     pub trust: bool,
+
+    /// Reverse changed template expressions without confirming
+    ///
+    /// Reversing a substitution keeps the `{{ }}` and carries only the change
+    /// around it. Round-tripping proves the result reproduces *your* file; it
+    /// cannot prove it is right for everyone else's answers, which is why each
+    /// one is normally shown for confirmation. Pass this to take them all —
+    /// and to un-substitute at all under `--json` or in CI, where there is
+    /// nobody to ask.
+    #[arg(long)]
+    pub unsubstitute: bool,
 }
 
 /// `git tpl questions`

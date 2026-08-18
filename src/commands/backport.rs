@@ -1,16 +1,19 @@
 //! `git tpl backport`
 
+use std::io::IsTerminal;
+
 use tpl::ops::{self, Backport, OpError};
 
 use super::Session;
 use crate::cli::{BackportArgs, GlobalArgs};
-use crate::prompt::Confirmer;
+use crate::prompt::{Confirmer, Reverser};
 use crate::theme::{command, diff_summary, field, headline, muted, warning};
 
 pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
     let preferences = tpl::gitconfig::Preferences::load(&ctx.repo)?;
     let mut confirmer = Confirmer;
+    let mut reverser = Reverser(ctx.out.theme.clone());
 
     // Never prompts in practice: the recorded answers cover every question the
     // recorded revision asks. `defaults()` is what happens if that stops being
@@ -31,6 +34,29 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         tpl::ops::Trust::refuse()
     };
 
+    // Reversing a substitution is the one thing `backport` does that a
+    // round-trip cannot prove right for anyone but the person running it
+    // (ADR-022), so by default it happens only when that person is there to
+    // look at it. With nobody to ask — `--json`, a script, `tpl.interactive`
+    // off — it is not attempted, and the line refuses exactly as it did before.
+    // `--unsubstitute` is the decision taken in advance, and is how CI opts in.
+    //
+    // The tty check is here and nowhere else in the tree, on purpose.
+    // Elsewhere `tpl.interactive` is enough, because a prompt that cannot run
+    // fails the command and the user finds out. Here a failed prompt would read
+    // as a refusal and silently shrink the patch, so "can I actually ask?" has
+    // to be answered before anything is attempted rather than after.
+    let unsubstitute = match reversing(
+        args.unsubstitute,
+        preferences.interactive,
+        global.json,
+        std::io::stderr().is_terminal(),
+    ) {
+        Reversing::Always => ops::Unsubstitute::Always,
+        Reversing::Ask => ops::Unsubstitute::Ask(&mut reverser),
+        Reversing::Never => ops::Unsubstitute::Never,
+    };
+
     let result = ops::backport(
         &ctx.repo,
         &ctx.root,
@@ -39,6 +65,7 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         &ctx.user,
         answering,
         trust,
+        unsubstitute,
     )?;
 
     // Written before anything is said, so a failure to write is not reported
@@ -66,6 +93,38 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     }
 
     Ok(crate::exit::SUCCESS)
+}
+
+/// Whether substitutions may be reversed, and whether to ask first.
+///
+/// Split out from [`run`] because it is the whole of the policy and none of the
+/// plumbing: `Unsubstitute` borrows the gate mutably, so the decision could not
+/// otherwise be examined without a terminal to answer it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reversing {
+    /// Take every reversal without asking. `--unsubstitute`.
+    Always,
+    /// Offer each one.
+    Ask,
+    /// Do not attempt it. What `backport` did before ADR-022.
+    Never,
+}
+
+/// The rule, in one place.
+///
+/// `tty` is consulted here and nowhere else in the tree. Elsewhere
+/// `tpl.interactive` is enough, because a prompt that cannot run fails the
+/// command and the user finds out. Here a failed prompt would read as a refusal
+/// and silently shrink the patch, so "can I actually ask?" has to be answered
+/// before anything is attempted rather than after.
+fn reversing(flag: bool, interactive: bool, json: bool, tty: bool) -> Reversing {
+    if flag {
+        Reversing::Always
+    } else if interactive && !json && tty {
+        Reversing::Ask
+    } else {
+        Reversing::Never
+    }
 }
 
 /// The prose, on stderr.
@@ -105,6 +164,18 @@ fn report(ctx: &Session, args: &BackportArgs, result: &Backport) {
         ));
     }
     ctx.out.blank();
+    // Loud, and above the summary. A reversed substitution changes what the
+    // template produces for every project, so it is the one part of a patch
+    // that must not be skimmed past on the way to the `apply:` line.
+    for reversal in &result.unsubstituted {
+        ctx.out.warn(warning(
+            &ctx.out.theme,
+            &format!(
+                "un-substituted {} line {}: {}",
+                reversal.path, reversal.line, reversal.patched
+            ),
+        ));
+    }
     ctx.out.say(muted(
         &ctx.out.theme,
         &diff_summary(
@@ -168,7 +239,50 @@ fn payload(args: &BackportArgs, result: &Backport) -> serde_json::Value {
             "path": skipped.path,
             "reason": skipped.reason,
         })).collect::<Vec<_>>(),
+        // Carried so a consumer can gate on it. A reversed substitution is the
+        // one thing in a backport that the round trip does not prove right for
+        // anyone but the user who ran it, and a reviewer that cannot see which
+        // lines they were cannot review them.
+        "unsubstituted": result.unsubstituted.iter().map(|reversal| serde_json::json!({
+            "path": reversal.path,
+            "source": reversal.template_path,
+            "line": reversal.line,
+            "rendered": reversal.rendered,
+            "project": reversal.project,
+            "patched": reversal.patched,
+            "expressions": reversal.expressions,
+        })).collect::<Vec<_>>(),
         "insertions": result.files.iter().map(|f| f.insertions).sum::<usize>(),
         "deletions": result.files.iter().map(|f| f.deletions).sum::<usize>(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    // The flag is a decision taken in advance, and holds everywhere — it is
+    // how a script or a CI job opts in at all.
+    #[case(true, false, true, false, Reversing::Always)]
+    #[case(true, true, false, true, Reversing::Always)]
+    // Otherwise: only with a person at a terminal to answer.
+    #[case(false, true, false, true, Reversing::Ask)]
+    // `--json` means a machine is reading, whatever the terminal says.
+    #[case(false, true, true, true, Reversing::Never)]
+    // No terminal: the prompt would fail, and a failed prompt reads as a
+    // refusal — which would silently shrink the patch.
+    #[case(false, true, false, false, Reversing::Never)]
+    // `tpl.interactive = false` is the user saying not to ask.
+    #[case(false, false, false, true, Reversing::Never)]
+    fn a_reversal_is_only_offered_when_someone_can_answer(
+        #[case] flag: bool,
+        #[case] interactive: bool,
+        #[case] json: bool,
+        #[case] tty: bool,
+        #[case] expected: Reversing,
+    ) {
+        assert_eq!(reversing(flag, interactive, json, tty), expected);
+    }
 }

@@ -147,7 +147,7 @@ off than not having run the command. The reasoning is
 
 | Code | Meaning |
 |---|---|
-| `tpl::backport::substituted_region` | A change lands on a line the template renders rather than copies, so there is no one-to-one change to send upstream. The expected refusal. |
+| `tpl::backport::substituted_region` | A change lands on a line the template renders rather than copies, and its provenance is not exact enough to reverse — or the reversal was declined. The expected refusal. See [Changing a line that holds a placeholder](../usage/backport.md#changing-a-line-that-holds-a-placeholder). |
 | `tpl::backport::round_trip` | The patched template source did not render back to your file, so sending it would change what the template produces for everyone. |
 | `tpl::backport::binary` | A changed file is binary, and a text patch cannot carry it. |
 | `tpl::backport::stale_rendering` | The recorded answers no longer reproduce `refs/tpl/<id>`, so every line of the patch would be measured against the wrong file. Run `update` first. |

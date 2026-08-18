@@ -7,6 +7,7 @@
 pub mod backport;
 pub mod resolve;
 pub mod testing;
+pub mod unsubstitute;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,7 @@ use crate::userconfig::UserConfig;
 pub use resolve::{Request, ResolveError, Resolved};
 
 pub use backport::{Backport, BackportError, BackportedFile, Skipped, backport};
+pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Verdict};
 
 /// Errors from any operation.
 #[derive(Debug, Error, Diagnostic)]

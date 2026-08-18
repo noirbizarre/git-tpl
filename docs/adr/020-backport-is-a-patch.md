@@ -1,6 +1,6 @@
 # ADR-020: `backport` emits a patch, and proves it by re-rendering
 
-**Status:** accepted
+**Status:** accepted, amended by [ADR-022](022-backport-unsubstitutes.md)
 
 **Relates to:** [ADR-002](002-no-custom-reconciliation.md),
 [ADR-006](006-no-runtime-context.md)
@@ -149,3 +149,15 @@ revisited: step 4 already stands ready to verify a reversed substitution, and
 option 1's refusal list becomes admissible once it is a *filter in front of a
 proof* rather than the proof itself. What this ADR forecloses is shipping that
 inference without the verification behind it.
+
+!!! note "Amended by ADR-022"
+
+    That last paragraph is the one part of this record that did not survive
+    contact with the code. The extension shipped, but not as option 1 in front
+    of a proof: a table's question — "does this text come from that value?" —
+    has no answer at the level of bytes, so no refinement of its refusal list
+    refines the *answer*. [ADR-022](022-backport-unsubstitutes.md) establishes
+    provenance by re-rendering the source line instead, which is option 2
+    reached without forking MiniJinja, and adds a human confirmation for the
+    one thing step 4 cannot prove: that a patch right for *this* user's answers
+    is right for everyone else's.
