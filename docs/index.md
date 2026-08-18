@@ -33,11 +33,16 @@ conflict markers, the same `git rerere`, the same `--abort` you already know.
 ## Getting started
 
 ```sh
-cargo install git-tpl
+brew install noirbizarre/tap/git-tpl
 
 cd my-project
 git tpl init https://github.com/noirbizarre/rust-library-template
 ```
+
+Homebrew is one of five ways in — see
+[Installation](getting-started/installation.md). `cargo install git-tpl` places
+only the binary, so `git tpl --help` reports *No manual entry for git-tpl* until
+the man page is generated; the other methods include it.
 
 That works on an empty repository and on a project that already has files — see
 [adopting an existing project](usage/init.md#an-existing-project).
