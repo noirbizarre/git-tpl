@@ -157,10 +157,14 @@ stub. `tests/common/mod.rs` builds real repositories in temporary directories.
 
 ## Driving git-tpl without a person
 
-Every command takes `--json`, and every failure carries a stable
-`error.code` — `docs/reference/diagnostics.md` is the catalogue. Branch on the
-code, never on the message; messages are expected to improve and are pinned
-nowhere.
+Every command takes `--json` and every failure carries a stable `error.code` —
+`docs/reference/diagnostics.md` is the catalogue. Branch on the code, never on
+the message; messages are expected to improve and are pinned nowhere.
+
+Almost every command also emits a success payload. `show`, `completion` and
+`man` do not: their stdout is already the payload — a file's bytes, a shell
+script, troff — and wrapping it would leave nothing able to read, source or
+render it.
 
 The loop for working on a template, none of which needs a repository:
 
