@@ -1,8 +1,6 @@
 # ADR-016: Template tests are data
 
-## Status
-
-Accepted.
+**Status:** accepted
 
 ## Context
 

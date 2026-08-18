@@ -1,8 +1,6 @@
 # ADR-014: Undefined names in rendered files
 
-## Status
-
-Accepted. Staged: opt-in now, default in a later minor.
+**Status:** accepted, staged — opt-in now, default in a later minor
 
 ## Context
 

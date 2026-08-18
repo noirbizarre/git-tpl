@@ -1,8 +1,6 @@
 # ADR-015: Machine-readable output
 
-## Status
-
-Accepted.
+**Status:** accepted
 
 ## Context
 
