@@ -31,3 +31,4 @@ existed.
 | [019](019-templates-address-never-act.md) | A template may address the user and declare Git remotes; it never runs anything |
 | [020](020-backport-is-a-patch.md) | `backport` emits a patch, and proves it by re-rendering |
 | [021](021-attachment-in-the-merge-commit.md) | The attachment rides in the merge commit, so `init` adds one commit |
+| [022](022-backport-unsubstitutes.md) | Un-substitution is proved per line, and confirmed by a human |

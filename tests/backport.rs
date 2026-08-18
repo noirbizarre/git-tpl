@@ -619,3 +619,244 @@ fn a_backported_fix_comes_back_through_update() {
     let again = tpl(&world.project, &["--json", "backport"]).success();
     assert_eq!(again.json()["result"], "nothingToBackport");
 }
+
+// ---- un-substitution, ADR-022 ---------------------------------------------
+
+/// A template whose lines mix substituted values with editable prose, which is
+/// the shape #66 exists for. Deliberately separate from [`world`]: the cases
+/// above pin what happens *without* un-substitution and must keep doing so.
+fn substituting_world() -> World {
+    World::with_template(
+        r#"
+name = "demo"
+
+[questions.project_name]
+type = "string"
+prompt = "Project name"
+default = "acme"
+
+[questions.author]
+type = "string"
+prompt = "Author"
+default = "June"
+"#,
+        &[(
+            "README.md.jinja",
+            "# {{ project_name }} — a service\n\nWritten by {{ author }} in June.\n\nRun the tests.\n",
+        )],
+    )
+}
+
+/// The acceptance case: the change is beside the placeholder, not in it.
+#[test]
+fn an_edit_beside_a_substitution_keeps_the_placeholder_and_carries_the_change() {
+    let world = substituting_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "README.md",
+        "# acme — a web service\n\nWritten by June in June.\n\nRun the tests.\n",
+    );
+
+    let output = tpl(&world.project, &["backport", "--unsubstitute"]).success();
+
+    let upstream = clone_of_template(&world);
+    let patch = upstream.path.join("backport.mbox");
+    std::fs::write(&patch, &output.stdout).expect("write the patch");
+    let (ok, message) = upstream.try_git(&["am", &patch.to_string_lossy()]);
+    assert!(ok, "git am refused the patch: {message}");
+
+    let source = upstream.read("template/README.md.jinja");
+    assert!(
+        source.starts_with("# {{ project_name }} — a web service\n"),
+        "the placeholder did not survive the reversal: {source}"
+    );
+}
+
+/// The `June` case ADR-020 says a substitution table cannot get right.
+///
+/// `author` is the month the template hard-codes. Nothing searches for the
+/// value, so the coincidence is literal text and edits to it carry cleanly.
+#[test]
+fn a_value_that_coincides_with_literal_text_is_not_reversed_by_accident() {
+    let world = substituting_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "README.md",
+        "# acme — a service\n\nWritten by June in July.\n\nRun the tests.\n",
+    );
+
+    let output = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).success();
+    let payload = output.json();
+    let patch = payload["patch"].as_str().expect("a patch");
+    assert!(
+        patch.contains("+Written by {{ author }} in July."),
+        "the coincidence was un-substituted, or the change was lost: {patch}"
+    );
+}
+
+/// The other half of the same line: editing the *author* is an answer change.
+#[test]
+fn editing_the_value_itself_is_still_refused_by_name() {
+    let world = substituting_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "README.md",
+        "# acme — a service\n\nWritten by Ada in June.\n\nRun the tests.\n",
+    );
+
+    let output = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).failure();
+    assert_eq!(output.error_code(), "tpl::backport::substituted_region");
+}
+
+/// Without the flag, and with nobody to ask, nothing is reversed.
+///
+/// This is the guarantee that a script's behaviour did not change under it:
+/// the same edit that succeeds above refuses here, with the ADR-020 code.
+#[test]
+fn un_substitution_is_not_attempted_when_there_is_nobody_to_ask() {
+    let world = substituting_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "README.md",
+        "# acme — a web service\n\nWritten by June in June.\n\nRun the tests.\n",
+    );
+
+    let output = tpl(&world.project, &["--json", "backport"]).failure();
+    assert_eq!(output.error_code(), "tpl::backport::substituted_region");
+}
+
+/// A reversal is reported, not merely counted.
+///
+/// A patch that reversed a substitution changes what the template produces for
+/// every project. A consumer that cannot see which lines they were cannot
+/// review them.
+#[test]
+fn the_json_payload_names_every_reversed_line() {
+    let world = substituting_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "README.md",
+        "# acme — a web service\n\nWritten by June in June.\n\nRun the tests.\n",
+    );
+
+    let output = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).success();
+    let payload = output.json();
+    let reversed = payload["unsubstituted"].as_array().expect("the array");
+
+    assert_eq!(reversed.len(), 1, "{payload}");
+    assert_eq!(reversed[0]["path"], "README.md");
+    assert_eq!(reversed[0]["source"], "README.md.jinja");
+    assert_eq!(reversed[0]["line"], 1);
+    assert_eq!(
+        reversed[0]["patched"],
+        "# {{ project_name }} — a web service"
+    );
+    assert_eq!(reversed[0]["expressions"][0], "{{ project_name }}");
+}
+
+/// A patch that round-trips and is still wrong.
+///
+/// Appending `.0` to a rendered version sits against the value, and placing it
+/// in the literal gives `{{ version }}.0` — correct for this user, and wrong
+/// for every other project. The round trip cannot tell; the slider can.
+#[test]
+fn an_edit_that_could_have_slid_into_a_value_is_refused_by_name() {
+    let world = World::with_template(
+        r#"
+name = "demo"
+
+[questions.version]
+type = "string"
+prompt = "Version"
+default = "1.0"
+"#,
+        &[(
+            "app.toml.jinja",
+            "version = \"{{ version }}\"\nname = \"x\"\n",
+        )],
+    );
+    world.init(&[]).success();
+
+    world
+        .project
+        .write("app.toml", "version = \"1.0.0\"\nname = \"x\"\n");
+
+    let output = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).failure();
+    assert_eq!(output.error_code(), "tpl::backport::substituted_region");
+}
+
+/// A line inside a loop has no line-local provenance to reverse.
+///
+/// The source line renders against a binding that is not in the context at
+/// all, so the reassembly cannot reproduce the rendered line and the reversal
+/// is refused rather than applied to every iteration.
+#[test]
+fn a_line_inside_a_loop_is_refused_by_name() {
+    let world = World::with_template(
+        r#"
+name = "demo"
+
+[questions.project_name]
+type = "string"
+prompt = "Project name"
+default = "acme"
+
+[computed]
+items = "{{ ['one', 'two'] }}"
+"#,
+        &[(
+            "list.md.jinja",
+            "# {{ project_name }}\n{% for item in items %}\n- {{ item }} ok\n{% endfor %}\n",
+        )],
+    );
+    world.init(&[]).success();
+
+    let rendered = world.project.read("list.md");
+    world
+        .project
+        .write("list.md", &rendered.replace("one ok", "one fine"));
+
+    let output = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).failure();
+    assert_eq!(output.error_code(), "tpl::backport::substituted_region");
+}
+
+/// The full loop, with a reversal in it.
+///
+/// The only test that would catch a patch which round-trips locally and then
+/// breaks on the next `update`.
+#[test]
+fn an_un_substituted_fix_comes_back_through_update() {
+    let world = substituting_world();
+    world.init(&[]).success();
+    world.project.write(
+        "README.md",
+        "# acme — a web service\n\nWritten by June in June.\n\nRun the tests.\n",
+    );
+    world.project.commit_all("docs: call it a web service");
+
+    let output = tpl(&world.project, &["backport", "--unsubstitute"]).success();
+
+    let patch = world.dir.path().join("fix.mbox");
+    std::fs::write(&patch, &output.stdout).expect("write the patch");
+    let (ok, message) = world
+        .template
+        .repo
+        .try_git(&["am", &patch.to_string_lossy()]);
+    assert!(ok, "git am refused the patch: {message}");
+
+    tpl(&world.project, &["update"]).success();
+    tpl(&world.project, &["merge"]).success();
+    assert_eq!(
+        world.project.read("README.md"),
+        "# acme — a web service\n\nWritten by June in June.\n\nRun the tests.\n"
+    );
+
+    // The loop is closed: the template now produces what the project has.
+    let again = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).success();
+    assert_eq!(again.json()["result"], "nothingToBackport");
+}

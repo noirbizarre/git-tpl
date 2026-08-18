@@ -7,6 +7,7 @@
 //! plausible-looking wrong patch to every downstream project at once.
 
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::path::Path;
 
 use miette::Diagnostic;
@@ -21,6 +22,9 @@ use crate::provenance::Provenance;
 use crate::render::Rendered;
 use crate::userconfig::UserConfig;
 
+use super::unsubstitute::{
+    self, LineContext, Proposal, Unsubstitute, Unsubstitution, Verdict, split_terminator,
+};
 use super::{Answering, OpError, Target, Trust, describe_revision, identify, render_files};
 use std::sync::Arc;
 
@@ -161,6 +165,12 @@ pub struct Backport {
     pub files: Vec<BackportedFile>,
     /// What was considered and deliberately left out.
     pub skipped: Vec<Skipped>,
+    /// The substitutions the patch reversed, in the order they were confirmed.
+    ///
+    /// Reported rather than merely counted: a patch that reversed a
+    /// substitution changes what the template produces for *everyone*, and it
+    /// is not one to skim past. See ADR-022.
+    pub unsubstituted: Vec<Unsubstitution>,
     /// The template revision the patch applies to, as `<ref> (<short>)`.
     pub revision_description: String,
     /// The template source, as configured.
@@ -184,6 +194,10 @@ pub struct Backport {
 /// reproduce the tree the project was given, so the recorded answers are the
 /// only admissible ones, and the check against the ref below would reject any
 /// others anyway.
+// Eight, and each one is a distinct decision the caller has already taken.
+// Bundling them into a struct would move the argument list up a line without
+// removing a decision from it, and hide which of them a call site forgot.
+#[allow(clippy::too_many_arguments)]
 pub fn backport(
     project: &dyn GitBackend,
     project_root: &Path,
@@ -192,6 +206,7 @@ pub fn backport(
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
+    mut unsubstitute: Unsubstitute<'_>,
 ) -> Result<Backport, OpError> {
     let config = Config::load(project_root)?;
     let (_, ref_name) = identify(project_root)?;
@@ -260,9 +275,21 @@ pub fn backport(
     };
     let root = rendered.template.root.clone();
 
+    // Gathered once. `None` is ADR-020's behaviour exactly: a change to a line
+    // the render produced is refused, and no reversal is attempted.
+    let lines = match unsubstitute {
+        Unsubstitute::Never => None,
+        Unsubstitute::Ask(_) | Unsubstitute::Always => Some(LineContext {
+            context: &rendered.context,
+            partials: &partials,
+            undefined,
+        }),
+    };
+
     let mut files = Vec::new();
     let mut skipped = Vec::new();
     let mut diffs = Vec::new();
+    let mut unsubstituted: Vec<Unsubstitution> = Vec::new();
 
     for change in changes {
         if excluded(&change.path, exclude) {
@@ -375,25 +402,77 @@ pub fn backport(
                     &project_text,
                     &change.path,
                     &file.source,
+                    lines.as_ref(),
                 )?;
 
                 // The proof. Determinism (invariant 2) is what makes a passing
                 // re-render mean something: the patched source demonstrably
                 // produces the user's file, rather than looking as though it
                 // might.
-                verify(
-                    &patched,
+                if let Err(error) = verify(
+                    &patched.patched,
                     &project_text,
                     file,
                     &rendered.context,
                     &partials,
                     undefined,
                     &change.path,
-                )?;
+                ) {
+                    // A failed round trip on a file that reversed a
+                    // substitution is almost certainly the reversal's fault,
+                    // and `round_trip`'s help tells the user the wrong story
+                    // about it. Ask what the answer would have been without
+                    // un-substitution and report that instead — normally
+                    // `substituted_region`, which is honest and actionable.
+                    if !patched.unsubstituted.is_empty() {
+                        transpose(
+                            &source_text,
+                            &rendered_text,
+                            &project_text,
+                            &change.path,
+                            &file.source,
+                            None,
+                        )?;
+                    }
+                    return Err(error.into());
+                }
 
-                let (insertions, deletions) = counts(&source_text, &patched);
+                // Only now is the user asked. Confirming a line of a patch that
+                // was about to be refused anyway wastes the one decision only
+                // they can make.
+                for reversal in &patched.unsubstituted {
+                    let verdict = match unsubstitute {
+                        Unsubstitute::Always => Verdict::Accept,
+                        Unsubstitute::Ask(ref mut gate) => gate.confirm(&Proposal {
+                            path: &change.path,
+                            template_path: &file.source,
+                            line: reversal.line,
+                            rendered: &reversal.rendered,
+                            project: &reversal.project,
+                            patched: &reversal.patched,
+                            expressions: &reversal.expressions,
+                        }),
+                        // `lines` was `None`, so there is nothing to confirm.
+                        Unsubstitute::Never => Verdict::Accept,
+                    };
+                    if verdict == Verdict::Decline {
+                        return Err(BackportError::SubstitutedRegion {
+                            path: change.path.clone(),
+                            template_path: file.source.clone(),
+                            line: reversal.line,
+                        }
+                        .into());
+                    }
+                }
+
+                let (insertions, deletions) = counts(&source_text, &patched.patched);
                 let source = join_root(&root, &file.source);
-                diffs.push(file_diff(&source, &source_text, &patched, false));
+                diffs.push(file_diff(&source, &source_text, &patched.patched, false));
+                unsubstituted.extend(patched.unsubstituted.into_iter().map(|mut reversal| {
+                    reversal.path = change.path.clone();
+                    reversal.template_path = file.source.clone();
+                    reversal
+                }));
                 files.push(BackportedFile {
                     rendered: change.path.clone(),
                     source,
@@ -422,10 +501,24 @@ pub fn backport(
         patch,
         files,
         skipped,
+        unsubstituted,
         revision_description,
         source: config.template.source.clone(),
         apply_command,
     })
+}
+
+/// The outcome of mapping a change onto the template source.
+#[derive(Debug)]
+struct Transposed {
+    /// The patched template source.
+    patched: String,
+    /// The substitutions that were reversed to get there, in line order.
+    ///
+    /// Kept rather than confirmed on the spot: `backport` proves the whole file
+    /// round-trips before it asks anything, so the user is never asked to bless
+    /// a patch that was going to be refused anyway.
+    unsubstituted: Vec<Unsubstitution>,
 }
 
 /// Map a change to the rendered file onto the template source that produced it.
@@ -434,27 +527,50 @@ pub fn backport(
 /// possible at all: a run of lines that survived rendering byte-for-byte is a
 /// region where the source and the output are the same text, so a change to
 /// the output is unambiguously a change to the source.
+///
+/// `lines` being `Some` additionally allows a line the render *did* change to
+/// be reversed, when its provenance can be established byte by byte — see
+/// `unsubstitute` and ADR-022. `None` is ADR-020's behaviour exactly.
 fn transpose(
     source: &str,
     rendered: &str,
     project: &str,
     path: &str,
     source_path: &str,
-) -> Result<String, BackportError> {
+    lines: Option<&LineContext<'_>>,
+) -> Result<Transposed, BackportError> {
     // Which rendered lines came from which source lines. Only `Equal` runs
     // carry a mapping; everything else is a region rendering changed, and a
     // change landing there has no one-to-one image in the source.
     let mut map: BTreeMap<usize, usize> = BTreeMap::new();
+    // For a rendered line that has no mapping, the source lines it could have
+    // come from — the other half of the alignment op it sits in. Candidates
+    // only: which one it really was is settled by re-rendering, not by position.
+    let mut origins: BTreeMap<usize, Range<usize>> = BTreeMap::new();
     for op in TextDiff::from_lines(source, rendered).ops() {
-        if let DiffOp::Equal {
-            old_index,
-            new_index,
-            len,
-        } = *op
-        {
-            for offset in 0..len {
-                map.insert(new_index + offset, old_index + offset);
+        match *op {
+            DiffOp::Equal {
+                old_index,
+                new_index,
+                len,
+            } => {
+                for offset in 0..len {
+                    map.insert(new_index + offset, old_index + offset);
+                }
             }
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => {
+                for offset in 0..new_len {
+                    origins.insert(new_index + offset, old_index..old_index + old_len);
+                }
+            }
+            // Rendered lines with no source lines opposite them at all. A
+            // `{% for %}` body can do this; there is nothing to try.
+            DiffOp::Insert { .. } | DiffOp::Delete { .. } => {}
         }
     }
 
@@ -468,6 +584,11 @@ fn transpose(
     // `{{ }}` — that is the whole trick.
     let mut out: Vec<String> = Vec::new();
     let mut emitted = 0usize; // next unemitted source line
+    // Source lines un-substitution rewrote, applied wherever `emit_through`
+    // passes them. Routing every emission through one helper is what makes an
+    // override impossible to honour at some sites and forget at the rest.
+    let mut overrides: BTreeMap<usize, String> = BTreeMap::new();
+    let mut unsubstituted: Vec<Unsubstitution> = Vec::new();
 
     let diff = TextDiff::from_slices(&rendered_lines, &project_lines);
     for op in diff.ops() {
@@ -484,7 +605,13 @@ fn transpose(
                         // Emit everything the rendering dropped between the
                         // last mapped line and this one — the substituted
                         // regions in between, verbatim from the source.
-                        emit_through(&mut out, &source_lines, &mut emitted, mapped + 1);
+                        emit_through(
+                            &mut out,
+                            &source_lines,
+                            &overrides,
+                            &mut emitted,
+                            mapped + 1,
+                        );
                     }
                 }
                 continue;
@@ -508,6 +635,45 @@ fn transpose(
             ),
         };
 
+        // The un-substitution case, and it is deliberately narrow: every
+        // rendered line in the op must be one rendering produced, and there
+        // must be exactly as many project lines to pair them with. A `Replace`
+        // mixing verbatim and substituted lines falls through to the refusal
+        // below — where it already was before ADR-022, so nothing regresses,
+        // and the alternative is an emission ordering with no test to pin it.
+        if let Some(lines) = lines
+            && !deletes.is_empty()
+            && deletes.len() == inserts.len()
+            && deletes.clone().all(|r| !map.contains_key(&r))
+            && let Some(reversed) = unsubstitute_run(
+                &source_lines,
+                &rendered_lines,
+                &project_lines,
+                &origins,
+                deletes.clone(),
+                inserts.clone(),
+                lines,
+            )
+        {
+            for (index, patched, expressions, rendered_line, project_line) in reversed {
+                unsubstituted.push(Unsubstitution {
+                    // Named by `backport`, which is the level that knows the
+                    // file this line belongs to.
+                    path: String::new(),
+                    template_path: String::new(),
+                    line: rendered_line + 1,
+                    rendered: split_terminator(rendered_lines[rendered_line])
+                        .0
+                        .to_string(),
+                    project: split_terminator(project_lines[project_line]).0.to_string(),
+                    patched: split_terminator(&patched).0.to_string(),
+                    expressions,
+                });
+                overrides.insert(index, patched);
+            }
+            continue;
+        }
+
         for r in deletes.clone() {
             let Some(&mapped) = map.get(&r) else {
                 return Err(BackportError::SubstitutedRegion {
@@ -518,7 +684,7 @@ fn transpose(
             };
             // Skip it: catch the source up to just before the mapped line,
             // then step over the line itself without emitting it.
-            emit_through(&mut out, &source_lines, &mut emitted, mapped);
+            emit_through(&mut out, &source_lines, &overrides, &mut emitted, mapped);
             emitted = mapped + 1;
         }
 
@@ -535,7 +701,7 @@ fn transpose(
                 });
             }
             if let Some(&mapped) = map.get(&anchor) {
-                emit_through(&mut out, &source_lines, &mut emitted, mapped);
+                emit_through(&mut out, &source_lines, &overrides, &mut emitted, mapped);
             }
             for p in inserts {
                 out.push(project_lines[p].to_string());
@@ -544,21 +710,97 @@ fn transpose(
     }
 
     // Whatever the rendering dropped after the last mapped line.
-    emit_through(&mut out, &source_lines, &mut emitted, source_lines.len());
+    emit_through(
+        &mut out,
+        &source_lines,
+        &overrides,
+        &mut emitted,
+        source_lines.len(),
+    );
 
-    Ok(out.concat())
+    Ok(Transposed {
+        patched: out.concat(),
+        unsubstituted,
+    })
 }
 
-/// Copy source lines up to `upto`, exclusive.
+/// Copy source lines up to `upto`, exclusive, honouring any line
+/// un-substitution rewrote.
 ///
 /// The one place a source line is emitted. There were four before, each with
-/// its own copy of the same loop, and a rule that has to hold at four sites is
-/// a rule that will one day hold at three.
-fn emit_through(out: &mut Vec<String>, source_lines: &[&str], emitted: &mut usize, upto: usize) {
+/// its own copy of the same loop, and an override applied at three of them and
+/// missed at the fourth is a patch that silently drops the user's edit.
+fn emit_through(
+    out: &mut Vec<String>,
+    source_lines: &[&str],
+    overrides: &BTreeMap<usize, String>,
+    emitted: &mut usize,
+    upto: usize,
+) {
     while *emitted < upto {
-        out.push(source_lines[*emitted].to_string());
+        match overrides.get(emitted) {
+            Some(patched) => out.push(patched.clone()),
+            None => out.push(source_lines[*emitted].to_string()),
+        }
         *emitted += 1;
     }
+}
+
+/// One reversal: the source line, its new text, the placeholders kept, and the
+/// rendered and project lines it came from.
+type Reversal = (usize, String, Vec<String>, usize, usize);
+
+/// Reverse the substitutions across one aligned run, or refuse the whole run.
+///
+/// All or nothing on purpose. A run where one line reverses and the next does
+/// not would emit half the user's change and drop the rest, and the round-trip
+/// check would then refuse the file with `round_trip` — an honest failure, but
+/// one that describes the wrong problem.
+#[allow(clippy::too_many_arguments)]
+fn unsubstitute_run(
+    source_lines: &[&str],
+    rendered_lines: &[&str],
+    project_lines: &[&str],
+    origins: &BTreeMap<usize, Range<usize>>,
+    deletes: Range<usize>,
+    inserts: Range<usize>,
+    lines: &LineContext<'_>,
+) -> Option<Vec<Reversal>> {
+    let mut reversed = Vec::with_capacity(deletes.len());
+    let mut claimed: Vec<usize> = Vec::with_capacity(deletes.len());
+
+    for (r, p) in deletes.zip(inserts) {
+        let (rendered_body, rendered_end) = split_terminator(rendered_lines[r]);
+        let (project_body, project_end) = split_terminator(project_lines[p]);
+        // A changed terminator is a line-ending conversion, not a content edit,
+        // and carrying it as one would rewrite the whole file upstream.
+        if rendered_end != project_end {
+            return None;
+        }
+
+        let candidates = origins.get(&r)?.clone();
+        let provenance = unsubstitute::pair(source_lines, candidates, rendered_body, lines)?;
+
+        // A source line reproducing two different rendered lines is a loop
+        // body, not a substitution: rewriting it would apply one iteration's
+        // edit to every iteration.
+        if claimed.contains(&provenance.source) {
+            return None;
+        }
+        claimed.push(provenance.source);
+
+        let patched =
+            provenance.rewrite(source_lines[provenance.source], rendered_body, project_body)?;
+        reversed.push((
+            provenance.source,
+            patched,
+            provenance.expressions.clone(),
+            r,
+            p,
+        ));
+    }
+
+    Some(reversed)
 }
 
 /// Render the patched source and require it to equal what the project has.
@@ -975,7 +1217,16 @@ mod tests {
         let rendered = "# acme\n\nA project.\n";
         let project = "# acme\n\nA fine project.\n";
 
-        let patched = transpose(source, rendered, project, "README.md", "README.md.jinja").unwrap();
+        let patched = transpose(
+            source,
+            rendered,
+            project,
+            "README.md",
+            "README.md.jinja",
+            None,
+        )
+        .unwrap()
+        .patched;
         assert_eq!(patched, "# {{ name }}\n\nA fine project.\n");
     }
 
@@ -985,7 +1236,16 @@ mod tests {
         let rendered = "# acme\n\nA project.\n";
         let project = "# acme\n\nA project.\nAnd more.\n";
 
-        let patched = transpose(source, rendered, project, "README.md", "README.md.jinja").unwrap();
+        let patched = transpose(
+            source,
+            rendered,
+            project,
+            "README.md",
+            "README.md.jinja",
+            None,
+        )
+        .unwrap()
+        .patched;
         assert_eq!(patched, "# {{ name }}\n\nA project.\nAnd more.\n");
     }
 
@@ -998,8 +1258,15 @@ mod tests {
         let rendered = "# acme\n\nA project.\n";
         let project = "# widgets\n\nA project.\n";
 
-        let error =
-            transpose(source, rendered, project, "README.md", "README.md.jinja").unwrap_err();
+        let error = transpose(
+            source,
+            rendered,
+            project,
+            "README.md",
+            "README.md.jinja",
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(
             error,
             BackportError::SubstitutedRegion { line: 1, .. }
@@ -1012,7 +1279,9 @@ mod tests {
         let rendered = "acme\nkeep\ndrop\n";
         let project = "acme\nkeep\n";
 
-        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        let patched = transpose(source, rendered, project, "f", "f.jinja", None)
+            .unwrap()
+            .patched;
         assert_eq!(patched, "{{ name }}\nkeep\n");
     }
 
@@ -1028,7 +1297,9 @@ mod tests {
         let rendered = "one\ntwo\n";
         let project = "one\nadded\ntwo\n";
 
-        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        let patched = transpose(source, rendered, project, "f", "f.jinja", None)
+            .unwrap()
+            .patched;
         assert_eq!(
             patched,
             "one\n{% if extra %}\ngone\n{% endif %}\nadded\ntwo\n"
@@ -1046,7 +1317,9 @@ mod tests {
         let rendered = "one\ndrop\n";
         let project = "one\n";
 
-        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        let patched = transpose(source, rendered, project, "f", "f.jinja", None)
+            .unwrap()
+            .patched;
         assert_eq!(patched, "one\n{% if extra %}\ngone\n{% endif %}\n");
     }
 
@@ -1058,7 +1331,9 @@ mod tests {
         let rendered = "one\n\ntwo\n";
         let project = "one\n\ntwo point five\n";
 
-        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        let patched = transpose(source, rendered, project, "f", "f.jinja", None)
+            .unwrap()
+            .patched;
         assert!(patched.contains("{% if extra %}"), "{patched}");
         assert!(patched.contains("two point five\n"), "{patched}");
     }
@@ -1085,8 +1360,15 @@ mod tests {
         let rendered = "# acme\na fine thing\n";
         let project = "# acme\nadded\na fine thing\n";
 
-        let error =
-            transpose(source, rendered, project, "README.md", "README.md.jinja").unwrap_err();
+        let error = transpose(
+            source,
+            rendered,
+            project,
+            "README.md",
+            "README.md.jinja",
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(
             error,
             BackportError::SubstitutedRegion { line: 2, .. }
@@ -1103,7 +1385,9 @@ mod tests {
         let rendered = "keep\n";
         let project = "changed\n";
 
-        let patched = transpose(source, rendered, project, "f", "f.jinja").unwrap();
+        let patched = transpose(source, rendered, project, "f", "f.jinja", None)
+            .unwrap()
+            .patched;
         assert_eq!(patched, "changed\n{% if extra %}\ngone\n{% endif %}\n");
     }
 
@@ -1116,6 +1400,198 @@ mod tests {
     fn a_missing_final_newline_is_marked_in_the_patch() {
         let diff = file_diff("f", "a\nb\n", "a\nc", false);
         assert!(diff.ends_with("\\ No newline at end of file\n"), "{diff}");
+    }
+
+    // ---- un-substitution, ADR-022 -----------------------------------------
+
+    /// The context `# {{ name }}` and friends are rendered against.
+    fn answers(pairs: &[(&str, &str)]) -> Context {
+        let mut context = Context::default();
+        for (name, value) in pairs {
+            context.set_answer(*name, crate::template::Value::String((*value).to_string()));
+        }
+        context
+    }
+
+    /// `transpose` with un-substitution on.
+    fn reverse(
+        source: &str,
+        rendered: &str,
+        project: &str,
+        context: &Context,
+    ) -> Result<Transposed, BackportError> {
+        let lines = LineContext {
+            context,
+            partials: crate::eval::no_partials(),
+            undefined: Undefined::Lenient,
+        };
+        transpose(source, rendered, project, "f", "f.jinja", Some(&lines))
+    }
+
+    /// The acceptance case: the change is beside the placeholder, not in it.
+    #[test]
+    fn an_edit_beside_a_substitution_keeps_the_placeholder() {
+        let context = answers(&[("name", "acme")]);
+        let out = reverse(
+            "# {{ name }} — a service\n",
+            "# acme — a service\n",
+            "# acme — a web service\n",
+            &context,
+        )
+        .unwrap();
+
+        assert_eq!(out.patched, "# {{ name }} — a web service\n");
+        assert_eq!(out.unsubstituted.len(), 1);
+        assert_eq!(out.unsubstituted[0].line, 1);
+        assert_eq!(out.unsubstituted[0].expressions, vec!["{{ name }}"]);
+    }
+
+    /// Replacing the whole value is a change of *answer*, not of template.
+    #[test]
+    fn replacing_the_value_itself_is_still_refused() {
+        let context = answers(&[("name", "acme")]);
+        let error = reverse("# {{ name }}\n", "# acme\n", "# widgets\n", &context).unwrap_err();
+        assert!(matches!(
+            error,
+            BackportError::SubstitutedRegion { line: 1, .. }
+        ));
+    }
+
+    /// The case ADR-020 says a substitution table cannot get right.
+    ///
+    /// `author` happens to be the month the template hard-codes. Nothing here
+    /// searches for the value, so the literal " in June." is just literal text
+    /// and edits to it carry cleanly.
+    #[test]
+    fn a_value_that_coincides_with_literal_text_is_not_confused_with_it() {
+        let context = answers(&[("author", "June")]);
+        let out = reverse(
+            "Written by {{ author }} in June.\n",
+            "Written by June in June.\n",
+            "Written by June in July.\n",
+            &context,
+        )
+        .unwrap();
+        assert_eq!(out.patched, "Written by {{ author }} in July.\n");
+        assert_eq!(out.unsubstituted.len(), 1);
+    }
+
+    /// The other half of the same line: editing the *author* is an answer change.
+    #[test]
+    fn editing_the_value_of_a_coinciding_name_is_refused() {
+        let context = answers(&[("author", "June")]);
+        let error = reverse(
+            "Written by {{ author }} in June.\n",
+            "Written by June in June.\n",
+            "Written by Ada in June.\n",
+            &context,
+        )
+        .unwrap_err();
+        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+    }
+
+    /// The patch that round-trips and is still wrong.
+    ///
+    /// `.0` appended to a rendered version sits against the value, and placing
+    /// it in the literal gives `{{ version }}.0` — correct for this user and
+    /// wrong for every other project. The slider refuses it.
+    #[test]
+    fn an_edit_that_could_have_slid_into_a_value_is_refused() {
+        let context = answers(&[("version", "1.0")]);
+        let error = reverse(
+            "version = \"{{ version }}\"\n",
+            "version = \"1.0\"\n",
+            "version = \"1.0.0\"\n",
+            &context,
+        )
+        .unwrap_err();
+        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+    }
+
+    /// A value rendering to nothing has a zero-width range, which the
+    /// reassembly cannot confirm and no edit can be attributed near.
+    #[test]
+    fn a_line_with_an_empty_value_is_refused() {
+        let context = answers(&[("suffix", ""), ("name", "acme")]);
+        let error = reverse(
+            "# {{ name }}{{ suffix }} here\n",
+            "# acme here\n",
+            "# acme there\n",
+            &context,
+        )
+        .unwrap_err();
+        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+    }
+
+    /// A loop body has no line-local provenance: the source line renders
+    /// against a binding that is not in the context at all.
+    #[test]
+    fn a_line_inside_a_loop_is_refused() {
+        let context = answers(&[("name", "acme")]);
+        let error = reverse(
+            "{% for item in items %}\n- {{ item }} ok\n{% endfor %}\n",
+            "- one ok\n- two ok\n",
+            "- one fine\n- two ok\n",
+            &context,
+        )
+        .unwrap_err();
+        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+    }
+
+    /// Two placeholders on a line, and an edit between them.
+    #[test]
+    fn an_edit_between_two_placeholders_is_carried() {
+        let context = answers(&[("tool", "cargo"), ("task", "test")]);
+        let out = reverse(
+            "run {{ tool }} then {{ task }}\n",
+            "run cargo then test\n",
+            "run cargo and then test\n",
+            &context,
+        )
+        .unwrap();
+        assert_eq!(out.patched, "run {{ tool }} and then {{ task }}\n");
+    }
+
+    /// Appending to a line that ends in a placeholder works, which needs the
+    /// zero-width trailing literal the scanner emits.
+    #[test]
+    fn appending_after_a_trailing_placeholder_is_carried() {
+        let context = answers(&[("tool", "cargo")]);
+        let out = reverse(
+            "run {{ tool }}\n",
+            "run cargo\n",
+            "run cargo --release\n",
+            &context,
+        )
+        .unwrap();
+        assert_eq!(out.patched, "run {{ tool }} --release\n");
+    }
+
+    /// Whitespace control reaches into the neighbouring line, so a byte range
+    /// computed on this one would describe the wrong text.
+    #[test]
+    fn a_line_with_whitespace_control_is_refused() {
+        let context = answers(&[("name", "acme")]);
+        let error = reverse("x {{- name }} y\n", "xacme y\n", "xacme z\n", &context).unwrap_err();
+        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+    }
+
+    /// Off by default: nothing changes for a caller that does not opt in.
+    #[test]
+    fn without_a_line_context_nothing_is_reversed() {
+        let error = transpose(
+            "# {{ name }}\n",
+            "# acme\n",
+            "# acme!\n",
+            "f",
+            "f.jinja",
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            BackportError::SubstitutedRegion { line: 1, .. }
+        ));
     }
 
     /// A template beside its own project is `.`, not the empty string.

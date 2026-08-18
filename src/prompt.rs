@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use demand::{Confirm, DemandOption, Input, MultiSelect, Select};
 use tpl::data::{DataError, Decision, RemoteRequest, SourceKind, TrustGate};
 use tpl::eval::{EvalError, Prompter};
+use tpl::ops::{Proposal, Unsubstituter, Verdict};
 use tpl::template::{Choice, Question, QuestionKind, Value};
 
 /// Asks questions on a terminal.
@@ -233,5 +234,55 @@ fn verb(request: &RemoteRequest) -> &'static str {
     match request.kind {
         SourceKind::Git => "clone",
         _ => "fetch",
+    }
+}
+
+impl Unsubstituter for Confirmer {
+    fn confirm(&mut self, proposal: &Proposal<'_>) -> Verdict {
+        // Everything goes to stderr. Stdout carries the mailbox, and a prompt
+        // mixed into it would be piped straight into `git am`.
+        eprintln!();
+        eprintln!(
+            "`{}` line {} was changed around a value the template substitutes.",
+            proposal.path, proposal.line
+        );
+        eprintln!();
+        eprintln!("  rendered  {}", proposal.rendered);
+        eprintln!("  yours     {}", proposal.project);
+        eprintln!("  upstream  {}", proposal.patched);
+        eprintln!();
+        // Named because it is the thing being kept, and the reason the user is
+        // being asked rather than told: if they meant to change what is *in*
+        // the placeholder, they meant to change their answer, not the template.
+        eprintln!(
+            "It keeps {} and sends the rest of the line to `{}`.",
+            proposal
+                .expressions
+                .iter()
+                .map(|expression| format!("`{expression}`"))
+                .collect::<Vec<_>>()
+                .join(" and "),
+            proposal.template_path
+        );
+        eprintln!();
+
+        let taken = Confirm::new("Send this line upstream?")
+            .description(
+                "It renders back to your file exactly. Whether it is right for every other \
+                 project is what only you can say.",
+            )
+            .affirmative("yes")
+            .negative("no")
+            .run()
+            // Ctrl-C at this prompt is a refusal, not an error. The command
+            // refuses the file and says why, which is where the user was
+            // heading anyway.
+            .unwrap_or(false);
+
+        if taken {
+            Verdict::Accept
+        } else {
+            Verdict::Decline
+        }
     }
 }

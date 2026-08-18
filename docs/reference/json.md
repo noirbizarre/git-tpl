@@ -250,7 +250,7 @@ it, for the user to resolve. `result` is how a caller finds out.
   "applyCommand": "git tpl backport | git -C ../my-template am",
   "files": [ { "rendered": "README.md", "source": "template/README.md.jinja",
                "insertions": 1, "deletions": 1, "added": false } ],
-  "skipped": [], "insertions": 1, "deletions": 1 }
+  "skipped": [], "unsubstituted": [], "insertions": 1, "deletions": 1 }
 ```
 
 `result` is `patched` or `nothingToBackport`.
@@ -269,6 +269,14 @@ produce.
 each with a `reason` — currently only files deleted locally, which would remove
 them from every project rendering the template. Files the template never
 produced are not listed: they are out of scope rather than skipped.
+
+`unsubstituted` names every line whose template expression was reversed —
+`path`, `source`, `line`, the `rendered` and `project` forms, the `patched`
+source line, and the `expressions` it kept. It is empty unless `--unsubstitute`
+was passed, since under `--json` there is nobody to confirm a reversal with.
+Worth branching on: a reversed substitution changes what the template produces
+for every project, and is the one part of a patch that should not be merged
+unread ([ADR-022](../adr/022-backport-unsubstitutes.md)).
 
 `applyCommand` is the `git am` invocation git-tpl declines to run
 ([ADR-020](../adr/020-backport-is-a-patch.md)), built from the configured

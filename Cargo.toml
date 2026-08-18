@@ -164,7 +164,10 @@ hex = "0.4"
 # owns their format. `GitBackend::diff_patch` was the alternative and needs two
 # trees — using it would mean writing objects into the template repository to
 # answer a question that reads nothing.
-similar = "2.7"
+# `unicode` is on for `backport`'s un-substitution, which diffs *within* a line:
+# the default byte/char granularity would split a `\r\n` or a combining sequence
+# and hand back a byte range that is not a character boundary.
+similar = { version = "2.7", features = ["unicode"] }
 # A remote template is cloned into a fresh temporary directory per run.
 # Caching between runs would be faster, but a stale cache silently rendering an
 # old template is a far worse failure than a slow fetch — in a tool whose whole
