@@ -1,6 +1,7 @@
 # ADR-020: `backport` emits a patch, and proves it by re-rendering
 
-**Status:** accepted, amended by [ADR-022](022-backport-unsubstitutes.md)
+**Status:** accepted, amended by [ADR-022](022-backport-unsubstitutes.md) and
+[ADR-023](023-hunk-selection-precedes-the-proof.md)
 
 **Relates to:** [ADR-002](002-no-custom-reconciliation.md),
 [ADR-006](006-no-runtime-context.md)

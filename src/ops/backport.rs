@@ -22,6 +22,7 @@ use crate::provenance::Provenance;
 use crate::render::Rendered;
 use crate::userconfig::UserConfig;
 
+use super::hunks::{self, Hunk, Picking, Selection};
 use super::unsubstitute::{
     self, LineContext, Proposal, Unsubstitute, Unsubstitution, Verdict, split_terminator,
 };
@@ -131,6 +132,61 @@ pub enum BackportError {
         /// The underlying failure.
         reason: String,
     },
+
+    /// A refusal, attributed to the hunk the user chose.
+    ///
+    /// A wrapper, never a cause: the refusal underneath keeps its own code and
+    /// its own advice. What this adds is the one thing `-p` makes available and
+    /// nothing else can — *which* of the hunks just selected was the problem,
+    /// so the answer can be "run it again and leave that one out" rather than
+    /// "find the line yourself".
+    #[error("hunk {ordinal} of `{path}` cannot be backported")]
+    #[diagnostic(
+        code(tpl::backport::hunk_refused),
+        help(
+            "the hunk at `{hunk}` is the one that failed. Run `git tpl backport -p` again and \
+             leave it out to send the rest, or edit `{template_path}` by hand to carry it."
+        )
+    )]
+    HunkRefused {
+        /// The rendered path.
+        path: String,
+        /// The template source that would have been patched.
+        template_path: String,
+        /// The hunk's position in the file, 1-based, as the picker showed it.
+        ordinal: usize,
+        /// The hunk's `@@` header.
+        hunk: String,
+        /// The refusal itself. A boxed `dyn Diagnostic` rather than a boxed
+        /// `BackportError` because that is what `#[diagnostic_source]` renders
+        /// in full — code, message and help — and the nested help is the whole
+        /// reason to wrap rather than replace. Nothing consumes the type.
+        #[diagnostic_source]
+        source: Box<dyn Diagnostic + Send + Sync>,
+    },
+
+    /// The user cancelled the hunk picker.
+    ///
+    /// An abort, not a decline. See [`crate::ops::Picker`] for why Escape here
+    /// cannot be read as "send nothing" the way it can at a confirmation.
+    #[error("cancelled")]
+    #[diagnostic(
+        code(tpl::backport::cancelled),
+        help("no patch was produced, and nothing was written. Run it again to start over.")
+    )]
+    Cancelled,
+
+    /// `-p` was asked for where no prompt can run.
+    #[error("`--patch` needs a terminal to ask on")]
+    #[diagnostic(
+        code(tpl::backport::not_interactive),
+        help(
+            "`--json`, a pipe, and `tpl.interactive false` all mean there is nobody to show the \
+             hunks to. Select without a prompt instead: name pathspecs to limit what is \
+             considered, or leave paths out with `--exclude`."
+        )
+    )]
+    NotInteractive,
 }
 
 /// One file's worth of backported change.
@@ -158,6 +214,7 @@ pub struct Skipped {
 }
 
 /// The outcome of a backport.
+#[derive(Debug)]
 pub struct Backport {
     /// The mailbox, ready for `git am`. Empty when `files` is empty.
     pub patch: String,
@@ -194,7 +251,7 @@ pub struct Backport {
 /// reproduce the tree the project was given, so the recorded answers are the
 /// only admissible ones, and the check against the ref below would reject any
 /// others anyway.
-// Eight, and each one is a distinct decision the caller has already taken.
+// Nine, and each one is a distinct decision the caller has already taken.
 // Bundling them into a struct would move the argument list up a line without
 // removing a decision from it, and hide which of them a call site forgot.
 #[allow(clippy::too_many_arguments)]
@@ -207,6 +264,7 @@ pub fn backport(
     answering: Answering<'_>,
     trust: Trust<'_>,
     mut unsubstitute: Unsubstitute<'_>,
+    mut picking: Picking<'_>,
 ) -> Result<Backport, OpError> {
     let config = Config::load(project_root)?;
     let (_, ref_name) = identify(project_root)?;
@@ -333,6 +391,14 @@ pub fn backport(
                     .into());
                 }
                 let text = to_text(&project_bytes, &change.path, &change.path)?;
+                // An added file is one hunk — `hunks` against an empty
+                // rendering says so — which makes deselecting it the way to
+                // drop a file named on the command line, with no second code
+                // path for the case.
+                let (text, _, _) = choose(&mut picking, "", &text, &change.path, &change.path)?;
+                if text.is_empty() {
+                    continue;
+                }
                 // No `.jinja`: nothing was substituted into a file the template
                 // has never seen, and naming it `.jinja` would render it —
                 // turning any `{{` the user wrote into a template expression.
@@ -396,6 +462,30 @@ pub fn backport(
                 let rendered_text = to_text(&file.content, &change.path, &file.source)?;
                 let project_text = to_text(&project_bytes, &change.path, &file.source)?;
 
+                // Selection first, and only then the proof. A change that
+                // round-tripped whole does not necessarily round-trip with half
+                // its hunks dropped, and what ADR-020 guarantees is the patch
+                // that is emitted — not one it was cut from. So everything
+                // below runs on the selection, and `project_text` from here on
+                // means "your file, with only the hunks you chose".
+                let (project_text, hunks, chosen) = choose(
+                    &mut picking,
+                    &rendered_text,
+                    &project_text,
+                    &change.path,
+                    &file.source,
+                )?;
+
+                // Nothing chosen is not a refusal; it is the user saying "not
+                // this file". Silence for the same reason a mode-only change is
+                // silent: there is no change left to carry, and an empty file
+                // section is a patch `git am` rejects outright.
+                if project_text == rendered_text {
+                    continue;
+                }
+
+                let attributed = |error| attribute(error, &hunks, &chosen, &change.path, file);
+
                 let patched = transpose(
                     &source_text,
                     &rendered_text,
@@ -403,7 +493,8 @@ pub fn backport(
                     &change.path,
                     &file.source,
                     lines.as_ref(),
-                )?;
+                )
+                .map_err(attributed)?;
 
                 // The proof. Determinism (invariant 2) is what makes a passing
                 // re-render mean something: the patched source demonstrably
@@ -432,9 +523,10 @@ pub fn backport(
                             &change.path,
                             &file.source,
                             None,
-                        )?;
+                        )
+                        .map_err(attributed)?;
                     }
-                    return Err(error.into());
+                    return Err(attributed(error).into());
                 }
 
                 // Only now is the user asked. Confirming a line of a patch that
@@ -488,6 +580,69 @@ pub fn backport(
         source: config.template.source.clone(),
         apply_command,
     })
+}
+
+/// Cut a change into hunks, ask which to keep, and reassemble the answer.
+///
+/// Returns the project text as the user selected it, plus the hunks and the
+/// selection — the latter two only so that a refusal further down can name the
+/// hunk that caused it rather than a line number the user has to go and find.
+///
+/// Without `-p` this is the identity, and deliberately so: `Picking::All` is
+/// not a code path, it is the absence of one.
+fn choose(
+    picking: &mut Picking<'_>,
+    rendered: &str,
+    project: &str,
+    path: &str,
+    template_path: &str,
+) -> Result<(String, Vec<Hunk>, Vec<usize>), BackportError> {
+    let Picking::Ask(picker) = picking else {
+        return Ok((project.to_string(), Vec::new(), Vec::new()));
+    };
+
+    let hunks = hunks::hunks(rendered, project);
+    let chosen = picker
+        .pick(&Selection {
+            path,
+            template_path,
+            hunks: &hunks,
+        })
+        // An abort, not an empty selection. Reading a cancelled prompt as
+        // "keep nothing" would quietly emit a patch the user was in the
+        // middle of assembling.
+        .ok_or(BackportError::Cancelled)?;
+
+    Ok((hunks::apply(rendered, project, &chosen), hunks, chosen))
+}
+
+/// Name the hunk a refusal came from, where one can be named.
+///
+/// Only `SubstitutedRegion` carries a line, and only a line inside a chosen
+/// hunk can be attributed. Everything else is returned untouched: a wrapper
+/// that said "one of the hunks you picked, we are not sure which" would cost
+/// the user the code they were about to act on and give nothing back.
+fn attribute(
+    error: BackportError,
+    hunks: &[Hunk],
+    chosen: &[usize],
+    path: &str,
+    file: &Rendered,
+) -> BackportError {
+    let BackportError::SubstitutedRegion { line, .. } = &error else {
+        return error;
+    };
+    let Some(hunk) = hunks::containing(hunks, chosen, line.saturating_sub(1)) else {
+        return error;
+    };
+
+    BackportError::HunkRefused {
+        path: path.to_string(),
+        template_path: file.source.clone(),
+        ordinal: hunk.index + 1,
+        hunk: hunk.header.clone(),
+        source: Box::new(error),
+    }
 }
 
 /// The outcome of mapping a change onto the template source.
@@ -861,7 +1016,7 @@ fn verify(
 
 /// Split keeping line terminators, so a file with no trailing newline stays
 /// that way and `\r\n` survives (invariant 2 applies to what we emit, too).
-fn split_lines(text: &str) -> Vec<&str> {
+pub(super) fn split_lines(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut rest = text;
     while !rest.is_empty() {

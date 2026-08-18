@@ -7,7 +7,7 @@
 
 use console::Style;
 
-use tpl::ops::Proposal;
+use tpl::ops::{Proposal, Selection};
 
 use crate::cli::ColorChoice;
 
@@ -247,6 +247,45 @@ pub fn reversal(theme: &Theme, proposal: &Proposal<'_>) -> String {
     )
 }
 
+/// One file's hunks, laid out for the person choosing between them.
+///
+/// Here rather than in `prompt.rs` for the same reason as [`reversal`]: the
+/// layout is the part worth testing, and a `demand` prompt cannot be driven
+/// without a terminal.
+///
+/// Coloured in Git's vocabulary — green added, red deleted — because this is
+/// the one place git-tpl shows a diff of the user's own working tree, and it
+/// should read like the `git diff` they have just run. The `@@` header is
+/// numbered, so what the picker lists below it (`1`, `2`, …) names something
+/// visible here rather than something the user has to count.
+pub fn hunks(theme: &Theme, selection: &Selection<'_>) -> String {
+    let mut out = format!(
+        "\n{}\n",
+        heading(
+            theme,
+            &format!("{} → {}", selection.path, selection.template_path)
+        )
+    );
+
+    for hunk in selection.hunks {
+        out.push_str(&format!(
+            "\n{}\n",
+            theme
+                .heading
+                .apply_to(format!("  {}  {}", hunk.index + 1, hunk.header))
+        ));
+        for line in &hunk.lines {
+            let styled = match line.as_bytes().first() {
+                Some(b'+') => theme.added.apply_to(line).to_string(),
+                Some(b'-') => theme.deleted.apply_to(line).to_string(),
+                _ => muted(theme, line),
+            };
+            out.push_str(&format!("    {styled}\n"));
+        }
+    }
+    out
+}
+
 /// A dimmed note.
 pub fn muted(theme: &Theme, text: &str) -> String {
     theme.muted.apply_to(text).to_string()
@@ -310,6 +349,37 @@ mod tests {
     /// reversed substitution upstream is comparing these three lines and
     /// nothing else — so it is pinned here rather than left to a prompt no test
     /// can drive.
+    /// The hunks are numbered from 1, because the picker's list is, and a user
+    /// matching "2" in the list to "2" above it should not have to count.
+    #[test]
+    fn hunks_are_numbered_from_one_and_show_their_body() {
+        let listed = [tpl::ops::Hunk {
+            index: 1,
+            header: "@@ -4,6 +4,7 @@".to_string(),
+            lines: vec![
+                " context".to_string(),
+                "-was".to_string(),
+                "+is".to_string(),
+            ],
+            rendered_lines: 3..9,
+            insertions: 1,
+            deletions: 1,
+        }];
+        let shown = hunks(
+            &Theme::plain(),
+            &Selection {
+                path: "README.md",
+                template_path: "README.md.jinja",
+                hunks: &listed,
+            },
+        );
+
+        assert!(shown.contains("README.md → README.md.jinja"), "{shown}");
+        assert!(shown.contains("  2  @@ -4,6 +4,7 @@"), "{shown}");
+        assert!(shown.contains("    -was\n"), "{shown}");
+        assert!(shown.contains("    +is\n"), "{shown}");
+    }
+
     #[test]
     fn a_reversal_shows_what_was_rendered_what_you_have_and_what_would_be_sent() {
         let kept = ["{{ project_name }}".to_string()];

@@ -414,6 +414,15 @@ pub struct BackportArgs {
     /// nobody to ask.
     #[arg(long)]
     pub unsubstitute: bool,
+
+    /// Choose which hunks to send, one file at a time
+    ///
+    /// The hunks are your own edits, as `git add -p` shows them, and the ones
+    /// you keep are what the patch is then built and proved against. Needs a
+    /// terminal: under `--json`, in a pipe, or with `tpl.interactive false` it
+    /// is refused rather than quietly ignored.
+    #[arg(short, long)]
+    pub patch: bool,
 }
 
 /// `git tpl questions`
