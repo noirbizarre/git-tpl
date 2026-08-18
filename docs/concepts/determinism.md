@@ -45,8 +45,14 @@ it is not done.
 
 ## No runtime context
 
-git-tpl has no `now()`, no `git.user.name`, no `platform.os` — no expression can
-read any of them.
+git-tpl has no `now()`, no `git.user.name`, no `platform.os` — no expression in
+a rendered file or a manifest can read any of them.
+
+The one exception proves the rule rather than weakening it: `default_from` reads
+its own small [seed context](../adr/018-seed-context.md), which is reachable
+from nowhere else and only ever pre-fills a prompt. Nothing it offers reaches a
+tree until a human accepts it and it is recorded as an answer. See
+[the render context](../templates/context.md#what-is-not-in-it).
 
 This is a deliberate omission, not a gap. Every one of those makes rendering
 depend on *when* and *where* it ran, which means two people running
