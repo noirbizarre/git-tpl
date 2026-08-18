@@ -22,7 +22,7 @@ and belongs in the next section.
 **The engine.** `Tpl-Version` records which git-tpl produced the tree, so a
 rendering difference caused by a git-tpl change is attributable.
 
-Given those four, a rendering is reproducible — with one exception.
+Given those five, a rendering is reproducible — with one exception.
 
 ## What is not: remote data, or a moving ref
 
