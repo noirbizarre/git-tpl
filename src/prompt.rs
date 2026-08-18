@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use demand::{Confirm, DemandOption, Input, MultiSelect, Select};
 use tpl::data::{DataError, Decision, RemoteRequest, SourceKind, TrustGate};
 use tpl::eval::{EvalError, Prompter};
-use tpl::ops::{Proposal, Unsubstituter, Verdict};
+use tpl::ops::{Picker, Proposal, Selection, Unsubstituter, Verdict};
 
 use crate::theme::Theme;
 use tpl::template::{Choice, Question, QuestionKind, Value};
@@ -273,5 +273,57 @@ impl Unsubstituter for Reverser {
         } else {
             Verdict::Decline
         }
+    }
+}
+
+/// Chooses which hunks of a change to send, on a terminal.
+///
+/// A type of its own, beside [`Reverser`], for the same reason it is: it needs
+/// a [`Theme`], and it is constructed in exactly one command.
+pub struct Chooser(pub Theme);
+
+impl Picker for Chooser {
+    fn pick(&mut self, selection: &Selection<'_>) -> Option<Vec<usize>> {
+        // Everything goes to stderr. Stdout carries the mailbox, and a prompt
+        // mixed into it would be piped straight into `git am`.
+        //
+        // The hunks are printed in full first, and the list below is a list of
+        // *labels*: a `MultiSelect` option is one line, and a hunk is not.
+        // Showing the bodies where the header numbers them keeps the whole
+        // change visible while the choice is being made.
+        eprint!("{}", crate::theme::hunks(&self.0, selection));
+
+        let mut select = MultiSelect::new(format!("Send which hunks of `{}`?", selection.path))
+            .description("Space toggles, Enter confirms. Everything is selected to begin with.");
+
+        for hunk in selection.hunks {
+            // The index travels on the option, not a label matched back: two
+            // hunks of a file can render to the same header text, and pairing
+            // them up by string is how the wrong one gets dropped.
+            select = select.option(
+                DemandOption::with_label(
+                    format!(
+                        "{}  {}  +{} −{}",
+                        hunk.index + 1,
+                        hunk.header,
+                        hunk.insertions,
+                        hunk.deletions
+                    ),
+                    hunk.index,
+                )
+                // `-p` is for taking things out. Starting with nothing selected
+                // would make the safe key — Enter — mean "send nothing", which
+                // is not what anyone typed `-p` to do.
+                .selected(true),
+            );
+        }
+
+        // `None`, not an empty selection: `ops::backport` turns it into
+        // `Cancelled` and stops. Escape here is the user changing their mind
+        // about the whole command, and reading it as "keep no hunks" would
+        // emit a patch they never approved. The reason is `cancelled`'s — a
+        // page of miette for a keystroke is not a diagnostic — but the shape
+        // is different, so it cannot share it.
+        select.run().ok()
     }
 }

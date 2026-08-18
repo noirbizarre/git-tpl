@@ -881,3 +881,203 @@ fn a_reversal_that_does_not_render_back_reports_the_honest_refusal() {
     let output = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).failure();
     assert_eq!(output.error_code(), "tpl::backport::substituted_region");
 }
+
+// ---- hunk selection, ADR-023 ---
+
+/// `-p` is refused where no prompt can run, rather than sending everything.
+///
+/// The opposite of `--unsubstitute`'s absence, which is silence. `-p` is the
+/// request for a prompt, so the one answer it cannot be given is the whole
+/// patch — and a script that asked for it and got everything would be shipping
+/// changes nobody looked at.
+#[test]
+fn interactive_hunk_selection_is_refused_without_a_terminal() {
+    let world = world();
+    world.init(&[]).success();
+
+    world
+        .project
+        .write("ci.yml", "name: CI\non: pull_request\njobs: {}\n");
+
+    let output = tpl(&world.project, &["--json", "backport", "-p"]).failure();
+    assert_eq!(output.error_code(), "tpl::backport::not_interactive");
+}
+
+/// The refusal happens before any work, so nothing is emitted alongside it.
+#[test]
+fn a_refused_hunk_selection_emits_no_patch() {
+    let world = world();
+    world.init(&[]).success();
+
+    world
+        .project
+        .write("ci.yml", "name: CI\non: pull_request\njobs: {}\n");
+
+    // Without `--json` there is still no terminal under the test harness, so
+    // the same refusal applies — and stdout, which would carry the mailbox,
+    // stays empty.
+    let output = tpl(&world.project, &["backport", "--patch"]).failure();
+    assert!(output.stdout.is_empty(), "{}", output.transcript());
+}
+
+/// A verbatim file long enough for two changes to be two hunks.
+fn pickable_world() -> World {
+    World::with_template(
+        r#"
+name = "demo"
+
+[questions.project_name]
+type = "string"
+prompt = "Project name"
+default = "acme"
+"#,
+        &[(
+            "notes.md",
+            "alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel\nindia\njuliett\n",
+        )],
+    )
+}
+
+/// A picker that answers from a script, standing in for the person at the
+/// terminal.
+///
+/// The only stub in this file, and it stubs a *human*, not Git: the prompt is
+/// the one part of `-p` a test cannot drive, and the whole of what it decides
+/// is a list of indices. Everything below it — the hunks, the reassembly, the
+/// transposition and the proof — is the real thing, against real repositories.
+struct Scripted(Option<Vec<usize>>);
+
+impl tpl::ops::Picker for Scripted {
+    fn pick(&mut self, selection: &tpl::ops::Selection<'_>) -> Option<Vec<usize>> {
+        // Every hunk the command offered must be one the picker could show.
+        assert!(!selection.hunks.is_empty(), "nothing was offered");
+        self.0.clone()
+    }
+}
+
+/// Drive the operation directly, with a scripted picker in place of a terminal.
+// `OpError` carries a `NamedSource` for miette, which makes it large. Same
+// reasoning as `lib.rs`: this returns once, at the end of a test.
+#[allow(clippy::result_large_err)]
+fn backport_picking(
+    world: &World,
+    chosen: Option<Vec<usize>>,
+) -> Result<tpl::ops::Backport, tpl::ops::OpError> {
+    let root = world.project.path.clone();
+    let repo = tpl::git::libgit2::LibGit2::open(&root).expect("open the project");
+    let mut picker = Scripted(chosen);
+
+    tpl::ops::backport(
+        &repo,
+        &root,
+        &[],
+        &[],
+        &tpl::userconfig::UserConfig::default(),
+        tpl::ops::Answering::defaults(),
+        tpl::ops::Trust::refuse(),
+        tpl::ops::Unsubstitute::Never,
+        tpl::ops::Picking::Ask(&mut picker),
+    )
+}
+
+/// The point of the feature: one change goes, the other stays behind.
+#[test]
+fn only_the_chosen_hunks_reach_the_patch() {
+    let world = pickable_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "notes.md",
+        "ALPHA\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel\nindia\nJULIETT\n",
+    );
+
+    let result = backport_picking(&world, Some(vec![0])).expect("a patch");
+
+    assert!(result.patch.contains("+ALPHA"), "{}", result.patch);
+    assert!(!result.patch.contains("+JULIETT"), "{}", result.patch);
+    // The line left behind is not in the patch at all, in either direction.
+    assert!(!result.patch.contains("juliett"), "{}", result.patch);
+    assert_eq!(result.files.len(), 1);
+    assert_eq!(result.files[0].insertions, 1);
+}
+
+/// Everything selected is the same patch `backport` produces without `-p`.
+///
+/// The identity that makes it safe to put the picker in front of the proof:
+/// a full selection is not a different code path, it is the same document.
+#[test]
+fn selecting_every_hunk_is_the_whole_change() {
+    let world = pickable_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "notes.md",
+        "ALPHA\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel\nindia\nJULIETT\n",
+    );
+
+    let picked = backport_picking(&world, Some(vec![0, 1])).expect("a patch");
+    let whole = tpl(&world.project, &["backport"]).success();
+
+    // The mailbox carries a clock, so the bodies are compared, not the headers.
+    let body = |patch: &str| patch[patch.find("diff --git").expect("a diff")..].to_string();
+    assert_eq!(body(&picked.patch), body(&whole.stdout));
+}
+
+/// Deselecting everything leaves the file out, and says nothing about it.
+#[test]
+fn choosing_no_hunk_leaves_the_file_alone() {
+    let world = pickable_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "notes.md",
+        "ALPHA\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel\nindia\njuliett\n",
+    );
+
+    let result = backport_picking(&world, Some(vec![])).expect("no patch");
+
+    assert!(result.patch.is_empty(), "{}", result.patch);
+    assert!(result.files.is_empty());
+    // Not a `skipped` entry: the user chose this, and did not fail to get it.
+    assert!(result.skipped.is_empty(), "{:?}", result.skipped);
+}
+
+/// Cancelling the picker abandons the command rather than emitting a patch.
+#[test]
+fn a_cancelled_picker_is_refused_by_name() {
+    let world = pickable_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "notes.md",
+        "ALPHA\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel\nindia\njuliett\n",
+    );
+
+    let error = backport_picking(&world, None).expect_err("cancelled");
+    let code = miette::Diagnostic::code(&error).map(|code| code.to_string());
+    assert_eq!(code.as_deref(), Some("tpl::backport::cancelled"));
+}
+
+/// A hunk that cannot be carried names itself, and keeps the refusal beneath.
+#[test]
+fn a_refused_hunk_names_itself() {
+    let world = substituting_world();
+    world.init(&[]).success();
+
+    // Line 1 holds `{{ project_name }}`; the value itself is what changed, so
+    // the hunk carrying it is refused — with un-substitution off, as ADR-020.
+    world.project.write(
+        "README.md",
+        "# widget — a service\n\nWritten by June in June.\n\nRun the tests.\n",
+    );
+
+    let error = backport_picking(&world, Some(vec![0])).expect_err("refused");
+    let code = miette::Diagnostic::code(&error).map(|code| code.to_string());
+    assert_eq!(code.as_deref(), Some("tpl::backport::hunk_refused"));
+    // The refusal underneath keeps its own code, and its own advice.
+    assert!(
+        format!("{error:?}").contains("substituted_region")
+            || miette::Diagnostic::diagnostic_source(&error).is_some(),
+        "the wrapped refusal is gone: {error:?}"
+    );
+}

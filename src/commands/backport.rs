@@ -6,7 +6,7 @@ use tpl::ops::{self, Backport, OpError};
 
 use super::Session;
 use crate::cli::{BackportArgs, GlobalArgs};
-use crate::prompt::{Confirmer, Reverser};
+use crate::prompt::{Chooser, Confirmer, Reverser};
 use crate::theme::{command, diff_summary, field, headline, muted, warning};
 
 pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
@@ -57,6 +57,22 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         Reversing::Never => ops::Unsubstitute::Never,
     };
 
+    // The opposite rule to the one above, and deliberately so. `--unsubstitute`
+    // is absent by default, so silence when nobody can be asked is correct.
+    // `-p` was typed: it *is* the request for a prompt, so a prompt that cannot
+    // run is a refusal, not a downgrade to sending everything.
+    let mut chooser = Chooser(ctx.out.theme.clone());
+    let picking = if picking(
+        args.patch,
+        preferences.interactive,
+        global.json,
+        std::io::stderr().is_terminal(),
+    )? {
+        ops::Picking::Ask(&mut chooser)
+    } else {
+        ops::Picking::All
+    };
+
     let result = ops::backport(
         &ctx.repo,
         &ctx.root,
@@ -66,6 +82,7 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         answering,
         trust,
         unsubstitute,
+        picking,
     )?;
 
     // Written before anything is said, so a failure to write is not reported
@@ -125,6 +142,24 @@ fn reversing(flag: bool, interactive: bool, json: bool, tty: bool) -> Reversing 
     } else {
         Reversing::Never
     }
+}
+
+/// Whether to ask which hunks to send.
+///
+/// Returns a `Result`, where [`reversing`] returns a variant, and that is the
+/// whole difference between the two flags. An absent `--unsubstitute` on a CI
+/// runner means "do not attempt it", which is a decision git-tpl can take on
+/// the user's behalf. A `-p` on a CI runner means "show me the hunks", which it
+/// cannot do and must not pretend to have done — sending everything would be
+/// the one answer the user demonstrably did not ask for.
+fn picking(flag: bool, interactive: bool, json: bool, tty: bool) -> Result<bool, OpError> {
+    if !flag {
+        return Ok(false);
+    }
+    if json || !interactive || !tty {
+        return Err(OpError::Backport(ops::BackportError::NotInteractive));
+    }
+    Ok(true)
 }
 
 /// The prose, on stderr.
@@ -284,5 +319,42 @@ mod tests {
         #[case] expected: Reversing,
     ) {
         assert_eq!(reversing(flag, interactive, json, tty), expected);
+    }
+
+    #[rstest]
+    // Without the flag, nothing is asked and nothing is refused.
+    #[case(false, true, false, true)]
+    #[case(false, false, true, false)]
+    // With it, and someone to ask.
+    #[case(true, true, false, true)]
+    fn hunk_selection_is_offered_or_omitted_without_complaint(
+        #[case] flag: bool,
+        #[case] interactive: bool,
+        #[case] json: bool,
+        #[case] tty: bool,
+    ) {
+        assert_eq!(picking(flag, interactive, json, tty).unwrap(), flag);
+    }
+
+    #[rstest]
+    // `--json`: a machine is reading, and there is nothing to show hunks on.
+    #[case(true, true, true, true)]
+    // No terminal: the prompt cannot run.
+    #[case(true, true, false, false)]
+    // `tpl.interactive = false` is the user saying not to ask.
+    #[case(true, false, false, true)]
+    fn patch_selection_needs_somebody_to_ask(
+        #[case] flag: bool,
+        #[case] interactive: bool,
+        #[case] json: bool,
+        #[case] tty: bool,
+    ) {
+        // Refused, not silently downgraded to sending everything: `-p` was
+        // typed, so the one thing it cannot mean is "send it all".
+        let error = picking(flag, interactive, json, tty).expect_err("refused");
+        assert!(
+            matches!(error, OpError::Backport(ops::BackportError::NotInteractive)),
+            "{error:?}"
+        );
     }
 }

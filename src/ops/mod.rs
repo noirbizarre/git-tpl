@@ -5,6 +5,7 @@
 //! operations the CLI exposes.
 
 pub mod backport;
+pub mod hunks;
 pub mod resolve;
 pub mod testing;
 pub mod unsubstitute;
@@ -35,6 +36,7 @@ use crate::userconfig::UserConfig;
 pub use resolve::{Request, ResolveError, Resolved};
 
 pub use backport::{Backport, BackportError, BackportedFile, Skipped, backport};
+pub use hunks::{Hunk, Picker, Picking, Selection};
 pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Verdict};
 
 /// Errors from any operation.

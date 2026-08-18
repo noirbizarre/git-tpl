@@ -283,6 +283,11 @@ unread ([ADR-022](../adr/022-backport-unsubstitutes.md)).
 source. When the template is a URL it contains the literal
 `<your-template-clone>`, because there is no local clone to name.
 
+`-p` is refused under `--json` with `tpl::backport::not_interactive`: there is
+nobody to show hunks to, and a flag that silently sent everything instead would
+be the one answer that was not asked for. Limit the backport with pathspecs or
+`--exclude`.
+
 A refusal is a failure, with a `tpl::backport::*`
 [code](diagnostics.md#backport). Branch on the code: `substituted_region` is
 routine and means "edit the template by hand", while `stale_rendering` means

@@ -3,7 +3,8 @@
 Emit a patch that carries a local fix back to the template it came from.
 
 ```sh
-git tpl backport [<pathspec>...] [--exclude <glob>]... [-o <file>] [--trust]
+git tpl backport [<pathspec>...] [--exclude <glob>]... [-o <file>]
+                 [-p] [--trust] [--unsubstitute]
 ```
 
 You fixed something in a generated project. The same fix belongs in the
@@ -177,6 +178,78 @@ Three kinds of change are handled specially:
 | You **deleted** a file the template produces | reported, not backported | Removing a file from a template removes it from every project that renders it. Far too blunt to infer from one project's worktree. |
 | You **added** a file the template does not produce | ignored, unless you name it | Otherwise every file your project owns would be a candidate. Named explicitly, it becomes a new template file — and *not* a `.jinja`, since nothing was substituted into a file the template has never seen. |
 
+### Choosing hunks
+
+Pathspecs select whole files. `-p` selects within one:
+
+```console
+$ git tpl backport -p
+
+README.md → template/README.md.jinja
+
+  1  @@ -1,4 +1,5 @@
+      # acme
+     +
+     +A generated project.
+
+      Run the tests before pushing.
+
+  2  @@ -8,3 +9,3 @@
+      ## Releasing
+     -Tag it.
+     +Tag it, then push the tag.
+
+Send which hunks of `README.md`? (Space toggles, Enter confirms.)
+> [x] 1  @@ -1,4 +1,5 @@  +2 −0
+  [ ] 2  @@ -8,3 +9,3 @@  +1 −1
+```
+
+The hunks are your own edits, as [`git add -p`](https://git-scm.com/docs/git-add)
+shows them — not the template patch. Everything starts selected, because `-p`
+is for taking things out.
+
+**The selection happens before the patch is built, not after.** What you keep is
+assembled into a candidate — your file, with only those hunks — and *that* is
+what the template source is patched to produce and then checked against. A
+change that round-tripped as a whole does not necessarily round-trip with half
+its hunks dropped, so the [proof](#the-patch-does-not-render-back-to-your-file)
+is made against the patch you are actually sending. See
+[ADR-023](../adr/023-hunk-selection-precedes-the-proof.md).
+
+That is also why a selection can be refused where the whole change would not
+have been. When it is, the refusal names the hunk:
+
+```console
+$ git tpl backport -p
+tpl::backport::hunk_refused
+
+  x hunk 2 of `README.md` cannot be backported
+  help: the hunk at `@@ -8,3 +9,3 @@` is the one that failed. Run
+        `git tpl backport -p` again and leave it out to send the rest, or
+        edit `README.md.jinja` by hand to carry it.
+```
+
+Deselecting every hunk of a file simply leaves that file out. Pressing Escape
+abandons the command with `tpl::backport::cancelled`, and no patch is emitted —
+a cancelled prompt is not read as "send nothing", because it is just as likely
+to have been "wait, start again".
+
+### Choosing hunks without a terminal
+
+`-p` needs somewhere to show the hunks, so under `--json`, through a pipe, or
+with `tpl.interactive false` it is **refused** rather than ignored:
+
+```console
+$ git tpl --json backport -p
+tpl::backport::not_interactive
+```
+
+This is the opposite of how `--unsubstitute` behaves, and deliberately so.
+Un-substitution is something git-tpl offers; not offering it on a CI runner is
+a decision it can take for you. `-p` is something you asked for, and the one
+answer it cannot mean is "send everything". To select without a prompt, name
+pathspecs or use `--exclude`.
+
 ## Changing a line that holds a placeholder
 
 Backporting works per *line*, not per file. A `.jinja` backports fine as long
@@ -336,6 +409,9 @@ a proof rather than a guess. `tpl::backport::round_trip` means the check failed
 | `tpl::backport::binary` | A changed file is binary. A text patch cannot carry it; copy it into the template by hand. |
 | `tpl::backport::stale_rendering` | `.config/git.tpl.toml` was edited without re-rendering, so `refs/tpl/<id>` is not what the answers produce and every line would be measured against the wrong file. Run [`git tpl update`](update.md) first. |
 | `tpl::backport::unknown_path` | A named path is neither produced by the template nor present in the project. |
+| `tpl::backport::hunk_refused` | A hunk selected with `-p` cannot be backported. The refusal it wraps keeps its own code; this one names the hunk to leave out. |
+| `tpl::backport::not_interactive` | `-p` was asked for where no prompt can run. |
+| `tpl::backport::cancelled` | The hunk picker was cancelled. Nothing was emitted. |
 
 The full list is in [Diagnostic codes](../reference/diagnostics.md#backport),
 and the reasoning behind all of it is
@@ -349,6 +425,7 @@ and the reasoning behind all of it is
 | `--exclude <glob>` | Leave these paths out. Repeatable. `*` does not cross a `/`, `**` does. |
 | `-o`, `--output <file>` | Write the patch here instead of to stdout. |
 | `--trust` | Fetch the template's [remote data sources](../data/index.md) without confirming. Per invocation; nothing is recorded. |
+| `-p`, `--patch` | Choose which hunks to send, one file at a time. Needs a terminal; refused under `--json` or with `tpl.interactive false`. See [Choosing hunks](#choosing-hunks). |
 | `--unsubstitute` | Reverse changed template expressions without confirming. Also the only way to reverse one at all with nobody to ask — under `--json`, or on CI. See [Changing a line that holds a placeholder](#changing-a-line-that-holds-a-placeholder). |
 
 There is deliberately no `--ref` and no `--answer`: both would change the
