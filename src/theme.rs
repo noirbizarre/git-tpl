@@ -7,6 +7,8 @@
 
 use console::Style;
 
+use tpl::ops::Proposal;
+
 use crate::cli::ColorChoice;
 
 /// The styles used across the CLI.
@@ -207,6 +209,44 @@ pub fn transition(theme: &Theme, from: &str, to: &str, note: Option<&str>) -> St
     }
 }
 
+/// A proposed un-substitution, laid out for the person who has to judge it.
+///
+/// Here rather than in `prompt.rs` for the reason at the top of this file: the
+/// layout is the part worth testing, and a `demand` prompt cannot be driven
+/// without a terminal. What is left at the prompt is the question itself.
+///
+/// Three texts, because two of them do not determine the third — the same edit
+/// has several placements that all render back correctly, and the one chosen is
+/// what is being consented to. See ADR-022.
+pub fn reversal(theme: &Theme, proposal: &Proposal<'_>) -> String {
+    let Proposal {
+        path,
+        template_path,
+        line,
+        rendered,
+        project,
+        patched,
+        expressions,
+    } = proposal;
+    // Named, because the placeholders are the thing being kept — and the reason
+    // the user is asked rather than told. If they meant to change what is
+    // *inside* one, they meant to change their answer, not the template.
+    let kept = expressions
+        .iter()
+        .map(|expression| format!("`{expression}`"))
+        .collect::<Vec<_>>()
+        .join(" and ");
+
+    format!(
+        "\n{}\n\n  rendered  {rendered}\n  yours     {project}\n  upstream  {patched}\n\n{}\n",
+        format_args!("`{path}` line {line} was changed around a value the template substitutes."),
+        muted(
+            theme,
+            &format!("It keeps {kept} and sends the rest of the line to `{template_path}`."),
+        ),
+    )
+}
+
 /// A dimmed note.
 pub fn muted(theme: &Theme, text: &str) -> String {
     theme.muted.apply_to(text).to_string()
@@ -263,6 +303,77 @@ pub fn note_block(theme: &Theme, sanitised: &str) -> String {
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    /// The three texts, in a fixed order, each labelled.
+    ///
+    /// The layout is the thing being judged — a user deciding whether to send a
+    /// reversed substitution upstream is comparing these three lines and
+    /// nothing else — so it is pinned here rather than left to a prompt no test
+    /// can drive.
+    #[test]
+    fn a_reversal_shows_what_was_rendered_what_you_have_and_what_would_be_sent() {
+        let kept = ["{{ project_name }}".to_string()];
+        let shown = reversal(
+            &Theme::plain(),
+            &Proposal {
+                path: "README.md",
+                template_path: "README.md.jinja",
+                line: 1,
+                rendered: "# acme — a service",
+                project: "# acme — a web service",
+                patched: "# {{ project_name }} — a web service",
+                expressions: &kept,
+            },
+        );
+
+        assert!(
+            shown.contains(
+                "`README.md` line 1 was changed around a value the template substitutes."
+            ),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("  rendered  # acme — a service\n"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("  yours     # acme — a web service\n"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("  upstream  # {{ project_name }} — a web service\n"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains(
+                "It keeps `{{ project_name }}` and sends the rest of the line to `README.md.jinja`."
+            ),
+            "{shown}"
+        );
+    }
+
+    /// Every placeholder is named, not just the first: the user is consenting
+    /// to keeping all of them.
+    #[test]
+    fn a_reversal_names_every_placeholder_it_keeps() {
+        let kept = ["{{ tool }}".to_string(), "{{ task }}".to_string()];
+        let shown = reversal(
+            &Theme::plain(),
+            &Proposal {
+                path: "run.sh",
+                template_path: "run.sh.jinja",
+                line: 3,
+                rendered: "cargo run test",
+                project: "cargo run --release test",
+                patched: "{{ tool }} run --release {{ task }}",
+                expressions: &kept,
+            },
+        );
+        assert!(
+            shown.contains("It keeps `{{ tool }}` and `{{ task }}`"),
+            "{shown}"
+        );
+    }
 
     #[rstest]
     // An explicit request wins over not being a terminal — that is exactly the

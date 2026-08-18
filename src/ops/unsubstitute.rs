@@ -608,6 +608,84 @@ mod tests {
         assert!(spans(line).is_none(), "{line}");
     }
 
+    fn context(pairs: &[(&str, &str)]) -> Context {
+        let mut context = Context::default();
+        for (name, value) in pairs {
+            context.set_answer(*name, crate::template::Value::String((*value).to_string()));
+        }
+        context
+    }
+
+    fn lines(context: &Context) -> LineContext<'_> {
+        LineContext {
+            context,
+            partials: crate::eval::no_partials(),
+            undefined: Undefined::Lenient,
+        }
+    }
+
+    /// A line that is nothing but an expression has no editable text: every
+    /// change to it is a change to the value.
+    #[test]
+    fn a_line_with_no_editable_literal_has_no_provenance() {
+        let context = context(&[("name", "acme")]);
+        assert!(establish("{{ name }}", "acme", 0, &lines(&context)).is_none());
+    }
+
+    /// Two source lines that both reproduce the rendered line is an ambiguity,
+    /// and there is nothing to choose between them.
+    #[test]
+    fn two_candidates_that_both_fit_are_refused() {
+        let context = context(&[("name", "acme")]);
+        let sources = ["# {{ name }} x\n", "# {{ name }} x\n"];
+        assert!(pair(&sources, 0..2, "# acme x", &lines(&context)).is_none());
+    }
+
+    /// Exactly one candidate is the case the feature exists for.
+    #[test]
+    fn the_one_candidate_that_fits_is_taken() {
+        let context = context(&[("name", "acme")]);
+        let sources = ["unrelated\n", "# {{ name }} x\n"];
+        let found = pair(&sources, 0..2, "# acme x", &lines(&context)).expect("a candidate");
+        assert_eq!(found.source, 1);
+    }
+
+    /// A `Replace` wider than the cap is a rewritten block, not a line edit,
+    /// and the quadratic render cost is not worth paying to discover that.
+    #[test]
+    fn a_replace_too_wide_to_be_a_line_edit_is_not_searched() {
+        let context = context(&[("name", "acme")]);
+        let sources = vec!["# {{ name }} x\n"; 40];
+        assert!(pair(&sources, 0..40, "# acme x", &lines(&context)).is_none());
+    }
+
+    /// A backslash escape inside a string keeps the scan inside the quotes.
+    #[test]
+    fn an_escaped_quote_does_not_end_a_string() {
+        assert_eq!(
+            texts(r#"a {{ x | default("b\"}}c") }} d"#).unwrap(),
+            vec![
+                (false, "a "),
+                (true, r#"{{ x | default("b\"}}c") }}"#),
+                (false, " d")
+            ]
+        );
+    }
+
+    /// An insertion slides right as well as left, and the interval has to
+    /// cover both or a hunk that could have reached a value looks safe.
+    #[test]
+    fn an_insertion_slides_right_too() {
+        // Inserting `a` at 0 in `aab` could equally be at 1 or at 2.
+        assert_eq!(slide_insert("aab", 0, "a"), 0..2);
+    }
+
+    /// Nothing to place, so nowhere to slide to.
+    #[test]
+    fn an_empty_insertion_stays_where_it_is() {
+        assert_eq!(slide_insert("abc", 2, ""), 2..2);
+    }
+
     #[test]
     fn a_line_keeps_its_terminator_separate() {
         assert_eq!(split_terminator("a\r\n"), ("a", "\r\n"));

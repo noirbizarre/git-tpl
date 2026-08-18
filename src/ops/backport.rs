@@ -440,30 +440,12 @@ pub fn backport(
                 // Only now is the user asked. Confirming a line of a patch that
                 // was about to be refused anyway wastes the one decision only
                 // they can make.
-                for reversal in &patched.unsubstituted {
-                    let verdict = match unsubstitute {
-                        Unsubstitute::Always => Verdict::Accept,
-                        Unsubstitute::Ask(ref mut gate) => gate.confirm(&Proposal {
-                            path: &change.path,
-                            template_path: &file.source,
-                            line: reversal.line,
-                            rendered: &reversal.rendered,
-                            project: &reversal.project,
-                            patched: &reversal.patched,
-                            expressions: &reversal.expressions,
-                        }),
-                        // `lines` was `None`, so there is nothing to confirm.
-                        Unsubstitute::Never => Verdict::Accept,
-                    };
-                    if verdict == Verdict::Decline {
-                        return Err(BackportError::SubstitutedRegion {
-                            path: change.path.clone(),
-                            template_path: file.source.clone(),
-                            line: reversal.line,
-                        }
-                        .into());
-                    }
-                }
+                confirm(
+                    &mut unsubstitute,
+                    &patched.unsubstituted,
+                    &change.path,
+                    &file.source,
+                )?;
 
                 let (insertions, deletions) = counts(&source_text, &patched.patched);
                 let source = join_root(&root, &file.source);
@@ -722,6 +704,44 @@ fn transpose(
         patched: out.concat(),
         unsubstituted,
     })
+}
+
+/// Put every reversal to the user, and refuse the file at the first decline.
+///
+/// Separate from `backport` so that it can be exercised with a gate that is not
+/// a terminal. The rule it encodes is small and the consequence of getting it
+/// wrong is not: an un-confirmed reversal is a change to what the template
+/// produces for every project, shipped on nobody's authority.
+fn confirm(
+    unsubstitute: &mut Unsubstitute<'_>,
+    reversals: &[Unsubstitution],
+    path: &str,
+    template_path: &str,
+) -> Result<(), BackportError> {
+    for reversal in reversals {
+        let verdict = match unsubstitute {
+            Unsubstitute::Always => Verdict::Accept,
+            Unsubstitute::Ask(gate) => gate.confirm(&Proposal {
+                path,
+                template_path,
+                line: reversal.line,
+                rendered: &reversal.rendered,
+                project: &reversal.project,
+                patched: &reversal.patched,
+                expressions: &reversal.expressions,
+            }),
+            // `lines` was `None`, so there is nothing to confirm.
+            Unsubstitute::Never => Verdict::Accept,
+        };
+        if verdict == Verdict::Decline {
+            return Err(BackportError::SubstitutedRegion {
+                path: path.to_string(),
+                template_path: template_path.to_string(),
+                line: reversal.line,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Copy source lines up to `upto`, exclusive, honouring any line
@@ -1592,6 +1612,120 @@ mod tests {
             error,
             BackportError::SubstitutedRegion { line: 1, .. }
         ));
+    }
+
+    /// A gate that answers the same way every time, and counts.
+    struct Fake {
+        verdict: Verdict,
+        asked: Vec<usize>,
+    }
+
+    impl crate::ops::Unsubstituter for Fake {
+        fn confirm(&mut self, proposal: &Proposal<'_>) -> Verdict {
+            self.asked.push(proposal.line);
+            self.verdict
+        }
+    }
+
+    fn reversal(line: usize) -> Unsubstitution {
+        Unsubstitution {
+            path: String::new(),
+            template_path: String::new(),
+            line,
+            rendered: "# acme".to_string(),
+            project: "# acme!".to_string(),
+            patched: "# {{ name }}!".to_string(),
+            expressions: vec!["{{ name }}".to_string()],
+        }
+    }
+
+    #[test]
+    fn every_reversal_is_put_to_the_user() {
+        let mut gate = Fake {
+            verdict: Verdict::Accept,
+            asked: Vec::new(),
+        };
+        let reversals = [reversal(1), reversal(4)];
+        confirm(
+            &mut Unsubstitute::Ask(&mut gate),
+            &reversals,
+            "README.md",
+            "README.md.jinja",
+        )
+        .unwrap();
+        assert_eq!(gate.asked, vec![1, 4]);
+    }
+
+    /// Declining one line refuses the file, and stops asking about the rest.
+    ///
+    /// The patch is per file, so a partial acceptance would have to drop the
+    /// declined line and keep the others — which is a patch the user never saw.
+    #[test]
+    fn declining_a_reversal_refuses_the_file_by_name() {
+        let mut gate = Fake {
+            verdict: Verdict::Decline,
+            asked: Vec::new(),
+        };
+        let reversals = [reversal(2), reversal(7)];
+        let error = confirm(
+            &mut Unsubstitute::Ask(&mut gate),
+            &reversals,
+            "README.md",
+            "README.md.jinja",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            BackportError::SubstitutedRegion { line: 2, .. }
+        ));
+        assert_eq!(gate.asked, vec![2], "it kept asking after a refusal");
+    }
+
+    /// `--unsubstitute` is the decision taken in advance, so nothing is asked.
+    ///
+    /// `Never` is here too, for the same call: it means no reversal was ever
+    /// attempted, so the list is empty in practice — and a variant that would
+    /// refuse a line the caller never offered is not the behaviour wanted if
+    /// that ever stops being true.
+    #[rstest]
+    #[case(Unsubstitute::Always)]
+    #[case(Unsubstitute::Never)]
+    fn a_decision_taken_in_advance_asks_nothing(#[case] mut mode: Unsubstitute<'static>) {
+        let reversals = [reversal(1)];
+        confirm(&mut mode, &reversals, "README.md", "README.md.jinja").unwrap();
+    }
+
+    /// A line-ending conversion is not a content edit, and carrying it as one
+    /// would rewrite the whole file upstream.
+    #[test]
+    fn a_changed_line_terminator_is_not_un_substituted() {
+        let context = answers(&[("name", "acme")]);
+        let error = reverse(
+            "# {{ name }} — a service\n",
+            "# acme — a service\n",
+            "# acme — a web service\r\n",
+            &context,
+        )
+        .unwrap_err();
+        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+    }
+
+    /// One source line reproducing two rendered lines is a loop, and rewriting
+    /// it would apply one iteration's edit to every iteration.
+    #[test]
+    fn a_source_line_claimed_twice_is_refused() {
+        let context = answers(&[("name", "acme")]);
+        // The rendering repeated the line, so both rendered lines have the same
+        // and only candidate.
+        let error = reverse(
+            "> {{ name }} here\n",
+            "> acme here\n> acme here\n",
+            "> acme there\n> acme everywhere\n",
+            &context,
+        )
+        .unwrap_err();
+        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
     }
 
     /// A template beside its own project is `.`, not the empty string.

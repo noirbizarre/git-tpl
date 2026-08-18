@@ -6,6 +6,8 @@ use demand::{Confirm, DemandOption, Input, MultiSelect, Select};
 use tpl::data::{DataError, Decision, RemoteRequest, SourceKind, TrustGate};
 use tpl::eval::{EvalError, Prompter};
 use tpl::ops::{Proposal, Unsubstituter, Verdict};
+
+use crate::theme::Theme;
 use tpl::template::{Choice, Question, QuestionKind, Value};
 
 /// Asks questions on a terminal.
@@ -237,34 +239,21 @@ fn verb(request: &RemoteRequest) -> &'static str {
     }
 }
 
-impl Unsubstituter for Confirmer {
+/// Confirms reversing one substitution, on a terminal.
+///
+/// A type of its own rather than another `impl` on [`Confirmer`], because it
+/// needs a [`Theme`] and `Confirmer` is constructed in eight places that have
+/// no use for one.
+pub struct Reverser(pub Theme);
+
+impl Unsubstituter for Reverser {
     fn confirm(&mut self, proposal: &Proposal<'_>) -> Verdict {
         // Everything goes to stderr. Stdout carries the mailbox, and a prompt
         // mixed into it would be piped straight into `git am`.
-        eprintln!();
-        eprintln!(
-            "`{}` line {} was changed around a value the template substitutes.",
-            proposal.path, proposal.line
-        );
-        eprintln!();
-        eprintln!("  rendered  {}", proposal.rendered);
-        eprintln!("  yours     {}", proposal.project);
-        eprintln!("  upstream  {}", proposal.patched);
-        eprintln!();
-        // Named because it is the thing being kept, and the reason the user is
-        // being asked rather than told: if they meant to change what is *in*
-        // the placeholder, they meant to change their answer, not the template.
-        eprintln!(
-            "It keeps {} and sends the rest of the line to `{}`.",
-            proposal
-                .expressions
-                .iter()
-                .map(|expression| format!("`{expression}`"))
-                .collect::<Vec<_>>()
-                .join(" and "),
-            proposal.template_path
-        );
-        eprintln!();
+        //
+        // The layout is `theme::reversal`, where it can be tested; what is left
+        // here is the question, which cannot be asked without a terminal.
+        eprint!("{}", crate::theme::reversal(&self.0, proposal));
 
         let taken = Confirm::new("Send this line upstream?")
             .description(

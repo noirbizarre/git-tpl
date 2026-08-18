@@ -860,3 +860,24 @@ fn an_un_substituted_fix_comes_back_through_update() {
     let again = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).success();
     assert_eq!(again.json()["result"], "nothingToBackport");
 }
+
+/// A file that reverses a substitution *and* then fails to render back.
+///
+/// The reversal on line 1 is fine; the edit on line 5 is text that is itself
+/// Jinja, so the patched source renders it away and the round trip fails.
+/// Reporting `round_trip` here would tell the user the patch was built and
+/// re-rendered — true, but it sends them looking at the wrong line. The
+/// command re-asks without un-substitution and reports that answer instead.
+#[test]
+fn a_reversal_that_does_not_render_back_reports_the_honest_refusal() {
+    let world = substituting_world();
+    world.init(&[]).success();
+
+    world.project.write(
+        "README.md",
+        "# acme — a web service\n\nWritten by June in June.\n\nRun {{ nope }}.\n",
+    );
+
+    let output = tpl(&world.project, &["--json", "backport", "--unsubstitute"]).failure();
+    assert_eq!(output.error_code(), "tpl::backport::substituted_region");
+}
