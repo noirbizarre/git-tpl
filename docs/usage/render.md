@@ -47,6 +47,18 @@ cd /tmp/out && cargo build && actionlint .github/workflows/*.yaml
 `--dirty` renders the working tree, so this is edit-and-see rather than
 edit-commit-and-see.
 
+!!! warning "A `--dirty` render honours `.gitignore`"
+
+    It renders what Git would see, because that is what a committed revision
+    would contain — so a new template file still matched by an ignore rule is
+    left out, and the rendering is missing a file you can see on disk.
+
+    The paths are named on stderr, listed under `-v`, and carried in
+    `skippedByGitignore` under `--json`. The stack includes
+    `core.excludesFile`, so a global rule set years ago on an unrelated project
+    can be the cause — which is why the omission is reported rather than left
+    to be noticed. See [ADR-017](../adr/017-ignore-evaluation.md).
+
 Checking the *output* with the tools that understand it is the intended
 division of labour. git-tpl does not run anything over a rendering, and
 [will not](../adr/003-minijinja-only.md): your own CI does it better, and
