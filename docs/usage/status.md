@@ -61,8 +61,8 @@ against a real project.
 
 !!! warning "`--format text\|json` is deprecated"
 
-    It still works and still warns, but it is hidden from `--help` and will be
-    removed. Use the global `--json`. See
+    It still works and still warns, but it is hidden from `--help` and is
+    removed in 0.7. Use the global `--json`. See
     [Machine-readable output](../reference/json.md).
 
 ## Exit codes

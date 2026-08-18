@@ -48,8 +48,7 @@ jobs, and neither substitutes for the other.
 ### `--format json` becomes `--json`
 
 Two spellings for one idea, on a single command out of all of them, is not a
-surface worth keeping. `--format` is hidden, warns on stderr, and is removed in the
-next minor.
+surface worth keeping. `--format` is hidden, warns on stderr, and is removed in 0.7.
 
 ### stdout and stderr keep their jobs
 

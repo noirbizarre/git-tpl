@@ -131,7 +131,7 @@ With `--eval`:
 ### `status`
 
 Documented in [status](../usage/status.md). `--format json` is deprecated in
-favour of `--json`; it still works, and warns, for one more minor release.
+favour of `--json`; it still works, and warns, until it is removed in 0.7.
 
 ### `diff`
 
