@@ -177,9 +177,19 @@ fn write_file(output: &Path, file: &tpl::render::Rendered) -> Result<(), OpError
     Ok(())
 }
 
+/// The failure to write the output directory, under the code that means it.
+///
+/// `tpl::git::backend` was used here, and no Git is involved: a caller
+/// branching on `error.code` — the contract `docs/reference/json.md` states —
+/// could not tell a full disk from a libgit2 fault, and the catalogue
+/// describes that code in Git terms. `tpl::ops::write_failed` already exists
+/// for exactly this, and its help names the directory rather than a remote.
 fn io(path: &Path, verb: &str, error: &std::io::Error) -> OpError {
-    OpError::Git(tpl::git::GitError::Backend {
-        context: format!("{verb} `{}`", path.display()),
-        reason: error.to_string(),
-    })
+    OpError::WriteFailed {
+        path: path.display().to_string(),
+        // The verb rides in the reason: "write" and "set the permissions of"
+        // fail for different causes, and the path alone does not say which was
+        // attempted.
+        reason: format!("could not {verb} it: {error}"),
+    }
 }
