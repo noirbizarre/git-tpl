@@ -68,9 +68,15 @@ still the point: the project file is Git-shaped (`git.tpl`, mirroring
 `git tpl`), the user file is named after the binary and follows XDG. Two shapes
 means a stray copy of one is never mistaken for the other.
 
-Resolution is `$XDG_CONFIG_HOME`, else `$HOME/.config`, and is hand-written
-rather than taken from a crate — it is six lines, and it is the same rule
-`src/git/libgit2.rs` already applies when it looks for SSH keys.
+Resolution is `$XDG_CONFIG_HOME` when it is set to an *absolute* path — an
+empty or relative value is unset, per the XDG specification — else `$HOME` or,
+on Windows, `$USERPROFILE`, joined with `.config`. It is hand-written rather
+than taken from a crate: it is a handful of lines, and a crate would still have
+to be told which of those rules to apply.
+
+It is also one function, because it was two and they disagreed: a relative
+`XDG_CONFIG_HOME` found a global ignore file but no user configuration, and a
+Windows user with only `USERPROFILE` got the reverse.
 
 ### `[defaults]` seeds prompts and nothing else
 
