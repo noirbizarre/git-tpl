@@ -1,8 +1,9 @@
 # JSON output
 
-`--json` is global. Every command accepts it, every command emits its payload
-to **stdout**, and every failure emits the same envelope — including the
-commands that have no success payload of their own.
+`--json` is global. Every command accepts it and every failure emits the same
+envelope — including the commands that have no success payload of their own.
+Almost every command emits its payload to **stdout**; the three whose stdout is
+already the payload are [`show`, `completion` and `man`](#show-completion-and-man).
 
 Human output goes to stderr, so a piped `--json` stream stays parseable even
 when the command is chatty:
@@ -119,8 +120,9 @@ the template, saving the caller from fetching and parsing it.
   "answers": {…}, "computed": {…}, "data": {…}, "template": {…}, "flat": {…} }
 ```
 
-`flat` is what a template body sees: answers and computed values at the top
-level, `data` and `template` namespaced.
+`flat` is what a template body sees: answers and computed values merged into
+one table. `data` and `template` are not in it — they are siblings of it here,
+and namespaces of their own in a template.
 
 With `--eval`:
 
