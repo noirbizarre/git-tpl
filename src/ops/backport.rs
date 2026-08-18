@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use miette::Diagnostic;
-use similar::{ChangeTag, TextDiff};
+use similar::{ChangeTag, DiffOp, TextDiff};
 use thiserror::Error;
 
 use crate::config::{CONFIG_PATH, Config};
@@ -445,17 +445,16 @@ fn transpose(
     // carry a mapping; everything else is a region rendering changed, and a
     // change landing there has no one-to-one image in the source.
     let mut map: BTreeMap<usize, usize> = BTreeMap::new();
-    let alignment = TextDiff::from_lines(source, rendered);
-    let (mut s, mut r) = (0usize, 0usize);
-    for change in alignment.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Equal => {
-                map.insert(r, s);
-                s += 1;
-                r += 1;
+    for op in TextDiff::from_lines(source, rendered).ops() {
+        if let DiffOp::Equal {
+            old_index,
+            new_index,
+            len,
+        } = *op
+        {
+            for offset in 0..len {
+                map.insert(new_index + offset, old_index + offset);
             }
-            ChangeTag::Delete => s += 1,
-            ChangeTag::Insert => r += 1,
         }
     }
 
@@ -469,72 +468,97 @@ fn transpose(
     // `{{ }}` — that is the whole trick.
     let mut out: Vec<String> = Vec::new();
     let mut emitted = 0usize; // next unemitted source line
-    let mut r = 0usize; // next rendered line
-    let mut p = 0usize; // next project line
 
     let diff = TextDiff::from_slices(&rendered_lines, &project_lines);
-    for change in diff.iter_all_changes() {
-        match change.tag() {
-            ChangeTag::Equal => {
-                if let Some(&mapped) = map.get(&r) {
-                    // Emit everything the rendering dropped between the last
-                    // mapped line and this one — the substituted regions in
-                    // between, verbatim from the source.
-                    while emitted <= mapped {
-                        out.push(source_lines[emitted].to_string());
-                        emitted += 1;
+    for op in diff.ops() {
+        // `ops` rather than `iter_all_changes`: a modified line is reported by
+        // the latter as an unrelated delete and an unrelated insert, so the
+        // walk below could not see that the two belong together even where it
+        // matters. `Replace` keeps them in one place.
+        let (deletes, inserts) = match *op {
+            DiffOp::Equal {
+                old_index, len: n, ..
+            } => {
+                for offset in 0..n {
+                    if let Some(&mapped) = map.get(&(old_index + offset)) {
+                        // Emit everything the rendering dropped between the
+                        // last mapped line and this one — the substituted
+                        // regions in between, verbatim from the source.
+                        emit_through(&mut out, &source_lines, &mut emitted, mapped + 1);
                     }
                 }
-                r += 1;
-                p += 1;
+                continue;
             }
-            ChangeTag::Delete => {
-                let Some(&mapped) = map.get(&r) else {
-                    return Err(BackportError::SubstitutedRegion {
-                        path: path.to_string(),
-                        template_path: source_path.to_string(),
-                        line: r + 1,
-                    });
-                };
-                // Skip it: catch the source up to just before the mapped line,
-                // then step over the line itself without emitting it.
-                while emitted < mapped {
-                    out.push(source_lines[emitted].to_string());
-                    emitted += 1;
-                }
-                emitted = mapped + 1;
-                r += 1;
+            DiffOp::Delete {
+                old_index, old_len, ..
+            } => (old_index..old_index + old_len, 0..0),
+            DiffOp::Insert {
+                old_index,
+                new_index,
+                new_len,
+            } => (old_index..old_index, new_index..new_index + new_len),
+            DiffOp::Replace {
+                old_index,
+                old_len,
+                new_index,
+                new_len,
+            } => (
+                old_index..old_index + old_len,
+                new_index..new_index + new_len,
+            ),
+        };
+
+        for r in deletes.clone() {
+            let Some(&mapped) = map.get(&r) else {
+                return Err(BackportError::SubstitutedRegion {
+                    path: path.to_string(),
+                    template_path: source_path.to_string(),
+                    line: r + 1,
+                });
+            };
+            // Skip it: catch the source up to just before the mapped line,
+            // then step over the line itself without emitting it.
+            emit_through(&mut out, &source_lines, &mut emitted, mapped);
+            emitted = mapped + 1;
+        }
+
+        // An insertion has no rendered line of its own, so it is anchored on
+        // the line it follows the deletions of. That line must be mapped, or we
+        // would be inserting into a region the render produced.
+        if !inserts.is_empty() {
+            let anchor = deletes.end;
+            if anchor < rendered_lines.len() && !map.contains_key(&anchor) {
+                return Err(BackportError::SubstitutedRegion {
+                    path: path.to_string(),
+                    template_path: source_path.to_string(),
+                    line: anchor + 1,
+                });
             }
-            ChangeTag::Insert => {
-                // An insertion has no rendered line of its own, so it is
-                // anchored on the line it precedes. That line must be mapped,
-                // or we would be inserting into a region the render produced.
-                if r < rendered_lines.len() && !map.contains_key(&r) {
-                    return Err(BackportError::SubstitutedRegion {
-                        path: path.to_string(),
-                        template_path: source_path.to_string(),
-                        line: r + 1,
-                    });
-                }
-                if let Some(&mapped) = map.get(&r) {
-                    while emitted < mapped {
-                        out.push(source_lines[emitted].to_string());
-                        emitted += 1;
-                    }
-                }
+            if let Some(&mapped) = map.get(&anchor) {
+                emit_through(&mut out, &source_lines, &mut emitted, mapped);
+            }
+            for p in inserts {
                 out.push(project_lines[p].to_string());
-                p += 1;
             }
         }
     }
 
     // Whatever the rendering dropped after the last mapped line.
-    while emitted < source_lines.len() {
-        out.push(source_lines[emitted].to_string());
-        emitted += 1;
-    }
+    emit_through(&mut out, &source_lines, &mut emitted, source_lines.len());
 
     Ok(out.concat())
+}
+
+/// Copy source lines up to `upto`, exclusive.
+///
+/// The one place a source line is emitted. There were four before, each with
+/// its own copy of the same loop, and a rule that has to hold at four sites is
+/// a rule that will one day hold at three.
+fn emit_through(out: &mut Vec<String>, source_lines: &[&str], emitted: &mut usize, upto: usize) {
+    while *emitted < upto {
+        out.push(source_lines[*emitted].to_string());
+        *emitted += 1;
+    }
 }
 
 /// Render the patched source and require it to equal what the project has.
