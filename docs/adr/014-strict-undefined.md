@@ -87,3 +87,9 @@ the wrong thing.
 The lint cannot see through `{% import %}` — `undeclared_variables` does not
 follow one — so a macro's own references are not checked. That is the same
 limitation the graph analysis has, and for the same reason.
+
+What `{% import %}`/`{% from %}` does put in the file's own namespace — the
+alias itself — is checked, separately, by `tpl::lint::shadowed_name`: an alias
+that reuses a question or computed name shadows it, and no name is ever
+undefined, so the strict-undefined path above cannot catch it. See
+[`lint`](../usage/lint.md#shadowed-names--tpllintshadowed_name).

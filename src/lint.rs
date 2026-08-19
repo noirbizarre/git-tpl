@@ -35,6 +35,7 @@ pub const CODES: &[&str] = &[
     "tpl::lint::degenerate_path",
     "tpl::lint::foreign_expression",
     "tpl::lint::missing_note_file",
+    "tpl::lint::shadowed_name",
     "tpl::lint::syntax",
     "tpl::lint::undeclared",
 ];
@@ -343,6 +344,7 @@ pub fn lint(
             partials,
             &foreign,
         ));
+        findings.extend(check_shadowed_names(&entry.path, &text, manifest));
     }
 
     findings.extend(check_path_collisions(entries));
@@ -795,6 +797,231 @@ fn is_builtin(name: &str) -> bool {
     )
 }
 
+/// A binding in a file body that hides an answer or a computed value.
+///
+/// `{% import "macros/m.jinja" as stack %}` binds `stack` in the same namespace
+/// the answers arrive in, so a later `{% if stack == "b" %}` compares a module
+/// with a string. That is never true and never an error, and `strict = true`
+/// does not help because nothing is undefined. The file renders, the branch is
+/// simply gone.
+///
+/// The manifest already refuses a question and a computed value that share a
+/// name, for the same reason and with the same help. This is that collision
+/// arriving from a third direction, and it was the only one nothing reported.
+///
+/// A warning rather than an error: the binding is legal MiniJinja, and an
+/// author who means it can `--allow` the code. `-D warnings` catches it in CI,
+/// which is where the reported case went unnoticed.
+fn check_shadowed_names(path: &str, text: &str, manifest: &Manifest) -> Vec<Finding> {
+    let known = declared_names(manifest);
+    let mut shadowed: Vec<&str> = tag_bodies(text)
+        .iter()
+        .flat_map(|body| bound_names(body))
+        // Borrow the manifest's own spelling, so the finding outlives the
+        // owned name the scanner produced.
+        .filter_map(|name| known.get(name.as_str()).copied())
+        .collect();
+    // A name bound twice in one file is one mistake, and the second report
+    // would say nothing the first did not.
+    shadowed.sort_unstable();
+    shadowed.dedup();
+
+    shadowed
+        .into_iter()
+        .map(|name| {
+            let kind = if manifest.questions.contains_key(name) {
+                "a question"
+            } else if manifest.computed.contains_key(name) {
+                "a computed value"
+            } else {
+                "a context namespace"
+            };
+            Finding::warning(
+                "tpl::lint::shadowed_name",
+                path,
+                format!("`{path}` binds `{name}`, which is already {kind}"),
+                format!(
+                    "answers, computed values and template bindings share one namespace, so \
+                     the rest of the file sees the binding and not {kind}. A comparison like \
+                     `{{% if {name} == \"...\" %}}` then silently never matches. Rename the \
+                     binding."
+                ),
+            )
+        })
+        .collect()
+}
+
+/// Every `{% ... %}` body outside a `{% raw %}` block, trimmed.
+///
+/// `find_tag` answers "where is this exact tag"; the shadowing check needs
+/// every tag instead. Text inside a raw block is emitted verbatim, so a
+/// binding written there binds nothing and must not be reported.
+fn tag_bodies(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut from = 0usize;
+
+    while let Some(at) = text[from..].find("{%") {
+        let start = from + at;
+        let after = &text[start + 2..];
+        // Unbalanced: `check_syntax` reports it properly, and guessing past it
+        // here would produce a second, worse diagnostic for one mistake.
+        let Some(end) = after.find("%}") else { break };
+        let body = after[..end].trim().trim_matches('-').trim();
+
+        if body == "raw" {
+            depth += 1;
+        } else if body == "endraw" {
+            depth = depth.saturating_sub(1);
+        } else if depth == 0 {
+            out.push(body.to_string());
+        }
+
+        from = start + 2 + end + 2;
+    }
+
+    out
+}
+
+/// The names a single tag body binds in the file's namespace.
+///
+/// Deliberately not covered:
+///
+/// - A macro's parameters. `{% macro badge(name) %}` shadowing a `name`
+///   question inside the macro body is exactly what the author means.
+/// - A target its own right-hand side mentions. `{% set x = x | default('a') %}`
+///   is the self-defaulting idiom; reporting it would make the rule unusable on
+///   the templates most likely to use it.
+///
+/// Anything that is not identifier-shaped yields nothing — `{% set ns.x = 1 %}`
+/// assigns through a namespace and binds no root name, and a malformed body is
+/// `check_syntax`'s to report.
+fn bound_names(body: &str) -> Vec<String> {
+    let (keyword, rest) = body.split_once(char::is_whitespace).unwrap_or((body, ""));
+    let rest = rest.trim();
+
+    match keyword {
+        // `import "m.jinja" as alias [with context]`
+        "import" => strip_context(rest)
+            .rsplit_once(" as ")
+            .and_then(|(_, alias)| identifier(alias.trim()))
+            .into_iter()
+            .collect(),
+        // `from "m.jinja" import a, b as c [with context]`
+        "from" => strip_context(rest)
+            .split_once(" import ")
+            .map(|(_, names)| {
+                names
+                    .split(',')
+                    .filter_map(|item| {
+                        let item = item.trim();
+                        identifier(
+                            item.rsplit_once(" as ")
+                                .map_or(item, |(_, alias)| alias)
+                                .trim(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        // `set a, b = expr`, the block form `set content`, or `with` — which
+        // additionally allows `a = 1, (b, c) = [2, 3]`: several assignments,
+        // each possibly unpacking a tuple, comma-separated. The comma between
+        // assignments must not be confused with a comma inside a literal on
+        // either side, e.g. `set a = [1, 2], b = 3` — hence the depth-aware
+        // split rather than a plain `rest.split(',')`.
+        "set" | "with" => split_top_level(rest, ',')
+            .into_iter()
+            .flat_map(|clause| match clause.split_once('=') {
+                Some((target, expression)) => target_names(target)
+                    .into_iter()
+                    .filter(|name| !mentions(expression, name))
+                    .collect(),
+                // The block form, `{% set content %}...{% endset %}`: no
+                // right-hand side on this line to check against.
+                None => target_names(clause),
+            })
+            .collect(),
+        // `for k, v in expr [if ...] [recursive]`, target possibly `(k, v)`.
+        "for" => rest
+            .split_once(" in ")
+            .map(|(targets, _)| target_names(targets))
+            .unwrap_or_default(),
+        // The name only; see the note above about parameters.
+        "macro" => identifier(rest.split('(').next().unwrap_or("").trim())
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Drop a trailing `with context` or `without context` from an import body.
+fn strip_context(rest: &str) -> &str {
+    for suffix in ["with context", "without context"] {
+        if let Some(head) = rest.strip_suffix(suffix) {
+            return head.trim_end();
+        }
+    }
+    rest
+}
+
+/// Split `text` on `sep`, but not inside `()`, `[]` or `{}`.
+///
+/// `set a = [1, 2], b = 3` has one assignment-separating comma and one that
+/// belongs to the list literal; only depth tracking tells them apart.
+fn split_top_level(text: &str, sep: char) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, c) in text.char_indices() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            c if c == sep && depth == 0 => {
+                out.push(text[start..i].trim());
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    out.push(text[start..].trim());
+    out
+}
+
+/// The identifiers a `set`/`with`/`for` target names, tuple unpacking included.
+///
+/// `(a, b, (c,))` and `a, b` both yield `["a", "b", "c"]`: parentheses only
+/// group, so stripping them and splitting on comma finds every leaf name
+/// without needing to track nesting.
+fn target_names(target: &str) -> Vec<String> {
+    target
+        .chars()
+        .filter(|c| !matches!(c, '(' | ')' | '[' | ']'))
+        .collect::<String>()
+        .split(',')
+        .filter_map(|token| identifier(token.trim()))
+        .collect()
+}
+
+/// A token usable as a variable name, or `None`.
+fn identifier(token: &str) -> Option<String> {
+    let mut chars = token.chars();
+    let first = chars.next()?;
+    (first.is_alphabetic() || first == '_')
+        .then(|| token.to_string())
+        .filter(|_| chars.all(|c| c.is_alphanumeric() || c == '_'))
+}
+
+/// Whether an expression uses `name` as a whole word.
+///
+/// A substring match would let `{% set stack = stackless %}` pass as the
+/// self-defaulting idiom, which it is not.
+fn mentions(expression: &str, name: &str) -> bool {
+    expression
+        .split(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .any(|token| token == name)
+}
+
 /// Two template files that can render to one path.
 ///
 /// The renderer catches this, but only for the answer set it was given. Here it
@@ -980,6 +1207,149 @@ mod tests {
         let partials = crate::eval::no_partials();
         let findings = check_syntax("broken.jinja", "{% if x %}unterminated\n", partials);
         assert_eq!(codes(&findings), ["tpl::lint::syntax"]);
+    }
+
+    // The bug report itself: an import alias silently replaces a question, and
+    // every comparison against it stops meaning anything.
+    #[test]
+    fn an_import_alias_matching_a_question_is_shadowed() {
+        let manifest = manifest_with(
+            "[questions.stack]\ntype = \"choice\"\nchoices = [\"a\", \"b\"]\ndefault = \"b\"\n",
+        );
+        let text = r#"{%- import "macros/m.jinja" as stack -%}"#;
+        let findings = check_shadowed_names("a.txt.jinja", text, &manifest);
+        assert_eq!(codes(&findings), ["tpl::lint::shadowed_name"]);
+        assert!(findings[0].message.contains("stack"));
+        assert!(findings[0].message.contains("a question"));
+    }
+
+    #[test]
+    fn a_from_import_alias_matching_a_computed_value_is_shadowed() {
+        let manifest = manifest_with("[computed]\nslug = \"'x'\"\n");
+        let text = r#"{% from "m.jinja" import name as slug %}"#;
+        let findings = check_shadowed_names("a.jinja", text, &manifest);
+        assert_eq!(codes(&findings), ["tpl::lint::shadowed_name"]);
+        assert!(findings[0].message.contains("a computed value"));
+    }
+
+    #[test]
+    fn an_alias_that_names_nothing_declared_is_not_flagged() {
+        let manifest = manifest_with(
+            "[questions.stack]\ntype = \"choice\"\nchoices = [\"a\", \"b\"]\ndefault = \"b\"\n",
+        );
+        let text = r#"{% import "macros/m.jinja" as helpers %}"#;
+        assert!(check_shadowed_names("a.jinja", text, &manifest).is_empty());
+    }
+
+    // A macro's own parameters are meant to be used as local names inside its
+    // body; that is what a parameter is for, not a collision.
+    #[test]
+    fn a_macro_parameter_matching_a_question_is_not_flagged() {
+        let manifest = manifest_with("[questions.name]\ntype = \"string\"\ndefault = \"x\"\n");
+        let text = "{% macro badge(name) %}{{ name }}{% endmacro %}";
+        assert!(check_shadowed_names("a.jinja", text, &manifest).is_empty());
+    }
+
+    // The macro's own name is still a binding in the file's namespace, and can
+    // still collide.
+    #[test]
+    fn a_macro_name_matching_a_question_is_shadowed() {
+        let manifest = manifest_with("[questions.badge]\ntype = \"string\"\ndefault = \"x\"\n");
+        let text = "{% macro badge() %}{% endmacro %}";
+        assert_eq!(
+            codes(&check_shadowed_names("a.jinja", text, &manifest)),
+            ["tpl::lint::shadowed_name"]
+        );
+    }
+
+    // The self-defaulting idiom: a target that reuses its own name on the
+    // right-hand side is deliberate, and flagging it would make the rule
+    // unusable on the templates that rely on it.
+    #[test]
+    fn a_set_that_defaults_from_itself_is_not_flagged() {
+        let manifest = manifest_with("[questions.stack]\ntype = \"string\"\ndefault = \"x\"\n");
+        let text = "{% set stack = stack | default('x') %}";
+        assert!(check_shadowed_names("a.jinja", text, &manifest).is_empty());
+    }
+
+    #[test]
+    fn a_set_that_does_not_reuse_its_own_name_is_flagged() {
+        let manifest = manifest_with("[questions.stack]\ntype = \"string\"\ndefault = \"x\"\n");
+        let text = "{% set stack = 'b' %}";
+        assert_eq!(
+            codes(&check_shadowed_names("a.jinja", text, &manifest)),
+            ["tpl::lint::shadowed_name"]
+        );
+    }
+
+    #[test]
+    fn a_for_loop_target_matching_a_question_is_shadowed() {
+        let manifest = manifest_with("[questions.stack]\ntype = \"string\"\ndefault = \"x\"\n");
+        let text = "{% for stack in items %}{{ stack }}{% endfor %}";
+        assert_eq!(
+            codes(&check_shadowed_names("a.jinja", text, &manifest)),
+            ["tpl::lint::shadowed_name"]
+        );
+    }
+
+    // Bound inside a raw block, which is emitted verbatim: it binds nothing.
+    #[test]
+    fn a_binding_inside_a_raw_block_is_not_flagged() {
+        let manifest = manifest_with(
+            "[questions.stack]\ntype = \"choice\"\nchoices = [\"a\", \"b\"]\ndefault = \"b\"\n",
+        );
+        let text = r#"{% raw %}{% import "m.jinja" as stack %}{% endraw %}"#;
+        assert!(check_shadowed_names("a.jinja", text, &manifest).is_empty());
+    }
+
+    // A name bound twice is one mistake; the second report would say nothing
+    // the first did not.
+    #[test]
+    fn the_same_name_shadowed_twice_is_reported_once() {
+        let manifest = manifest_with("[questions.stack]\ntype = \"string\"\ndefault = \"x\"\n");
+        let text = "{% set stack = 'a' %}{% set stack = 'b' %}";
+        assert_eq!(
+            codes(&check_shadowed_names("a.jinja", text, &manifest)),
+            ["tpl::lint::shadowed_name"]
+        );
+    }
+
+    #[rstest]
+    // A plain alias.
+    #[case("import \"m.jinja\" as stack", &["stack"])]
+    // `with context` is not part of the alias.
+    #[case("import \"m.jinja\" as stack with context", &["stack"])]
+    #[case("from \"m.jinja\" import a, b as c", &["a", "c"])]
+    // Multiple assignments in one `with`, comma-separated.
+    #[case("with a = foo, b = bar", &["a", "b"])]
+    // A list literal's comma must not be read as a second assignment.
+    #[case("set a = [1, 2], b = 3", &["a", "b"])]
+    // Tuple unpacking.
+    #[case("with (a, b) = pair", &["a", "b"])]
+    #[case("for k, v in items.items()", &["k", "v"])]
+    // The block form: no right-hand side on this line at all.
+    #[case("set content", &["content"])]
+    #[case("macro badge(name)", &["badge"])]
+    // A macro's parameters are not bindings this rule reports.
+    #[case("macro badge(name, size)", &["badge"])]
+    // Assigning through a namespace binds no root name.
+    #[case("set ns.x = 1", &[] as &[&str])]
+    fn bound_names_reads_every_construct(#[case] tag: &str, #[case] expected: &[&str]) {
+        assert_eq!(bound_names(tag), expected);
+    }
+
+    #[rstest]
+    #[case("set x = x | default('a')", &[] as &[&str])]
+    // Only the reused target is excluded; an unrelated second target is not.
+    #[case("with x = x, y = 1", &["y"])]
+    fn a_target_reusing_its_own_name_is_excluded(#[case] tag: &str, #[case] expected: &[&str]) {
+        assert_eq!(bound_names(tag), expected);
+    }
+
+    #[test]
+    fn tag_bodies_skips_a_raw_block_and_finds_what_follows() {
+        let text = "{% raw %}{% import \"m.jinja\" as x %}{% endraw %}{% set y = 1 %}";
+        assert_eq!(tag_bodies(text), vec!["set y = 1"]);
     }
 
     fn entry(path: &str) -> TreeEntry {
