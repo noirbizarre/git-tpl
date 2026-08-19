@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1](https://github.com/noirbizarre/git-tpl/compare/0.7.0..0.7.1) - 2026-08-19
+
+### 🧪 Tests
+
+- Adopt std::assert_matches! for structural assertions - ([16866ea](https://github.com/noirbizarre/git-tpl/commit/16866ea7dc757891cc339cc67d46026d1b22d7b4))
+
+### 🧹 Chores
+
+- Raise the MSRV to Rust 1.96 - ([80dde48](https://github.com/noirbizarre/git-tpl/commit/80dde482ab3f4d6d98d7d89c1be526560d1a9d4b))
+
 ## [0.7.0](https://github.com/noirbizarre/git-tpl/compare/0.6.0..0.7.0) - 2026-08-19
 
 ### 💫 Features
@@ -18,6 +28,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### 🐛 Bug Fixes
 
 - **backport** Describe the revision through describe_revision - ([8017fd9](https://github.com/noirbizarre/git-tpl/commit/8017fd9c12cdb6916d72ce0ac1e3e4a52f29803d))
+- **lint** Recognise raw blocks with trailing whitespace control ([#98](https://github.com/noirbizarre/git-tpl/issues/98)) - ([d14ffdd](https://github.com/noirbizarre/git-tpl/commit/d14ffddbd866b1808f75ed7c347ede672538d2a5))
 - **lint** Report a binding that shadows a question or computed name ([#94](https://github.com/noirbizarre/git-tpl/issues/94)) - ([725b819](https://github.com/noirbizarre/git-tpl/commit/725b819e119ec5c3682d31d20b42ae69606e928f))
 - **lint** Warn on a top-level manifest key absorbed by a table ([#93](https://github.com/noirbizarre/git-tpl/issues/93)) - ([d2fb940](https://github.com/noirbizarre/git-tpl/commit/d2fb9409c4131541e284d4686e412dbcfa994c10))
 - **render** Report output write failures as tpl::ops::write_failed - ([38fdd6c](https://github.com/noirbizarre/git-tpl/commit/38fdd6c7a06bdcc29a7a579e79975c4da6c47356))
