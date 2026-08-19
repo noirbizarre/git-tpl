@@ -81,6 +81,34 @@ A warning, because that is still the default. Set `strict = true` in
 Names that came from a `${{ … }}` are not reported: `matrix` belongs to GitHub
 Actions, and advising an author to declare it would be advice not to take.
 
+### Absorbed keys — `tpl::lint::absorbed_key`
+
+In TOML a bare key belongs to the table that most recently opened. So a
+top-level manifest key written below a table header is that table's:
+
+```toml
+name = "probe"
+
+[computed]
+package = "{{ name | lower }}"
+note_file = "NOTE.md"        # a computed value called `note_file`
+```
+
+The manifest is valid TOML, it loads without complaint, and the note never
+appears — `note_file` was never set. Below `[remotes]` the same line adds a Git
+remote called `note_file` at `init`, pointing at `NOTE.md`.
+
+Nothing else can catch this. By the time the manifest is deserialised the key
+is gone, and a template that declared no note looks exactly the same, so this
+rule reads the manifest source rather than the parsed manifest.
+
+The fix is to move the key above the first table header. A warning rather than
+an error, because a computed value or a remote genuinely named `name` is
+conceivable — `--allow tpl::lint::absorbed_key` for a template that means it.
+
+Keys whose value is a table are not reported: `[data.note_file]` is a data
+source that happens to be called `note_file`, not an absorbed key.
+
 ## Options
 
 | Flag | Effect |

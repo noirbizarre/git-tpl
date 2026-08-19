@@ -18,6 +18,26 @@ pub const MANIFEST_NAME: &str = "template.toml";
 /// README, LICENSE and CI without them being rendered into every project.
 pub const DEFAULT_ROOT: &str = "template";
 
+/// Every key `template.toml` accepts at the top level, sorted.
+///
+/// Exists so `lint` can name the keys a table header can silently absorb —
+/// in TOML a bare key written after `[computed]` belongs to it — without
+/// keeping a second copy of the schema. Pinned to [`Manifest`] by
+/// `the_top_level_key_list_matches_the_schema`, so a new field fails a test
+/// rather than quietly leaving the rule half blind.
+pub const TOP_LEVEL_KEYS: &[&str] = &[
+    "computed",
+    "data",
+    "description",
+    "name",
+    "note",
+    "note_file",
+    "questions",
+    "remotes",
+    "root",
+    "strict",
+];
+
 /// Errors from loading a manifest.
 #[derive(Debug, Error, Diagnostic)]
 pub enum ManifestError {
@@ -584,6 +604,50 @@ mod tests {
         let manifest = Manifest::parse(FULL, MANIFEST_NAME).unwrap();
         let names: Vec<_> = manifest.questions.keys().cloned().collect();
         assert_eq!(names, ["project_name", "license", "ci", "cli"]);
+    }
+
+    /// `lint` reads the raw TOML to catch a top-level key absorbed by a table,
+    /// and needs to know which names those are. This is what stops that list
+    /// from drifting from the struct: a new field lands here first.
+    #[test]
+    fn the_top_level_key_list_matches_the_schema() {
+        // Every optional field populated, because `skip_serializing_if` would
+        // otherwise hide exactly the keys the list is meant to name.
+        let manifest = Manifest {
+            name: "x".into(),
+            description: Some("d".into()),
+            root: "template".into(),
+            strict: Some(true),
+            data: BTreeMap::from([(
+                "things".to_string(),
+                DataSourceDecl {
+                    source: "data/things.toml".into(),
+                    kind: None,
+                    reference: None,
+                    path: None,
+                    format: None,
+                    sha256: None,
+                },
+            )]),
+            questions: IndexMap::new(),
+            computed: IndexMap::from([("c".to_string(), Value::String("{{ 1 }}".into()))]),
+            note: Some("n".into()),
+            note_file: None,
+            remotes: IndexMap::from([(
+                "origin".to_string(),
+                "git@example.com:a/b.git".to_string(),
+            )]),
+        };
+
+        let serialized =
+            toml::Table::try_from(&manifest).expect("a manifest serializes to a table");
+        let mut keys: Vec<&str> = serialized.keys().map(String::as_str).collect();
+        // `note` and `note_file` are mutually exclusive, so no single value can
+        // carry both; the absent one is added back rather than dropped.
+        keys.push("note_file");
+        keys.sort_unstable();
+
+        assert_eq!(keys, TOP_LEVEL_KEYS);
     }
 
     #[test]

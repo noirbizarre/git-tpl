@@ -129,6 +129,72 @@ default = true
     assert!(codes(&output).is_empty(), "{:?}", codes(&output));
 }
 
+/// The whole failure in one manifest: `note_file` below `[computed]` is a
+/// computed value, so the note never appears and nothing says so. Invisible
+/// after deserialisation — `note_file` is simply `None` — which is why the
+/// rule reads the manifest source.
+#[test]
+fn a_top_level_key_written_after_a_table_is_a_warning() {
+    let world = World::with_shared_template(
+        r#"
+name = "probe"
+
+[computed]
+x = "{{ 'y' }}"
+note_file = "NOTE.md"
+"#,
+        &[("file.txt", "hello\n")],
+        &[("NOTE.md", "NOTE BODY\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert_eq!(codes(&output), ["tpl::lint::absorbed_key"]);
+    assert_eq!(output.json()["warnings"], 1);
+}
+
+/// The other half of the report: below `[remotes]` the same line adds a Git
+/// remote called `note_file` at `init`.
+#[test]
+fn a_top_level_key_written_after_remotes_is_a_warning() {
+    let world = World::with_shared_template(
+        r#"
+name = "probe"
+
+[remotes]
+origin = "git@example.com:a/b.git"
+note_file = "NOTE.md"
+"#,
+        &[("file.txt", "hello\n")],
+        &[("NOTE.md", "NOTE BODY\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert_eq!(codes(&output), ["tpl::lint::absorbed_key"]);
+}
+
+/// The control: written above the first table header, the same manifest is
+/// what its author meant and reports nothing.
+#[test]
+fn a_top_level_key_above_the_first_table_is_not_flagged() {
+    let world = World::with_shared_template(
+        r#"
+name = "probe"
+note_file = "NOTE.md"
+
+[computed]
+x = "{{ 'y' }}"
+"#,
+        &[("file.txt", "hello\n")],
+        &[("NOTE.md", "NOTE BODY\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
 /// A syntax error in a branch no answer set reaches is still a syntax error.
 /// Rendering only ever proves the branch it took.
 #[test]
