@@ -12,7 +12,7 @@ edition = "2024"
 # The MSRV. Checked by a dedicated CI job, which greps this very line — keep it
 # a plain literal. `rust-toolchain.toml` separately pins the channel to develop
 # against; the two answer different questions.
-rust-version = "1.88"
+rust-version = "1.96"
 license = "MIT"
 authors = ["Axel H. <noirbizarre@gmail.com>"]
 description = "Git-native project templates"
