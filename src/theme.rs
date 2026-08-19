@@ -3,7 +3,7 @@
 //! Every function here returns a `String` rather than printing. That keeps the
 //! formatting testable without capturing stdout, and keeps the decision about
 //! *where* output goes with the caller — human output goes to stderr, so
-//! `--format json` leaves stdout machine-readable.
+//! `--json` leaves stdout machine-readable.
 
 use console::Style;
 

@@ -4,8 +4,8 @@ use tpl::gitconfig::Preferences;
 use tpl::ops::{self, OpError};
 
 use super::Session;
-use crate::cli::{Format, GlobalArgs, StatusArgs};
-use crate::theme::{command, field, transition, warning};
+use crate::cli::{GlobalArgs, StatusArgs};
+use crate::theme::{command, field, transition};
 
 pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -16,16 +16,7 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let preferences = Preferences::load(&ctx.repo)?;
     let status = ops::status(&ctx.repo, &ctx.root, &preferences, args.dirty)?;
 
-    let deprecated_json = args.format == Some(Format::Json);
-    if args.format.is_some() {
-        // stderr, so it cannot corrupt the JSON the caller came for.
-        ctx.out.warn(warning(
-            &ctx.out.theme,
-            "`--format` is deprecated and will be removed; use `--json`",
-        ));
-    }
-
-    if global.json || deprecated_json {
+    if global.json {
         println!("{}", crate::report::success(json(&status)));
     } else {
         print_text(&ctx, &status);

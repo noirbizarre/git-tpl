@@ -482,24 +482,6 @@ pub struct StatusArgs {
     /// Compare against the template's working tree rather than its HEAD
     #[arg(long)]
     pub dirty: bool,
-
-    // Deprecated: use the global `--json`.
-    //
-    // Kept for one minor so that a CI job pinned to `--format json` does not
-    // break on upgrade without being told why. It is hidden, so it stops being
-    // discoverable immediately, and it warns on stderr when used.
-    #[arg(long, value_enum, hide = true)]
-    pub format: Option<Format>,
-}
-
-/// Output format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-#[value(rename_all = "lower")]
-pub enum Format {
-    /// Human-readable.
-    Text,
-    /// JSON.
-    Json,
 }
 
 /// `git tpl diff`

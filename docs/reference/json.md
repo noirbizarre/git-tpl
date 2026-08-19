@@ -146,8 +146,8 @@ With `--eval`:
 
 ### `status`
 
-Documented in [status](../usage/status.md). `--format json` is deprecated in
-favour of `--json`; it still works, and warns, until it is removed in 0.7.
+Documented in [status](../usage/status.md). `--json` is the only spelling:
+the `--format json` it replaced was removed in 0.7.
 
 ### `diff`
 
