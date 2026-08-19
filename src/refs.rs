@@ -310,18 +310,18 @@ mod tests {
     #[case("a..b")]
     #[case("")]
     fn an_unusable_explicit_id_is_rejected(#[case] id: &str) {
-        assert!(matches!(
+        std::assert_matches!(
             TemplateId::explicit(id),
             Err(TemplateIdError::Invalid { .. })
-        ));
+        );
     }
 
     #[test]
     fn a_source_with_nothing_sluggable_is_rejected() {
-        assert!(matches!(
+        std::assert_matches!(
             TemplateId::derive("///"),
             Err(TemplateIdError::Underivable { .. })
-        ));
+        );
     }
 
     #[test]

@@ -1219,10 +1219,7 @@ mod tests {
             Some(&Value::Integer(30))
         );
         assert_eq!(value.get_path("versions.strict"), Some(&Value::Bool(true)));
-        assert!(matches!(
-            value.get_path("versions.rust"),
-            Some(Value::Array(_))
-        ));
+        std::assert_matches!(value.get_path("versions.rust"), Some(Value::Array(_)));
     }
 
     #[test]

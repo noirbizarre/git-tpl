@@ -515,10 +515,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            matches!(error, RenderError::EscapesTree { .. }),
-            "{error:?}"
-        );
+        std::assert_matches!(error, RenderError::EscapesTree { .. }, "{error:?}");
     }
 
     #[test]
@@ -536,10 +533,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            matches!(error, RenderError::EscapesTree { .. }),
-            "{error:?}"
-        );
+        std::assert_matches!(error, RenderError::EscapesTree { .. }, "{error:?}");
     }
 
     /// Rendering a PNG would corrupt it, and the corruption would be silent.
@@ -639,7 +633,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, RenderError::Collision { .. }), "{error:?}");
+        std::assert_matches!(error, RenderError::Collision { .. }, "{error:?}");
     }
 
     #[test]
@@ -902,10 +896,10 @@ mod tests {
 
         let error = collect_partials(&f.repo, tree, "template").unwrap_err();
 
-        assert!(matches!(
+        std::assert_matches!(
             error,
             RenderError::PartialNotUtf8 { ref path } if path == "macros.jinja"
-        ));
+        );
     }
 
     /// Invariant 2. A loader is a new source of inputs, so it gets its own

@@ -247,8 +247,9 @@ mod tests {
         let Some(Value::Table(a)) = both.get("a") else {
             panic!("expected an `a` table");
         };
-        assert!(
-            matches!(a.get("b"), Some(Value::Table(_))),
+        std::assert_matches!(
+            a.get("b"),
+            Some(Value::Table(_)),
             "the branch should have won, got {:?}",
             a.get("b")
         );
@@ -259,7 +260,7 @@ mod tests {
         let Some(Value::Table(a)) = reversed.get("a") else {
             panic!("expected an `a` table");
         };
-        assert!(matches!(a.get("b"), Some(Value::Table(_))));
+        std::assert_matches!(a.get("b"), Some(Value::Table(_)));
     }
 
     /// The whole point of the eager tree: a miss must be undefined, or

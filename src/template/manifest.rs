@@ -722,10 +722,10 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(
+        std::assert_matches!(
             error,
             ManifestError::NameCollision { ref name } if name == "package_name"
-        ));
+        );
     }
 
     #[test]
@@ -735,7 +735,7 @@ mod tests {
             MANIFEST_NAME,
         )
         .unwrap_err();
-        assert!(matches!(error, ManifestError::InvalidQuestion { .. }));
+        std::assert_matches!(error, ManifestError::InvalidQuestion { .. });
     }
 
     #[test]
@@ -751,7 +751,7 @@ mod tests {
             MANIFEST_NAME,
         )
         .unwrap_err();
-        assert!(matches!(error, ManifestError::InvalidQuestion { .. }));
+        std::assert_matches!(error, ManifestError::InvalidQuestion { .. });
     }
 
     #[test]
@@ -766,7 +766,7 @@ mod tests {
             MANIFEST_NAME,
         )
         .unwrap_err();
-        assert!(matches!(error, ManifestError::InvalidQuestion { .. }));
+        std::assert_matches!(error, ManifestError::InvalidQuestion { .. });
     }
 
     /// A dynamic list that resolves to nothing skips the question, but a
@@ -783,10 +783,10 @@ mod tests {
             MANIFEST_NAME,
         )
         .unwrap_err();
-        assert!(matches!(
+        std::assert_matches!(
             error,
             ManifestError::InvalidQuestion { ref reason, .. } if reason.contains("empty")
-        ));
+        );
     }
 
     #[test]
@@ -848,7 +848,7 @@ mod tests {
             MANIFEST_NAME,
         )
         .unwrap_err();
-        assert!(matches!(error, ManifestError::Parse { .. }));
+        std::assert_matches!(error, ManifestError::Parse { .. });
     }
 
     /// A prompt seed is read from the machine, so the only source is the one
@@ -1107,7 +1107,7 @@ mod tests {
     #[test]
     fn a_missing_name_is_a_parse_error() {
         let error = Manifest::parse("description = \"x\"", MANIFEST_NAME).unwrap_err();
-        assert!(matches!(error, ManifestError::Parse { .. }));
+        std::assert_matches!(error, ManifestError::Parse { .. });
     }
 
     /// The template's revision is deliberately absent: a file rendering its own
@@ -1145,7 +1145,7 @@ mod tests {
             MANIFEST_NAME,
         )
         .unwrap_err();
-        assert!(matches!(error, ManifestError::ConflictingNote));
+        std::assert_matches!(error, ManifestError::ConflictingNote);
     }
 
     #[test]

@@ -1197,8 +1197,9 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            matches!(error, EvalError::Unanswered { ref question } if question == "project_name"),
+        std::assert_matches!(
+            error,
+            EvalError::Unanswered { ref question } if question == "project_name",
             "{error:?}"
         );
     }
@@ -1216,10 +1217,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            matches!(error, EvalError::InvalidChoice { .. }),
-            "{error:?}"
-        );
+        std::assert_matches!(error, EvalError::InvalidChoice { .. }, "{error:?}");
     }
 
     /// The rejection has to name the values, not the labels: a value is what
@@ -1285,10 +1283,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            matches!(error, EvalError::InvalidChoice { .. }),
-            "{error:?}"
-        );
+        std::assert_matches!(error, EvalError::InvalidChoice { .. }, "{error:?}");
     }
 
     /// Every element is checked, not just the array as a whole.
@@ -1500,7 +1495,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, EvalError::WrongType { .. }), "{error:?}");
+        std::assert_matches!(error, EvalError::WrongType { .. }, "{error:?}");
     }
 
     /// `--answer ci=true` arrives as text and must become a boolean.

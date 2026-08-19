@@ -1452,10 +1452,7 @@ mod tests {
             None,
         )
         .unwrap_err();
-        assert!(matches!(
-            error,
-            BackportError::SubstitutedRegion { line: 1, .. }
-        ));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { line: 1, .. });
     }
 
     #[test]
@@ -1554,10 +1551,7 @@ mod tests {
             None,
         )
         .unwrap_err();
-        assert!(matches!(
-            error,
-            BackportError::SubstitutedRegion { line: 2, .. }
-        ));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { line: 2, .. });
     }
 
     /// Source lines the rendering dropped after the last mapped line survive.
@@ -1636,10 +1630,7 @@ mod tests {
     fn replacing_the_value_itself_is_still_refused() {
         let context = answers(&[("name", "acme")]);
         let error = reverse("# {{ name }}\n", "# acme\n", "# widgets\n", &context).unwrap_err();
-        assert!(matches!(
-            error,
-            BackportError::SubstitutedRegion { line: 1, .. }
-        ));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { line: 1, .. });
     }
 
     /// The case ADR-020 says a substitution table cannot get right.
@@ -1672,7 +1663,7 @@ mod tests {
             &context,
         )
         .unwrap_err();
-        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { .. });
     }
 
     /// The patch that round-trips and is still wrong.
@@ -1690,7 +1681,7 @@ mod tests {
             &context,
         )
         .unwrap_err();
-        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { .. });
     }
 
     /// A value rendering to nothing has a zero-width range, which the
@@ -1705,7 +1696,7 @@ mod tests {
             &context,
         )
         .unwrap_err();
-        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { .. });
     }
 
     /// A loop body has no line-local provenance: the source line renders
@@ -1720,7 +1711,7 @@ mod tests {
             &context,
         )
         .unwrap_err();
-        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { .. });
     }
 
     /// Two placeholders on a line, and an edit between them.
@@ -1758,7 +1749,7 @@ mod tests {
     fn a_line_with_whitespace_control_is_refused() {
         let context = answers(&[("name", "acme")]);
         let error = reverse("x {{- name }} y\n", "xacme y\n", "xacme z\n", &context).unwrap_err();
-        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { .. });
     }
 
     /// Off by default: nothing changes for a caller that does not opt in.
@@ -1773,10 +1764,7 @@ mod tests {
             None,
         )
         .unwrap_err();
-        assert!(matches!(
-            error,
-            BackportError::SubstitutedRegion { line: 1, .. }
-        ));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { line: 1, .. });
     }
 
     /// A gate that answers the same way every time, and counts.
@@ -1840,10 +1828,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(
-            error,
-            BackportError::SubstitutedRegion { line: 2, .. }
-        ));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { line: 2, .. });
         assert_eq!(gate.asked, vec![2], "it kept asking after a refusal");
     }
 
@@ -1873,7 +1858,7 @@ mod tests {
             &context,
         )
         .unwrap_err();
-        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { .. });
     }
 
     /// One source line reproducing two rendered lines is a loop, and rewriting
@@ -1890,7 +1875,7 @@ mod tests {
             &context,
         )
         .unwrap_err();
-        assert!(matches!(error, BackportError::SubstitutedRegion { .. }));
+        std::assert_matches!(error, BackportError::SubstitutedRegion { .. });
     }
 
     /// A template beside its own project is `.`, not the empty string.

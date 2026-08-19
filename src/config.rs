@@ -300,7 +300,7 @@ mod tests {
     #[test]
     fn a_missing_source_is_a_parse_error_pointing_at_the_file() {
         let error = Config::parse("[template]\n", "test.toml").unwrap_err();
-        assert!(matches!(error, ConfigError::Parse { .. }));
+        std::assert_matches!(error, ConfigError::Parse { .. });
     }
 
     #[test]
