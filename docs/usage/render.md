@@ -59,6 +59,11 @@ edit-commit-and-see.
     can be the cause — which is why the omission is reported rather than left
     to be noticed. See [ADR-017](../adr/017-ignore-evaluation.md).
 
+    Only what a render reads is reported: the tree under `root`, the `.jinja`
+    partials outside it, and the files declared data sources name. A directory
+    beside `template.toml` is ignored quietly, because it was never a candidate
+    for the rendering in the first place.
+
 Checking the *output* with the tools that understand it is the intended
 division of labour. git-tpl does not run anything over a rendering, and
 [will not](../adr/003-minijinja-only.md): your own CI does it better, and

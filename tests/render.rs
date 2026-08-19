@@ -723,3 +723,74 @@ fn an_ignored_directory_is_pruned_rather_than_descended_into() {
     assert!(!scratch.out().join("build/keep").exists());
     assert_eq!(scratch.read("sub/build"), "a file, not a directory\n");
 }
+
+/// The bug behind #83. `.opencode/` sits beside `template.toml`, not under
+/// `root`, so it could not have appeared in a rendering however it were
+/// ignored — and the rule hiding it is in the user's global config, where
+/// nothing in the template can reach it. Reporting it put a warning nothing
+/// could act on above the output of every run.
+#[test]
+fn an_ignored_path_outside_the_render_root_is_not_reported() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+    scratch.global_gitignore(".opencode/\n");
+
+    // Left uncommitted: `--dirty` reads the working tree, and this is the
+    // reported case exactly — a directory a tool created beside the template.
+    template.repo.write(".opencode/plans/one.md", "a plan\n");
+
+    let output = scratch
+        .run(&[
+            "--json",
+            "render",
+            &template.source(),
+            "--dirty",
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .success()
+        .silent_about("skipped by .gitignore");
+
+    let json = output.json();
+    let skipped = json["skippedByGitignore"].as_array().expect("skipped");
+    assert!(
+        skipped.is_empty(),
+        "warned about a path a render never reads: {skipped:?}"
+    );
+}
+
+/// The other half of #83: the scope is what a render *reads*, not what is
+/// under `root`. A partial lives outside the root by definition, and an
+/// ignored one changes what an `{% import %}` resolves to.
+#[test]
+fn an_ignored_partial_outside_the_render_root_is_reported() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+    scratch.global_gitignore("*.local.jinja\n");
+
+    template.repo.write(
+        "macros.local.jinja",
+        "{% macro greet() %}hi{% endmacro %}\n",
+    );
+    template.repo.commit_all("feat: a partial");
+
+    let output = scratch
+        .run(&[
+            "--json",
+            "render",
+            &template.source(),
+            "--dirty",
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .success();
+
+    let json = output.json();
+    let skipped = json["skippedByGitignore"].as_array().expect("skipped");
+    assert!(
+        skipped.iter().any(|p| p == "macros.local.jinja"),
+        "an absent partial went unexplained: {skipped:?}"
+    );
+}
