@@ -88,6 +88,24 @@ pub fn global_gitignore(config_home: &Path, rules: &str) {
     .expect("write global config");
 }
 
+/// Give libgit2's global config an identity, for `init --init`: the
+/// repository does not exist yet when the command starts, so there is no
+/// local config to set it on — as [`Repo::configure`] does for every other
+/// test — and `init` needs an identity to build the orphan commit's
+/// signature.
+///
+/// Same file `global_gitignore` writes to, and for the same reason: libgit2
+/// reads `<config_home>/git/config`, not `GIT_CONFIG_GLOBAL`.
+pub fn global_identity(config_home: &Path) {
+    let git = config_home.join("git");
+    std::fs::create_dir_all(&git).expect("create git config dir");
+    std::fs::write(
+        git.join("config"),
+        "[user]\n\tname = Test\n\temail = test@example.invalid\n",
+    )
+    .expect("write global config");
+}
+
 /// A Git repository under test.
 pub struct Repo {
     pub path: PathBuf,

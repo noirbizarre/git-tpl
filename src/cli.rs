@@ -128,6 +128,14 @@ pub struct InitArgs {
     /// The template — any Git URL, or a path
     pub template: String,
 
+    /// Where to render it — the current directory by default
+    ///
+    /// It must already be a Git repository, or be one after `--init`. Paths
+    /// given to `--answers-from`, and a template given as a path, stay
+    /// relative to the directory the command was run from.
+    #[arg(value_name = "DIR")]
+    pub directory: Option<PathBuf>,
+
     /// Branch, tag or commit to render
     #[arg(long, value_name = "REF")]
     pub r#ref: Option<String>,
@@ -154,7 +162,7 @@ pub struct InitArgs {
     #[arg(long)]
     pub no_merge: bool,
 
-    /// Create the repository if there is not one here
+    /// Create the directory and the repository if there is not one here
     #[arg(long)]
     pub init: bool,
 
@@ -805,5 +813,22 @@ mod tests {
     fn init_requires_a_template() {
         assert!(Cli::try_parse_from(["git-tpl", "init"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "init", "../tpl"]).is_ok());
+    }
+
+    #[test]
+    fn a_destination_directory_is_an_optional_second_positional() {
+        let cli = Cli::try_parse_from(["git-tpl", "init", "../tpl"]).unwrap();
+        match cli.command {
+            Command::Init(args) => assert_eq!(args.directory, None),
+            other => panic!("expected init, got {other:?}"),
+        }
+
+        let cli = Cli::try_parse_from(["git-tpl", "init", "../tpl", "my-project"]).unwrap();
+        match cli.command {
+            Command::Init(args) => {
+                assert_eq!(args.directory, Some(PathBuf::from("my-project")));
+            }
+            other => panic!("expected init, got {other:?}"),
+        }
     }
 }

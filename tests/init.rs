@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{World, tpl};
+use common::{World, global_identity, tpl, tpl_outside};
 
 #[test]
 fn init_renders_the_template_and_merges_it_into_the_branch() {
@@ -899,4 +899,197 @@ fn a_dry_run_marks_the_answers_already_supplied() {
         supplied.iter().any(|(_, supplied)| !supplied),
         "every question was reported as supplied: {supplied:?}"
     );
+}
+
+// --- an explicit destination (#84) ------------------------------------------
+
+/// The case #84 is about: `init <template> <dir>` renders into `dir` rather
+/// than requiring the caller to `cd` there first.
+#[test]
+fn a_destination_directory_is_rendered_into_instead_of_the_current_one() {
+    let world = World::new();
+    let source = world.template.source();
+    let destination = world.project.path.to_string_lossy().into_owned();
+
+    // Run from the workspace root, which is not itself a repository — only
+    // `destination` says where the project is.
+    tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        &["init", &source, &destination, "--defaults"],
+    )
+    .success();
+
+    assert!(world.project.has_ref(&world.ref_name()));
+    assert_eq!(
+        world.project.read("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nlicense = \"MIT\"\n"
+    );
+}
+
+/// `--init` now makes the directory as well as the repository, so
+/// `init <template> <dir> --init` works from nothing — `mkdir -p` and
+/// `git init` in one step.
+#[test]
+fn init_creates_the_destination_and_the_repository_when_asked() {
+    let world = World::new();
+    let source = world.template.source();
+    // Nested, to prove this is `mkdir -p` and not a single `mkdir`.
+    let destination = world.dir.path().join("fresh").join("my-project");
+    // The repository does not exist until `--init` creates it, so there is no
+    // local config to give it an identity — see `global_identity`.
+    global_identity(world.project.config_home());
+
+    tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        &[
+            "init",
+            &source,
+            &destination.to_string_lossy(),
+            "--defaults",
+            "--init",
+        ],
+    )
+    .success();
+
+    assert!(destination.join(".git").is_dir());
+    assert!(destination.join("Cargo.toml").exists());
+}
+
+/// Without `--init`, a missing destination is refused with the fix named —
+/// the diagnostic the clap "unexpected argument" error in #84 stood in for.
+#[test]
+fn a_missing_destination_says_how_to_create_it() {
+    let world = World::new();
+    let source = world.template.source();
+    let destination = world.dir.path().join("does-not-exist");
+
+    let output = tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        &[
+            "--json",
+            "init",
+            &source,
+            &destination.to_string_lossy(),
+            "--defaults",
+        ],
+    )
+    .failure();
+
+    assert_eq!(output.error_code(), "tpl::ops::no_such_directory");
+}
+
+/// A destination that exists but is not a repository, and was not asked to
+/// become one, fails the same way the current directory always has.
+#[test]
+fn a_destination_that_is_not_a_repository_says_so() {
+    let world = World::new();
+    let source = world.template.source();
+    let destination = world.dir.path().join("plain");
+    std::fs::create_dir_all(&destination).expect("create plain dir");
+
+    let output = tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        &[
+            "--json",
+            "init",
+            &source,
+            &destination.to_string_lossy(),
+            "--defaults",
+        ],
+    )
+    .failure();
+
+    assert_eq!(output.error_code(), "tpl::git::not_a_repository");
+}
+
+/// A destination below a repository's root discovers upward, exactly as
+/// running from a subdirectory of the current one always has — `init`
+/// renders at the repository's root either way.
+#[test]
+fn a_destination_inside_a_repository_renders_at_its_root() {
+    let world = World::new();
+    let source = world.template.source();
+    let subdir = world.project.path.join("src");
+    std::fs::create_dir_all(&subdir).expect("create subdir");
+
+    tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        &["init", &source, &subdir.to_string_lossy(), "--defaults"],
+    )
+    .success();
+
+    assert!(world.project.exists(".config/git.tpl.toml"));
+}
+
+/// The destination changes where the project is rendered, not where the
+/// command reads its other arguments from: a relative template path is
+/// resolved against the directory the command was typed in, never against
+/// the destination. Getting this wrong — by `chdir`-ing to the destination —
+/// would silently reinterpret `--answers-from` the same way.
+#[test]
+fn a_relative_template_path_stays_relative_to_the_current_directory() {
+    let world = World::new();
+    let destination = world.project.path.to_string_lossy().into_owned();
+
+    tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        // "template" only exists relative to `world.dir.path()`, the
+        // directory the command runs from — not relative to `destination`,
+        // a sibling of it.
+        &["init", "template", &destination, "--defaults"],
+    )
+    .success();
+
+    assert!(world.project.has_ref(&world.ref_name()));
+}
+
+/// A dry run creates nothing, so it must not require `--init` to have already
+/// made the destination a repository — it previews on the template alone.
+#[test]
+fn a_dry_run_against_a_destination_that_does_not_exist_creates_nothing() {
+    let world = World::new();
+    let source = world.template.source();
+    let destination = world.dir.path().join("not-yet");
+
+    tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        &[
+            "init",
+            &source,
+            &destination.to_string_lossy(),
+            "--defaults",
+            "--dry-run",
+        ],
+    )
+    .success();
+
+    assert!(!destination.exists(), "a dry run must create nothing");
+}
+
+/// `--init` with no destination argument: the existing single-directory form,
+/// which nothing in the suite exercised before this change.
+#[test]
+fn init_creates_the_repository_when_there_is_none() {
+    let world = World::new();
+    let source = world.template.source();
+    let bare = world.dir.path().join("bare-project");
+    std::fs::create_dir_all(&bare).expect("create bare dir");
+    global_identity(world.project.config_home());
+
+    tpl_outside(
+        &bare,
+        world.project.config_home(),
+        &["init", &source, "--defaults", "--init"],
+    )
+    .success();
+
+    assert!(bare.join(".git").is_dir());
+    assert!(bare.join("Cargo.toml").exists());
 }
