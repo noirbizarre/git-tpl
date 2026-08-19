@@ -92,4 +92,4 @@ What `{% import %}`/`{% from %}` does put in the file's own namespace — the
 alias itself — is checked, separately, by `tpl::lint::shadowed_name`: an alias
 that reuses a question or computed name shadows it, and no name is ever
 undefined, so the strict-undefined path above cannot catch it. See
-[`lint`](../usage/lint.md#shadowed-names--tpllintshadowed_name).
+[`lint`](../usage/lint.md#shadowed-names-tpllintshadowed_name).

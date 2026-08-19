@@ -75,7 +75,7 @@ All of these must be written **above the first table header**. In TOML a bare
 key belongs to the table that most recently opened, so a `note_file` written
 below `[computed]` is a computed value and the note never appears. The manifest
 stays valid and nothing fails, which is why
-[`git tpl lint`](../usage/lint.md#absorbed-keys--tpllintabsorbed_key) reports
+[`git tpl lint`](../usage/lint.md#absorbed-keys-tpllintabsorbed_key) reports
 it as `tpl::lint::absorbed_key`.
 
 The template **id** — which determines the ref name — is derived from the
