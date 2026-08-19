@@ -193,9 +193,17 @@ pub struct Manifest {
     #[serde(default)]
     pub questions: IndexMap<String, Question>,
 
-    /// Computed values, by name.
+    /// Computed values, by name. Each is an expression or a literal value.
+    ///
+    /// A `Value` rather than a `String` so that a constant shared between files
+    /// — `line_length = 100` — is written as itself. The same rule as a
+    /// question's `default`, and for the same reason: forcing `"{{ 100 }}"`
+    /// reads as a workaround because it is one. See [`computed_expression`].
+    ///
+    /// `IndexMap`, not `BTreeMap`: declaration order breaks ties in the
+    /// dependency sort.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub computed: IndexMap<String, String>,
+    pub computed: IndexMap<String, Value>,
 
     /// A note shown to the user once, after `init`. May be an expression.
     ///
@@ -448,6 +456,19 @@ impl Manifest {
     }
 }
 
+/// The expression source of a computed value, if it is one.
+///
+/// Only strings can be expressions; `line_length = 100` is a literal integer and
+/// must not be run through the template engine. A free function rather than a
+/// [`Value`] method because [`Value`] is also what a data source and an answer
+/// hold, where "is this an expression" has no meaning.
+pub fn computed_expression(value: &Value) -> Option<&str> {
+    match value {
+        Value::String(source) if is_expression(source) => Some(source),
+        _ => None,
+    }
+}
+
 /// The seed namespaces, as an English list for a diagnostic.
 fn namespace_list() -> String {
     crate::seed::NAMESPACES
@@ -575,6 +596,50 @@ mod tests {
     fn the_rendered_root_can_be_overridden() {
         let manifest = Manifest::parse("name = \"x\"\nroot = \"src\"", MANIFEST_NAME).unwrap();
         assert_eq!(manifest.root, "src");
+    }
+
+    /// A constant shared between files is written as itself. Requiring
+    /// `"{{ 100 }}"` for an integer read as a workaround because it was one.
+    #[test]
+    fn a_computed_value_may_be_a_literal() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+            [computed]
+            line_length = 100
+            strict = true
+            ratio = 1.5
+            editors = ["vim", "helix"]
+            title = "a plain string"
+            derived = "{{ line_length + 1 }}"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+
+        assert_eq!(
+            manifest.computed.get("line_length"),
+            Some(&Value::Integer(100))
+        );
+        assert_eq!(manifest.computed.get("strict"), Some(&Value::Bool(true)));
+        assert_eq!(manifest.computed.get("ratio"), Some(&Value::Float(1.5)));
+        assert_eq!(
+            manifest.computed.get("editors"),
+            Some(&Value::Array(vec![
+                Value::String("vim".into()),
+                Value::String("helix".into()),
+            ]))
+        );
+
+        // Only a string carrying MiniJinja syntax is an expression. Everything
+        // else, a plain string included, is a literal kept as written.
+        assert_eq!(computed_expression(&manifest.computed["line_length"]), None);
+        assert_eq!(computed_expression(&manifest.computed["editors"]), None);
+        assert_eq!(computed_expression(&manifest.computed["title"]), None);
+        assert_eq!(
+            computed_expression(&manifest.computed["derived"]),
+            Some("{{ line_length + 1 }}")
+        );
     }
 
     /// Answers and computed values share one namespace, so a collision would

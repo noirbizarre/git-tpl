@@ -335,6 +335,36 @@ package_name = "{{ 'y' }}"
     world.init(&[]).failure().says("package_name");
 }
 
+/// The reason literals are accepted: a constant shared by several rendered
+/// files, used as the number it is. Writing `"{{ 100 }}"` worked but read as a
+/// workaround, and the type error it replaced said nothing useful.
+#[test]
+fn a_literal_computed_value_reaches_the_template_as_its_toml_type() {
+    let world = World::with_template(
+        r#"
+name = "literal"
+[computed]
+line_length = 100
+"#,
+        &[(
+            "ruff.toml.jinja",
+            "line-length = {{ line_length }}\nhalf = {{ line_length // 2 }}\n",
+        )],
+    );
+
+    world.init(&[]).success();
+
+    let rendered = world.project.read("ruff.toml");
+    assert!(
+        rendered.contains("line-length = 100"),
+        "a literal integer must not be stringified:\n{rendered}"
+    );
+    assert!(
+        rendered.contains("half = 50"),
+        "arithmetic proves it arrived as a number:\n{rendered}"
+    );
+}
+
 #[test]
 fn a_question_with_no_default_and_no_answer_is_reported_under_defaults() {
     let world = World::with_template(

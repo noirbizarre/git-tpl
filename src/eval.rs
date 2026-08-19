@@ -16,7 +16,9 @@ use crate::context::Context;
 use crate::data::{DataError, Loader, Rendered};
 use crate::graph::{Graph, NodeKind};
 use crate::seed::SeedContext;
-use crate::template::{Choice, Manifest, Question, QuestionKind, Value, is_expression};
+use crate::template::{
+    Choice, Manifest, Question, QuestionKind, Value, computed_expression, is_expression,
+};
 
 /// Errors from evaluating a template.
 #[derive(Debug, Error, Diagnostic)]
@@ -254,15 +256,21 @@ pub fn resolve(
             }
 
             NodeKind::Computed => {
-                let Some(expression) = manifest.computed.get(&node.key) else {
+                let Some(declared) = manifest.computed.get(&node.key) else {
                     continue;
                 };
-                let value = evaluate(
-                    expression,
-                    &context,
-                    &format!("computed.{}", node.key),
-                    partials,
-                )?;
+                let value = match computed_expression(declared) {
+                    Some(expression) => evaluate(
+                        expression,
+                        &context,
+                        &format!("computed.{}", node.key),
+                        partials,
+                    )?,
+                    // A literal keeps its TOML type verbatim, exactly as a
+                    // question's literal default does: no engine, no round trip
+                    // through a string, so `line_length = 100` stays an integer.
+                    None => declared.clone(),
+                };
                 context.set_computed(&node.key, value);
             }
 
@@ -1607,6 +1615,45 @@ mod tests {
             context.get_path("keys"),
             Some(&Value::String("name,slug".into()))
         );
+    }
+
+    /// A literal must reach the context as itself. Round-tripping it through the
+    /// engine would turn `100` into `"100"`, which is exactly the bug that made
+    /// `"{{ 100 }}"` necessary in the first place.
+    #[test]
+    fn a_literal_computed_value_keeps_its_toml_type() {
+        let context = resolve_with(
+            r#"
+            name = "t"
+            [computed]
+            line_length = 100
+            strict = true
+            ratio = 1.5
+            editors = ["vim", "helix"]
+            title = "a plain string"
+            wrapped = "{{ line_length - 20 }}"
+            "#,
+            &[],
+        )
+        .unwrap();
+
+        assert_eq!(context.get_path("line_length"), Some(&Value::Integer(100)));
+        assert_eq!(context.get_path("strict"), Some(&Value::Bool(true)));
+        assert_eq!(context.get_path("ratio"), Some(&Value::Float(1.5)));
+        assert_eq!(
+            context.get_path("editors"),
+            Some(&Value::Array(vec![
+                Value::String("vim".into()),
+                Value::String("helix".into()),
+            ]))
+        );
+        assert_eq!(
+            context.get_path("title"),
+            Some(&Value::String("a plain string".into()))
+        );
+
+        // Arithmetic, not concatenation: proof the literal arrived as a number.
+        assert_eq!(context.get_path("wrapped"), Some(&Value::Integer(80)));
     }
 
     /// Only answers are recorded in `.config/git.tpl.toml`; computed values are

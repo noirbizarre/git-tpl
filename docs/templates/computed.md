@@ -9,7 +9,11 @@ expression in twelve files.
 package_name = "{{ project_name | lower | replace(' ', '-') }}"
 module_name = "{{ package_name | replace('-', '_') }}"
 year_range = "{{ start_year }}–{{ end_year }}"
+line_length = 100
 ```
+
+A value is an expression or a plain literal — see
+[Values, not strings](#values-not-strings).
 
 Computed values sit in the same namespace as answers, so a template reads them
 the same way:
@@ -78,7 +82,28 @@ with `crates/<computed>` pre-filled.
 
 ## Values, not strings
 
-An expression that produces a single value keeps that value's type:
+A computed value is an *expression* or a *literal*. The rule is the one a
+question's [`default`](questions.md#dynamic-defaults) already follows: a string
+containing `{{` or `{%` is an expression; **anything else is a literal, kept
+exactly as written**.
+
+So a shared constant is written as itself:
+
+```toml
+[computed]
+line_length = 100          # an integer
+strict = true              # a boolean
+editors = ["vim", "helix"] # a list
+```
+
+and reaches the template as that type, not as text:
+
+```jinja
+line-length = {{ line_length }}
+indent = {{ line_length // 4 }}
+```
+
+An expression that produces a single value keeps *its* value's type too:
 
 ```toml
 [computed]

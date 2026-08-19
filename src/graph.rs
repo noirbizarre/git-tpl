@@ -14,7 +14,7 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::context::{Name, Namespace};
-use crate::template::{Manifest, is_expression};
+use crate::template::{Manifest, computed_expression, is_expression};
 
 /// Errors from building or validating the graph.
 #[derive(Debug, Error, Diagnostic)]
@@ -194,9 +194,14 @@ impl Graph {
             edges.insert(node, deps);
         }
 
-        for (key, expression) in &manifest.computed {
+        for (key, declared) in &manifest.computed {
             let node = Name::computed(key);
-            let deps = references(expression, &format!("computed.{key}"), &known)?;
+            // A literal references nothing, and has no source to hand
+            // `references` — `line_length = 100` is not a string at all.
+            let deps = match computed_expression(declared) {
+                Some(expression) => references(expression, &format!("computed.{key}"), &known)?,
+                None => BTreeSet::new(),
+            };
             edges.entry(node).or_default().extend(deps);
         }
 
@@ -554,6 +559,39 @@ mod tests {
             keys(&graph),
             ["project_name", "package_name", "module_name"]
         );
+    }
+
+    /// A literal depends on nothing, so it sorts first and the values that read
+    /// it sort after — the same as any other computed value with no references.
+    #[test]
+    fn a_literal_computed_value_has_no_dependencies() {
+        let graph = graph(
+            r#"
+            name = "t"
+            [computed]
+            wrapped = "{{ line_length - 1 }}"
+            line_length = 100
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(keys(&graph), ["line_length", "wrapped"]);
+    }
+
+    /// `{{ … }}` inside a literal is text, not an expression. It must not be
+    /// parsed for references, or a template could not state a Jinja snippet.
+    #[test]
+    fn braces_inside_a_literal_computed_value_are_not_a_reference() {
+        let graph = graph(
+            r#"
+            name = "t"
+            [computed]
+            snippets = ["{{ nonexistent }}"]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(keys(&graph), ["snippets"]);
     }
 
     /// A data source must load before the question that draws its choices from

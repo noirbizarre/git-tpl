@@ -57,6 +57,7 @@ prompt = "Project name"
 
 [computed]
 package_name = "{{ project_name | lower | replace(' ', '-') }}"
+line_length = 100
 ```
 
 ### Top level
@@ -73,6 +74,9 @@ package_name = "{{ project_name | lower | replace(' ', '-') }}"
 The template **id** — which determines the ref name — is derived from the
 `source` the project records, not from `name`. See
 [Configuration](../configuration.md#template).
+
+Each entry in `[computed]` is an expression or a literal value: a string
+containing `{{` or `{%` is evaluated, anything else is kept as written.
 
 `[questions]`, `[computed]` and `[data]` are covered in
 [Questions](questions.md), [Computed values](computed.md) and
