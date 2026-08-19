@@ -709,7 +709,7 @@ fn find_tag(text: &str, tag: &str) -> Option<usize> {
         let start = from + at;
         let after = &text[start + 2..];
         let end = after.find("%}")?;
-        let inner = after[..end].trim().trim_start_matches('-').trim();
+        let inner = after[..end].trim().trim_matches('-').trim();
         if inner == tag {
             return Some(start);
         }
@@ -1166,6 +1166,56 @@ mod tests {
         let findings = check_foreign_expressions(
             "ci.yaml.jinja",
             "{% raw %}a: ${{ ok }}{% endraw %}\nb: {{ name }}\nc: ${{ leaked }}\n",
+        );
+        assert_eq!(codes(&findings), ["tpl::lint::foreign_expression"]);
+        assert!(findings[0].message.contains("leaked"));
+        assert!(
+            !findings[0].message.contains("ok"),
+            "the raw one was reported"
+        );
+    }
+
+    // #81: trailing whitespace control (`-%}`) puts the `-` inside the
+    // captured tag body. A scanner that only trims a leading `-` reads
+    // `raw -` instead of `raw`, misses the tag, and reports every expression
+    // in a block that in fact renders fine. This is the issue's own repro.
+    #[test]
+    fn trailing_whitespace_control_on_both_tags_is_a_raw_block() {
+        let findings = check_foreign_expressions(
+            "w.yaml.jinja",
+            "{%- raw -%}\nx: ${{ github.ref }}\n{%- endraw %}\n",
+        );
+        assert!(findings.is_empty());
+    }
+
+    // Trailing dash on the opening tag only.
+    #[test]
+    fn trailing_whitespace_control_on_the_open_tag_is_a_raw_block() {
+        let findings = check_foreign_expressions(
+            "ci.yaml.jinja",
+            "{% raw -%}\nruns-on: ${{ matrix.os }}\n{% endraw %}\n",
+        );
+        assert!(findings.is_empty());
+    }
+
+    // Trailing dash on the closing tag only.
+    #[test]
+    fn trailing_whitespace_control_on_the_close_tag_is_a_raw_block() {
+        let findings = check_foreign_expressions(
+            "ci.yaml.jinja",
+            "{%- raw %}\nruns-on: ${{ matrix.os }}\n{%- endraw -%}\n",
+        );
+        assert!(findings.is_empty());
+    }
+
+    // With whitespace control on every tag, `endraw` still has to be
+    // recognised as closing the block — otherwise `depth` never drops back
+    // to zero and everything after is (wrongly) treated as still raw.
+    #[test]
+    fn an_expression_after_a_fully_trimmed_raw_block_is_reported() {
+        let findings = check_foreign_expressions(
+            "ci.yaml.jinja",
+            "{%- raw -%}a: ${{ ok }}{%- endraw -%}\nb: {{ name }}\nc: ${{ leaked }}\n",
         );
         assert_eq!(codes(&findings), ["tpl::lint::foreign_expression"]);
         assert!(findings[0].message.contains("leaked"));
