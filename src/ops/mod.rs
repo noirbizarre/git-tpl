@@ -30,7 +30,7 @@ use crate::provenance::{Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
 use crate::render::{RenderError, Rendered, render_entries, write_tree};
 use crate::seed::SeedContext;
-use crate::template::{Manifest, Value};
+use crate::template::{MANIFEST_NAME, Manifest, Value};
 use crate::userconfig::UserConfig;
 
 pub use resolve::{Request, ResolveError, Resolved};
@@ -1578,9 +1578,21 @@ pub fn lint(request: Request<'_>) -> Result<Linted, OpError> {
     let repo_entries = template.repo.list_tree(template.tree)?;
     let partials = template.partials()?;
 
+    // The raw manifest, because a key absorbed by a preceding table header is
+    // gone once the manifest is deserialised. Read here rather than kept on
+    // `Resolved`, so `init`, `update` and `render` do not carry a `String`
+    // none of them reads. `resolve` has already failed if the path is absent,
+    // so the fallback is unreachable.
+    let manifest_bytes = template
+        .repo
+        .read_path(template.tree, MANIFEST_NAME)?
+        .unwrap_or_default();
+    let manifest_text = String::from_utf8_lossy(&manifest_bytes);
+
     let findings = crate::lint::lint(
         template.repo.as_ref(),
         &template.manifest,
+        &manifest_text,
         &entries,
         &repo_entries,
         &partials,

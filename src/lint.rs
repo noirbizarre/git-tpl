@@ -21,7 +21,7 @@ use crate::eval::{Partials, environment};
 use crate::git::{GitBackend, TreeEntry};
 use crate::graph::{Graph, GraphError};
 use crate::render::TEMPLATE_SUFFIX;
-use crate::template::Manifest;
+use crate::template::{MANIFEST_NAME, Manifest, TOP_LEVEL_KEYS};
 
 /// Every rule this module can report, sorted.
 ///
@@ -30,6 +30,7 @@ use crate::template::Manifest;
 /// registers itself here; `tests/diagnostics.rs` enforces that the set and the
 /// reference page agree.
 pub const CODES: &[&str] = &[
+    "tpl::lint::absorbed_key",
     "tpl::lint::collision",
     "tpl::lint::degenerate_path",
     "tpl::lint::foreign_expression",
@@ -291,9 +292,14 @@ fn check(spelling: &str) -> Result<Selector<'_>, LintError> {
 /// repository, flattened — a `note_file` and a partial live there rather than
 /// in the render root, and the two are different path namespaces. `partials`
 /// are the importable `.jinja` blobs from outside the root.
+///
+/// `manifest_text` is the raw `template.toml`. It is not redundant with
+/// `manifest`: a key absorbed by a preceding table header is gone by the time
+/// the manifest is deserialised, and only the source says it was ever written.
 pub fn lint(
     template: &dyn GitBackend,
     manifest: &Manifest,
+    manifest_text: &str,
     entries: &[TreeEntry],
     repo_entries: &[TreeEntry],
     partials: &std::sync::Arc<Partials>,
@@ -341,8 +347,77 @@ pub fn lint(
 
     findings.extend(check_path_collisions(entries));
     findings.extend(check_note_file(manifest, repo_entries));
+    findings.extend(check_absorbed_keys(manifest_text));
 
     Ok(findings)
+}
+
+/// A top-level key written after a table header, and so absorbed by it.
+///
+/// In TOML a bare key belongs to the table that most recently opened, so a
+/// `note_file = "NOTE.md"` written below `[computed]` is a computed value and
+/// below `[remotes]` is a Git remote. Both are valid TOML, both load without
+/// complaint, and both do something other than what was written — the note
+/// simply never appears, or a remote nobody asked for is added at `init`.
+///
+/// Invisible after deserialisation: `Manifest::note_file` is `None`, which is
+/// exactly what a template declaring no note looks like, so `missing_note_file`
+/// short-circuits. The raw source is the only place the mistake still exists.
+///
+/// A warning rather than an error, because a computed value or a remote
+/// genuinely named `name` is conceivable, if unlikely.
+fn check_absorbed_keys(text: &str) -> Vec<Finding> {
+    // A manifest that does not parse never reaches `lint`; if one somehow did,
+    // the parse error is the finding to report, not a guess about its shape.
+    let Ok(document) = text.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+
+    let mut findings = Vec::new();
+    for (name, value) in &document {
+        // The top level itself is exempt: that is where these keys belong.
+        collect_absorbed_keys(&mut findings, name, value);
+    }
+    findings
+}
+
+/// Report every top-level key name used inside `table`, depth-first.
+///
+/// Only non-table values are reported. An absorbed key is always a scalar —
+/// `name`, `note`, `note_file`, `root` and `description` are strings and
+/// `strict` is a boolean — so skipping table values is what lets `[data.note_file]`,
+/// a data source legitimately named after a top-level key, go unreported
+/// without a per-table list of exceptions to maintain.
+fn collect_absorbed_keys(findings: &mut Vec<Finding>, path: &str, value: &toml::Value) {
+    match value {
+        toml::Value::Table(table) => {
+            for (key, nested) in table {
+                if !nested.is_table() && TOP_LEVEL_KEYS.contains(&key.as_str()) {
+                    findings.push(Finding::warning(
+                        "tpl::lint::absorbed_key",
+                        MANIFEST_NAME,
+                        format!("`{key}` is a top-level key, but it is written inside `[{path}]`"),
+                        format!(
+                            "in TOML a bare key belongs to the table that most recently \
+                             opened, so this declares `{path}.{key}` and the top-level \
+                             `{key}` is never set. Move it above the first table header. \
+                             Pass `--allow tpl::lint::absorbed_key` if `{path}` really \
+                             does have an entry of its own by that name."
+                        ),
+                    ));
+                }
+                collect_absorbed_keys(findings, &format!("{path}.{key}"), nested);
+            }
+        }
+        // An array of tables — `[[questions.x.choices]]` — opens a table too,
+        // and absorbs whatever bare key follows it just the same.
+        toml::Value::Array(items) => {
+            for item in items {
+                collect_absorbed_keys(findings, path, item);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A `note_file` that names nothing in the template repository.
@@ -1004,6 +1079,92 @@ mod tests {
         assert_eq!(
             codes(&check_note_file(&manifest, &[tree])),
             ["tpl::lint::missing_note_file"]
+        );
+    }
+
+    /// The two shapes from the field report. Both are valid TOML, both load,
+    /// and both do something other than what the author wrote — the note never
+    /// appears, or a remote called `note_file` is added at `init`.
+    #[rstest]
+    #[case("[computed]\nx = \"{{ 'y' }}\"\nnote_file = \"NOTE.md\"", "computed")]
+    #[case(
+        "[remotes]\norigin = \"git@example.com:a/b.git\"\nnote_file = \"NOTE.md\"",
+        "remotes"
+    )]
+    #[case(
+        "[data.things]\nsource = \"data/things.toml\"\nnote_file = \"NOTE.md\"",
+        "data.things"
+    )]
+    #[case("[questions.a]\ntype = \"string\"\nnote = \"hi\"", "questions.a")]
+    fn a_top_level_key_written_after_a_table_is_absorbed(#[case] body: &str, #[case] table: &str) {
+        let findings = check_absorbed_keys(&format!("name = \"x\"\n{body}\n"));
+
+        assert_eq!(codes(&findings), ["tpl::lint::absorbed_key"]);
+        assert!(
+            findings[0].message.contains(&format!("[{table}]")),
+            "{:?}",
+            findings[0].message
+        );
+        // The help must name the destination, or the author cannot tell which
+        // of several tables above the line swallowed it.
+        assert!(
+            findings[0].help.contains(&format!("{table}.")),
+            "{:?}",
+            findings[0].help
+        );
+    }
+
+    /// The keys are the schema's, not a second list: a `data` source or a
+    /// question named after any of them absorbs just the same.
+    #[rstest]
+    #[case("name")]
+    #[case("description")]
+    #[case("root")]
+    #[case("note")]
+    #[case("note_file")]
+    fn every_top_level_key_is_reported_when_absorbed(#[case] key: &str) {
+        let findings = check_absorbed_keys(&format!("name = \"x\"\n[computed]\n{key} = \"v\"\n"));
+        assert_eq!(codes(&findings), ["tpl::lint::absorbed_key"]);
+    }
+
+    /// The whole point of the rule: written above the first table header, the
+    /// key means what it says.
+    #[test]
+    fn a_top_level_key_at_the_top_level_is_not_flagged() {
+        let text = "name = \"x\"\nnote_file = \"NOTE.md\"\nstrict = true\n\n\
+                    [computed]\ny = \"{{ 1 }}\"\n";
+        assert!(check_absorbed_keys(text).is_empty());
+    }
+
+    /// A table value is not an absorbed key. `[data.note_file]` is a data
+    /// source that happens to be called `note_file`, and refusing it would
+    /// make the rule police names it has no business policing.
+    #[rstest]
+    #[case("[data.note_file]\nsource = \"data/n.toml\"")]
+    #[case("[questions.name]\ntype = \"string\"")]
+    fn a_table_named_after_a_top_level_key_is_not_flagged(#[case] body: &str) {
+        assert!(check_absorbed_keys(&format!("name = \"x\"\n{body}\n")).is_empty());
+    }
+
+    /// An array of tables opens a table too, so a key after `[[...]]` is
+    /// absorbed by that element rather than by the manifest.
+    #[test]
+    fn an_array_of_tables_absorbs_a_key_as_well() {
+        let text = "name = \"x\"\n\n[[questions.a.choices]]\nvalue = \"v\"\nnote = \"hi\"\n";
+        assert_eq!(
+            codes(&check_absorbed_keys(text)),
+            ["tpl::lint::absorbed_key"]
+        );
+    }
+
+    /// Reported once per occurrence, in document order, so a manifest with two
+    /// mistakes does not have to be fixed twice to see the second.
+    #[test]
+    fn every_absorbed_key_is_reported() {
+        let text = "name = \"x\"\n\n[computed]\nnote_file = \"a\"\nroot = \"b\"\n";
+        assert_eq!(
+            codes(&check_absorbed_keys(text)),
+            ["tpl::lint::absorbed_key", "tpl::lint::absorbed_key"]
         );
     }
 

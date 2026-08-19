@@ -121,6 +121,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::graph::cycle",
     "tpl::graph::invalid_expression",
     "tpl::graph::unknown_reference",
+    "tpl::lint::absorbed_key",
     "tpl::lint::collision",
     "tpl::lint::conflicting_level",
     "tpl::lint::degenerate_path",
