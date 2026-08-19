@@ -4,6 +4,57 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0](https://github.com/noirbizarre/git-tpl/compare/0.6.0..0.7.0) - 2026-08-19
+
+### 💫 Features
+
+- **backport** `git tpl backport -p` — interactive hunk selection ([#78](https://github.com/noirbizarre/git-tpl/issues/78)) - ([f3e5620](https://github.com/noirbizarre/git-tpl/commit/f3e56205fea8192fbd52190d2dc9fe138096db52))
+- **backport** Un-substitute changed regions - ([4b0ada0](https://github.com/noirbizarre/git-tpl/commit/4b0ada07f6a481571f8f90d9779e82cfdf0f8962))
+- **init** Accept an optional destination directory ([#97](https://github.com/noirbizarre/git-tpl/issues/97)) - ([c35e59c](https://github.com/noirbizarre/git-tpl/commit/c35e59c67b7c0dda9fa56452bc3b7356b03cca7b))
+- **init** Commit the attachment in the merge commit - ([8038d48](https://github.com/noirbizarre/git-tpl/commit/8038d48c5661eafbe4715ffc3d1e745f606fd7c4))
+- **template** Accept a literal value in [computed] ([#92](https://github.com/noirbizarre/git-tpl/issues/92)) - ([601adf8](https://github.com/noirbizarre/git-tpl/commit/601adf887289656d9418d13b08cc8545b4bc6c53))
+- **update** Warn when no rendered ref exists locally - ([ec9a4b6](https://github.com/noirbizarre/git-tpl/commit/ec9a4b68aa1e06ef521552c0a15e25b688660c04))
+
+### 🐛 Bug Fixes
+
+- **backport** Describe the revision through describe_revision - ([8017fd9](https://github.com/noirbizarre/git-tpl/commit/8017fd9c12cdb6916d72ce0ac1e3e4a52f29803d))
+- **lint** Report a binding that shadows a question or computed name ([#94](https://github.com/noirbizarre/git-tpl/issues/94)) - ([725b819](https://github.com/noirbizarre/git-tpl/commit/725b819e119ec5c3682d31d20b42ae69606e928f))
+- **lint** Warn on a top-level manifest key absorbed by a table ([#93](https://github.com/noirbizarre/git-tpl/issues/93)) - ([d2fb940](https://github.com/noirbizarre/git-tpl/commit/d2fb9409c4131541e284d4686e412dbcfa994c10))
+- **render** Report output write failures as tpl::ops::write_failed - ([38fdd6c](https://github.com/noirbizarre/git-tpl/commit/38fdd6c7a06bdcc29a7a579e79975c4da6c47356))
+- **resolve** Only report ignored paths a render reads ([#91](https://github.com/noirbizarre/git-tpl/issues/91)) - ([e309963](https://github.com/noirbizarre/git-tpl/commit/e3099631887f7ff78d76fffd6b548dce8e78797b))
+- **show** Route the stdout write failure through Reporter - ([a485d77](https://github.com/noirbizarre/git-tpl/commit/a485d773d626dc39ab60cbc3add1f9c81a1c8ba1))
+
+### 🔨 Refactor
+
+- **backport** Map changes through diff ops rather than a change stream - ([67a1c7e](https://github.com/noirbizarre/git-tpl/commit/67a1c7e3452649a8a54f032ecd43718b5bfd970b))
+- **cli**  🚨 **breaking** Remove the deprecated status --format ([#90](https://github.com/noirbizarre/git-tpl/issues/90)) - ([c92ae56](https://github.com/noirbizarre/git-tpl/commit/c92ae567ada93923e79702080a1bc645fa7d8155))
+- **ops** Materialise a rendered tree in one place - ([537a8dc](https://github.com/noirbizarre/git-tpl/commit/537a8dc50d85e95e110f8e263560defca7e1b9fd))
+
+### 📚 Documentation
+
+- **adr** Use one status format - ([a6a5513](https://github.com/noirbizarre/git-tpl/commit/a6a551339006d919bb87ce898a1588b993cc79b2))
+- **answers** Move the --strict-answers paragraph to its warning - ([d32413e](https://github.com/noirbizarre/git-tpl/commit/d32413e6244747dc2c957128a53a77c82b425725))
+- **data** Count the pinned items correctly - ([b00043c](https://github.com/noirbizarre/git-tpl/commit/b00043c098c7ad0c170ee3612d59c4ac3c46ab3c))
+- **determinism** Qualify the no-runtime-context claim - ([d992164](https://github.com/noirbizarre/git-tpl/commit/d9921648c3a91c38130a720fcf76e0aa04264ea3))
+- **json** Document the missing payload keys and dry-run shapes - ([40f4c6e](https://github.com/noirbizarre/git-tpl/commit/40f4c6e4df3f9c4725faacd24c4b030b8540363e))
+- **json** Correct the universality and flat claims - ([26b72b4](https://github.com/noirbizarre/git-tpl/commit/26b72b47d398a5544506f7185bc93da76230aa9a))
+- **quickstart** Match the transcript to the example template - ([3b22e1d](https://github.com/noirbizarre/git-tpl/commit/3b22e1d1ab6175e00776298fa42ad69734059b97))
+- **render** Say that a dirty render honours .gitignore - ([4eca750](https://github.com/noirbizarre/git-tpl/commit/4eca750815af98f4cccf0d5766be5e750440dcc9))
+- **setup** Restore the missing modules in the layout - ([75a71ae](https://github.com/noirbizarre/git-tpl/commit/75a71aead580b58032d796eac68bc1fbf4f0ab91))
+- **templates** Add the missing as binding to the import example ([#95](https://github.com/noirbizarre/git-tpl/issues/95)) - ([0ba15ab](https://github.com/noirbizarre/git-tpl/commit/0ba15ab6911504a7b2e1a6b936975ec69730394f))
+- Fix anchors pointing into usage/lint.md ([#96](https://github.com/noirbizarre/git-tpl/issues/96)) - ([6d3c1f8](https://github.com/noirbizarre/git-tpl/commit/6d3c1f877abdde1d30403d47e1e26769d814c613))
+- Qualify the --json universality claim - ([21e692e](https://github.com/noirbizarre/git-tpl/commit/21e692e112ffcc934475bdb003d9441a1590ff7d))
+- Document the XDG fallbacks and the colour environment - ([1b16596](https://github.com/noirbizarre/git-tpl/commit/1b165963f06ae2a7c7931c9b6a1cf1e45e81fa51))
+- Document --strict-answers on init and update - ([bbde130](https://github.com/noirbizarre/git-tpl/commit/bbde130456d72f255d599e2a9a4767aae34d5c48))
+- Point the front doors at all five install methods - ([7bec72c](https://github.com/noirbizarre/git-tpl/commit/7bec72c3ecd4def148ccda602a490d843a99e38d))
+- Give --format json a single removal deadline - ([6f1407d](https://github.com/noirbizarre/git-tpl/commit/6f1407dc729d4d783a92bc6064d36142ebb7de07))
+- Refresh the versions in examples to 0.6.0 - ([f59cf3a](https://github.com/noirbizarre/git-tpl/commit/f59cf3a65889ca1cb235ada05490ff77b9c9c2b9))
+- Describe src/ops as the directory it is - ([9160308](https://github.com/noirbizarre/git-tpl/commit/91603084a29943989cd4834b2dc47cd2664bd0c4))
+
+### 🧪 Tests
+
+- **backport** Cover the un-substitution paths a terminal was hiding - ([44f73a6](https://github.com/noirbizarre/git-tpl/commit/44f73a65830ad04cc88cc647d97ba53b88f6bc01))
+
 ## [0.6.0](https://github.com/noirbizarre/git-tpl/compare/0.5.1..0.6.0) - 2026-08-17
 
 ### 💫 Features
