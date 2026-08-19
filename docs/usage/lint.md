@@ -109,6 +109,36 @@ conceivable — `--allow tpl::lint::absorbed_key` for a template that means it.
 Keys whose value is a table are not reported: `[data.note_file]` is a data
 source that happens to be called `note_file`, not an absorbed key.
 
+### Shadowed names — `tpl::lint::shadowed_name`
+
+An import alias binds in the same namespace as the answers and computed
+values. If it collides with a question name, the alias wins, and every
+comparison against the name after that is module-vs-string — never true, never
+an error. `strict = true` does not help, because nothing is undefined:
+
+```jinja
+{%- import "macros/m.jinja" as stack -%}
+{% if stack == "b" %}YES{% else %}NO{% endif %}
+```
+
+`stack` here is the imported module, not the `stack` question, and the `if`
+silently takes the wrong branch forever. Rename the alias.
+
+`{% set %}`, `{% with %}`, `{% for %}` targets and `{% macro %}` names are
+checked the same way — anything a file body binds can shadow a question just
+as an import alias can. Two things are not flagged, because they are the
+common, intended use of a rebinding:
+
+- a macro's own parameters, since shadowing inside the macro's body is what a
+  parameter is for;
+- a target whose right-hand side mentions its own name, the self-defaulting
+  idiom — `{% set stack = stack | default('b') %}`.
+
+A warning, the same as `tpl::lint::undeclared`: the binding is legal MiniJinja,
+so an author who means it can `--allow` the code. The manifest refuses the
+same collision between a question and a computed value outright — this is
+that collision arriving from a third direction.
+
 ## Options
 
 | Flag | Effect |

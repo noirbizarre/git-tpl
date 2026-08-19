@@ -69,6 +69,7 @@ severity.
 | `tpl::lint::foreign_expression` | warning | A `${{ ... }}` MiniJinja will consume, rendering it to `$`. |
 | `tpl::lint::undeclared` | warning | A file body uses a name the template does not declare. Renders empty unless `strict = true`. |
 | `tpl::lint::absorbed_key` | warning | A top-level manifest key is written after a table header, so TOML gives it to that table. The top-level key is never set. |
+| `tpl::lint::shadowed_name` | warning | An `{% import %}`/`{% from %}` alias, or a `set`/`with`/`for`/`macro` binding, reuses a question or computed name — the rest of the file sees the binding, not the answer, and a comparison against it is silently never true. |
 | `tpl::lint::missing_note_file` | error | `note_file` names a path the template repository does not contain. Reported without a repository, before an `init` refuses. |
 
 These two are about the flags rather than the template, so they are raised as

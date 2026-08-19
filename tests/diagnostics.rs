@@ -127,6 +127,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::lint::degenerate_path",
     "tpl::lint::foreign_expression",
     "tpl::lint::missing_note_file",
+    "tpl::lint::shadowed_name",
     "tpl::lint::syntax",
     "tpl::lint::undeclared",
     "tpl::lint::unknown_code",

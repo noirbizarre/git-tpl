@@ -479,6 +479,62 @@ default = "demo"
     assert!(help.contains("project_name"), "no suggestion in: {help}");
 }
 
+/// The bug report itself: an `{% import %}` alias binds `stack` in the same
+/// namespace as the `stack` question. `{% if stack == "b" %}` then compares a
+/// module with a string — never true, never an error, and `strict = true`
+/// does not help because nothing is undefined.
+#[test]
+fn an_import_alias_matching_a_question_is_reported() {
+    let world = World::with_shared_template(
+        r#"
+name = "probe"
+strict = true
+
+[questions.stack]
+type = "choice"
+choices = ["a", "b"]
+default = "b"
+"#,
+        &[(
+            "a.txt.jinja",
+            "{%- import \"macros/m.jinja\" as stack -%}\n\
+             stack is b: {% if stack == \"b\" %}YES{% else %}NO{% endif %}\n",
+        )],
+        &[("macros/m.jinja", "{% macro noop() %}{% endmacro %}")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert_eq!(codes(&output), ["tpl::lint::shadowed_name"]);
+
+    let json = output.json();
+    let message = json["diagnostics"][0]["message"].as_str().expect("message");
+    assert!(message.contains("stack"), "no name in: {message}");
+}
+
+/// An alias that names nothing the manifest declares is unremarkable.
+#[test]
+fn an_import_alias_matching_nothing_declared_is_not_reported() {
+    let world = World::with_shared_template(
+        r#"
+name = "fine"
+
+[questions.project_name]
+type = "string"
+default = "demo"
+"#,
+        &[(
+            "a.txt.jinja",
+            "{% import \"macros/m.jinja\" as helpers %}{{ helpers.noop() }}\n",
+        )],
+        &[("macros/m.jinja", "{% macro noop() %}{% endmacro %}")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
 #[test]
 fn a_declared_name_and_a_builtin_are_not_reported() {
     let world = World::with_template(
