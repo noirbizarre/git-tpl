@@ -64,6 +64,12 @@ deterministic ordering, its `.git` skipping and its record of what it dropped.
 `core.excludesFile` is still resolved through libgit2's config chain, so a
 repository-local override means here what it means to Git.
 
+The walk stays repository-wide — the tree is needed whole, for partials and for
+`lint` — but the *report* is narrowed in `resolve` to what a render reads: the
+tree under `root`, the partials outside it, and the files declared data sources
+name. Warning about a path that was never a candidate for the rendering is a
+warning nothing in the template can silence, printed above every run.
+
 ## Consequences
 
 `--dirty` renders what `git add -A` stages. Verified by diffing the two file

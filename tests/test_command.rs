@@ -640,6 +640,24 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
     assert_eq!(output.json()["cases"][0]["snapshot"], "compared");
 }
 
+/// #83, as reported: through `git tpl test`, where the warning was the first
+/// thing printed and pushed the actual results one line down. `.opencode/` is
+/// beside `template.toml` rather than under `root`, and the rule hiding it is
+/// global — so there was nothing the template could do about it.
+#[test]
+fn an_ignored_path_outside_the_render_root_is_not_warned_about() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(dir.path(), &[("tests/case.toml", "[answers]\n")]);
+
+    // Left uncommitted, as a tool-created directory beside a template is.
+    template.repo.write(".opencode/plans/one.md", "a plan\n");
+    common::global_gitignore(template.repo.config_home(), ".opencode/\n");
+
+    run(&template, &["--dirty"])
+        .success()
+        .silent_about("skipped by .gitignore");
+}
+
 #[test]
 fn a_changed_template_makes_the_snapshot_diff_name_the_file() {
     let dir = tempfile::tempdir().unwrap();

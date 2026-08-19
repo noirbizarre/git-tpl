@@ -1,6 +1,7 @@
 //! Template resolution: fetching a template repository and reading its
 //! manifest at a chosen revision.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -11,8 +12,8 @@ use crate::eval::Partials;
 use crate::git::libgit2::LibGit2;
 use crate::git::{GitBackend, GitError, Oid, TreeEntry};
 use crate::provenance::WORKTREE_REF;
-use crate::render::{RenderError, collect_partials};
-use crate::template::{MANIFEST_NAME, Manifest, ManifestError};
+use crate::render::{RenderError, TEMPLATE_SUFFIX, collect_partials};
+use crate::template::{DataSourceDecl, MANIFEST_NAME, Manifest, ManifestError};
 
 /// Errors from resolving a template.
 #[derive(Debug, Error, Diagnostic)]
@@ -94,6 +95,9 @@ pub struct Resolved {
     /// includes `core.excludesFile`: a global rule set years ago on an
     /// unrelated project can remove a file the author can see on disk, and an
     /// unexplained absence in a rendering is the hardest kind of bug to find.
+    ///
+    /// Only paths a render actually reads — under `root`, a partial, or a
+    /// declared data file. See `affects_render`.
     pub ignored: Vec<String>,
     /// Kept so the temporary clone outlives the resolution.
     _cache: Option<tempfile::TempDir>,
@@ -191,6 +195,15 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
         .subtree(tree, &root)?
         .ok_or_else(|| ResolveError::MissingRoot { root: root.clone() })?;
 
+    // The walk that produced `ignored` covers the whole repository, and that is
+    // deliberate: the *tree* is needed whole, for partials and for `lint`. Only
+    // the report is narrowed. Warning about a path that could never have been
+    // rendered — `.opencode/` beside `template.toml`, say, ignored by a rule in
+    // the user's global `core.excludesFile` — is noise nothing in the template
+    // can silence, printed above every rendering (#83).
+    let mut ignored = ignored;
+    ignored.retain(|path| affects_render(path, &root, &manifest.data));
+
     Ok(Resolved {
         repo,
         manifest,
@@ -203,6 +216,53 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
         ignored,
         _cache: cache,
     })
+}
+
+/// Whether an ignored path could have changed the rendering.
+///
+/// Three things a render reads, and nothing else: the tree under `root`, the
+/// partials — every `TEMPLATE_SUFFIX` blob outside it (`collect_partials`) —
+/// and the files named by the declared data sources. A path that is none of
+/// these is absent from the rendering only in the vacuous sense that it was
+/// never a candidate for it.
+fn affects_render(path: &str, root: &str, data: &BTreeMap<String, DataSourceDecl>) -> bool {
+    // An empty or `.` root renders the whole repository, exactly as `subtree`
+    // reads it. Everything is then under the root and nothing is filtered.
+    let root = root.trim_end_matches('/');
+    if root.is_empty() || root == "." {
+        return true;
+    }
+
+    if path == root || path.starts_with(&format!("{root}/")) {
+        return true;
+    }
+
+    // A partial. Outside the root by definition, and its absence changes what
+    // an `{% import %}` resolves to.
+    if path.ends_with(TEMPLATE_SUFFIX) {
+        return true;
+    }
+
+    data.values()
+        .flat_map(|decl| [Some(decl.source.as_str()), decl.path.as_deref()])
+        .flatten()
+        .any(|location| declares(path, location))
+}
+
+/// Whether a data source declaration reads `path`, or something under it.
+///
+/// The second half matters because an ignored *directory* is recorded without
+/// being descended into: `data/` ignored while `data/licenses.toml` is declared
+/// has to warn, or the render fails with no clue where the file went.
+fn declares(path: &str, location: &str) -> bool {
+    // An expression is not resolvable here — it may depend on answers that do
+    // not exist until the prompts run. Comparing the unrendered text would
+    // match nothing anyway, so say no rather than guess.
+    if location.contains("{{") || location.contains("{%") {
+        return false;
+    }
+    let location = location.trim_start_matches("./");
+    location == path || location.starts_with(&format!("{path}/"))
 }
 
 /// The path a source refers to, if it is one on this machine.
@@ -271,5 +331,51 @@ mod tests {
             Err(other) => panic!("expected DirtyNeedsLocal, got {other:?}"),
             Ok(_) => panic!("expected an error"),
         }
+    }
+
+    /// A declaration reading `data/licenses.toml`, as a template would write it.
+    fn declaring(source: &str) -> BTreeMap<String, DataSourceDecl> {
+        let decl: DataSourceDecl = toml::from_str(&format!("source = \"{source}\"")).unwrap();
+        BTreeMap::from([("licenses".to_string(), decl)])
+    }
+
+    #[rstest]
+    // Under the render root: the case the warning exists for (#51).
+    #[case("template/secret.local", true)]
+    #[case("template", true)]
+    // Beside it. Never a candidate for the rendering, so never reported (#83).
+    #[case(".opencode/plans", false)]
+    #[case("docs/usage", false)]
+    // A near-miss on the prefix. `templates/` is not `template/`.
+    #[case("templates/other", false)]
+    // A partial, which lives outside the root by definition.
+    #[case("macros.jinja", true)]
+    // A declared data file, and the directory holding it — an ignored
+    // directory is recorded without being descended into.
+    #[case("data/licenses.toml", true)]
+    #[case("data", true)]
+    #[case("data/unused.toml", false)]
+    fn only_a_path_a_render_reads_is_reported(#[case] path: &str, #[case] expected: bool) {
+        assert_eq!(
+            affects_render(path, "template", &declaring("data/licenses.toml")),
+            expected
+        );
+    }
+
+    /// An expression resolves against answers that do not exist yet, so it
+    /// cannot be compared. Saying "no" beats matching on the unrendered text.
+    #[test]
+    fn an_expression_valued_data_source_matches_nothing() {
+        let data = declaring("data/{{ flavour }}.toml");
+        assert!(!affects_render("data/one.toml", "template", &data));
+    }
+
+    /// `subtree` reads an empty or `.` root as the whole repository, so there
+    /// is nothing outside it to filter.
+    #[rstest]
+    #[case("")]
+    #[case(".")]
+    fn a_whole_repository_root_filters_nothing(#[case] root: &str) {
+        assert!(affects_render(".opencode/plans", root, &BTreeMap::new()));
     }
 }

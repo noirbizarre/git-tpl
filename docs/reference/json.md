@@ -74,7 +74,10 @@ byte-for-byte. It is the only way to tell, from the output, that a workflow
 full of `${{ }}` was copied rather than rendered-and-survived.
 
 `skippedByGitignore` names the working-tree files a `.gitignore` kept out of a
-`--dirty` render — always empty for a committed revision. It is a report, not
+`--dirty` render — always empty for a committed revision. Only paths a render
+reads are listed: those under `root`, the `.jinja` partials outside it, and the
+files named by declared data sources. A path that could never have been
+rendered is not reported, however it is ignored. It is a report, not
 an error: the render succeeded, and a caller comparing the file list against
 its expectations needs to know why one is absent. See
 [the authoring loop](../usage/render.md#the-authoring-loop).
