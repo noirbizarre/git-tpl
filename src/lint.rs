@@ -1738,13 +1738,13 @@ mod tests {
     #[test]
     fn denying_and_allowing_the_same_code_is_rejected() {
         let error = levels(&["tpl::lint::undeclared"], &["tpl::lint::undeclared"]).unwrap_err();
-        assert!(matches!(error, LintError::ConflictingLevel { .. }));
+        std::assert_matches!(error, LintError::ConflictingLevel { .. });
     }
 
     #[test]
     fn denying_and_allowing_warnings_wholesale_is_rejected() {
         let error = levels(&["warnings"], &["warnings"]).unwrap_err();
-        assert!(matches!(error, LintError::ConflictingLevel { .. }));
+        std::assert_matches!(error, LintError::ConflictingLevel { .. });
     }
 
     // The list `--deny` validates against has to be the list the rules use, or

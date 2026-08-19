@@ -496,14 +496,14 @@ mod tests {
     /// standing in for an integer.
     #[test]
     fn an_answer_of_the_wrong_type_is_rejected_rather_than_coerced() {
-        assert!(matches!(
+        std::assert_matches!(
             Value::parse_as("nope", "an integer"),
             Err(ValueError::Parse { .. })
-        ));
-        assert!(matches!(
+        );
+        std::assert_matches!(
             Value::parse_as("maybe", "a boolean"),
             Err(ValueError::Parse { .. })
-        ));
+        );
     }
 
     /// The digest goes into a commit trailer and is compared across runs, so

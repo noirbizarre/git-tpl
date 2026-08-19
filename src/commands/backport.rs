@@ -352,8 +352,9 @@ mod tests {
         // Refused, not silently downgraded to sending everything: `-p` was
         // typed, so the one thing it cannot mean is "send it all".
         let error = picking(flag, interactive, json, tty).expect_err("refused");
-        assert!(
-            matches!(error, OpError::Backport(ops::BackportError::NotInteractive)),
+        std::assert_matches!(
+            error,
+            OpError::Backport(ops::BackportError::NotInteractive),
             "{error:?}"
         );
     }

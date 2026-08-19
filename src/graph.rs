@@ -670,7 +670,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, GraphError::Cycle { .. }), "{error:?}");
+        std::assert_matches!(error, GraphError::Cycle { .. }, "{error:?}");
     }
 
     #[test]
@@ -685,7 +685,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(matches!(error, GraphError::Cycle { .. }), "{error:?}");
+        std::assert_matches!(error, GraphError::Cycle { .. }, "{error:?}");
     }
 
     #[test]
@@ -754,8 +754,9 @@ mod tests {
         )
         .unwrap_err();
 
-        assert!(
-            matches!(error, GraphError::UnknownReference { ref unknown, .. } if unknown == "data.licenses"),
+        std::assert_matches!(
+            error,
+            GraphError::UnknownReference { ref unknown, .. } if unknown == "data.licenses",
             "{error:?}"
         );
     }

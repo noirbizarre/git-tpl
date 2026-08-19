@@ -1790,9 +1790,10 @@ mod tests {
             &error,
         );
 
-        assert!(
-            matches!(&error, GitError::Clone { path, reason, .. }
-                if path == Path::new("/tmp/x") && reason.contains("Disk quota exceeded")),
+        std::assert_matches!(
+            &error,
+            GitError::Clone { path, reason, .. }
+                if path == Path::new("/tmp/x") && reason.contains("Disk quota exceeded"),
             "{error:?}"
         );
     }
@@ -1809,8 +1810,9 @@ mod tests {
             &error,
         );
 
-        assert!(
-            matches!(&error, GitError::Network { reason, .. } if reason == "connection reset"),
+        std::assert_matches!(
+            &error,
+            GitError::Network { reason, .. } if reason == "connection reset",
             "{error:?}"
         );
     }
@@ -1827,9 +1829,9 @@ mod tests {
             &error,
         );
 
-        assert!(
-            matches!(&error, GitError::Authentication { methods, .. }
-                if methods.contains("credential helper")),
+        std::assert_matches!(
+            &error,
+            GitError::Authentication { methods, .. } if methods.contains("credential helper"),
             "{error:?}"
         );
     }
@@ -1846,8 +1848,9 @@ mod tests {
 
         let error = translate_remote("git@host.invalid:t.git", None, &error);
 
-        assert!(
-            matches!(&error, GitError::Authentication { methods, .. } if methods.contains("SSH agent")),
+        std::assert_matches!(
+            &error,
+            GitError::Authentication { methods, .. } if methods.contains("SSH agent"),
             "{error:?}"
         );
     }

@@ -1304,7 +1304,7 @@ mod tests {
     #[test]
     fn a_case_that_is_not_a_table_is_refused() {
         let result = Case::parse("c", "tests/c.json", b"[1, 2]");
-        assert!(matches!(result, Err(TestError::CaseShape { .. })));
+        std::assert_matches!(result, Err(TestError::CaseShape { .. }));
     }
 
     /// Each of these is a section written with the wrong type. The message has

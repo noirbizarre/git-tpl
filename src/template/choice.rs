@@ -238,14 +238,14 @@ mod tests {
     /// how that stops being a silent half-working state.
     #[test]
     fn a_non_string_choice_value_is_rejected() {
-        assert!(matches!(
+        std::assert_matches!(
             Choice::from_value(&Value::Integer(1)),
             Err(ChoiceError::NonStringValue { .. })
-        ));
-        assert!(matches!(
+        );
+        std::assert_matches!(
             Choice::from_value(&table(&[("value", Value::Integer(1))])),
             Err(ChoiceError::NonStringValue { .. })
-        ));
+        );
     }
 
     /// Pointing `choices_from` at the wrong path is the likeliest mistake, and

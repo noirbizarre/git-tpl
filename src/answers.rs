@@ -206,7 +206,7 @@ mod tests {
     fn a_document_that_is_not_a_table_is_refused() {
         let error = read("a.json", "[1, 2, 3]").unwrap_err();
 
-        assert!(matches!(error, AnswersError::Shape { .. }), "{error:?}");
+        std::assert_matches!(error, AnswersError::Shape { .. }, "{error:?}");
     }
 
     #[test]

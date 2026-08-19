@@ -409,7 +409,7 @@ mod tests {
         // A singular `[shortcut]`, which is the mistake people actually make.
         let error =
             UserConfig::parse("[shortcut]\ngh = \"https://x/\"\n", "config.toml").unwrap_err();
-        assert!(matches!(error, UserConfigError::Parse { .. }));
+        std::assert_matches!(error, UserConfigError::Parse { .. });
     }
 
     #[test]
@@ -435,7 +435,7 @@ mod tests {
     fn a_shortcut_name_containing_a_slash_is_refused() {
         let error = UserConfig::parse("[shortcuts]\n\"a/b\" = \"https://x/\"\n", "config.toml")
             .unwrap_err();
-        assert!(matches!(error, UserConfigError::Shortcut { .. }));
+        std::assert_matches!(error, UserConfigError::Shortcut { .. });
     }
 
     fn shortcuts() -> UserConfig {
