@@ -110,27 +110,21 @@ fn status_json_reports_a_dirty_worktree() {
     assert_eq!(json["worktreeClean"], false);
 }
 
-/// The flag it replaced still works, and still emits JSON a caller can parse.
+/// The flag `--json` replaced is gone, as ADR-015 said it would be in 0.7.
 ///
-/// `.json()` is the assertion that matters: it panics if a human line reached
-/// stdout, which is exactly what a warning printed to the wrong stream would
-/// do to the caller this flag exists for.
+/// The assertion is on behaviour, not on clap's wording: a caller still pinned
+/// to the old spelling must fail loudly rather than get a report it cannot
+/// distinguish from a JSON one.
 #[test]
-fn the_deprecated_format_flag_warns_on_stderr_and_still_prints_json() {
+fn the_removed_format_flag_is_rejected() {
     let world = World::new();
     world.init(&[]).success();
 
-    let output = tpl(&world.project, &["status", "--format", "json"]).success();
+    let output = tpl(&world.project, &["status", "--format", "json"]).failure();
 
-    assert_eq!(output.json()["ref"], "refs/tpl/template");
     assert!(
-        output.stderr.contains("`--format` is deprecated"),
-        "the deprecation goes to stderr, not stdout: {:?}",
-        output.stderr
-    );
-    assert!(
-        !output.stdout.contains("deprecated"),
-        "stdout carries the payload and nothing else: {:?}",
+        output.stdout.trim().is_empty(),
+        "a rejected invocation produces no payload: {:?}",
         output.stdout
     );
 }

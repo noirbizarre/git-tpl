@@ -1,6 +1,6 @@
 # ADR-015: Machine-readable output
 
-**Status:** accepted
+**Status:** accepted; `--format` removed in 0.7
 
 ## Context
 
@@ -48,7 +48,8 @@ jobs, and neither substitutes for the other.
 ### `--format json` becomes `--json`
 
 Two spellings for one idea, on a single command out of all of them, is not a
-surface worth keeping. `--format` is hidden, warns on stderr, and is removed in 0.7.
+surface worth keeping. `--format` was hidden and warned on stderr through 0.5
+and 0.6, and was removed in 0.7.
 
 ### stdout and stderr keep their jobs
 

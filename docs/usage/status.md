@@ -59,12 +59,6 @@ shown when a remote copy exists. `ahead` means you have renderings to
 without committing it first. It is how an author checks a work-in-progress
 against a real project.
 
-!!! warning "`--format text\|json` is deprecated"
-
-    It still works and still warns, but it is hidden from `--help` and is
-    removed in 0.7. Use the global `--json`. See
-    [Machine-readable output](../reference/json.md).
-
 ## Exit codes
 
 | Code | Meaning |
