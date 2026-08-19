@@ -1,8 +1,9 @@
 # JSON output
 
-`--json` is global. Every command accepts it, every command emits its payload
-to **stdout**, and every failure emits the same envelope — including the
-commands that have no success payload of their own.
+`--json` is global. Every command accepts it and every failure emits the same
+envelope — including the commands that have no success payload of their own.
+Almost every command emits its payload to **stdout**; the three whose stdout is
+already the payload are [`show`, `completion` and `man`](#show-completion-and-man).
 
 Human output goes to stderr, so a piped `--json` stream stays parseable even
 when the command is chatty:
@@ -72,6 +73,12 @@ first knowing which command it ran.
 byte-for-byte. It is the only way to tell, from the output, that a workflow
 full of `${{ }}` was copied rather than rendered-and-survived.
 
+`skippedByGitignore` names the working-tree files a `.gitignore` kept out of a
+`--dirty` render — always empty for a committed revision. It is a report, not
+an error: the render succeeded, and a caller comparing the file list against
+its expectations needs to know why one is absent. See
+[the authoring loop](../usage/render.md#the-authoring-loop).
+
 ### `lint`
 
 ```json
@@ -99,18 +106,26 @@ distinguishable from a native error. `errors` and `warnings` count by severity;
 { "ok": true,
   "template": { "name": "rust", "description": "…", "root": "template" },
   "questions": [{ "name": "crate", "order": 0, "type": "string", "prompt": "Crate name",
-                  "default": null, "defaultIsExpression": false, "when": null,
-                  "pattern": "^[a-z0-9-]+$", "message": "…" }],
+                  "help": null, "default": null, "defaultIsExpression": false,
+                  "when": null, "pattern": "^[a-z0-9-]+$", "message": "…",
+                  "defaultFrom": null }],
   "computed": ["lib_name"],
-  "data": [{ "name": "targets", "source": "data/targets.toml", "format": "toml" }] }
+  "data": [{ "name": "targets", "source": "data/targets.toml", "kind": "template",
+             "format": "toml", "sha256": null }] }
 ```
 
 Questions come in **resolution order**, which is the order they must be
 answered in when a `when` or a `default` references an earlier answer.
 
 `defaultIsExpression` distinguishes `"{{ crate }}"` from a literal.
-`choicesResolved` appears when a `choices_from` points at a data file inside
-the template, saving the caller from fetching and parsing it.
+`defaultFrom` is the [machine-seeded default](../templates/questions.md#machine-seeded-defaults),
+which pre-fills a prompt and is never the answer.
+
+Three keys appear only when the question declares them: `choices`, an array of
+`{ value, label, help }`; `choicesFrom`, the reference a `choices_from` names;
+and `choicesResolved`, that reference's values, present only when it points at
+a data file inside the template — which saves the caller fetching and parsing
+it, and is why a remote source has no resolved form here.
 
 ### `context`
 
@@ -119,8 +134,9 @@ the template, saving the caller from fetching and parsing it.
   "answers": {…}, "computed": {…}, "data": {…}, "template": {…}, "flat": {…} }
 ```
 
-`flat` is what a template body sees: answers and computed values at the top
-level, `data` and `template` namespaced.
+`flat` is what a template body sees: answers and computed values merged into
+one table. `data` and `template` are not in it — they are siblings of it here,
+and namespaces of their own in a template.
 
 With `--eval`:
 
@@ -131,7 +147,7 @@ With `--eval`:
 ### `status`
 
 Documented in [status](../usage/status.md). `--format json` is deprecated in
-favour of `--json`; it still works, and warns, for one more minor release.
+favour of `--json`; it still works, and warns, until it is removed in 0.7.
 
 ### `diff`
 
@@ -188,6 +204,26 @@ what became of each:
 which is the case you most need it in. `existing` is `null` unless the two
 disagree, so its presence is the signal. Both are `init`-only: `update` neither
 adds a remote nor shows a note.
+
+With `--dry-run` the payload is a different shape entirely, because nothing was
+created and there is no ref, commit or merge to report:
+
+```json
+{ "ok": true, "dryRun": true,
+  "template": "https://github.com/noirbizarre/rust.tpl",
+  "revision": "main (76ec0ea)",
+  "questions": [{ "name": "crate", "kind": "question", "supplied": false },
+                { "name": "lib_name", "kind": "computed", "supplied": false }],
+  "files": ["Cargo.toml"],
+  "ignoredAnswers": [] }
+```
+
+`questions` is in resolution order and includes the `computed` and `data` nodes
+the graph resolves alongside them, which `kind` distinguishes. `files` is
+`null`, not `[]`, unless `--defaults` was passed: without it the list was never
+computed, and producing it would mean asking the whole questionnaire — which is
+what a dry run is avoiding. An empty array would claim the template renders
+nothing.
 
 ### `update`
 
@@ -307,11 +343,27 @@ of the ref, which is a different thing from a copy level with yours.
 
 Fetching never moves the local ref, so `behind` is a report, not an action.
 
+With `--dry-run` nothing is fetched and the payload says only what would be:
+
+```json
+{ "ok": true, "dryRun": true, "remote": "origin",
+  "refspec": "+refs/tpl/*:refs/remotes/origin/tpl/*" }
+```
+
 ### `push`
 
 ```json
 { "ok": true, "remote": "origin", "ref": "refs/tpl/rust" }
 ```
+
+With `--dry-run` nothing is pushed:
+
+```json
+{ "ok": true, "dryRun": true, "remote": "origin", "ref": "refs/tpl/rust" }
+```
+
+`fetch` names a `refspec` and `push` a `ref`, because a fetch brings every
+template ref and a push moves the one this project has.
 
 ### `test`
 

@@ -88,6 +88,12 @@ would make a typo'd key look exactly like an answer that had no effect.
 Nothing about the ignored keys is recorded: `.config/git.tpl.toml` holds the
 answers to questions the template actually asked.
 
+Pass `--strict-answers` to turn that warning into an error, which is what a
+CI job wants: a key that names no question is a typo, and a run that renders
+anyway has silently ignored an instruction. Recorded answers stay lenient
+whatever the flag says — a template drops questions over time, and a project
+that answered one is not at fault for it.
+
 ## A Copier answers file works unedited
 
 ```console
@@ -131,12 +137,6 @@ the chain.
 A question covered by none of them is asked as usual, unless `--defaults` or
 `tpl.interactive false` is in force — in which case its default is taken, and a
 question with no default is an error (`tpl::eval::unanswered`).
-
-Pass `--strict-answers` to turn that warning into an error, which is what a
-CI job wants: a key that names no question is a typo, and a run that renders
-anyway has silently ignored an instruction. Recorded answers stay lenient
-whatever the flag says — a template drops questions over time, and a project
-that answered one is not at fault for it.
 
 ## Failures
 

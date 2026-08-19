@@ -35,8 +35,14 @@ git-tpl:
 ## Install
 
 ```sh
-cargo install git-tpl
+brew install noirbizarre/tap/git-tpl   # or: cargo install git-tpl
 ```
+
+Also on the AUR, from a release archive, and via mise —
+[Installation](https://noirbizarre.github.io/git-tpl/getting-started/installation/) has
+all of them. `cargo install` places only the binary, so the man page and the
+shell completions are not installed and `git tpl --help` reports *No manual
+entry for git-tpl* until you generate them; the other methods include both.
 
 The binary must be named `git-tpl` and be on your `PATH` — that is how Git
 resolves `git tpl`.

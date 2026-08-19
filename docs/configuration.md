@@ -104,8 +104,8 @@ change what a template renders. See
 [ADR-013](adr/013-user-configuration.md).
 
 The path follows XDG: `$XDG_CONFIG_HOME/git-tpl/config.toml`, falling back to
-`~/.config/git-tpl/config.toml`. An absent file is the normal case, not an
-error. Unknown keys *are* an error — nothing generates this file, so a key that
+`~/.config/git-tpl/config.toml` — see [the environment](#the-environment) for
+what counts as set. An absent file is the normal case, not an error. Unknown keys *are* an error — nothing generates this file, so a key that
 is not understood is a typo.
 
 ```toml
@@ -321,3 +321,35 @@ mean `git config tpl.remote` no longer told you the truth. The user
 configuration holds the three things Git has no opinion about: what a prompt
 should be pre-filled with, what a URL prefix abbreviates, and which templates
 you have already agreed to let reach the network.
+
+## The environment
+
+git-tpl reads five environment variables and writes none. Everything else it
+knows comes from a file you can point at.
+
+| Variable | Read for |
+|---|---|
+| `XDG_CONFIG_HOME` | Where `git-tpl/config.toml` and the global ignore file live. Honoured only when **absolute**; an empty or relative value is unset, per the XDG specification. |
+| `HOME` | The fallback for the above: `$HOME/.config`. |
+| `USERPROFILE` | The Windows fallback for `HOME`, and the one libgit2 itself uses. Git for Windows usually exports `HOME`, but nothing guarantees it. |
+| `NO_COLOR` | [no-color.org](https://no-color.org). Presence is the signal, whatever the value. |
+| `CLICOLOR_FORCE` | [force-color.org](https://force-color.org). Any value but `0` forces colour. |
+| `TERM` | `dumb` means no colour. |
+
+Colour precedence, highest first — `--color` decides outright when it is not
+`auto`, and only then does the environment get a say:
+
+```
+1.  --color always | never
+2.  CLICOLOR_FORCE       set and not `0` → colour, even when not a terminal
+3.  NO_COLOR             set at all → no colour
+4.  TERM=dumb            → no colour
+5.  is stderr a terminal?
+```
+
+`CLICOLOR_FORCE` outranks `NO_COLOR` and outranks not being a terminal, which
+is deliberate: that is what CI systems set to get coloured logs, and a build
+that asked for colour explicitly has said something a heuristic has not.
+
+None of these reach a template. A rendered tree cannot depend on where it was
+rendered — that is [invariant 2](concepts/determinism.md).

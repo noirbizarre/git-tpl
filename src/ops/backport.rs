@@ -558,9 +558,19 @@ pub fn backport(
         }
     }
 
+    // Every arm goes through `describe_revision`, arm for arm as
+    // `Provenance::Recorded::describe_revision` does. Cloning the reference
+    // instead — which this did — printed the literal `<worktree>` where the
+    // rest of git-tpl prints `7fa834c (+ uncommitted changes)`, and the string
+    // is not merely displayed: it is embedded in the emitted patch and
+    // re-exported as the JSON `revision` field.
     let revision_description = match (&reference, revision) {
         (Some(reference), Some(revision)) => describe_revision(reference, revision),
-        _ => rendered.template.reference.clone(),
+        // The recorded pair is incomplete, so fall back to what the render
+        // actually resolved rather than to the bare name.
+        (Some(reference), None) => describe_revision(reference, rendered.template.revision),
+        (None, Some(revision)) => revision.short(),
+        (None, None) => describe_revision(&rendered.template.reference, rendered.template.revision),
     };
 
     let apply_command = apply_command(&config.template.source, project_root);

@@ -69,6 +69,12 @@ src/
 │   ├── ignore.rs    .gitignore evaluation, ours not libgit2's (ADR-017)
 │   └── libgit2.rs   the only implementation
 ├── ops/             orchestration, one function per command
+│   ├── mod.rs       init, update, status, diff, merge, fetch, push, and the rest
+│   ├── resolve.rs   fetching a template to a revision
+│   ├── backport.rs  the patch that carries a fix upstream (ADR-020)
+│   ├── hunks.rs     interactive hunk selection (ADR-023)
+│   ├── unsubstitute.rs  reversing a substitution in a change (ADR-022)
+│   └── testing.rs   running a template's own tests (ADR-016)
 ├── cli.rs           argument types only
 ├── report.rs        the --json envelope, success and failure
 ├── theme.rs         formatting helpers that return String
@@ -90,8 +96,10 @@ runs is a bug, not a feature.
 **`src/git/mod.rs`** — adding to the trait is right; adding a `git2` type to a
 signature is not.
 
-**`src/ops/mod.rs`** — this is where the commands' semantics live. A change here
-almost certainly needs a documentation change in `docs/usage/`.
+**`src/ops/`** — this is where the commands' semantics live: `mod.rs` for the
+commands that need one function, a file of its own for the ones that do not —
+`backport`, `testing`, `hunks`, `unsubstitute`, `resolve`. A change here almost
+certainly needs a documentation change in `docs/usage/`.
 
 **Anything user-visible** — update the corresponding page under `docs/`. In the
 same PR. A feature is not finished when it works; it is finished when someone
@@ -149,10 +157,14 @@ stub. `tests/common/mod.rs` builds real repositories in temporary directories.
 
 ## Driving git-tpl without a person
 
-Every command takes `--json`, and every failure carries a stable
-`error.code` — `docs/reference/diagnostics.md` is the catalogue. Branch on the
-code, never on the message; messages are expected to improve and are pinned
-nowhere.
+Every command takes `--json` and every failure carries a stable `error.code` —
+`docs/reference/diagnostics.md` is the catalogue. Branch on the code, never on
+the message; messages are expected to improve and are pinned nowhere.
+
+Almost every command also emits a success payload. `show`, `completion` and
+`man` do not: their stdout is already the payload — a file's bytes, a shell
+script, troff — and wrapping it would leave nothing able to read, source or
+render it.
 
 The loop for working on a template, none of which needs a repository:
 

@@ -63,23 +63,37 @@ src/
 ├── eval.rs          expression evaluation and prompting
 ├── render.rs        the tree walk
 ├── answers.rs       --answers-from files
+├── userconfig.rs    ~/.config/git-tpl/config.toml
+├── seed.rs          the machine-seeded prompt defaults (ADR-018)
+├── remote.rs        remote URL parts, for seeding
+├── lint.rs          static template analysis
+├── note.rs          terminal-safe rendering of a template's note (ADR-019)
+├── suggest.rs       "did you mean?"
 ├── data/            data source abstraction and loaders
 ├── git/             the Git abstraction
 │   ├── mod.rs       the GitBackend trait — our types, never git2's
 │   ├── ignore.rs    .gitignore evaluation, ours not libgit2's (ADR-017)
 │   └── libgit2.rs   the only implementation
 ├── ops/             orchestration, one function per command
+│   ├── mod.rs       init, update, status, diff, merge, fetch, push, and the rest
+│   ├── resolve.rs   fetching a template to a revision
+│   ├── backport.rs  the patch that carries a fix upstream (ADR-020)
+│   ├── hunks.rs     interactive hunk selection (ADR-023)
+│   ├── unsubstitute.rs  reversing a substitution in a change (ADR-022)
+│   └── testing.rs   running a template's own tests (ADR-016)
 ├── cli.rs           argument types only
+├── report.rs        the --json envelope, success and failure
 ├── theme.rs         formatting helpers that return String
 ├── prompt.rs        the demand-based prompter
 └── commands/        one module per subcommand
 ```
 
-`ops/` is a module with one *function* per command — `init`, `update`, `status`,
-`diff`, `merge`, `fetch`, `push`, `lint`, `questions` and the rest — plus
-`resolve` for fetching a template. `commands/` is the directory with one module
-per subcommand; that is where argument handling and output formatting live, and
-nothing else.
+`ops/` holds one *function* per command in `mod.rs` — `init`, `update`,
+`status`, `diff`, `merge`, `fetch`, `push`, `lint`, `questions` and the rest —
+and a file of its own for each command too large to be one: `backport`,
+`testing`, `hunks`, `unsubstitute`, plus `resolve` for fetching a template.
+`commands/` is the directory with one module per subcommand; that is where
+argument handling and output formatting live, and nothing else.
 
 Dependencies point inward. `ops` uses `render`, `graph`, `git`; nothing in
 `template/` or `render.rs` knows a command exists.

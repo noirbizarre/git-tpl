@@ -214,6 +214,11 @@ fn force_replaces_the_output_rather_than_merging_into_it() {
 /// Not a directory at all. The error must name the path and say what failed to
 /// happen to it — "read `/tmp/x/out`" — because the alternative is a bare
 /// `NotADirectory` from somewhere inside a command that touched four paths.
+///
+/// And it must name *writing*. This was reported as `tpl::git::backend`, with
+/// no Git involved: a caller branching on `error.code` could not tell a full
+/// disk from a libgit2 fault, and the catalogue describes that code in Git
+/// terms.
 #[test]
 fn an_output_path_that_is_a_file_is_refused_with_the_path_that_failed() {
     let (_keep, template) = template();
@@ -235,6 +240,18 @@ fn an_output_path_that_is_a_file_is_refused_with_the_path_that_failed() {
         scratch.out().is_file(),
         "the output path was clobbered rather than refused"
     );
+
+    let coded = scratch
+        .run(&[
+            "--json",
+            "render",
+            &template.source(),
+            "--output",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+        ])
+        .failure();
+    assert_eq!(coded.error_code(), "tpl::ops::write_failed");
 }
 
 /// A pinned revision carries the mode in the tree, so it is readable — and

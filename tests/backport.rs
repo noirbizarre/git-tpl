@@ -566,6 +566,56 @@ fn the_apply_command_names_a_local_template_clone() {
 }
 
 #[test]
+fn a_revision_without_a_recorded_commit_is_still_described_by_its_sha() {
+    let world = world();
+    world.init(&[]).success();
+
+    // Strip the provenance from the template ref's tip, standing in for a
+    // history written by an older git-tpl: the reference survives in the
+    // config, the commit does not. Backport used to clone the bare name into
+    // the patch here, so the line telling a reviewer what the fix was rendered
+    // against named a branch and no revision — the one thing it exists to say.
+    let reference = world
+        .project
+        .git(&["for-each-ref", "--format=%(refname)", "refs/tpl/"])
+        .trim()
+        .to_string();
+    let tree = world
+        .project
+        .git(&["rev-parse", &format!("{reference}^{{tree}}")]);
+    let stripped = world
+        .project
+        .git(&["commit-tree", tree.trim(), "-m", "tpl: render"]);
+    world
+        .project
+        .git(&["update-ref", &reference, stripped.trim()]);
+
+    world.project.write("ci.yml", "name: CI\non: [push]\n");
+
+    let output = tpl(&world.project, &["--json", "backport"]).success();
+    let revision = output.json()["revision"]
+        .as_str()
+        .expect("a revision description")
+        .to_string();
+
+    // `describe_revision`'s shape — `<reference> (<short sha>)` — rather than a
+    // bare name, and never the literal `<worktree>` placeholder.
+    assert!(
+        revision.ends_with(')') && revision.contains(" ("),
+        "a described revision, not a bare name: {revision}"
+    );
+    assert!(
+        !revision.contains("<worktree>"),
+        "the placeholder should not reach the output: {revision}"
+    );
+
+    // And the same string reaches the patch, which is where a reviewer reads
+    // it. The two must not drift apart.
+    let patch = tpl(&world.project, &["backport"]).success().stdout;
+    assert!(patch.contains(&revision), "{patch}");
+}
+
+#[test]
 fn an_output_file_holds_the_patch_and_stdout_stays_empty() {
     let world = world();
     world.init(&[]).success();

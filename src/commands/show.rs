@@ -7,6 +7,7 @@ use tpl::ops::{self, OpError, Shown};
 use super::{Session, answering, report_ignored_paths, supplied, trust};
 use crate::cli::{GlobalArgs, ShowArgs};
 use crate::prompt::{Confirmer, Interactive};
+use crate::theme::warning;
 
 pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -43,7 +44,7 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         // Bytes, verbatim, to stdout: `git tpl show README.md > mine.md` and
         // piping into an editor must both work, and rendered content is not
         // necessarily UTF-8 — so `write_all`, never `print!`.
-        Shown::File(bytes) => write_out(&bytes),
+        Shown::File(bytes) => write_out(&ctx.out, &bytes),
         // One root-relative path per line, the same shape as
         // `git tpl diff --name-only`, and for the same reason: `| xargs`.
         // Line-terminated rather than line-separated, so the last path is not
@@ -54,7 +55,7 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 listing.push_str(path);
                 listing.push('\n');
             }
-            write_out(listing.as_bytes());
+            write_out(&ctx.out, listing.as_bytes());
         }
     }
 
@@ -65,13 +66,22 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 ///
 /// `git tpl show big-file | head` closes the pipe under us, and a diagnostic
 /// about it would be noise about something the user did on purpose.
-fn write_out(bytes: &[u8]) {
+///
+/// Through the [`Reporter`](super::Reporter) rather than a bare `eprintln!`:
+/// this was the one command that hand-rolled its own `error: ` prefix, which
+/// matched neither miette's rendering at the binary edge nor `warn`'s, and it
+/// is a warning — the run still succeeds — so `warn` is what carries it past
+/// `--quiet`.
+fn write_out(out: &super::Reporter, bytes: &[u8]) {
     let stdout = io::stdout();
-    let mut out = stdout.lock();
-    if let Err(error) = out.write_all(bytes)
+    let mut stream = stdout.lock();
+    if let Err(error) = stream.write_all(bytes)
         && error.kind() != io::ErrorKind::BrokenPipe
     {
-        eprintln!("error: could not write to stdout: {error}");
+        out.warn(warning(
+            &out.theme,
+            &format!("could not write to stdout: {error}"),
+        ));
     }
-    let _ = out.flush();
+    let _ = stream.flush();
 }

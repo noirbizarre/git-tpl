@@ -93,9 +93,9 @@ Revision:  main (4f2c1a9)
 
 Created refs/tpl/rust-library-template
 
+  added     .github/workflows/ci.yml
   added     Cargo.toml
   added     README.md
-  added     src/lib.rs
 
 Merged into main.
 
