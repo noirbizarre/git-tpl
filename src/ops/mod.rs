@@ -189,6 +189,21 @@ pub enum OpError {
         message: String,
     },
 
+    /// The destination `init` was pointed at does not exist.
+    ///
+    /// Its own variant rather than `InvalidArgument`: the argument was well
+    /// formed, and the fix — `--init`, or create the directory yourself — is
+    /// worth naming rather than folded into a generic message.
+    #[error("`{}` does not exist", path.display())]
+    #[diagnostic(
+        code(tpl::ops::no_such_directory),
+        help("create it first, or pass --init to create it and the repository")
+    )]
+    NoSuchDirectory {
+        /// The destination that was asked for.
+        path: PathBuf,
+    },
+
     /// The rendered ref does not exist.
     #[error("`{ref_name}` does not exist")]
     #[diagnostic(

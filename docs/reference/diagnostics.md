@@ -136,6 +136,7 @@ errors before anything is checked:
 | `tpl::ops::missing_note_file` | `note_file` names nothing at the template revision. The path is relative to the repository root, not the render root. |
 | `tpl::ops::note_file_not_utf8` | `note_file` names a binary file. A note is text. |
 | `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist yet. Run `init` or `update`. |
+| `tpl::ops::no_such_directory` | `init`'s destination does not exist. Create it, or pass `--init` to create it and the repository. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
 | `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
 

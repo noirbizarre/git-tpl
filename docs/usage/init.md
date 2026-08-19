@@ -3,12 +3,14 @@
 Attach a template to a repository, render it, and merge the result.
 
 ```sh
-git tpl init <template> [--ref <ref>] [--answer k=v]... [options]
+git tpl init <template> [<dir>] [--ref <ref>] [--answer k=v]... [options]
 ```
 
 ## What it does
 
-1. Verifies the current directory is a Git repository (`--init` creates one).
+1. Verifies the destination — `<dir>`, or the current directory if it is
+   omitted — is a Git repository (`--init` creates the directory and the
+   repository).
 2. Resolves the template source and its revision.
 3. Loads the template manifest and any data sources it needs.
 4. Builds the dependency graph and validates it.
@@ -95,8 +97,9 @@ shortcut never leaves your machine.
 
 | Option | Meaning |
 |---|---|
+| `<dir>` | Where to render it. Defaults to the current directory. Everything else — a template given as a path, `--answers-from` — stays relative to where you ran the command, not to `<dir>`. |
 | `--ref <ref>` | Branch, tag or commit. Defaults to the remote's default branch. |
-| `--init` | Create the repository if there is not one here. |
+| `--init` | Create the directory and the repository if there is not one here. |
 | `--answer k=v` | Supply an answer, skipping its prompt. Repeatable. |
 | `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
 | `--defaults` | Accept every default without prompting. |
@@ -136,10 +139,24 @@ Answers recorded in .config/git.tpl.toml and committed.
 it is what `.config/git.tpl.toml` will record, and what a later `--ref` or
 `--id` will be resolved against.
 
+## Starting from nothing
+
+`<dir>` plus `--init` is the whole of `mkdir`, `cd`, `git init` and `init` in
+one line:
+
+```console
+$ git tpl init https://github.com/noirbizarre/rust-library-template my-project --init
+```
+
+Leave off `--init` and a `my-project` that does not exist yet, or is not a Git
+repository, is refused with a diagnostic naming the fix rather than clap's
+"unexpected argument" — the problem this option exists to solve.
+
 ## Preconditions
 
-**A Git repository.** `init` needs somewhere to put a ref. Pass `--init` to
-create one, or run `git init` first.
+**A Git repository at the destination** — the current directory by default, or
+`<dir>` if given. `init` needs somewhere to put a ref. Pass `--init` to create
+the directory and the repository, or create them yourself first.
 
 **No existing `.config/git.tpl.toml`.** A project has one template. Re-running
 `init` is refused with `tpl::ops::already_initialised`, because it would

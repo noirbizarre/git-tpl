@@ -35,7 +35,7 @@ pub use test::run as test;
 pub use update::run as update;
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use tpl::git::GitBackend;
 use tpl::git::libgit2::LibGit2;
@@ -151,10 +151,19 @@ pub struct Session {
 impl Session {
     /// Discover the repository containing the current directory.
     pub fn discover(global: &GlobalArgs) -> Result<Self, OpError> {
-        let cwd = current_dir()?;
+        Self::discover_at(&current_dir()?, global)
+    }
+
+    /// Discover the repository containing `path`.
+    ///
+    /// `init` is the only command that takes a destination, and it passes it
+    /// here rather than changing the process directory: a relative template
+    /// path and a relative `--answers-from` are relative to where the command
+    /// was typed, and a `chdir` would reinterpret both without saying so.
+    pub fn discover_at(path: &Path, global: &GlobalArgs) -> Result<Self, OpError> {
         // Searches upwards, like every Git command, so running from a
         // subdirectory works.
-        let repo = LibGit2::discover(&cwd)?;
+        let repo = LibGit2::discover(path)?;
         let root = repo.workdir()?;
         Ok(Self {
             repo,

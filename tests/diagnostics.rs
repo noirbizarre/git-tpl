@@ -141,6 +141,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::ops::invalid_argument",
     "tpl::ops::missing_note_file",
     "tpl::ops::no_rendered_ref",
+    "tpl::ops::no_such_directory",
     "tpl::ops::no_such_path",
     "tpl::ops::note_file_not_utf8",
     "tpl::ops::write_failed",

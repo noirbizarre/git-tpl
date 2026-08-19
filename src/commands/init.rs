@@ -1,30 +1,72 @@
 //! `git tpl init`
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use tpl::git::libgit2::LibGit2;
 use tpl::git::{GitBackend, MergeOutcome};
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError};
+use tpl::userconfig::UserConfig;
 
 use super::{
-    Session, answering, current_dir, report_ignored, report_ignored_paths, supplied, trust,
+    Reporter, Session, Standalone, answering, current_dir, report_ignored, report_ignored_paths,
+    supplied, trust,
 };
 use crate::cli::{GlobalArgs, InitArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, heading, headline, muted, note_block, warning};
 
 pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
-    // `--init` has to happen before discovery, since there may be no
-    // repository to discover yet.
-    if args.init {
-        let cwd = current_dir()?;
-        if LibGit2::discover(&cwd).is_err() {
-            LibGit2::init(&cwd)?;
+    // Where the project goes. Not a `chdir` — see `Session::discover_at`: a
+    // relative template path and a relative `--answers-from` stay relative to
+    // where the command was typed, and a `chdir` would reinterpret both
+    // without saying so.
+    let destination = match &args.directory {
+        Some(dir) => dir.clone(),
+        None => current_dir()?,
+    };
+
+    if args.dry_run {
+        // A dry run creates nothing, so `--init` is deliberately not honoured
+        // here, and a destination that is not yet a repository previews
+        // without a project to seed from rather than failing.
+        let base = Standalone::new(global)?;
+        let repo = LibGit2::discover(&destination).ok();
+        let root = repo.as_ref().and_then(|r| r.workdir().ok());
+        let project = repo
+            .as_ref()
+            .zip(root.as_deref())
+            .map(|(r, p)| (r as &dyn GitBackend, p));
+
+        let answers = supplied(&args.answers)?;
+        // Expanded here, at the edge, and not in `ops`. See the comment on the
+        // non-dry-run expansion below — the same rule applies to a preview.
+        let template = base.user.expand(&args.template).into_owned();
+        let payload = dry_run(&base.out, &base.user, project, &args, &template, answers)?;
+        if global.json {
+            println!("{}", crate::report::success(payload));
         }
+        return Ok(crate::exit::SUCCESS);
     }
 
-    let ctx = Session::discover(global)?;
+    // `--init` has to happen before discovery, since there may be no
+    // repository — and now no directory — to discover yet.
+    if args.init {
+        // `create_dir_all`, so `init <template> a/b --init` behaves like
+        // `mkdir -p`, and an already-existing directory is a no-op rather
+        // than an error.
+        std::fs::create_dir_all(&destination).map_err(|e| write_failed(&destination, &e))?;
+        if LibGit2::discover(&destination).is_err() {
+            LibGit2::init(&destination)?;
+        }
+    } else if !destination.exists() {
+        // The error #84 is about: an argument clap accepted but that names
+        // nothing yet, with the fix — `--init` — said outright.
+        return Err(OpError::NoSuchDirectory { path: destination });
+    }
+
+    let ctx = Session::discover_at(&destination, global)?;
     let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
         // `init` has no `--remote` and no `--push`; `--defaults` is the only
         // preference it can override, and it must, or `tpl.interactive true`
@@ -44,14 +86,6 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // project created by someone with a `mine:` shortcut would be unusable by
     // everyone else.
     let template = ctx.user.expand(&args.template).into_owned();
-
-    if args.dry_run {
-        let payload = dry_run(&ctx, &args, &template, answers)?;
-        if global.json {
-            println!("{}", crate::report::success(payload));
-        }
-        return Ok(crate::exit::SUCCESS);
-    }
 
     let mut prompter = Interactive;
     let mut confirmer = Confirmer;
@@ -245,14 +279,34 @@ fn declared_remote(remote: &ops::DeclaredRemote) -> serde_json::Value {
     })
 }
 
+/// The failure to create the destination directory, under the code that
+/// means it.
+///
+/// Mirrors `commands::render::io`: `tpl::git::backend` was used here once, and
+/// no Git is involved — a caller branching on `error.code` could not tell a
+/// full disk from a libgit2 fault, and `tpl::ops::write_failed` already exists
+/// for exactly this.
+fn write_failed(path: &Path, error: &std::io::Error) -> OpError {
+    OpError::WriteFailed {
+        path: path.display().to_string(),
+        reason: format!("could not create it: {error}"),
+    }
+}
+
 /// Report what would be asked and rendered, without creating anything.
 ///
 /// The cheapest way to find a cycle or a typo in an expression, since both are
 /// caught when the graph is built rather than when a question is reached.
 ///
+/// `project` is `None` when the destination is not (yet) inside a repository —
+/// a dry run creates nothing, so it previews on the template alone rather than
+/// requiring `--init` to have already run.
+///
 /// Returns the machine-readable form so the caller does the single `println!`.
 fn dry_run(
-    ctx: &Session,
+    out: &Reporter,
+    user: &UserConfig,
+    project: Option<(&dyn GitBackend, &Path)>,
     args: &InitArgs,
     source: &str,
     answers: BTreeMap<String, tpl::template::Value>,
@@ -272,19 +326,18 @@ fn dry_run(
         .filter(|key| !template.manifest.questions.contains_key(*key))
         .cloned()
         .collect();
-    report_ignored(&ctx.out, &ignored);
+    report_ignored(out, &ignored);
 
-    ctx.out.blank();
-    ctx.out.say(field(&ctx.out.theme, "Template", source));
+    out.blank();
+    out.say(field(&out.theme, "Template", source));
     let revision_description = ops::describe_revision(&template.reference, template.revision);
-    ctx.out
-        .say(field(&ctx.out.theme, "Revision", &revision_description));
-    ctx.out.blank();
-    ctx.out.say(heading(
-        &ctx.out.theme,
+    out.say(field(&out.theme, "Revision", &revision_description));
+    out.blank();
+    out.say(heading(
+        &out.theme,
         "Questions, in the order they would be asked",
     ));
-    ctx.out.blank();
+    out.blank();
 
     let mut asked = 0;
     // Resolution order, the same order the text list prints: it is the order
@@ -296,28 +349,24 @@ fn dry_run(
             tpl::graph::NodeKind::Question => {
                 let supplied = answers.contains_key(&node.key);
                 let supplied_note = if supplied {
-                    muted(&ctx.out.theme, "  (supplied)")
+                    muted(&out.theme, "  (supplied)")
                 } else {
                     String::new()
                 };
-                ctx.out.say(format!("  {}{supplied_note}", node.key));
+                out.say(format!("  {}{supplied_note}", node.key));
                 nodes.push(
                     serde_json::json!({ "name": node.key, "kind": "question", "supplied": supplied }),
                 );
                 asked += 1;
             }
             tpl::graph::NodeKind::Computed => {
-                ctx.out
-                    .say(muted(&ctx.out.theme, &format!("  {} (computed)", node.key)));
+                out.say(muted(&out.theme, &format!("  {} (computed)", node.key)));
                 nodes.push(
                     serde_json::json!({ "name": node.key, "kind": "computed", "supplied": false }),
                 );
             }
             tpl::graph::NodeKind::Data => {
-                ctx.out.say(muted(
-                    &ctx.out.theme,
-                    &format!("  {} (data source)", node.key),
-                ));
+                out.say(muted(&out.theme, &format!("  {} (data source)", node.key)));
                 nodes.push(
                     serde_json::json!({ "name": node.key, "kind": "data", "supplied": false }),
                 );
@@ -326,7 +375,7 @@ fn dry_run(
     }
 
     if asked == 0 {
-        ctx.out.say(muted(&ctx.out.theme, "  (none)"));
+        out.say(muted(&out.theme, "  (none)"));
     }
 
     // The file list, when the answers are complete enough to render without
@@ -347,18 +396,16 @@ fn dry_run(
                 root: None,
                 dirty: args.dirty,
             },
-            Some((&ctx.repo, &ctx.root)),
+            project,
             answers.clone(),
-            &ctx.user,
+            user,
             tpl::ops::Answering::Interactive(&mut prompter),
             trust(&args.answers, args.trust, false, &mut confirmer),
         ) {
-            ctx.out.blank();
-            ctx.out
-                .say(heading(&ctx.out.theme, "Files it would render"));
+            out.blank();
+            out.say(heading(&out.theme, "Files it would render"));
             for file in &rendered.files {
-                ctx.out
-                    .say(muted(&ctx.out.theme, &format!("  {}", file.path)));
+                out.say(muted(&out.theme, &format!("  {}", file.path)));
             }
             files = Some(
                 rendered
@@ -370,8 +417,8 @@ fn dry_run(
         }
     }
 
-    ctx.out.blank();
-    ctx.out.say(muted(&ctx.out.theme, "Nothing was created."));
+    out.blank();
+    out.say(muted(&out.theme, "Nothing was created."));
 
     Ok(serde_json::json!({
         "dryRun": true,

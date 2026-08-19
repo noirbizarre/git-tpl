@@ -81,6 +81,12 @@ git init
 git tpl init ../rust-library-template
 ```
 
+`init` also accepts the destination directly, which is `mkdir`, `git init` and
+`init` in one line — see [Starting from nothing](../usage/init.md#starting-from-nothing).
+The template path stays relative to wherever you run the command though, so
+that form reads `../rust-library-template` differently; commands below assume
+you `cd`ed into `my-project` as above.
+
 git-tpl asks the questions, writes `.config/git.tpl.toml`, renders the template
 into `refs/tpl/rust-library-template`, and merges it into your branch.
 
