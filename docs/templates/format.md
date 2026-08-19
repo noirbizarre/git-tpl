@@ -237,9 +237,15 @@ template/README.md.jinja                 ← imports it
 {{ m.badge(project_name) }}
 ```
 
-`{% include %}` works the same way. A partial is named by its path relative to
-the **repository root**, not to the rendered subdirectory, so a partial in a
-directory is `{% import "macros/rust.jinja" %}`.
+A partial is named by its path relative to the **repository root**, not to the
+rendered subdirectory, so a partial in a directory is:
+
+```jinja
+{% import "macros/rust.jinja" as rust %}
+```
+
+`{% include %}` follows the same path rule but takes no alias — it inlines the
+partial's output directly, e.g. `{% include "macros/rust.jinja" %}`.
 
 Being outside the rendered subdirectory is the whole rule, and it is what keeps
 a macro definition from landing in every generated project. There is no manifest
