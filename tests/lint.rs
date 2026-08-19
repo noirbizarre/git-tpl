@@ -241,6 +241,25 @@ fn a_raw_block_makes_a_github_expression_fine() {
     assert!(codes(&output).is_empty(), "{:?}", codes(&output));
 }
 
+/// #81: `{%- raw -%}` trims whitespace on both sides of the opening tag,
+/// which is the natural form for a workflow — it is what removes the blank
+/// line `{%- raw %}\nname: ...` leaves behind. A scanner that missed the
+/// trailing dash would report the block's contents as leaked.
+#[test]
+fn a_raw_block_with_full_whitespace_control_makes_a_github_expression_fine() {
+    let world = World::with_template(
+        r#"name = "escaped""#,
+        &[(
+            "w.yaml.jinja",
+            "{%- raw -%}\nx: ${{ github.ref }}\n{%- endraw %}\n",
+        )],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
 /// A file not named `.jinja` is copied byte-for-byte, so its `${{ }}` is never
 /// at risk and reporting it would be noise.
 #[test]
