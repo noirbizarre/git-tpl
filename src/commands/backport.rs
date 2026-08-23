@@ -98,10 +98,10 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         })?;
     }
 
-    report(&ctx, &args, &result);
+    print_text(&ctx, &args, &result);
 
     if global.json {
-        println!("{}", crate::report::success(payload(&args, &result)));
+        println!("{}", crate::report::success(json(&args, &result)));
     } else if args.output.is_none() && !result.patch.is_empty() {
         // The patch is data, so it goes to stdout and nowhere else. Everything
         // above went to stderr precisely so that this stays pipeable straight
@@ -164,10 +164,10 @@ fn picking(flag: bool, interactive: bool, json: bool, tty: bool) -> Result<bool,
 
 /// The prose, on stderr.
 ///
-/// Built beside [`payload`] rather than from it: `--json` suppresses this text
+/// Built beside [`json`] rather than from it: `--json` suppresses this text
 /// but not the work behind it, and the two must not come to disagree about
 /// what was backported (#53).
-fn report(ctx: &Session, args: &BackportArgs, result: &Backport) {
+fn print_text(ctx: &Session, args: &BackportArgs, result: &Backport) {
     // Loud regardless of verbosity: a path that was considered and dropped is
     // something the user is getting wrong right now, and a silent omission
     // from a patch is discovered only by the template's maintainer.
@@ -252,7 +252,7 @@ fn report(ctx: &Session, args: &BackportArgs, result: &Backport) {
 }
 
 /// The `--json` payload.
-fn payload(args: &BackportArgs, result: &Backport) -> serde_json::Value {
+fn json(args: &BackportArgs, result: &Backport) -> serde_json::Value {
     serde_json::json!({
         "result": if result.files.is_empty() { "nothingToBackport" } else { "patched" },
         "template": result.source,
