@@ -8,7 +8,10 @@
 
 use tpl::ops::{self, OpError, Target};
 
-use super::{Standalone, answering, report_ignored, report_ignored_paths, supplied, trust};
+use super::{
+    Standalone, answering, enforce_strict_answers, report_ignored, report_ignored_paths, supplied,
+    trust,
+};
 use crate::cli::{ContextArgs, GlobalArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{heading, muted};
@@ -34,6 +37,11 @@ pub fn run(args: ContextArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         trust(&args.answers, args.trust, true, &mut confirmer),
     )?;
 
+    enforce_strict_answers(
+        &args.answers,
+        &rendered.ignored_answers,
+        rendered.template.manifest.questions.keys().cloned(),
+    )?;
     report_ignored(&ctx.out, &rendered.ignored_answers);
     report_ignored_paths(&ctx.out, &rendered.template.ignored);
 

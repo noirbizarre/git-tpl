@@ -560,6 +560,40 @@ pub struct RenderedOnce {
     pub ignored_answers: Vec<String>,
 }
 
+/// Refuse a supplied answer that names no question, under `--strict-answers`.
+///
+/// The lenient default exists for *recorded* answers: a template drops
+/// questions over time, and a project that answered one is not at fault. A
+/// hand-written `--answers-from` is a different trust level — there a typo'd
+/// key silently swaps in the default, and for a boolean that deletes a whole
+/// conditional subtree while the warning scrolls past.
+///
+/// Takes a plain `bool` rather than a CLI type: nothing below the command
+/// layer may know `AnswerArgs` exists, but `init` and `update` must refuse
+/// *before* they write a commit, which is earlier than either ever returns
+/// to its caller — so the check has to live here, not in `commands/`.
+pub fn enforce_strict_answers(
+    strict: bool,
+    ignored: &[String],
+    known: impl IntoIterator<Item = String>,
+) -> Result<(), OpError> {
+    if !strict {
+        return Ok(());
+    }
+    let Some(key) = ignored.first() else {
+        return Ok(());
+    };
+    let known: Vec<String> = known.into_iter().collect();
+    let suggestion = crate::suggest::closest(key, known.iter().map(String::as_str))
+        .map(|close| format!("Did you mean `{close}`? "))
+        .unwrap_or_default();
+    Err(crate::answers::AnswersError::UnknownKey {
+        key: key.clone(),
+        suggestion,
+    }
+    .into())
+}
+
 /// Resolve, evaluate and render — to bytes, with no repository required.
 ///
 /// `project` is `None` for a project-free render. Two things depend on it, and
@@ -981,6 +1015,7 @@ pub fn init(
     dirty: bool,
     merge_after: bool,
     force: bool,
+    strict_answers: bool,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
@@ -1011,6 +1046,15 @@ pub fn init(
         user,
         answering,
         trust,
+    )?;
+
+    // Before the ref is created, not after: `--force` re-renders onto an
+    // existing ref, and a refusal that arrived once the commit already
+    // existed would have to be undone rather than simply never made.
+    enforce_strict_answers(
+        strict_answers,
+        &rendered.ignored_answers,
+        rendered.template.manifest.questions.keys().cloned(),
     )?;
 
     let id = TemplateId::resolve(source, explicit_id)?;
@@ -1403,11 +1447,13 @@ pub enum UpdateOutcome {
 /// Never touches `HEAD`, the index or the worktree. That is structural: the
 /// tree is built as a Git object and one ref is moved. There is no code path
 /// here that writes a file into the project.
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     project: &dyn GitBackend,
     project_root: &Path,
     overrides: BTreeMap<String, Value>,
     dirty: bool,
+    strict_answers: bool,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
@@ -1429,6 +1475,16 @@ pub fn update(
         user,
         answering,
         trust,
+    )?;
+
+    // Before any migration is discovered or any commit created: `update`
+    // writes `.config/git.tpl.toml` back further down, and a refusal that
+    // arrived after that write would leave the recorded answers changed for
+    // a run that ultimately failed.
+    enforce_strict_answers(
+        strict_answers,
+        &rendered.ignored_answers,
+        rendered.template.manifest.questions.keys().cloned(),
     )?;
 
     let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
@@ -1733,11 +1789,13 @@ pub struct Preview {
 /// Answers come from `.config/git.tpl.toml`, so the preview asks nothing: the
 /// question being answered is "what would my template edit do to this
 /// project?", not "what would a different set of answers do?".
+#[allow(clippy::too_many_arguments)]
 pub fn render_preview(
     project: &dyn GitBackend,
     project_root: &Path,
     overrides: BTreeMap<String, Value>,
     dirty: bool,
+    strict_answers: bool,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
@@ -1761,6 +1819,12 @@ pub fn render_preview(
         user,
         answering,
         trust,
+    )?;
+
+    enforce_strict_answers(
+        strict_answers,
+        &rendered.ignored_answers,
+        rendered.template.manifest.questions.keys().cloned(),
     )?;
 
     // Parented on the rendered ref's tip when there is one, so the merge base

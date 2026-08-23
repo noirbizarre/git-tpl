@@ -152,6 +152,7 @@ fn preview(
         &ctx.root,
         supplied(answers)?,
         true,
+        answers.strict_answers,
         &ctx.user,
         answering(answers, preferences.interactive, &mut prompter),
         trust(answers, false, preferences.interactive, &mut confirmer),

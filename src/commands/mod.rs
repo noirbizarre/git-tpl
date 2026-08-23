@@ -226,31 +226,17 @@ pub fn answering<'a>(
 
 /// Refuse supplied answers that name no question, under `--strict-answers`.
 ///
-/// The lenient default exists for *recorded* answers: a template drops
-/// questions over time, and a project that answered one is not at fault. A
-/// hand-written `--answers-from` is a different trust level — there a typo'd
-/// key silently swaps in the default, and for a boolean that deletes a whole
-/// conditional subtree while the warning scrolls past.
+/// A thin wrapper over [`tpl::ops::enforce_strict_answers`]: `render` and
+/// `context` are the only commands that reach this point before writing
+/// anything, so they are the only two that can still refuse here. `init`,
+/// `update`, `diff --dirty` and `show --dirty` call the same `ops::` function
+/// directly, earlier, before either writes a commit.
 pub fn enforce_strict_answers(
     args: &AnswerArgs,
     ignored: &[String],
     known: impl IntoIterator<Item = String>,
 ) -> Result<(), OpError> {
-    if !args.strict_answers {
-        return Ok(());
-    }
-    let Some(key) = ignored.first() else {
-        return Ok(());
-    };
-    let known: Vec<String> = known.into_iter().collect();
-    let suggestion = tpl::suggest::closest(key, known.iter().map(String::as_str))
-        .map(|close| format!("Did you mean `{close}`? "))
-        .unwrap_or_default();
-    Err(tpl::answers::AnswersError::UnknownKey {
-        key: key.clone(),
-        suggestion,
-    }
-    .into())
+    tpl::ops::enforce_strict_answers(args.strict_answers, ignored, known)
 }
 
 /// Say what `.gitignore` removed from a `--dirty` render.

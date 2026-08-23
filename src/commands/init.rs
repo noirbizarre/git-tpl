@@ -10,8 +10,8 @@ use tpl::ops::{self, OpError};
 use tpl::userconfig::UserConfig;
 
 use super::{
-    Reporter, Session, Standalone, answering, current_dir, report_ignored, report_ignored_paths,
-    supplied, trust,
+    Reporter, Session, Standalone, answering, current_dir, enforce_strict_answers, report_ignored,
+    report_ignored_paths, supplied, trust,
 };
 use crate::cli::{GlobalArgs, InitArgs};
 use crate::prompt::{Confirmer, Interactive};
@@ -99,6 +99,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         args.dirty,
         !args.no_merge,
         args.force,
+        args.answers.strict_answers,
         &ctx.user,
         answering(&args.answers, preferences.interactive, &mut prompter),
         trust(
@@ -326,6 +327,11 @@ fn dry_run(
         .filter(|key| !template.manifest.questions.contains_key(*key))
         .cloned()
         .collect();
+    enforce_strict_answers(
+        &args.answers,
+        &ignored,
+        template.manifest.questions.keys().cloned(),
+    )?;
     report_ignored(out, &ignored);
 
     out.blank();

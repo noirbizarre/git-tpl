@@ -1093,3 +1093,33 @@ fn init_creates_the_repository_when_there_is_none() {
     assert!(bare.join(".git").is_dir());
     assert!(bare.join("Cargo.toml").exists());
 }
+
+/// `--strict-answers` was accepted here but silently ignored — only `render`
+/// enforced it. A typo'd `--answer` at `init` time must refuse the same way,
+/// and before anything is committed: a refusal that arrived after the merge
+/// would have to be undone rather than simply never made.
+#[test]
+fn strict_answers_refuses_a_key_that_names_no_question() {
+    let world = World::new();
+    let source = world.template.source();
+
+    let output = tpl(
+        &world.project,
+        &[
+            "--json",
+            "init",
+            &source,
+            "--defaults",
+            "--answer",
+            "projct_name=oops",
+            "--strict-answers",
+        ],
+    )
+    .failure();
+
+    assert_eq!(output.error_code(), "tpl::answers::unknown_key");
+    assert!(
+        !world.project.has_ref(&world.ref_name()),
+        "a refused init must create no ref"
+    );
+}

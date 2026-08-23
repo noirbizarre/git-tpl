@@ -295,3 +295,25 @@ fn eval_reports_a_non_string_type() {
     );
     assert!(output.stdout.contains("MIT"), "{}", output.stdout);
 }
+
+/// `--strict-answers` was accepted here but silently ignored — only `render`
+/// enforced it.
+#[test]
+fn strict_answers_refuses_a_key_that_names_no_question() {
+    let (_keep, template) = template();
+    let scratch = Scratch::new();
+
+    let output = scratch
+        .run(&[
+            "--json",
+            "context",
+            &template.source(),
+            "--defaults",
+            "--answer",
+            "projct_name=oops",
+            "--strict-answers",
+        ])
+        .failure();
+
+    assert_eq!(output.error_code(), "tpl::answers::unknown_key");
+}

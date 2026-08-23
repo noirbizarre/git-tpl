@@ -529,3 +529,31 @@ fn diff_json_honours_exit_code() {
 
     tpl(&world.project, &["--json", "diff", "--exit-code"]).code(1);
 }
+
+/// `--strict-answers` was accepted on `diff --dirty` but silently ignored —
+/// only `render` enforced it.
+#[test]
+fn dirty_strict_answers_refuses_a_key_that_names_no_question() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world
+        .template
+        .repo
+        .write("template/README.md.jinja", "# changed\n");
+
+    let output = tpl(
+        &world.project,
+        &[
+            "--json",
+            "diff",
+            "--dirty",
+            "--answer",
+            "projct_name=oops",
+            "--strict-answers",
+        ],
+    )
+    .failure();
+
+    assert_eq!(output.error_code(), "tpl::answers::unknown_key");
+}
