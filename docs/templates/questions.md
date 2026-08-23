@@ -112,6 +112,10 @@ name = "{{ package_name }}"
 answer. Collapsing the two would make "not applicable" indistinguishable from
 "declined", and templates would render an empty `[[bin]]` section for libraries.
 
+[`git tpl lint`](../usage/lint.md#unguarded-gate-reads-tpllintunguarded_gate)
+warns (`tpl::lint::unguarded_gate`) about a file that reads `cli` without this
+guard.
+
 ## Dynamic defaults
 
 A default may be an expression:

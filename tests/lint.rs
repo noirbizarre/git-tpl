@@ -6,6 +6,7 @@
 mod common;
 
 use common::{Template, World, tpl_outside};
+use rstest::rstest;
 
 struct Scratch {
     dir: tempfile::TempDir,
@@ -498,9 +499,89 @@ default = "demo"
     assert!(help.contains("project_name"), "no suggestion in: {help}");
 }
 
+/// The gap #88 closes: `docs_accent` is declared, so `undeclared` has nothing
+/// to say, but it has no value at all when `docs` is false — reading it
+/// unguarded renders fine today and fails once `strict` becomes the default,
+/// with nobody warned beforehand.
+#[test]
+fn a_when_gated_question_read_outside_its_guard_is_reported() {
+    let world = World::with_template(
+        r#"
+name = "probe"
+
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.docs_accent]
+type = "string"
+when = "{{ docs }}"
+default = "blue"
+"#,
+        &[("mkdocs.yml.jinja", "accent: {{ docs_accent }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert_eq!(codes(&output), ["tpl::lint::unguarded_gate"]);
+
+    let json = output.json();
+    let message = json["diagnostics"][0]["message"].as_str().expect("message");
+    assert!(message.contains("docs_accent"), "no name in: {message}");
+}
+
+/// The three forms the docs recommend, all accepted.
+#[rstest]
+#[case("{% if docs_accent is defined %}accent: {{ docs_accent }}{% endif %}\n")]
+#[case(
+    "{% if docs_accent is not defined %}accent: none{% else %}accent: {{ docs_accent }}{% endif %}\n"
+)]
+#[case("accent: {{ docs_accent | default('blue') }}\n")]
+fn a_guarded_read_of_a_gated_question_is_not_reported(#[case] body: &str) {
+    let world = World::with_template(
+        r#"
+name = "probe"
+
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.docs_accent]
+type = "string"
+when = "{{ docs }}"
+default = "blue"
+"#,
+        &[("mkdocs.yml.jinja", body)],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
+/// A question with no `when` at all is never absent, so reading it bare is
+/// unremarkable — this is what every other lint test already relies on.
+#[test]
+fn an_ungated_question_read_bare_is_not_reported() {
+    let world = World::with_template(
+        r#"
+name = "probe"
+
+[questions.project_name]
+type = "string"
+default = "demo"
+"#,
+        &[("Cargo.toml.jinja", "name = \"{{ project_name }}\"\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
 /// The bug report itself: an `{% import %}` alias binds `stack` in the same
 /// namespace as the `stack` question. `{% if stack == "b" %}` then compares a
-/// module with a string — never true, never an error, and `strict = true`
+/// module with a string. That is never true, never an error, and `strict = true`
 /// does not help because nothing is undefined.
 #[test]
 fn an_import_alias_matching_a_question_is_reported() {

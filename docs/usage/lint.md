@@ -81,6 +81,49 @@ A warning, because that is still the default. Set `strict = true` in
 Names that came from a `${{ … }}` are not reported: `matrix` belongs to GitHub
 Actions, and advising an author to declare it would be advice not to take.
 
+### Unguarded gate reads — `tpl::lint::unguarded_gate`
+
+A [`when`-gated question](../templates/questions.md#conditional-questions) is
+*declared*, so `undeclared` has nothing to say about it — but for every answer
+set where its `when` is false it has no value at all, absent from the context
+rather than null or false. Reading it bare in a file that is not itself gated
+by the same condition renders fine for every answer set that turns the
+condition on, and fails for the one that turns it off:
+
+```toml
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.docs_accent]
+type = "string"
+when = "{{ docs }}"
+default = "blue"
+```
+
+```jinja
+accent: {{ docs_accent }}
+```
+
+`accent: blue` today, whatever `docs` is — until `strict = true` is set, or
+until `strict` becomes the default. Then it fails only when `docs` is false,
+and nothing warned beforehand, because `docs_accent` is a name the manifest
+does declare.
+
+The fix is the same idiom `undeclared` already recommends for an optional
+name:
+
+```jinja
+{% if docs_accent is defined %}accent: {{ docs_accent }}{% endif %}
+accent: {{ docs_accent | default('blue') }}
+```
+
+A warning, for the same reason as `undeclared`: the renderer is still lenient
+by default. It is a whole-file text search for the guard idiom, not
+control-flow analysis — a guard anywhere in the file silences every read of
+the name in it, and one inside an imported macro is invisible, for the same
+reason `undeclared` cannot see one.
+
 ### Absorbed keys — `tpl::lint::absorbed_key`
 
 In TOML a bare key belongs to the table that most recently opened. So a
