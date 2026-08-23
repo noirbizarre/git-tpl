@@ -23,8 +23,8 @@ to disagree about what `no` means.
 
 ### The assertion vocabulary is closed
 
-A case may assert `files`, `absent`, `contains`, `error`, and a snapshot.
-Nothing else, and in particular:
+A case may assert `files`, `absent`, `contains`, `lacks`, `error`, and a
+snapshot. Nothing else, and in particular:
 
 **No `command` key.** This is invariant 5 — templates cannot execute code — at
 the one surface where breaking it would feel most reasonable. A template
@@ -51,6 +51,29 @@ already the stable surface (ADR-015), so they are what a case names. The code
 is matched anywhere in the cause chain, because `tpl::render::content` says a
 file failed and only the `tpl::eval::expression` beneath it says why — and
 which wrapper a failure arrives in is not part of the stable surface.
+
+### `lacks` completes `contains` (added, issue #87)
+
+`contains` had no negative partner: a case could assert that a rendered file
+mentions something, never that it does not. `expect.lacks` fills that gap,
+same shape as `contains` — a path to a substring or an array of them.
+
+None of the three exclusions above apply to it. It executes nothing, so
+invariant 5 is untouched. It expands to nothing, so there is no combinatorial
+explosion. And it pins the *template author's own* rendered text, not
+git-tpl's diagnostic prose, so it is the same text `contains` already pins,
+asserted the other way round.
+
+It is additive rather than a revision of the decision above, so it amends
+this ADR in place instead of a superseding one: an old git-tpl reading a case
+file that uses `lacks` fails loudly at the vocabulary check with a
+"not an expectation" error and a did-you-mean, which is the correct failure —
+not a silent no-op.
+
+A path named in `lacks` that the rendering does not produce is a **failure**,
+not a vacuous pass, for the same reason `contains` already fails on a missing
+path: "this file does not mention X" must not go green because the file
+stopped rendering entirely.
 
 ### Cases are read from the resolved revision
 
