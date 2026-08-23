@@ -67,6 +67,7 @@ src/
 ├── remote.rs        remote URL parts, for seeding
 ├── lint.rs          static template analysis
 ├── note.rs          terminal-safe rendering of a template's note (ADR-019)
+├── migration.rs     discovering and applying template migrations (ADR-024)
 ├── suggest.rs       "did you mean?"
 ├── data/            data source abstraction and loaders
 ├── git/             the Git abstraction
