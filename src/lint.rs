@@ -38,6 +38,8 @@ pub const CODES: &[&str] = &[
     "tpl::lint::collision",
     "tpl::lint::degenerate_path",
     "tpl::lint::foreign_expression",
+    "tpl::lint::invalid_migration",
+    "tpl::lint::missing_migration_file",
     "tpl::lint::missing_note_file",
     "tpl::lint::shadowed_name",
     "tpl::lint::syntax",
@@ -362,6 +364,81 @@ pub fn lint(
     findings.extend(check_path_collisions(entries));
     findings.extend(check_note_file(manifest, repo_entries));
     findings.extend(check_absorbed_keys(manifest_text));
+    findings.extend(check_migrations(template, repo_entries)?);
+
+    Ok(findings)
+}
+
+/// A migration file that fails to parse, or whose `message_file` names
+/// nothing in the template repository.
+///
+/// Read directly, the same way a `.jinja` file's content is read in the main
+/// loop above: a migration lives outside the render root, in
+/// [`crate::migration::MIGRATIONS_DIR`], so it is never visited by that loop
+/// and needs its own pass over `repo_entries`.
+///
+/// Only what [`crate::migration::parse`] can check without a project is
+/// checked here — `move_source_missing`/`move_target_exists` need the
+/// previous rendered tree, which a lint run does not have, and are refused at
+/// `update` time instead. See docs/adr/024.
+fn check_migrations(
+    template: &dyn GitBackend,
+    repo_entries: &[TreeEntry],
+) -> Result<Vec<Finding>, crate::git::GitError> {
+    use crate::migration;
+
+    let mut findings = Vec::new();
+
+    for entry in repo_entries {
+        if !entry.mode.is_blob() || !migration::is_migration_path(&entry.path) {
+            continue;
+        }
+
+        let bytes = template.read_blob(entry.oid)?;
+        let text = String::from_utf8_lossy(&bytes);
+
+        match migration::parse(&text, &entry.path) {
+            Ok(parsed) => {
+                let Some(declared) = &parsed.message_file else {
+                    continue;
+                };
+                // An expression depends on answers a lint has none of — the
+                // same exception `check_note_file` makes.
+                if declared.contains("{{") || declared.contains("{%") {
+                    continue;
+                }
+                let wanted = declared.trim();
+                let exists = repo_entries
+                    .iter()
+                    .any(|e| e.mode.is_blob() && e.path == wanted);
+                if !exists {
+                    findings.push(Finding::error(
+                        "tpl::lint::missing_migration_file",
+                        wanted,
+                        format!(
+                            "`{}` declares a `message_file` of `{wanted}`, which the \
+                             template repository does not contain",
+                            entry.path
+                        ),
+                        "the path is relative to the repository root, not to the \
+                         render root. `git tpl update` will refuse rather than show \
+                         nothing."
+                            .into(),
+                    ));
+                }
+            }
+            Err(error) => {
+                findings.push(Finding::error(
+                    "tpl::lint::invalid_migration",
+                    &entry.path,
+                    error.to_string(),
+                    "see docs/adr/024-template-migrations.md for the schema a \
+                     migration file must follow."
+                        .into(),
+                ));
+            }
+        }
+    }
 
     Ok(findings)
 }

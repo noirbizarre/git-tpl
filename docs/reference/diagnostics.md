@@ -1,13 +1,12 @@
 # Diagnostic codes
 
-Every failure carries a code of the form `tpl::<area>::<kind>`. Under
-[`--json`](json.md) it is the `error.code` field; in text output it is the first
-line of the diagnostic.
+Every failure carries a code of the form `tpl::<area>::<kind>`.
+Under [`--json`](json.md) it is the `error.code` field; in text output it is the first line of the diagnostic.
 
-**The codes are the stable surface.** Messages are not, and are expected to
-improve. A caller that matches on prose will break the next time one does;
-a caller that matches on a code will not. Removing or renaming a code is a
-breaking change, and a test pins the set so it cannot happen by accident.
+**The codes are the stable surface.**
+Messages are not, and are expected to improve.
+A caller that matches on prose will break the next time one does; a caller that matches on a code will not.
+Removing or renaming a code is a breaking change, and a test pins the set so it cannot happen by accident.
 
 ## Reading a failure
 
@@ -19,10 +18,9 @@ $ git tpl --json render ./template --output ./out --defaults
   "causes":[{"code":"tpl::eval::expression","message":"undefined value","help":"..."}]}}
 ```
 
-`causes` is where the actionable detail lives. The outer error names the file;
-the one beneath it names the expression and the reason. Branch on the outer
-code to decide *what kind* of failure it is, and read the innermost one to say
-*why*.
+`causes` is where the actionable detail lives.
+The outer error names the file; the one beneath it names the expression and the reason.
+Branch on the outer code to decide *what kind* of failure it is, and read the innermost one to say *why*.
 
 ## Templates
 
@@ -55,11 +53,10 @@ Something is wrong with the template itself.
 
 ## Linting
 
-Reported by [`git tpl lint`](../usage/lint.md) as findings rather than raised
-as errors, so they arrive in the `diagnostics` array rather than in `error`.
-Only `severity: "error"` fails the command, unless
-[`--deny`](../usage/lint.md#choosing-what-fails) names a warning or the whole
-severity.
+Reported by [`git tpl lint`](../usage/lint.md) as findings rather than raised as errors, so they arrive in the
+`diagnostics` array rather than in `error`.
+Only `severity: "error"` fails the command, unless [`--deny`](../usage/lint.md#choosing-what-fails) names a warning
+or the whole severity.
 
 | Code | Severity | Meaning |
 |---|---|---|
@@ -72,9 +69,10 @@ severity.
 | `tpl::lint::absorbed_key` | warning | A top-level manifest key is written after a table header, so TOML gives it to that table. The top-level key is never set. |
 | `tpl::lint::shadowed_name` | warning | An `{% import %}`/`{% from %}` alias, or a `set`/`with`/`for`/`macro` binding, reuses a question or computed name — the rest of the file sees the binding, not the answer, and a comparison against it is silently never true. |
 | `tpl::lint::missing_note_file` | error | `note_file` names a path the template repository does not contain. Reported without a repository, before an `init` refuses. |
+| `tpl::lint::invalid_migration` | error | A file in `migrations/` is not valid TOML, or does not match the schema — see [Migrations](#migrations). |
+| `tpl::lint::missing_migration_file` | error | A migration's `message_file` names a path the template repository does not contain. |
 
-These two are about the flags rather than the template, so they are raised as
-errors before anything is checked:
+These two are about the flags rather than the template, so they are raised as errors before anything is checked:
 
 | Code | Meaning |
 |---|---|
@@ -136,6 +134,9 @@ errors before anything is checked:
 | `tpl::ops::invalid_argument` | An argument is not usable — see the message. |
 | `tpl::ops::missing_note_file` | `note_file` names nothing at the template revision. The path is relative to the repository root, not the render root. |
 | `tpl::ops::note_file_not_utf8` | `note_file` names a binary file. A note is text. |
+| `tpl::ops::migration_file_not_utf8` | A migration file discovered under `migrations/` is not valid UTF-8. |
+| `tpl::ops::missing_migration_message_file` | A migration's `message_file` names nothing at the template revision. |
+| `tpl::ops::migration_message_file_not_utf8` | A migration's `message_file` names a binary file. |
 | `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist yet. Run `init` or `update`. |
 | `tpl::ops::no_such_directory` | `init`'s destination does not exist. Create it, or pass `--init` to create it and the repository. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
@@ -143,11 +144,10 @@ errors before anything is checked:
 
 ## Backport
 
-Raised by [`git tpl backport`](../usage/backport.md). Every one of these is a
-refusal, never a wrong patch, and every one names editing the template by hand
-as the fallback — which is the status quo, so a refusal never leaves you worse
-off than not having run the command. The reasoning is
-[ADR-020](../adr/020-backport-is-a-patch.md).
+Raised by [`git tpl backport`](../usage/backport.md).
+Every one of these is a refusal, never a wrong patch, and every one names editing the template by hand as the
+fallback — which is the status quo, so a refusal never leaves you worse off than not having run the command.
+The reasoning is [ADR-020](../adr/020-backport-is-a-patch.md).
 
 | Code | Meaning |
 |---|---|
@@ -161,14 +161,27 @@ off than not having run the command. The reasoning is
 | `tpl::backport::cancelled` | The hunk picker was cancelled. No patch was produced and nothing was written. |
 | `tpl::backport::not_interactive` | `-p` was asked for under `--json`, in a pipe, or with `tpl.interactive false` — where the hunks cannot be shown. Limit the backport with pathspecs or `--exclude` instead. |
 
+## Migrations
+
+Raised while `update` discovers or applies a migration file under `migrations/`.
+The reasoning is [ADR-024](../adr/024-template-migrations.md).
+
+| Code | Meaning |
+|---|---|
+| `tpl::migration::parse` | A migration file is not valid TOML, or does not match the schema. |
+| `tpl::migration::conflicting_message` | A migration sets both `message` and `message_file`. Keep one. |
+| `tpl::migration::invalid_move` | A move's `from` and `to` are the same, or either is empty. |
+| `tpl::migration::duplicate_target` | Two moves in the same migration file target the same `to`. |
+| `tpl::migration::move_source_missing` | A move's `from` does not exist in the previously rendered tree. |
+| `tpl::migration::move_target_exists` | A move's `to` collides with a path already in the previously rendered tree. |
+
 ## Template tests
 
-Raised by [`git tpl test`](../usage/test.md) when the *run* cannot proceed. A
-case that simply fails its expectations is not one of these: it arrives in the
-report's `cases[].failures` array, and the command exits `1`.
+Raised by [`git tpl test`](../usage/test.md) when the *run* cannot proceed.
+A case that simply fails its expectations is not one of these: it arrives in the report's `cases[].failures`
+array, and the command exits `1`.
 
-The area is `testing` rather than `test`, which is reserved for the diagnostic
-fixtures in `src/report.rs`.
+The area is `testing` rather than `test`, which is reserved for the diagnostic fixtures in `src/report.rs`.
 
 | Code | Meaning |
 |---|---|

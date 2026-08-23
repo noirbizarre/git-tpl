@@ -7,7 +7,7 @@ use tpl::ops::{self, OpError, UpdateOutcome};
 use super::{Session, answering, report_ignored, report_ignored_paths, supplied, trust};
 use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, headline, muted, transition};
+use crate::theme::{change, command, field, headline, muted, note_block, transition};
 
 pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -91,6 +91,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             revision_description,
             answers_changed,
             started_new_history,
+            migrations,
+            moved_commit,
             ignored_answers,
             ignored,
         } => {
@@ -117,6 +119,28 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 ctx.out.say(change(&ctx.out.theme, c.kind, &c.path));
             }
             ctx.out.blank();
+
+            // Each migration newly crossed by this update, in application
+            // order. Sanitised at the last possible moment and only for the
+            // human stream, exactly like a template's `init`-time note —
+            // `--json` gets the text as written, below, because a consumer is
+            // not a terminal and has no escape sequences to be attacked
+            // through.
+            for migration in &migrations {
+                let Some(raw) = &migration.message else {
+                    continue;
+                };
+                let formatting = if ctx.out.theme.is_colored() {
+                    tpl::note::Formatting::Allowed
+                } else {
+                    tpl::note::Formatting::Stripped
+                };
+                let sanitised = tpl::note::sanitise(raw, formatting);
+                if !sanitised.trim().is_empty() {
+                    ctx.out.say(note_block(&ctx.out.theme, &sanitised));
+                    ctx.out.blank();
+                }
+            }
 
             // Stated every time. It is the single most surprising property of
             // the tool, and a user who does not believe it will not use it.
@@ -177,6 +201,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "changes": crate::report::changes(&changes),
                 "answersChanged": answers_changed,
                 "startedNewHistory": started_new_history,
+                "migrations": crate::report::migrations(&migrations),
+                "movedCommit": moved_commit.map(|oid| oid.to_hex()),
                 "ignoredAnswers": ignored_answers,
                 "pushed": pushed,
             })
