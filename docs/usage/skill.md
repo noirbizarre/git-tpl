@@ -15,64 +15,36 @@ It is not needed to work on git-tpl itself.
 
 ## Installing it
 
-There is no install command:
-an agent skill is just a file the agent's tool discovers at a known path.
-Fetch it once into one of those paths, project-local or global.
+Two ways to put the skill in place, both global —
+available whenever *any* project turns out to use git-tpl, without touching that project's own files.
 
-=== "opencode, project-local"
+### With `gh skill`
 
-    ```sh
-    mkdir -p .opencode/skills/git-tpl
-    curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/0.7.0/skills/git-tpl/SKILL.md \
-      -o .opencode/skills/git-tpl/SKILL.md
-    ```
+```sh
+gh skill install noirbizarre/git-tpl git-tpl --agent universal --scope user --pin 0.7.0
+```
 
-=== "opencode, global"
+- `--scope user` installs it once, for every project, instead of only the current repository.
+- `--agent universal` places it under the generic `.agents/skills` layout most tools already read,
+  rather than duplicating it per tool.
+- `gh skill list` shows what's installed; `gh skill update --all` refreshes it later.
 
-    ```sh
-    mkdir -p ~/.config/opencode/skills/git-tpl
-    curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/0.7.0/skills/git-tpl/SKILL.md \
-      -o ~/.config/opencode/skills/git-tpl/SKILL.md
-    ```
+`gh skill` is a preview feature of the GitHub CLI — confirm it exists with `gh skill --help`
+before relying on it in a script.
 
-=== "Claude Code, project-local"
+### Manual, generic install
 
-    ```sh
-    mkdir -p .claude/skills/git-tpl
-    curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/0.7.0/skills/git-tpl/SKILL.md \
-      -o .claude/skills/git-tpl/SKILL.md
-    ```
+Without `gh`, or on a `gh` version that predates `gh skill`, fetch the file directly
+into the same generic location:
 
-=== "Claude Code, global"
+```sh
+mkdir -p ~/.agents/skills/git-tpl
+curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/0.7.0/skills/git-tpl/SKILL.md \
+  -o ~/.agents/skills/git-tpl/SKILL.md
+```
 
-    ```sh
-    mkdir -p ~/.claude/skills/git-tpl
-    curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/0.7.0/skills/git-tpl/SKILL.md \
-      -o ~/.claude/skills/git-tpl/SKILL.md
-    ```
-
-=== "generic (.agents), project-local"
-
-    ```sh
-    mkdir -p .agents/skills/git-tpl
-    curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/0.7.0/skills/git-tpl/SKILL.md \
-      -o .agents/skills/git-tpl/SKILL.md
-    ```
-
-=== "generic (.agents), global"
-
-    ```sh
-    mkdir -p ~/.agents/skills/git-tpl
-    curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/0.7.0/skills/git-tpl/SKILL.md \
-      -o ~/.agents/skills/git-tpl/SKILL.md
-    ```
-
-Pin the ref (here `0.7.0`) to a released tag rather than `main`,
-the same reason you would pin any dependency —
-a moving target is a surprise later, not a convenience now.
-
-A global install makes the skill available whenever *any* project turns out to use git-tpl,
-without touching that project's own files.
+Pin the ref (here `0.7.0`) to a released tag rather than `main` —
+the same reason you would pin any dependency: a moving target is a surprise later, not a convenience now.
 
 ## Content
 
