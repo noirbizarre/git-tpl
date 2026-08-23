@@ -50,6 +50,31 @@ pub fn changes(changes: &[tpl::git::Change]) -> Value {
     )
 }
 
+/// The `migrations` array, as `update` reports it.
+///
+/// Raw and unsanitised, like `InitOutcome::note`: this is not a terminal, and
+/// escape sequences are a terminal's problem. `moves` is included even when
+/// empty, so a consumer does not have to guess whether the key was omitted or
+/// the migration truly moved nothing.
+///
+/// Renaming a key here is a breaking change.
+pub fn migrations(migrations: &[tpl::ops::AppliedMigration]) -> Value {
+    Value::Array(
+        migrations
+            .iter()
+            .map(|migration| {
+                json!({
+                    "path": migration.path,
+                    "message": migration.message,
+                    "moves": migration.moves.iter().map(|mv| {
+                        json!({ "from": mv.from, "to": mv.to })
+                    }).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
+}
+
 /// The `merge` object, as `init` and `merge` report it.
 ///
 /// Tagged with `result`, so a caller switches on one field rather than probing

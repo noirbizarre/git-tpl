@@ -863,3 +863,131 @@ fn the_text_report_marks_a_denied_warning() {
         .says("0 error(s), 2 warning(s)")
         .says("2 warning(s) denied, which fails the lint");
 }
+
+// --- migrations --------------------------------------------------------
+//
+// See `docs/adr/024-template-migrations.md`. What `lint` can check about a
+// migration file is only its shape — it has no project, and so no previous
+// rendered tree to validate a move's `from`/`to` against.
+
+#[test]
+fn a_sound_migration_is_not_flagged() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    template.repo.write(
+        "migrations/000-move.toml",
+        "message = \"moved a file\"\n[[moves]]\nfrom = \"a\"\nto = \"b\"\n",
+    );
+    template.repo.commit_all("feat: add a migration");
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
+#[test]
+fn a_migration_that_is_not_valid_toml_is_an_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    template
+        .repo
+        .write("migrations/000-broken.toml", "this is not [ valid toml");
+    template.repo.commit_all("feat: add a broken migration");
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&template.source(), &[]).failure();
+    assert!(
+        codes(&output).contains(&"tpl::lint::invalid_migration".to_string()),
+        "{:?}",
+        codes(&output)
+    );
+}
+
+#[test]
+fn a_migration_with_both_message_and_message_file_is_an_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    template.repo.write(
+        "migrations/000-conflicting.toml",
+        "message = \"a\"\nmessage_file = \"NOTE.md\"\n",
+    );
+    template
+        .repo
+        .commit_all("feat: add a conflicting migration");
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&template.source(), &[]).failure();
+    assert!(
+        codes(&output).contains(&"tpl::lint::invalid_migration".to_string()),
+        "{:?}",
+        codes(&output)
+    );
+}
+
+#[test]
+fn a_migration_message_file_that_does_not_exist_is_an_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    template
+        .repo
+        .write("migrations/000-note.toml", "message_file = \"NEXT.md\"\n");
+    template.repo.commit_all("feat: add a migration");
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&template.source(), &[]).failure();
+    assert!(
+        codes(&output).contains(&"tpl::lint::missing_migration_file".to_string()),
+        "{:?}",
+        codes(&output)
+    );
+}
+
+#[test]
+fn a_migration_message_file_the_template_contains_is_accepted() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    template
+        .repo
+        .write("migrations/000-note.toml", "message_file = \"NEXT.md\"\n");
+    template.repo.write("NEXT.md", "read this\n");
+    template.repo.commit_all("feat: add a migration");
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
+/// An expression depends on answers a lint has none of — the same exception
+/// `check_note_file` makes for `note_file`.
+#[test]
+fn a_migration_message_file_that_is_an_expression_is_not_checked() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    template.repo.write(
+        "migrations/000-note.toml",
+        "message_file = \"{% if ci %}CI.md{% endif %}\"\n",
+    );
+    template.repo.commit_all("feat: add a migration");
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
+/// Something a lint run has no way to check: whether `from` exists in some
+/// project's previously rendered tree. Not flagged here — refused at
+/// `update` time instead, where a previous tree actually exists.
+#[test]
+fn a_move_naming_a_path_that_may_not_exist_anywhere_is_not_a_lint_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let template = Template::standard(dir.path());
+    template.repo.write(
+        "migrations/000-move.toml",
+        "[[moves]]\nfrom = \"anything\"\nto = \"anywhere\"\n",
+    );
+    template.repo.commit_all("feat: add a migration");
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}

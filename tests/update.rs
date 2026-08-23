@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{World, tpl};
+use common::{World, tpl, tpl_colored};
 
 /// The single most important test in the suite.
 #[test]
@@ -506,4 +506,319 @@ fn a_dry_run_with_nothing_to_do_reports_up_to_date_as_json() {
     assert_eq!(json["dryRun"], true);
     assert_eq!(json["result"], "upToDate");
     assert_eq!(json["changes"], serde_json::json!([]));
+}
+
+// --- migrations --------------------------------------------------------
+//
+// See `docs/adr/024-template-migrations.md`. `World::add_migration` writes
+// directly to the template repository's `migrations/` directory; these
+// tests additionally rename or edit files under `template/` themselves, so
+// that the *rendered* output actually changes shape the way a real
+// migration's companion template edit would.
+
+/// A move with nothing else changing needs no commit of its own: the final
+/// rendered commit already *is* the pure rename, so `update` writes exactly
+/// one commit — same as any other update.
+#[test]
+fn a_pure_move_produces_a_single_commit() {
+    let world = World::new();
+    world.init(&[]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+
+    // The template author actually moves the file, so the fresh render
+    // naturally stops producing `README.md` and starts producing
+    // `docs/README.md` — with the same content, since nothing else changed.
+    let readme = world.template.repo.read("template/README.md.jinja");
+    world.template.repo.remove("template/README.md.jinja");
+    world
+        .template
+        .repo
+        .write("template/docs/README.md.jinja", &readme);
+    world.add_migration(
+        "000-move-readme.toml",
+        "[[moves]]\nfrom = \"README.md\"\nto = \"docs/README.md\"\n",
+    );
+
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let after = world.project.rev_parse(&world.ref_name());
+    assert_ne!(after, before);
+    assert_eq!(
+        world.project.rev_parse(&format!("{}^", world.ref_name())),
+        before,
+        "a pure move must not insert an intermediate commit"
+    );
+
+    let paths = world.project.tree_paths(&world.ref_name());
+    assert!(!paths.contains(&"README.md".to_string()), "{paths:?}");
+    assert!(paths.contains(&"docs/README.md".to_string()), "{paths:?}");
+}
+
+/// A move that lands alongside an unrelated content change needs the
+/// rename split into its own commit first — otherwise a plain `git merge`'s
+/// similarity heuristic has two things to explain at once and may not see a
+/// rename at all.
+#[test]
+fn a_move_alongside_another_change_gets_an_intermediate_rename_commit() {
+    let world = World::new();
+    world.init(&[]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+
+    let readme = world.template.repo.read("template/README.md.jinja");
+    world.template.repo.remove("template/README.md.jinja");
+    world
+        .template
+        .repo
+        .write("template/docs/README.md.jinja", &readme);
+    // Unrelated to the move: a new file the migration says nothing about.
+    world
+        .template
+        .repo
+        .write("template/.github/workflows/release.yml", "name: Release\n");
+    world.add_migration(
+        "000-move-readme.toml",
+        "[[moves]]\nfrom = \"README.md\"\nto = \"docs/README.md\"\n",
+    );
+
+    let json = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+
+    let tip = world.project.rev_parse(&world.ref_name());
+    let rename_commit = world.project.rev_parse(&format!("{}^", world.ref_name()));
+    let original_tip = world.project.rev_parse(&format!("{}^^", world.ref_name()));
+    assert_eq!(original_tip, before);
+    assert_eq!(
+        json["movedCommit"].as_str().expect("movedCommit"),
+        rename_commit
+    );
+
+    // The rename commit moves `README.md` and nothing else: the new workflow
+    // file is not there yet, and neither is any other content change.
+    let renamed_paths = world.project.tree_paths(&rename_commit);
+    assert!(renamed_paths.contains(&"docs/README.md".to_string()));
+    assert!(!renamed_paths.contains(&"README.md".to_string()));
+    assert!(!renamed_paths.contains(&".github/workflows/release.yml".to_string()));
+
+    // The final commit carries everything, exactly as an ordinary update
+    // would if the move were not there at all.
+    let final_paths = world.project.tree_paths(&tip);
+    assert!(final_paths.contains(&"docs/README.md".to_string()));
+    assert!(final_paths.contains(&".github/workflows/release.yml".to_string()));
+}
+
+/// A migration's message forces a commit even when the rendered output does
+/// not change at all — otherwise the provenance trailer never advances past
+/// it, and the same migration would resurface on every later update.
+#[test]
+fn a_message_only_migration_forces_a_commit() {
+    let world = World::new();
+    world.init(&[]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+
+    world.add_migration(
+        "000-note.toml",
+        "message = \"0.4 split config.rs into a module.\"\n",
+    );
+
+    let json = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+
+    assert_eq!(json["result"], "updated");
+    assert_ne!(world.project.rev_parse(&world.ref_name()), before);
+    assert_eq!(
+        json["migrations"][0]["message"],
+        "0.4 split config.rs into a module."
+    );
+    assert_eq!(json["migrations"][0]["moves"], serde_json::json!([]));
+}
+
+/// The message is shown to a person, sanitised and framed exactly like a
+/// template's `init`-time note.
+#[test]
+fn a_migration_message_is_shown_in_an_attributed_block() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world.add_migration(
+        "000-note.toml",
+        "message = \"0.4 split config.rs into a module.\"\n",
+    );
+
+    tpl(&world.project, &["update", "--defaults"])
+        .success()
+        .says("from the template")
+        .says("0.4 split config.rs into a module.");
+}
+
+/// The property the whole discovery mechanism depends on: a migration is
+/// crossed exactly once. The next `update`'s "old" tree already contains it,
+/// so the diff that discovers new migrations is empty.
+#[test]
+fn a_migration_does_not_resurface_on_a_later_update() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world.add_migration(
+        "000-note.toml",
+        "message = \"0.4 split config.rs into a module.\"\n",
+    );
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    // Nothing else changed, and the migration was already crossed: this is
+    // an ordinary up-to-date run.
+    tpl(&world.project, &["update", "--defaults"])
+        .success()
+        .says("Already up to date")
+        .silent_about("0.4 split config.rs into a module.");
+}
+
+/// Colour survives on a terminal, exactly as a template's `init`-time note
+/// does — a migration message with no emphasis is one people stop reading.
+#[test]
+fn a_migration_message_keeps_its_colour_on_a_terminal() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world.add_migration(
+        "000-note.toml",
+        "message = \"\\u001b[1mbold\\u001b[0m and \\u001b[2Jgone\"\n",
+    );
+
+    let output = tpl_colored(&world.project, &["update", "--defaults"]).success();
+    assert!(
+        output.stderr.contains("\x1b[1m"),
+        "styling must survive on a terminal:\n{:?}",
+        output.stderr
+    );
+    // ...but the screen-clear still does not.
+    assert!(!output.stderr.contains("\x1b[2J"));
+    assert!(output.stderr.contains("bold"));
+}
+
+/// `message_file` is repository-root-relative, read from the whole template
+/// tree, exactly like `note_file`.
+#[test]
+fn a_migration_message_file_is_shown() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world
+        .template
+        .repo
+        .write("NEXT-STEPS.md", "Braces {{ stay }}.\n");
+    world.add_migration("000-note.toml", "message_file = \"NEXT-STEPS.md\"\n");
+
+    tpl(&world.project, &["update", "--defaults"])
+        .success()
+        .says("Braces {{ stay }}.");
+}
+
+/// Rendered if and only if the path ends in `.jinja` — the same rule the
+/// renderer applies to files, and `note_file` applies to a note.
+#[test]
+fn a_migration_message_file_is_rendered_when_it_ends_in_jinja() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world.template.repo.write(
+        "NEXT-STEPS.md.jinja",
+        "Set up {{ project_name }} by running bootstrap.\n",
+    );
+    world.add_migration("000-note.toml", "message_file = \"NEXT-STEPS.md.jinja\"\n");
+
+    tpl(&world.project, &["update", "--defaults"])
+        .success()
+        .says("Set up demo by running bootstrap.");
+}
+
+/// A path that renders to nothing is the migration choosing to say nothing
+/// for these answers — the same reading `template_note` gives `note_file`.
+#[test]
+fn a_migration_message_file_path_that_renders_empty_shows_no_message() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world
+        .template
+        .repo
+        .write("CI.md", "CI notes, never shown.\n");
+    world.add_migration(
+        "000-note.toml",
+        "message_file = \"{% if false %}CI.md{% endif %}\"\n",
+    );
+
+    let output = tpl(&world.project, &["update", "--defaults"]).success();
+    assert!(!output.stderr.contains("from the template"));
+    assert!(!output.stderr.contains("CI notes"));
+}
+
+/// Resolved before anything is written to the ref, so a missing
+/// `message_file` fails the whole update rather than showing nothing.
+#[test]
+fn a_migration_message_file_that_does_not_exist_fails_the_update() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    world.add_migration("000-note.toml", "message_file = \"NOWHERE.md\"\n");
+
+    let output = tpl(&world.project, &["--json", "update", "--defaults"]).failure();
+    assert_eq!(
+        output.error_code(),
+        "tpl::ops::missing_migration_message_file"
+    );
+}
+
+/// Refused rather than decoded lossily, for the same reason a binary
+/// `note_file` is: replacement characters would look like something was
+/// shown.
+#[test]
+fn a_binary_migration_message_file_is_an_error() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    std::fs::write(
+        world.template.repo.path.join("NOTE.bin"),
+        [0xff, 0xfe, 0x00],
+    )
+    .expect("write");
+    world.add_migration("000-note.toml", "message_file = \"NOTE.bin\"\n");
+
+    let output = tpl(&world.project, &["--json", "update", "--defaults"]).failure();
+    assert_eq!(
+        output.error_code(),
+        "tpl::ops::migration_message_file_not_utf8"
+    );
+}
+
+/// Invariant 1 holds however many commits an update writes.
+#[test]
+fn a_migration_does_not_touch_head_the_index_or_the_worktree() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let readme = world.template.repo.read("template/README.md.jinja");
+    world.template.repo.remove("template/README.md.jinja");
+    world
+        .template
+        .repo
+        .write("template/docs/README.md.jinja", &readme);
+    world
+        .template
+        .repo
+        .write("template/.github/workflows/release.yml", "name: Release\n");
+    world.add_migration(
+        "000-move-readme.toml",
+        "message = \"moved\"\n[[moves]]\nfrom = \"README.md\"\nto = \"docs/README.md\"\n",
+    );
+
+    let before = world.project.working_state();
+
+    tpl(&world.project, &["update", "--defaults"]).success();
+
+    let after = world.project.working_state();
+    assert_eq!(before.head, after.head, "HEAD moved");
+    assert_eq!(before.index, after.index, "the index changed");
+    assert_eq!(before.worktree, after.worktree, "the worktree changed");
 }

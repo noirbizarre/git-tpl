@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 29
 expression: transcript
 ---
 exit: 0
@@ -24,6 +25,8 @@ exit: 0
   ],
   "answersChanged": false,
   "startedNewHistory": false,
+  "migrations": [],
+  "movedCommit": null,
   "ignoredAnswers": [],
   "pushed": null,
   "ok": true

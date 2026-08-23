@@ -892,6 +892,22 @@ impl World {
     pub fn ref_name(&self) -> String {
         "refs/tpl/template".to_string()
     }
+
+    /// Add one migration file to the template repository, and commit it.
+    ///
+    /// Written directly rather than folded into [`Self::move_template`], so a
+    /// test can choose whether the migration is the *only* thing that
+    /// changed, or lands alongside an otherwise-unrelated template change —
+    /// the two cases `update` tells apart when deciding whether a move needs
+    /// its own commit. See `docs/adr/024-template-migrations.md`.
+    pub fn add_migration(&self, filename: &str, content: &str) {
+        self.template
+            .repo
+            .write(&format!("migrations/{filename}"), content);
+        self.template
+            .repo
+            .commit_all(&format!("feat: add {filename}"));
+    }
 }
 
 // --- a real HTTP server -----------------------------------------------------

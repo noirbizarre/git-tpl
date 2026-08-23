@@ -22,7 +22,7 @@ use crate::data::{
     AlwaysTrust, DataError, Decided, Decision, Loader, REMOTE_LIMIT_BYTES, RefuseRemote,
     TemplateTree, TrustGate, declared_remotes,
 };
-use crate::eval::{DefaultsOnly, EvalError, Evaluation, Prompter};
+use crate::eval::{DefaultsOnly, EvalError, Evaluation, Partials, Prompter};
 use crate::git::{AheadBehind, Change, FileStat, GitBackend, GitError, MergeOutcome, Oid};
 use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
@@ -35,6 +35,7 @@ use crate::userconfig::UserConfig;
 
 pub use resolve::{Request, ResolveError, Resolved};
 
+pub use crate::migration::{self, Migration, MigrationError, Move};
 pub use backport::{Backport, BackportError, BackportedFile, Skipped, backport};
 pub use hunks::{Hunk, Picker, Picking, Selection};
 pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Verdict};
@@ -120,6 +121,15 @@ pub enum OpError {
     #[diagnostic(transparent)]
     Git(#[from] GitError),
 
+    /// A migration could not be parsed or applied.
+    ///
+    /// Its own variant rather than folded into `Render` or `Git`: a migration
+    /// is neither — it is discovered from a tree diff and applied to one, but
+    /// the failure a user needs to act on is about the migration file itself.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Migration(#[from] MigrationError),
+
     /// The template id could not be determined.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -163,6 +173,53 @@ pub enum OpError {
     )]
     NoteFileNotUtf8 {
         /// The path, as it resolved.
+        path: String,
+    },
+
+    /// A migration file's own content is not valid UTF-8.
+    #[error("`{path}` is not valid UTF-8")]
+    #[diagnostic(
+        code(tpl::ops::migration_file_not_utf8),
+        help("a migration file is TOML text; this path names a binary file")
+    )]
+    MigrationFileNotUtf8 {
+        /// The migration file's path.
+        path: String,
+    },
+
+    /// A migration's `message_file` names nothing at the template revision.
+    ///
+    /// Fatal rather than silent, for the same reason `MissingNoteFile` is:
+    /// discovered and resolved before the ref moves, so nothing has been
+    /// committed yet.
+    #[error("`{path}` is not in the template at {revision_description}")]
+    #[diagnostic(
+        code(tpl::ops::missing_migration_message_file),
+        help(
+            "`message_file` in a migration is relative to the template repository \
+             root, not to the render root. `git tpl lint` reports this without a \
+             repository."
+        )
+    )]
+    MissingMigrationMessageFile {
+        /// The migration file that declared it.
+        migration: String,
+        /// The `message_file` path, as it resolved.
+        path: String,
+        /// The revision it was looked for at, as `reference (revision)`.
+        revision_description: String,
+    },
+
+    /// A migration's `message_file` is not valid UTF-8.
+    #[error("`{path}` is not valid UTF-8")]
+    #[diagnostic(
+        code(tpl::ops::migration_message_file_not_utf8),
+        help("a message is text; this path names a binary file")
+    )]
+    MigrationMessageFileNotUtf8 {
+        /// The migration file that declared it.
+        migration: String,
+        /// The `message_file` path, as it resolved.
         path: String,
     },
 
@@ -1139,6 +1196,69 @@ fn template_note(rendered: &Render) -> Result<Option<String>, OpError> {
     Ok(Some(text))
 }
 
+/// A migration's message, with its expression evaluated.
+///
+/// The other half of [`template_note`], and resolved exactly the same way —
+/// `message_file` is repository-root-relative, read from the whole template
+/// tree, rendered only if it ends in `.jinja`. [`crate::migration::parse`]
+/// only validates the *shape* of `message`/`message_file`; evaluating either
+/// against a project's answers needs the [`Context`] this function has and
+/// [`crate::migration`] deliberately does not.
+fn migration_message(
+    migration: &Migration,
+    rendered: &Render,
+    partials: &std::sync::Arc<Partials>,
+) -> Result<Option<String>, OpError> {
+    let Some(declared) = &migration.message_file else {
+        return migration
+            .message
+            .as_ref()
+            .map(|text| {
+                crate::eval::render_string(text, &rendered.context, &migration.path, partials)
+            })
+            .transpose()
+            .map_err(Into::into);
+    };
+
+    let path = crate::eval::render_string(declared, &rendered.context, &migration.path, partials)?;
+    let path = path.trim();
+
+    // A path that renders to nothing is the migration choosing to say
+    // nothing for these answers — the same reading `template_note` gives
+    // `note_file`.
+    if path.is_empty() {
+        return Ok(None);
+    }
+
+    let Some(bytes) = rendered
+        .template
+        .repo
+        .read_path(rendered.template.tree, path)?
+    else {
+        return Err(OpError::MissingMigrationMessageFile {
+            migration: migration.path.clone(),
+            path: path.to_string(),
+            revision_description: describe_revision(
+                &rendered.template.reference,
+                rendered.template.revision,
+            ),
+        });
+    };
+
+    let text = String::from_utf8(bytes).map_err(|_| OpError::MigrationMessageFileNotUtf8 {
+        migration: migration.path.clone(),
+        path: path.to_string(),
+    })?;
+
+    if path.ends_with(crate::render::TEMPLATE_SUFFIX) {
+        return crate::eval::render_string(&text, &rendered.context, path, partials)
+            .map(Some)
+            .map_err(Into::into);
+    }
+
+    Ok(Some(text))
+}
+
 /// Add the remotes a template declares, reporting what happened to each.
 ///
 /// Never fetches and never pushes — ADR-019's closure rule admits the addition
@@ -1193,12 +1313,28 @@ fn add_remotes(
     Ok(remotes)
 }
 
+/// One migration discovered and applied by an `update`.
+///
+/// The message is raw and unsanitised, in `InitOutcome::note`'s tradition:
+/// this layer does not print, and a `--json` consumer is not a terminal and
+/// must get the text as written. Sanitised where it is shown — see
+/// [`crate::note`].
+pub struct AppliedMigration {
+    /// The migration file's path, repository-root-relative.
+    pub path: String,
+    /// The migration's message, if it declared one.
+    pub message: Option<String>,
+    /// The paths it moved, if any.
+    pub moves: Vec<migration::Move>,
+}
+
 /// The result of an `update`.
 pub enum UpdateOutcome {
     /// The rendered tree was identical to the ref's tip; nothing was committed.
     ///
     /// The reason determinism matters: a renderer that varied would create a
-    /// commit on every run, and every one would be noise to merge.
+    /// commit on every run, and every one would be noise to merge. Never the
+    /// outcome when a migration was newly discovered — see `Updated`.
     UpToDate {
         /// The revision that was rendered, ready to print.
         revision_description: String,
@@ -1238,6 +1374,19 @@ pub enum UpdateOutcome {
         /// next `git tpl merge` has no merge base and can conflict on every
         /// file, which is worth saying before it happens.
         started_new_history: bool,
+        /// Migrations newly crossed by this update, in application order.
+        ///
+        /// Empty on every ordinary update — a migration is discovered exactly
+        /// once, at whichever update first crosses it. See docs/adr/024.
+        migrations: Vec<AppliedMigration>,
+        /// The intermediate, content-identical rename commit, when one was
+        /// needed to make a move's rename reliably detectable by a plain
+        /// `git merge`.
+        ///
+        /// `None` on almost every update, including most that carry a
+        /// migration: only a move that lands alongside some other content
+        /// change to the same rendering needs it. See docs/adr/024.
+        moved_commit: Option<Oid>,
         /// Supplied answers that name no question in this template.
         ignored_answers: Vec<String>,
         /// Template files a `.gitignore` removed from the rendering.
@@ -1287,17 +1436,63 @@ pub fn update(
     let tip = project.resolve_ref(&ref_name)?;
 
     let previous = tip.map(|oid| project.commit(oid)).transpose()?;
-    let previous_revision_description = previous
+    let recorded_previous = previous
         .as_ref()
-        .and_then(|commit| Provenance::parse(&commit.message))
-        .map(|recorded| recorded.describe_revision());
+        .and_then(|commit| Provenance::parse(&commit.message));
+    let previous_revision_description = recorded_previous.as_ref().map(Recorded::describe_revision);
 
-    // Identical output. Committing would add a commit that changes nothing,
-    // which the user would then have to merge for no reason. This is what the
-    // determinism guarantee buys.
-    if let Some(previous) = &previous
-        && previous.tree == rendered.tree
-    {
+    // Migrations newly crossed since the last render. `recorded.commit` is the
+    // `Template-Commit` trailer of the previous rendered commit — read back
+    // here for the first time rather than only for display, and the whole
+    // reason no template ever needs to declare a version: the template's own
+    // history between that commit and the one just resolved *is* the version
+    // boundary. No previous commit, or one with no parseable provenance (a
+    // hand-made commit on the ref, or the very first render): there is no
+    // coherent "old state" to migrate away from, so migrations are skipped
+    // rather than firing every migration the template has ever had.
+    let mut migrations: Vec<AppliedMigration> = Vec::new();
+    if let (Some(_), Some(old_commit)) = (&previous, recorded_previous.and_then(|r| r.commit)) {
+        let old_tree = rendered.template.repo.commit_tree(old_commit)?;
+        let new_tree = rendered.template.tree;
+        if old_tree != new_tree {
+            let partials = rendered.template.partials()?;
+            for (path, bytes) in
+                migration::discover_new(rendered.template.repo.as_ref(), old_tree, new_tree)?
+            {
+                let text = String::from_utf8(bytes)
+                    .map_err(|_| OpError::MigrationFileNotUtf8 { path: path.clone() })?;
+                let parsed = migration::parse(&text, &path)?;
+                let message = migration_message(&parsed, &rendered, &partials)?;
+                migrations.push(AppliedMigration {
+                    path,
+                    message,
+                    moves: parsed.moves,
+                });
+            }
+        }
+    }
+
+    // Every newly discovered migration's moves, in file order, applied
+    // against the ref's current tip — never against `rendered.tree`, which
+    // has no notion of where a path used to be.
+    let all_moves: Vec<migration::Move> = migrations
+        .iter()
+        .flat_map(|m| m.moves.iter().cloned())
+        .collect();
+    let moved_tree = match &previous {
+        Some(previous) => migration::apply_moves(project, previous.tree, &all_moves)?,
+        None => None,
+    };
+
+    // Identical output, and nothing newly crossed. Committing would add a
+    // commit that changes nothing, which the user would then have to merge
+    // for no reason. This is what the determinism guarantee buys. A migration
+    // bypasses it deliberately: without a commit here, the provenance trailer
+    // never advances past it, and the same migration would surface again on
+    // every later update — the one piece of state this design has no other
+    // way to avoid needing.
+    let identical = previous.as_ref().is_some_and(|p| p.tree == rendered.tree);
+    if migrations.is_empty() && identical {
         return Ok(UpdateOutcome::UpToDate {
             revision_description: describe_revision(
                 &rendered.template.reference,
@@ -1308,11 +1503,29 @@ pub fn update(
         });
     }
 
-    // Append-only. The parent is the current tip, whatever the reason for
-    // re-rendering — template moved, answer changed, data changed. Rewriting
-    // would destroy the merge base the branch already shares with the ref.
-    // See docs/adr/005-append-only-refs.md.
-    let parents: Vec<Oid> = tip.into_iter().collect();
+    // A move that fully explains the difference between the two renderings
+    // needs no intermediate commit: the final commit built below already *is*
+    // the pure rename. One is only inserted when a move lands alongside some
+    // other content change in the same update — the case a plain `git merge`'s
+    // similarity heuristic could otherwise miss. See docs/adr/024.
+    const MOVE_COMMIT_MESSAGE: &str = "tpl: apply migration moves\n\n\
+         A content-identical rename, so that the merge that follows \
+         attributes it correctly rather than seeing an unrelated \
+         delete and add. Superseded immediately by the next commit.";
+
+    let mut moved_commit = None;
+    let parents: Vec<Oid> = match (&previous, moved_tree) {
+        (Some(previous), Some(moved)) if moved != rendered.tree => {
+            let commit = project.create_commit(moved, &[previous.oid], MOVE_COMMIT_MESSAGE)?;
+            moved_commit = Some(commit);
+            vec![commit]
+        }
+        // Append-only. The parent is the current tip, whatever the reason for
+        // re-rendering — template moved, answer changed, data changed.
+        // Rewriting would destroy the merge base the branch already shares
+        // with the ref. See docs/adr/005-append-only-refs.md.
+        _ => tip.into_iter().collect(),
+    };
     // No tip to descend from: this rendering shares no ancestry with whatever
     // the branch merged before. Not an error — a fresh clone has no
     // `refs/tpl/*` until it fetches — but the caller must say so.
@@ -1345,6 +1558,8 @@ pub fn update(
         ),
         answers_changed,
         started_new_history,
+        migrations,
+        moved_commit,
         ignored_answers: rendered.ignored_answers,
         ignored: rendered.template.ignored,
     })
