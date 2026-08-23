@@ -91,8 +91,11 @@ commit and an ADR.
 **`src/git/mod.rs`** — adding to the trait is right; adding a `git2` type to a signature is not.
 
 **`src/ops/`** — this is where the commands' semantics live: `mod.rs` for the commands that need one function, a
-file of its own for the ones that do not — `backport`, `testing`, `hunks`, `unsubstitute`, `resolve`. A change here
-almost certainly needs a documentation change in `docs/usage/`.
+file of its own for the ones that do not — `backport`, `testing`, `resolve`. Not every file of its own is a command,
+though: `hunks` and `unsubstitute` are mechanisms `backport` uses internally, never invoked as an operation in their
+own right, so they carry no `Error` enum or `tpl::<name>::*` diagnostics catalogue entry of their own — their
+failures are `backport`'s failures. A change to a command-shaped file almost certainly needs a documentation change
+in `docs/usage/`; a change to a supporting mechanism does not, unless it changes what `backport` itself does.
 
 **Anything user-visible** — update the corresponding page under `docs/`. In the same PR. A feature is not finished
 when it works; it is finished when someone else can find out that it works.
