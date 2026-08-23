@@ -278,7 +278,7 @@ pub fn backport(
         .as_ref()
         .and_then(|r| r.reference.clone())
         .or_else(|| config.template.r#ref.clone());
-    let revision = recorded.as_ref().and_then(|r| r.commit);
+    let revision = recorded.as_ref().and_then(|r| r.revision);
 
     let rendered = render_files(
         Target {

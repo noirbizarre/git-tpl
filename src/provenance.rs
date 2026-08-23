@@ -35,7 +35,7 @@ pub struct Provenance {
     /// The revision that was asked for — a branch, tag or SHA.
     pub reference: String,
     /// The commit it resolved to.
-    pub commit: Oid,
+    pub revision: Oid,
     /// Whether the template's uncommitted working tree was rendered.
     pub dirty: bool,
     /// A digest of the answers.
@@ -63,7 +63,7 @@ impl Provenance {
 
         message.push_str(&format!("{}: {}\n", keys::SOURCE, self.source));
         message.push_str(&format!("{}: {}\n", keys::REF, self.reference));
-        message.push_str(&format!("{}: {}\n", keys::COMMIT, self.commit));
+        message.push_str(&format!("{}: {}\n", keys::COMMIT, self.revision));
         if self.dirty {
             // Only written when true. An absent trailer means clean, so the
             // common case costs nothing and cannot be misread.
@@ -108,7 +108,7 @@ impl Provenance {
                     found_any = true;
                 }
                 keys::COMMIT => {
-                    recorded.commit = Oid::parse(value);
+                    recorded.revision = Oid::parse(value);
                     found_any = true;
                 }
                 keys::DIRTY => {
@@ -150,7 +150,7 @@ pub struct Recorded {
     /// The revision that was asked for.
     pub reference: Option<String>,
     /// The commit it resolved to.
-    pub commit: Option<Oid>,
+    pub revision: Option<Oid>,
     /// Whether an uncommitted working tree was rendered.
     pub dirty: bool,
     /// The digest of the answers.
@@ -169,10 +169,12 @@ impl Recorded {
     /// otherwise a `A → B` line would use two different formats either side of
     /// the arrow, which is exactly what it did before this was shared.
     pub fn describe_revision(&self) -> String {
-        match (&self.reference, &self.commit) {
-            (Some(reference), Some(commit)) => crate::ops::describe_revision(reference, *commit),
+        match (&self.reference, &self.revision) {
+            (Some(reference), Some(revision)) => {
+                crate::ops::describe_revision(reference, *revision)
+            }
             (Some(reference), None) => reference.clone(),
-            (None, Some(commit)) => commit.short(),
+            (None, Some(revision)) => revision.short(),
             (None, None) => "unknown".to_string(),
         }
     }
@@ -197,7 +199,7 @@ mod tests {
         Provenance {
             source: "https://github.com/noirbizarre/rust-library".into(),
             reference: "v1.4.0".into(),
-            commit: oid("4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29"),
+            revision: oid("4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29"),
             dirty: false,
             answers_digest:
                 "sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08".into(),
@@ -222,7 +224,7 @@ mod tests {
 
         assert_eq!(recorded.source.as_deref(), Some(original.source.as_str()));
         assert_eq!(recorded.reference.as_deref(), Some("v1.4.0"));
-        assert_eq!(recorded.commit, Some(original.commit));
+        assert_eq!(recorded.revision, Some(original.revision));
         assert_eq!(
             recorded.answers_digest.as_deref(),
             Some(original.answers_digest.as_str())

@@ -347,11 +347,11 @@ impl Answering<'_> {
 ///
 /// A branch name alone cannot tell you whether the template moved, which is the
 /// question every one of these lines exists to answer.
-pub fn describe_revision(reference: &str, commit: Oid) -> String {
+pub fn describe_revision(reference: &str, revision: Oid) -> String {
     if reference == crate::provenance::WORKTREE_REF {
-        format!("{} (+ uncommitted changes)", commit.short())
+        format!("{} (+ uncommitted changes)", revision.short())
     } else {
-        format!("{reference} ({})", commit.short())
+        format!("{reference} ({})", revision.short())
     }
 }
 
@@ -735,7 +735,7 @@ pub fn render_resolved(
     let provenance = Provenance {
         source: source.to_string(),
         reference: template.reference.clone(),
-        commit: template.revision,
+        revision: template.revision,
         dirty: template.dirty,
         answers_digest: context.answers_digest(),
         data: loader.provenance().to_vec(),
@@ -1441,17 +1441,18 @@ pub fn update(
         .and_then(|commit| Provenance::parse(&commit.message));
     let previous_revision_description = recorded_previous.as_ref().map(Recorded::describe_revision);
 
-    // Migrations newly crossed since the last render. `recorded.commit` is the
-    // `Template-Commit` trailer of the previous rendered commit — read back
-    // here for the first time rather than only for display, and the whole
-    // reason no template ever needs to declare a version: the template's own
-    // history between that commit and the one just resolved *is* the version
-    // boundary. No previous commit, or one with no parseable provenance (a
-    // hand-made commit on the ref, or the very first render): there is no
-    // coherent "old state" to migrate away from, so migrations are skipped
-    // rather than firing every migration the template has ever had.
+    // Migrations newly crossed since the last render. `recorded.revision` is
+    // the `Template-Commit` trailer of the previous rendered commit — read
+    // back here for the first time rather than only for display, and the
+    // whole reason no template ever needs to declare a version: the
+    // template's own history between that commit and the one just resolved
+    // *is* the version boundary. No previous commit, or one with no
+    // parseable provenance (a hand-made commit on the ref, or the very first
+    // render): there is no coherent "old state" to migrate away from, so
+    // migrations are skipped rather than firing every migration the template
+    // has ever had.
     let mut migrations: Vec<AppliedMigration> = Vec::new();
-    if let (Some(_), Some(old_commit)) = (&previous, recorded_previous.and_then(|r| r.commit)) {
+    if let (Some(_), Some(old_commit)) = (&previous, recorded_previous.and_then(|r| r.revision)) {
         let old_tree = rendered.template.repo.commit_tree(old_commit)?;
         let new_tree = rendered.template.tree;
         if old_tree != new_tree {
@@ -1645,8 +1646,8 @@ pub fn status(
         // contained.
         (Some(resolved), _) if resolved.dirty => true,
         (Some(resolved), Some(recorded)) => recorded
-            .commit
-            .is_some_and(|commit| commit != resolved.revision),
+            .revision
+            .is_some_and(|revision| revision != resolved.revision),
         // Nothing rendered yet, but a template resolves: there is work to do.
         (Some(_), None) => tip.is_none(),
         _ => false,
