@@ -22,6 +22,21 @@ id = "commitlint"
 stages = ["commit-msg"]
 additional_dependencies = ["@commitlint/config-conventional"]
 
+# Enforces the 120-character ceiling from AGENTS.md's Style section. It
+# cannot judge whether a break under that ceiling is semantic or columnar —
+# that half of the convention is a review concern, not a lint one.
+#
+# Scoped to the docs this convention actually covers — the same set
+# `mise run lint:md` checks. Left unscoped it also reaches CHANGELOG.md
+# (git-cliff's output, not ours to reformat) and README.md (not part of this
+# convention).
+[[repos]]
+repo = "https://github.com/DavidAnson/markdownlint-cli2"
+rev = "v0.23.2"
+hooks = [
+  { id = "markdownlint-cli2", files = "^(docs/.*\\.md|AGENTS\\.md)$" },
+]
+
 [[repos]]
 repo = "local"
 

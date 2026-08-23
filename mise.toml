@@ -82,6 +82,11 @@ description = "Lint the GitHub Actions workflows"
 # this task and the prek hook cannot drift apart.
 run = "actionlint .github/workflows/*.yaml"
 
+[tasks."lint:md"]
+description = "Lint the documentation Markdown"
+tools = { "npm:markdownlint-cli2" = "latest" }
+run = 'markdownlint-cli2 --config .markdownlint-cli2.yaml "docs/**/*.md" AGENTS.md'
+
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"
 tools = { "cargo:cargo-insta" = "latest" }
@@ -89,7 +94,7 @@ run = "cargo insta review"
 
 [tasks.check]
 description = "Run every check that does not modify the working tree"
-depends = ["fmt:check", "lint", "lint:actions", "spell", "test"]
+depends = ["fmt:check", "lint", "lint:actions", "lint:md", "spell", "test"]
 
 [tasks.ci]
 description = "Everything CI runs, locally"

@@ -1,7 +1,8 @@
 # Template format
 
-A template is a normal Git repository. Nothing registers it, nothing packages it,
-and any Git URL that libgit2 can clone will do — including a local path.
+A template is a normal Git repository.
+Nothing registers it, nothing packages it, and any Git URL that libgit2 can clone will do — including a local
+path.
 
 ## Layout
 
@@ -26,12 +27,12 @@ rust-library-template/
 └── LICENSE                ← likewise
 ```
 
-Only `template/` is rendered. The rest of the repository — the template's own
-README, its CI, its license — is invisible to the projects that use it.
+Only `template/` is rendered.
+The rest of the repository — the template's own README, its CI, its license — is invisible to the projects that
+use it.
 
-The exception, and the only one, is a `.jinja` file outside `template/`: it is
-still never rendered into a project, but it *is* importable as a
-[shared partial](#shared-partials).
+The exception, and the only one, is a `.jinja` file outside `template/`: it is still never rendered into a
+project, but it *is* importable as a [shared partial](#shared-partials).
 
 The rendered subdirectory is configurable:
 
@@ -71,23 +72,21 @@ line_length = 100
 | `note` | string | — | A note shown after `init`. May be an expression. Mutually exclusive with `note_file`. |
 | `note_file` | string | — | A path *in the template repository*, relative to its root, whose content is shown after `init`. Rendered if it ends in `.jinja`. The path may be an expression. |
 
-All of these must be written **above the first table header**. In TOML a bare
-key belongs to the table that most recently opened, so a `note_file` written
-below `[computed]` is a computed value and the note never appears. The manifest
-stays valid and nothing fails, which is why
-[`git tpl lint`](../usage/lint.md#absorbed-keys-tpllintabsorbed_key) reports
-it as `tpl::lint::absorbed_key`.
+All of these must be written **above the first table header**.
+In TOML a bare key belongs to the table that most recently opened, so a `note_file` written below `[computed]` is
+a computed value and the note never appears.
+The manifest stays valid and nothing fails, which is why
+[`git tpl lint`](../usage/lint.md#absorbed-keys-tpllintabsorbed_key) reports it as `tpl::lint::absorbed_key`.
 
-The template **id** — which determines the ref name — is derived from the
-`source` the project records, not from `name`. See
-[Configuration](../configuration.md#template).
+The template **id** — which determines the ref name — is derived from the `source` the project records, not from
+`name`.
+See [Configuration](../configuration.md#template).
 
-Each entry in `[computed]` is an expression or a literal value: a string
-containing `{{` or `{%` is evaluated, anything else is kept as written.
+Each entry in `[computed]` is an expression or a literal value: a string containing `{{` or `{%` is evaluated,
+anything else is kept as written.
 
-`[questions]`, `[computed]` and `[data]` are covered in
-[Questions](questions.md), [Computed values](computed.md) and
-[Data sources](../data/index.md).
+`[questions]`, `[computed]` and `[data]` are covered in [Questions](questions.md), [Computed values](computed.md)
+and [Data sources](../data/index.md).
 
 ### `[data.<name>]`
 
@@ -105,9 +104,9 @@ See [Git data sources](../data/git.md).
 
 ### `[remotes]`
 
-Git remotes to add on `init`, as `<name> = "<url>"`. The URL may be an
-expression, which is the point — a remote a template can usefully declare is one
-derived from the answers.
+Git remotes to add on `init`, as `<name> = "<url>"`.
+The URL may be an expression, which is the point — a remote a template can usefully declare is one derived from
+the answers.
 
 ```toml
 [remotes]
@@ -116,18 +115,18 @@ origin = "git@github.com:{{ github_org }}/{{ project_name }}.git"
 
 Added in declaration order, on `init` only, and **never fetched or pushed**.
 
-If the repository already has a remote of that name pointing somewhere else, it
-is left alone and a warning names both URLs. git-tpl does not repoint an
-existing `origin`: the one in the repository was put there by a person, and a
+If the repository already has a remote of that name pointing somewhere else, it is left alone and a warning names
+both URLs.
+git-tpl does not repoint an existing `origin`: the one in the repository was put there by a person, and a
 template that could redirect it could redirect a push.
 
-These are Git remotes. A `remote` *data source* under `[data]` is an unrelated
-thing — an HTTP URL the loader reads.
+These are Git remotes.
+A `remote` *data source* under `[data]` is an unrelated thing — an HTTP URL the loader reads.
 
 ## Talking to the user
 
-A template can show one note after `init`, and only after `init`. Two forms,
-mutually exclusive:
+A template can show one note after `init`, and only after `init`.
+Two forms, mutually exclusive:
 
 ```toml
 # A literal, for a line or two.
@@ -137,20 +136,19 @@ note = "Next: run scripts/bootstrap.sh"
 note_file = "NEXT-STEPS.md"
 ```
 
-The key is `note` and not `message` because `[questions.<name>].message` already
-exists — it explains a `pattern`. TOML would fold a top-level `message =`
-written after any table into that question, silently.
+The key is `note` and not `message` because `[questions.<name>].message` already exists — it explains a
+`pattern`.
+TOML would fold a top-level `message =` written after any table into that question, silently.
 
 ### `note_file`
 
-The path is relative to the **template repository root**, not to the render
-root. A note beside `template.toml` is `"NEXT-STEPS.md"`, never
-`"template/NEXT-STEPS.md"`. This is the same namespace
-[partials](#shared-partials) live in.
+The path is relative to the **template repository root**, not to the render root.
+A note beside `template.toml` is `"NEXT-STEPS.md"`, never `"template/NEXT-STEPS.md"`.
+This is the same namespace [partials](#shared-partials) live in.
 
-The file is read from the template and **never rendered into the project**. A
-note is guidance, not an artifact — if you want a file the user keeps, render
-one and let the note say to read it.
+The file is read from the template and **never rendered into the project**.
+A note is guidance, not an artifact — if you want a file the user keeps, render one and let the note say to read
+it.
 
 It is rendered if and only if the path ends in `.jinja`, exactly as a file is:
 
@@ -166,37 +164,35 @@ note_file = "notes/{{ language }}.md"
 note_file = "{% if ci %}notes/ci.md{% endif %}"   # renders empty: no note
 ```
 
-A path that renders to nothing means no note. A non-empty path naming nothing
-is an **error**, and `init` refuses before it writes anything —
-`git tpl lint` reports the same thing without a repository.
+A path that renders to nothing means no note.
+A non-empty path naming nothing is an **error**, and `init` refuses before it writes anything — `git tpl lint`
+reports the same thing without a repository.
 
 ### What a note cannot do
 
-Nothing here runs. git-tpl executes no command a note names, and a note saying
-"run `curl … | sh`" is exactly as dangerous as a `README.md` saying it —
-which is to say the user has to do it themselves. See
-[ADR-019](../adr/019-templates-address-never-act.md).
+Nothing here runs.
+git-tpl executes no command a note names, and a note saying "run `curl … | sh`" is exactly as dangerous as a
+`README.md` saying it — which is to say the user has to do it themselves.
+See [ADR-019](../adr/019-templates-address-never-act.md).
 
-The note is shown in a block attributed to the template, and is sanitised
-first: colour and `https` links survive, and everything else a terminal could
-act on does not. Under `--json`, when piped, or under `NO_COLOR`, it is plain
-text.
+The note is shown in a block attributed to the template, and is sanitised first: colour and `https` links
+survive, and everything else a terminal could act on does not.
+Under `--json`, when piped, or under `NO_COLOR`, it is plain text.
 
 ## Rendering rules
 
 ### `.jinja` files are templates
 
-`Cargo.toml.jinja` is rendered and written as `Cargo.toml`. The suffix is
-stripped, and only that suffix — `a.jinja.jinja` becomes `a.jinja`.
+`Cargo.toml.jinja` is rendered and written as `Cargo.toml`.
+The suffix is stripped, and only that suffix — `a.jinja.jinja` becomes `a.jinja`.
 
 ### Everything else is copied byte-for-byte
 
-`.github/workflows/ci.yml` lands unchanged. This matters more than it sounds:
-GitHub Actions files are full of `${{ }}`, and a tool that rendered every file
+`.github/workflows/ci.yml` lands unchanged.
+This matters more than it sounds: GitHub Actions files are full of `${{ }}`, and a tool that rendered every file
 would mangle them.
 
-If you *want* to template a workflow, name it `ci.yml.jinja` and escape the
-Actions syntax with `{% raw %}`.
+If you *want* to template a workflow, name it `ci.yml.jinja` and escape the Actions syntax with `{% raw %}`.
 
 ### Paths are templates too
 
@@ -206,8 +202,8 @@ Every path segment is itself rendered:
 template/src/{{ package_name }}/mod.rs.jinja
 ```
 
-A segment that renders to the empty string causes that entry — and, for a
-directory, everything beneath it — to be skipped:
+A segment that renders to the empty string causes that entry — and, for a directory, everything beneath it — to
+be skipped:
 
 ```
 template/{% if ci %}.github{% endif %}/workflows/ci.yml
@@ -217,15 +213,15 @@ That is how you make a whole subtree conditional.
 
 !!! warning "A rendered path may not escape the tree"
 
-    A path segment that renders to `..`, to an absolute path, or to something
-    containing a `/` is an error, not a traversal. The rendered tree is built
-    directly as a Git tree, so this is caught before anything is written, but it
-    is rejected explicitly rather than left to chance.
+    A path segment that renders to `..`, to an absolute path, or to something containing a `/` is an error, not
+    a traversal.
+    The rendered tree is built directly as a Git tree, so this is caught before anything is written, but it is
+    rejected explicitly rather than left to chance.
 
 ### Shared partials
 
-A `.jinja` file **outside** the rendered subdirectory is a partial. It is never
-written into a project, and it can be imported by name from any file that is:
+A `.jinja` file **outside** the rendered subdirectory is a partial.
+It is never written into a project, and it can be imported by name from any file that is:
 
 ```
 macros.jinja                             ← the partial
@@ -237,52 +233,51 @@ template/README.md.jinja                 ← imports it
 {{ m.badge(project_name) }}
 ```
 
-A partial is named by its path relative to the **repository root**, not to the
-rendered subdirectory, so a partial in a directory is:
+A partial is named by its path relative to the **repository root**, not to the rendered subdirectory, so a
+partial in a directory is:
 
 ```jinja
 {% import "macros/rust.jinja" as rust %}
 ```
 
-`{% include %}` follows the same path rule but takes no alias — it inlines the
-partial's output directly, e.g. `{% include "macros/rust.jinja" %}`.
+`{% include %}` follows the same path rule but takes no alias — it inlines the partial's output directly, e.g.
+`{% include "macros/rust.jinja" %}`.
 
-Being outside the rendered subdirectory is the whole rule, and it is what keeps
-a macro definition from landing in every generated project. There is no manifest
-key and no reserved filename.
+Being outside the rendered subdirectory is the whole rule, and it is what keeps a macro definition from landing
+in every generated project.
+There is no manifest key and no reserved filename.
 
 Two consequences worth stating:
 
-- A `.jinja` file **inside** the rendered subdirectory is an output file and is
-  *not* importable. One file, one meaning.
-- Only `.jinja` files are loadable. `{% include "data/licenses.toml" %}` does not
-  work; declare a [data source](../data/index.md) instead, which knows how to parse it.
+- A `.jinja` file **inside** the rendered subdirectory is an output file and is *not* importable. One file, one
+  meaning.
+- Only `.jinja` files are loadable. `{% include "data/licenses.toml" %}` does not work; declare a
+  [data source](../data/index.md) instead, which knows how to parse it.
 
-Partials are read from the same pinned revision as everything else, so editing
-one changes the rendered tree and advances the ref. They are available to
-manifest expressions too — a `computed` value may `{% import %}` the same macro
-a file does.
+Partials are read from the same pinned revision as everything else, so editing one changes the rendered tree and
+advances the ref.
+They are available to manifest expressions too — a `computed` value may `{% import %}` the same macro a file
+does.
 
 !!! tip "Getting the name wrong"
 
-    A failed import lists the partials that do exist. The usual cause is a path
-    written relative to `template/` instead of the repository root.
+    A failed import lists the partials that do exist.
+    The usual cause is a path written relative to `template/` instead of the repository root.
 
 ### Binary files
 
-A file with a NUL byte in its first 8 KiB is treated as binary and copied
-verbatim, even if it is named `.jinja`. Rendering a PNG would corrupt it, and the
-failure would be silent.
+A file with a NUL byte in its first 8 KiB is treated as binary and copied verbatim, even if it is named `.jinja`.
+Rendering a PNG would corrupt it, and the failure would be silent.
 
 ### Permissions
 
-The executable bit is preserved. Git records nothing else about a file's mode, so
-nothing else can be.
+The executable bit is preserved.
+Git records nothing else about a file's mode, so nothing else can be.
 
 ### Determinism
 
-Byte-identical output for identical inputs, always. See
-[Determinism](../concepts/determinism.md) for what that rules out.
+Byte-identical output for identical inputs, always.
+See [Determinism](../concepts/determinism.md) for what that rules out.
 
 ## The template context
 
@@ -295,22 +290,21 @@ Inside a `.jinja` file, these names are available:
 | `data` | Loaded data sources. `{{ data.licenses }}`. |
 | `template` | Template metadata: `template.name`, `template.description`. |
 
-Answers and computed values are at the top level because that is what templates
-actually read, and `{{ answers.project_name }}` is noise. They share one
-namespace, and a computed value may not reuse an answer's name — that is an
-error at load time, not a silent shadow.
+Answers and computed values are at the top level because that is what templates actually read, and
+`{{ answers.project_name }}` is noise.
+They share one namespace, and a computed value may not reuse an answer's name — that is an error at load time,
+not a silent shadow.
 
 Full detail: [Template context](context.md).
 
 ## Publishing
 
-There is nothing to package and nowhere to register. Publishing a template is
-`git push`, and sharing it is sharing the URL someone passes to `git tpl init`.
+There is nothing to package and nowhere to register.
+Publishing a template is `git push`, and sharing it is sharing the URL someone passes to `git tpl init`.
 
-What a visitor lands on is the repository itself, so the template's own
-`README.md` and `LICENSE` — the files outside `template/` that are never
-rendered — are the ones worth writing. They are the only description anyone
-gets before cloning.
+What a visitor lands on is the repository itself, so the template's own `README.md` and `LICENSE` — the files
+outside `template/` that are never rendered — are the ones worth writing.
+They are the only description anyone gets before cloning.
 
 On GitHub, add the `git-tpl` repository topic:
 
@@ -318,11 +312,10 @@ On GitHub, add the `git-tpl` repository topic:
 gh repo edit --add-topic git-tpl
 ```
 
-or Settings → *About* → *Topics*. The template then appears at
-[github.com/topics/git-tpl](https://github.com/topics/git-tpl), which is how
+or Settings → *About* → *Topics*.
+The template then appears at [github.com/topics/git-tpl](https://github.com/topics/git-tpl), which is how
 templates are found.
 
-The topic is a discovery convention between humans, nothing more. git-tpl never
-queries GitHub, has no registry and resolves no names: `git tpl init` takes a
-Git URL and clones it. A template without the topic works exactly as well — it
-is just harder to come across.
+The topic is a discovery convention between humans, nothing more.
+git-tpl never queries GitHub, has no registry and resolves no names: `git tpl init` takes a Git URL and clones it.
+A template without the topic works exactly as well — it is just harder to come across.

@@ -13,8 +13,9 @@ git tpl merge --abort
 git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
-That is the operation. `git tpl merge` looks up the ref name and uses a
-conventional message; everything else is libgit2's merge, which is Git's merge.
+That is the operation.
+`git tpl merge` looks up the ref name and uses a conventional message; everything else is libgit2's merge, which
+is Git's merge.
 
 Which means:
 
@@ -25,10 +26,10 @@ Which means:
 - your `merge.tool` works
 - `.gitattributes` merge drivers work
 
-git-tpl implements **no** conflict resolution of its own. Not a custom
-three-way merge, not patch replay, not rename detection, not heuristics. Those
-exist in Git, they are better than anything this project would write, and
-reimplementing them is the mistake this design exists to avoid.
+git-tpl implements **no** conflict resolution of its own.
+Not a custom three-way merge, not patch replay, not rename detection, not heuristics.
+Those exist in Git, they are better than anything this project would write, and reimplementing them is the
+mistake this design exists to avoid.
 
 ## Success
 
@@ -63,21 +64,21 @@ warning: automatic merge failed; fix conflicts and then commit the result.
   git merge --abort       start over
 ```
 
-The index is left exactly as Git leaves it. Every tool you already use applies,
-because nothing here is special.
+The index is left exactly as Git leaves it.
+Every tool you already use applies, because nothing here is special.
 
-[`git tpl show <path>`](show.md) prints the template's version of a conflicted
-file, which is often the quickest way to see what it was trying to say.
+[`git tpl show <path>`](show.md) prints the template's version of a conflicted file, which is often the quickest
+way to see what it was trying to say.
 
 ## Why conflicts are rarer than you expect
 
-The merge base is your *previous* rendering. So a file the template did not
-change in this update is not part of the merge at all, however much you edited
+The merge base is your *previous* rendering.
+So a file the template did not change in this update is not part of the merge at all, however much you edited
 it — Git sees no change on one side.
 
-A conflict means what it always means: you and the template both changed the
-same region of the same file since the last time you agreed. Which is genuinely
-ambiguous, and genuinely wants a human.
+A conflict means what it always means: you and the template both changed the same region of the same file since
+the last time you agreed.
+Which is genuinely ambiguous, and genuinely wants a human.
 
 ## Options
 
@@ -89,6 +90,5 @@ ambiguous, and genuinely wants a human.
 
 ## Machine-readable output
 
-`git tpl --json merge` emits its outcome on stdout as a single JSON object, with
-the prose on stderr. The payload is described in
-[JSON output](../reference/json.md#merge).
+`git tpl --json merge` emits its outcome on stdout as a single JSON object, with the prose on stderr.
+The payload is described in [JSON output](../reference/json.md#merge).

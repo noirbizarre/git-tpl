@@ -17,13 +17,12 @@ git tpl --json questions ./my-template
 | `--dirty` | Read the template's working tree rather than its `HEAD`. Local templates only. |
 | [`--json`](../reference/json.md#questions) | A global flag. The schema on stdout as one object. |
 
-`--dirty` is the one to reach for while authoring: it shows the schema a
-question you have just added produces, before you commit it.
+`--dirty` is the one to reach for while authoring: it shows the schema a question you have just added produces,
+before you commit it.
 
-`init --dry-run` lists question *names*, on stderr, and needs a repository and
-a network fetch to do it. That is enough to reassure a human and not enough to
-write an answers file with — which is what anything driving git-tpl
-non-interactively needs first.
+`init --dry-run` lists question *names*, on stderr, and needs a repository and a network fetch to do it.
+That is enough to reassure a human and not enough to write an answers file with — which is what anything driving
+git-tpl non-interactively needs first.
 
 ## Generating an answers file
 
@@ -37,10 +36,9 @@ git tpl --json questions ./tpl \
 
 ### Resolution order
 
-Questions come out in the order they are asked, not the order they are
-declared. When a `when` or a `default` references an earlier answer, that is
-the order they must be answered in — and it is what the dependency graph
-already computes for prompting.
+Questions come out in the order they are asked, not the order they are declared.
+When a `when` or a `default` references an earlier answer, that is the order they must be answered in — and it
+is what the dependency graph already computes for prompting.
 
 ### `defaultIsExpression`
 
@@ -52,20 +50,19 @@ type = "string"
 default = "{{ crate }}"
 ```
 
-The schema reports the raw string *and* that it is derived. A caller that took
-it literally would write `{{ crate }}` into the answers file.
+The schema reports the raw string *and* that it is derived.
+A caller that took it literally would write `{{ crate }}` into the answers file.
 
 ### `choicesResolved`
 
-When `choices_from` points at a data file inside the template repository, the
-values are resolved and included, so a caller does not have to fetch and parse
-the file itself.
+When `choices_from` points at a data file inside the template repository, the values are resolved and included,
+so a caller does not have to fetch and parse the file itself.
 
-Only for template-local sources. A remote one would mean this command silently
-acquired a network fetch, which a command that reads a manifest should not do.
+Only for template-local sources.
+A remote one would mean this command silently acquired a network fetch, which a command that reads a manifest
+should not do.
 
 ## See also
 
-- [`git tpl context`](context.md) — the resolved values, rather than the
-  declaration.
+- [`git tpl context`](context.md) — the resolved values, rather than the declaration.
 - [Answers from a file](answers.md) — precedence and file formats.

@@ -1,8 +1,7 @@
 # Answers from a file
 
-`--answers-from <path>` supplies answers from a TOML, JSON or YAML file, on
-`git tpl init`, `git tpl update`, `git tpl render`, `git tpl context`, and on
-the `--dirty` previews of `git tpl diff` and `git tpl show`.
+`--answers-from <path>` supplies answers from a TOML, JSON or YAML file, on `git tpl init`, `git tpl update`,
+`git tpl render`, `git tpl context`, and on the `--dirty` previews of `git tpl diff` and `git tpl show`.
 
 ```console
 $ git tpl init https://github.com/noirbizarre/rust-library-template \
@@ -16,8 +15,8 @@ It exists because four unrelated things need the same thing:
 - rendering in CI, where there is no terminal to prompt at
 - checking a template's fixtures in, so the template can have tests
 
-A tool-specific importer would have bought only the first, and would have put
-someone else's file format in the CLI surface permanently.
+A tool-specific importer would have bought only the first, and would have put someone else's file format in the
+CLI surface permanently.
 
 ## The file
 
@@ -30,8 +29,7 @@ with_ci = true
 port = 8080
 ```
 
-…or those same pairs under an `answers` key, so a template's fixture file can
-carry other tables beside them:
+…or those same pairs under an `answers` key, so a template's fixture file can carry other tables beside them:
 
 ```toml
 [answers]
@@ -41,13 +39,13 @@ project_name = "my-thing"
 files = ["pyproject.toml"]
 ```
 
-Nothing else is a valid shape. A document that is not a table is refused
-(`tpl::answers::shape`) rather than silently supplying nothing.
+Nothing else is a valid shape.
+A document that is not a table is refused (`tpl::answers::shape`) rather than silently supplying nothing.
 
 ## Formats
 
-The same three the [data sources](../data/index.md#formats) take, read by the
-same parsers, chosen by the file extension:
+The same three the [data sources](../data/index.md#formats) take, read by the same parsers, chosen by the file
+extension:
 
 | Extension | Format |
 |---|---|
@@ -55,20 +53,20 @@ same parsers, chosen by the file extension:
 | `.json` | JSON |
 | `.yaml`, `.yml` | YAML 1.2 |
 
-YAML matters here specifically: `.copier-answers.yml` and most hand-written
-house-defaults files are YAML, and requiring a `yq` step first would have
-undercut the point of the flag. It is YAML 1.2, so `no` is the string `"no"` —
-see [About YAML](../data/index.md#about-yaml).
+YAML matters here specifically: `.copier-answers.yml` and most hand-written house-defaults files are YAML, and
+requiring a `yq` step first would have undercut the point of the flag.
+It is YAML 1.2, so `no` is the string `"no"` — see [About YAML](../data/index.md#about-yaml).
 
 ## Types are preserved
 
-This is the difference between the file and `--answer`. A flag can only carry
-text, so `--answer port=8080` is a string that the question's declared type
-turns into an integer. A file carries the type it was written with.
+This is the difference between the file and `--answer`.
+A flag can only carry text, so `--answer port=8080` is a string that the question's declared type turns into an
+integer.
+A file carries the type it was written with.
 
-A value that does not match the question's declared type is an **error**
-(`tpl::eval::wrong_type`), never a silent coercion. `port = "eighty"` for an
-integer question fails; it does not become `0`.
+A value that does not match the question's declared type is an **error** (`tpl::eval::wrong_type`), never a
+silent coercion.
+`port = "eighty"` for an integer question fails; it does not become `0`.
 
 ## Unknown keys are ignored, and reported
 
@@ -80,19 +78,18 @@ warning: answers ignored: they name no question in this template
   _commit
 ```
 
-Both halves are deliberate. Erroring would make the flag useless for the case
-that motivated it — a `.copier-answers.yml` carries `_src_path` and `_commit`,
-and any long-lived template has dropped a question at some point. Staying silent
-would make a typo'd key look exactly like an answer that had no effect.
+Both halves are deliberate.
+Erroring would make the flag useless for the case that motivated it — a `.copier-answers.yml` carries `_src_path`
+and `_commit`, and any long-lived template has dropped a question at some point.
+Staying silent would make a typo'd key look exactly like an answer that had no effect.
 
-Nothing about the ignored keys is recorded: `.config/git.tpl.toml` holds the
-answers to questions the template actually asked.
+Nothing about the ignored keys is recorded: `.config/git.tpl.toml` holds the answers to questions the template
+actually asked.
 
-Pass `--strict-answers` to turn that warning into an error, which is what a
-CI job wants: a key that names no question is a typo, and a run that renders
-anyway has silently ignored an instruction. Recorded answers stay lenient
-whatever the flag says — a template drops questions over time, and a project
-that answered one is not at fault for it.
+Pass `--strict-answers` to turn that warning into an error, which is what a CI job wants: a key that names no
+question is a typo, and a run that renders anyway has silently ignored an instruction.
+Recorded answers stay lenient whatever the flag says — a template drops questions over time, and a project that
+answered one is not at fault for it.
 
 ## A Copier answers file works unedited
 
@@ -101,15 +98,14 @@ $ git tpl init https://github.com/example/rust-library \
     --answers-from .copier-answers.yml
 ```
 
-This is not Copier compatibility, and is not meant to grow into it. The flag
-maps names to names: a template whose questions were renamed between tools needs
-its answers edited. Shipping a mapping language to avoid that would cost more
-than the editing does.
+This is not Copier compatibility, and is not meant to grow into it.
+The flag maps names to names: a template whose questions were renamed between tools needs its answers edited.
+Shipping a mapping language to avoid that would cost more than the editing does.
 
 ## Precedence
 
-`--answers-from` is repeatable, and later files win over earlier ones — house
-defaults first, the specific file on top:
+`--answers-from` is repeatable, and later files win over earlier ones — house defaults first, the specific file
+on top:
 
 ```console
 $ git tpl init <template> \
@@ -130,13 +126,12 @@ The whole chain, highest first:
   >  the question's default
 ```
 
-The last three are the [user configuration](../configuration.md#defaults) and
-the question's own declarations; that page is the authoritative statement of
-the chain.
+The last three are the [user configuration](../configuration.md#defaults) and the question's own declarations;
+that page is the authoritative statement of the chain.
 
-A question covered by none of them is asked as usual, unless `--defaults` or
-`tpl.interactive false` is in force — in which case its default is taken, and a
-question with no default is an error (`tpl::eval::unanswered`).
+A question covered by none of them is asked as usual, unless `--defaults` or `tpl.interactive false` is in
+force — in which case its default is taken, and a question with no default is an error
+(`tpl::eval::unanswered`).
 
 ## Failures
 
@@ -149,6 +144,6 @@ question with no default is an error (`tpl::eval::unanswered`).
 | `tpl::eval::wrong_type` | A value does not match the question's declared type. |
 
 The path is resolved relative to your working directory, and is used as given.
-It is deliberately not restricted to the project — you named it yourself, unlike
-a [local data source](../data/local.md) path, which comes out of a template
-repository and is therefore untrusted input.
+It is deliberately not restricted to the project — you named it yourself, unlike a
+[local data source](../data/local.md) path, which comes out of a template repository and is therefore untrusted
+input.

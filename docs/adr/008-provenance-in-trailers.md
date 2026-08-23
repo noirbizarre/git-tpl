@@ -4,9 +4,9 @@
 
 ## Context
 
-A rendered commit needs to record what produced it: the template source, the
-resolved revision, the answers, which data sources contributed, which git-tpl
-version rendered it. `git tpl status` needs to read it back.
+A rendered commit needs to record what produced it: the template source, the resolved revision, the answers, which
+data sources contributed, which git-tpl version rendered it.
+`git tpl status` needs to read it back.
 
 Three places it could go:
 
@@ -31,30 +31,31 @@ Tpl-Version: 0.2.0
 
 ## Consequences
 
-The rendered tree is *only* rendered files. `git diff HEAD refs/tpl/<id>` shows
-real differences and nothing the user must learn to ignore. A provenance file in
-the tree would appear in every diff and every merge, and would conflict on every
-update — it changes on every render by definition.
+The rendered tree is *only* rendered files.
+`git diff HEAD refs/tpl/<id>` shows real differences and nothing the user must learn to ignore.
+A provenance file in the tree would appear in every diff and every merge, and would conflict on every update — it
+changes on every render by definition.
 
-Provenance is attached to the thing it describes. The tree and its provenance
-move together and cannot be separated, which is not true of a file in a different
+Provenance is attached to the thing it describes.
+The tree and its provenance move together and cannot be separated, which is not true of a file in a different
 commit.
 
-It is readable with plain Git, and trailers are a Git convention with existing
-tooling (`git interpret-trailers`, `%(trailers)` in `--format`):
+It is readable with plain Git, and trailers are a Git convention with existing tooling (`git interpret-trailers`,
+`%(trailers)` in `--format`):
 
 ```sh
 git show --no-patch refs/tpl/github-com-noirbizarre-rust-library-template
 git log --format='%(trailers:key=Template-Commit,valueonly)' refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
-The provenance history is queryable. `git log` on the ref gives every rendering
-and what produced it, which is how `status` reports the previous revision.
+The provenance history is queryable.
+`git log` on the ref gives every rendering and what produced it, which is how `status` reports the previous
+revision.
 
-Option 2 was rejected because `.config/git.tpl.toml` is the user's *input* —
-hand-editable, reviewed, and containing only the template reference and the
-answers. Mixing generated state into it means a file that is partly authored and
-partly machine-written, and users editing the wrong half.
+Option 2 was rejected because `.config/git.tpl.toml` is the user's *input* — hand-editable, reviewed, and
+containing only the template reference and the answers.
+Mixing generated state into it means a file that is partly authored and partly machine-written, and users editing
+the wrong half.
 
-The cost: trailers are strings, so parsing needs care and a round-trip test. That
-is one unit test.
+The cost: trailers are strings, so parsing needs care and a round-trip test.
+That is one unit test.

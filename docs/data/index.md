@@ -1,9 +1,8 @@
 # Data sources
 
-Templates often need reference data: a list of licences, the language versions a
-CI matrix should cover, an organisation's project categories. Data sources load
-that data once and make it available to both the question engine and the
-renderer.
+Templates often need reference data: a list of licences, the language versions a CI matrix should cover, an
+organisation's project categories.
+Data sources load that data once and make it available to both the question engine and the renderer.
 
 ```toml
 [data.licenses]
@@ -23,9 +22,9 @@ choices_from = "data.licenses.ids"
 
 ## Why a subsystem, and not a template function
 
-Because a `load_file()` or `http_get()` available to expressions would be a
-security hole and a reproducibility hole at the same time. A template could read
-anything on your disk, or fetch anything, at render time, invisibly.
+Because a `load_file()` or `http_get()` available to expressions would be a security hole and a reproducibility
+hole at the same time.
+A template could read anything on your disk, or fetch anything, at render time, invisibly.
 
 Instead, a template *declares* the data it wants. The data layer owns:
 
@@ -37,7 +36,8 @@ Instead, a template *declares* the data it wants. The data layer owns:
 - provenance — recording what contributed to a rendering
 - error handling
 
-Expressions consume the result. They cannot cause a load.
+Expressions consume the result.
+They cannot cause a load.
 
 ## Kinds
 
@@ -58,8 +58,7 @@ The kind is inferred from `source`:
 | `./project-data.toml` | LocalFile — relative to the project root |
 | `https://example.com/data@v1:licenses.toml` | Git — a `<repo>@<ref>:<path>` shorthand |
 
-A `ref` or a `path` also makes a source a Git source, without `kind` being
-written out:
+A `ref` or a `path` also makes a source a Git source, without `kind` being written out:
 
 ```toml
 [data.licenses]
@@ -68,8 +67,8 @@ ref    = "v2.1.0"
 path   = "licenses.toml"
 ```
 
-An explicit `kind` disambiguates when needed, and is **required** when a `source`
-only becomes a URL after interpolation:
+An explicit `kind` disambiguates when needed, and is **required** when a `source` only becomes a URL after
+interpolation:
 
 ```toml
 [data.overrides]
@@ -85,7 +84,8 @@ See [Local data](local.md), [Remote data](remote.md) and [Git data](git.md).
 
 ## Pinning
 
-Any source may declare the sha256 of its content. A mismatch stops the render.
+Any source may declare the sha256 of its content.
+A mismatch stops the render.
 
 ```toml
 [data.licenses]
@@ -111,20 +111,18 @@ format = "json"
 | `.json` | JSON |
 | `.yaml`, `.yml` | YAML |
 
-The same three, read by the same parsers, are what
-[`--answers-from`](../usage/answers.md) accepts — one decision about what YAML
-means rather than two.
+The same three, read by the same parsers, are what [`--answers-from`](../usage/answers.md) accepts — one decision
+about what YAML means rather than two.
 
 Three formats is a deliberate limit, and adding a fourth needs a real reason.
-All three have exact type mappings, and whichever you pick, the same file
-produces the same context.
+All three have exact type mappings, and whichever you pick, the same file produces the same context.
 
 ### About YAML
 
-YAML is accepted as **YAML 1.2**, which is not the YAML that earned the
-reputation. Under the older 1.1 rules `no` resolved to `false`, `on` to `true`
-and `12:30:00` to the integer 45000 — the kind of thing that changes a rendered
-tree without changing a character of the template. None of that happens here:
+YAML is accepted as **YAML 1.2**, which is not the YAML that earned the reputation.
+Under the older 1.1 rules `no` resolved to `false`, `on` to `true` and `12:30:00` to the integer 45000 — the kind
+of thing that changes a rendered tree without changing a character of the template.
+None of that happens here:
 
 ```yaml
 country: no       # the string "no", not false
@@ -136,22 +134,20 @@ enabled: true     # a boolean, because it was written as one
 
 Two further points, because a data source is untrusted input:
 
-- **Duplicate keys, multiple documents and unbounded alias expansion are
-  refused**, rather than resolved to whichever answer the parser happened to
-  reach first.
-- **A tag is not an instruction.** `!!python/object:os.system` is the classic
-  YAML exploit; here the tag is dropped and the scalar kept, because git-tpl
-  constructs nothing from data.
+- **Duplicate keys, multiple documents and unbounded alias expansion are refused**, rather than resolved to
+  whichever answer the parser happened to reach first.
+- **A tag is not an instruction.** `!!python/object:os.system` is the classic YAML exploit; here the tag is
+  dropped and the scalar kept, because git-tpl constructs nothing from data.
 
-One thing YAML 1.2 removed that you may miss: the **merge key `<<` is not
-merged**. Anchors and aliases work, but `<<: *base` leaves a literal `<<` key in
-the mapping rather than folding its contents in. If you want shared fragments,
-alias the whole node.
+One thing YAML 1.2 removed that you may miss: the **merge key `<<` is not merged**.
+Anchors and aliases work, but `<<: *base` leaves a literal `<<` key in the mapping rather than folding its
+contents in.
+If you want shared fragments, alias the whole node.
 
 ## Types are preserved
 
-Data enters the context as structured values. A table is a table, an array is an
-array, `8080` is an integer:
+Data enters the context as structured values.
+A table is a table, an array is an array, `8080` is an integer:
 
 ```toml
 # data/ci.toml
@@ -178,24 +174,23 @@ A `source` may itself be an expression:
 source = "data/frameworks/{{ project_type }}.toml"
 ```
 
-It participates in the dependency graph like everything else, so
-`project_type` is asked before the source is resolved, and a question depending
-on `data.frameworks` is asked after it is loaded. Cycles are caught up front.
+It participates in the dependency graph like everything else, so `project_type` is asked before the source is
+resolved, and a question depending on `data.frameworks` is asked after it is loaded.
+Cycles are caught up front.
 
 ## Loading order
 
-Data sources are loaded lazily, in dependency order, and each is loaded at most
-once per run. Three questions using `data.licenses` cause one read.
+Data sources are loaded lazily, in dependency order, and each is loaded at most once per run.
+Three questions using `data.licenses` cause one read.
 
-A source nothing references is never loaded at all — which is why a template can
-declare a remote source used only by one branch of a conditional without making
-every user pay for it.
+A source nothing references is never loaded at all — which is why a template can declare a remote source used
+only by one branch of a conditional without making every user pay for it.
 
 ## Failures
 
-A data source that cannot be loaded is an error that stops the render. Rendering
-with a partially-loaded context would produce a tree that looks plausible and is
-wrong, and that tree would become a commit.
+A data source that cannot be loaded is an error that stops the render.
+Rendering with a partially-loaded context would produce a tree that looks plausible and is wrong, and that tree
+would become a commit.
 
 ```
 x could not load template data source `licenses`
@@ -206,14 +201,14 @@ help: source: https://example.com/licenses.toml
 
 ## Provenance
 
-Each data source that contributed to a rendering is recorded in the rendered
-commit's trailers:
+Each data source that contributed to a rendering is recorded in the rendered commit's trailers:
 
 ```
 Data-Source: licenses = template:data/licenses.toml@8b3e7d1
 Data-Source: registry = remote:https://example.com/registry.json@sha256:9f86d081…
 ```
 
-A template file records the template commit it was read at; a remote source
-records the sha256 of the bytes it returned. Either way you can answer "what
-produced this tree?" from Git alone. See [Reproducibility](reproducibility.md).
+A template file records the template commit it was read at; a remote source records the sha256 of the bytes it
+returned.
+Either way you can answer "what produced this tree?" from Git alone.
+See [Reproducibility](reproducibility.md).

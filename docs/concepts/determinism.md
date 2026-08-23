@@ -1,15 +1,15 @@
 # Determinism
 
-The rendered output becomes a Git commit. That raises the bar: if rendering the
-same inputs twice produced different bytes, every `git tpl update` would create a
-commit, and every one of those commits would be noise you have to merge.
+The rendered output becomes a Git commit.
+That raises the bar: if rendering the same inputs twice produced different bytes, every `git tpl update` would
+create a commit, and every one of those commits would be noise you have to merge.
 
 So the rule is absolute:
 
 !!! info "The determinism guarantee"
 
-    The same template revision, the same answers and the same data produce a
-    byte-identical tree. Always, on every platform.
+    The same template revision, the same answers and the same data produce a byte-identical tree.
+    Always, on every platform.
 
 ## What that requires
 
@@ -30,80 +30,74 @@ Each of these is a way the guarantee could be lost, and how it is prevented:
 
 The guarantee is stated over a template *revision*, and that is not an accident.
 
-A `--dirty` render, or a `<worktree>` reference, has no committed tree to read
-modes from, so the executable bit is read from the filesystem instead. Windows
-has no such bit, and git-tpl reports `false` there — which is exactly what Git
-records for a file created on Windows, so the two agree.
+A `--dirty` render, or a `<worktree>` reference, has no committed tree to read modes from, so the executable bit
+is read from the filesystem instead.
+Windows has no such bit, and git-tpl reports `false` there — which is exactly what Git records for a file created
+on Windows, so the two agree.
 
-The consequence is narrow but worth knowing: the same uncommitted template can
-render executable on Linux and not on Windows. Commit the template and pin a
-revision — which is what `init` and `update` do anyway — and the mode comes from
+The consequence is narrow but worth knowing: the same uncommitted template can render executable on Linux and not
+on Windows.
+Commit the template and pin a revision — which is what `init` and `update` do anyway — and the mode comes from
 the blob, identical everywhere.
 
-Making the platforms agree would mean recording a mode Git itself does not, so
-it is not done.
+Making the platforms agree would mean recording a mode Git itself does not, so it is not done.
 
 ## No runtime context
 
-git-tpl has no `now()`, no `git.user.name`, no `platform.os` — no expression in
-a rendered file or a manifest can read any of them.
+git-tpl has no `now()`, no `git.user.name`, no `platform.os` — no expression in a rendered file or a manifest can
+read any of them.
 
-The one exception proves the rule rather than weakening it: `default_from` reads
-its own small [seed context](../adr/018-seed-context.md), which is reachable
-from nowhere else and only ever pre-fills a prompt. Nothing it offers reaches a
-tree until a human accepts it and it is recorded as an answer. See
-[the render context](../templates/context.md#what-is-not-in-it).
+The one exception proves the rule rather than weakening it: `default_from` reads its own small
+[seed context](../adr/018-seed-context.md), which is reachable from nowhere else and only ever pre-fills a
+prompt.
+Nothing it offers reaches a tree until a human accepts it and it is recorded as an answer.
+See [the render context](../templates/context.md#what-is-not-in-it).
 
-This is a deliberate omission, not a gap. Every one of those makes rendering
-depend on *when* and *where* it ran, which means two people running
-`git tpl update` on the same commit get different trees, and the template ref
-grows a commit every time anyone looks at it.
+This is a deliberate omission, not a gap.
+Every one of those makes rendering depend on *when* and *where* it ran, which means two people running
+`git tpl update` on the same commit get different trees, and the template ref grows a commit every time anyone
+looks at it.
 
 The usual motivations have better answers:
 
-**A copyright year.** Ask for it, or don't render one — `Copyright (c) Acme` is
-correct in every year.
+**A copyright year.** Ask for it, or don't render one — `Copyright (c) Acme` is correct in every year.
 
 **The author's name and email.** Ask a question, with
-[`default_from = "git:user.name"`](../templates/questions.md#machine-seeded-defaults),
-which offers the value from your Git configuration as the *prompt default* — you
-press Enter and move on. The same field derives a project slug from the remote
-or the directory name, `{{ remote.name | default(dir.name) | slugify }}`. The
-difference is that the answer is then recorded in `.config/git.tpl.toml`, and
-the next person to render gets your project's author rather than their own. When
-nobody is asked, the seed is not read at all and the question's own `default`
-applies, so the rule above is not weakened: nothing machine-specific ever
-reaches a tree without a human accepting it first.
+[`default_from = "git:user.name"`](../templates/questions.md#machine-seeded-defaults), which offers the value from
+your Git configuration as the *prompt default* — you press Enter and move on.
+The same field derives a project slug from the remote or the directory name,
+`{{ remote.name | default(dir.name) | slugify }}`.
+The difference is that the answer is then recorded in `.config/git.tpl.toml`, and the next person to render gets
+your project's author rather than their own.
+When nobody is asked, the seed is not read at all and the question's own `default` applies, so the rule above is
+not weakened: nothing machine-specific ever reaches a tree without a human accepting it first.
 
-That is the general shape of the answer: a value that varies by machine belongs
-in the answers, where it is recorded and shared, not in the context, where it is
-invisible and different every time.
+That is the general shape of the answer: a value that varies by machine belongs in the answers, where it is
+recorded and shared, not in the context, where it is invisible and different every time.
 
-If a compelling case for runtime values appears, it will arrive as an explicit,
-per-template opt-in that marks the template non-deterministic and records that
-fact in the commit trailers. Not as an ambient global.
+If a compelling case for runtime values appears, it will arrive as an explicit, per-template opt-in that marks the
+template non-deterministic and records that fact in the commit trailers.
+Not as an ambient global.
 
 ## Remote data is the remaining hazard
 
 A template that loads data over HTTP is only as reproducible as that URL.
-git-tpl records which data sources contributed to a rendering in the commit
-trailers, so you can always tell what a tree was built from — and a source may
-declare a `sha256`, which turns a changed response into an error rather than a
-silently different tree. See
-[Reproducing a rendering](../data/reproducibility.md).
+git-tpl records which data sources contributed to a rendering in the commit trailers, so you can always tell what
+a tree was built from — and a source may declare a `sha256`, which turns a changed response into an error rather
+than a silently different tree.
+See [Reproducing a rendering](../data/reproducibility.md).
 
-Local data — files in the template repository — has no such problem. It is read
-from the template's Git tree at the resolved revision, so it is pinned by the
-template revision itself, exactly like the template files.
+Local data — files in the template repository — has no such problem.
+It is read from the template's Git tree at the resolved revision, so it is pinned by the template revision itself,
+exactly like the template files.
 
 ## Security
 
-Determinism and safety turn out to be the same constraint viewed from two sides:
-anything that could make rendering non-deterministic is also something that could
-make it dangerous.
+Determinism and safety turn out to be the same constraint viewed from two sides: anything that could make
+rendering non-deterministic is also something that could make it dangerous.
 
-Templates are **untrusted input**. Rendering one must be as safe as reading a
-text file. So there is no:
+Templates are **untrusted input**. Rendering one must be as safe as reading a text file.
+So there is no:
 
 - Python execution
 - shell execution
@@ -111,14 +105,12 @@ text file. So there is no:
 - subprocess execution of any kind
 - arbitrary HTTP from within a template
 - environment access
-- loading a template from anywhere but the template repository — `{% import %}`
-  and `{% include %}` resolve against the pinned tree, and cannot name a path on
-  the machine running the render
+- loading a template from anywhere but the template repository — `{% import %}` and `{% include %}` resolve
+  against the pinned tree, and cannot name a path on the machine running the render
 
-Dynamic behaviour is MiniJinja expressions over a controlled context, plus the
-data-source subsystem, which owns *all* fetching. A template declares what data
-it wants; it cannot reach out and take it.
+Dynamic behaviour is MiniJinja expressions over a controlled context, plus the data-source subsystem, which owns
+*all* fetching.
+A template declares what data it wants; it cannot reach out and take it.
 
-Remote data is untrusted input too, and is never executable — it is parsed as
-TOML, JSON or YAML into plain values, and that is the only thing that ever
-happens to it.
+Remote data is untrusted input too, and is never executable — it is parsed as TOML, JSON or YAML into plain
+values, and that is the only thing that ever happens to it.
