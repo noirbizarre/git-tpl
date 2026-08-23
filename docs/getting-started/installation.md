@@ -112,7 +112,7 @@ Download the archive for your platform from the [releases page](https://github.c
 extract it and put the binary somewhere on your `PATH`.
 
 ```sh
-VERSION=0.6.0
+VERSION=0.7.0
 curl -fsSLO \
   https://github.com/noirbizarre/git-tpl/releases/download/$VERSION/git-tpl_${VERSION}_linux-amd64.tar.gz
 tar xzf git-tpl_${VERSION}_linux-amd64.tar.gz
