@@ -249,55 +249,39 @@ impl From<serde_json::Value> for Value {
     }
 }
 
-impl From<serde_norway::Value> for Value {
-    fn from(v: serde_norway::Value) -> Self {
+impl From<noyalib::Value> for Value {
+    fn from(v: noyalib::Value) -> Self {
         match v {
             // A YAML null is a written-out absence, unlike a question that was
             // never asked. Mapping it to the empty string keeps it a value the
             // template can interpolate, matching what JSON `null` does.
-            serde_norway::Value::Null => Value::String(String::new()),
-            serde_norway::Value::Bool(b) => Value::Bool(b),
-            serde_norway::Value::Number(n) => match n.as_i64() {
+            noyalib::Value::Null => Value::String(String::new()),
+            noyalib::Value::Bool(b) => Value::Bool(b),
+            noyalib::Value::Number(n) => match n.as_i64() {
                 Some(i) => Value::Integer(i),
-                // Too large for i64, or fractional. `unwrap_or` rather than a
-                // panic: a data file is untrusted input.
-                None => Value::Float(n.as_f64().unwrap_or(f64::NAN)),
+                // Too large for i64, or fractional. `as_f64` always succeeds
+                // (integers widen, floats pass through), unlike serde_norway's
+                // fallible accessor, so there is no panic path to guard here.
+                None => Value::Float(n.as_f64()),
             },
-            serde_norway::Value::String(s) => Value::String(s),
-            serde_norway::Value::Sequence(items) => {
+            noyalib::Value::String(s) => Value::String(s),
+            noyalib::Value::Sequence(items) => {
                 Value::Array(items.into_iter().map(Into::into).collect())
             }
-            serde_norway::Value::Mapping(map) => Value::Table(
-                map.into_iter()
-                    // YAML permits any node as a key; the context is addressed
-                    // by name, so a non-string key has no way to be referenced.
-                    // Rendering it is closer to the author's intent than
-                    // dropping the entry silently.
-                    .map(|(k, v)| (yaml_key(&k), v.into()))
-                    .collect(),
-            ),
+            // Unlike serde_norway, `noyalib::Mapping` is already `String`-keyed
+            // (`IndexMap<String, Value>`): the crate itself resolves a
+            // non-scalar YAML key to a string during parsing, so there is no
+            // `yaml_key`-style stringification left for this conversion to do.
+            noyalib::Value::Mapping(map) => {
+                Value::Table(map.into_iter().map(|(k, v)| (k, v.into())).collect())
+            }
             // A tagged node such as `!Ref foo`. The tag is dropped and the
             // value kept: git-tpl has no user-defined types, and a tag is never
             // a request to construct one here — `!!python/object:os.system` is
-            // inert input, not an instruction.
-            serde_norway::Value::Tagged(tagged) => Value::from(tagged.value),
+            // inert input, not an instruction. `into_parts` takes the value by
+            // ownership rather than cloning through the `.value()` accessor.
+            noyalib::Value::Tagged(tagged) => Value::from(tagged.into_parts().1),
         }
-    }
-}
-
-/// A YAML mapping key as the name the context will address it by.
-fn yaml_key(key: &serde_norway::Value) -> String {
-    match key {
-        serde_norway::Value::String(s) => s.clone(),
-        serde_norway::Value::Bool(b) => b.to_string(),
-        serde_norway::Value::Number(n) => n.to_string(),
-        serde_norway::Value::Null => String::new(),
-        // A sequence or mapping used as a key. Rare enough that any stable
-        // rendering will do; what matters is that it is deterministic.
-        other => serde_norway::to_string(other)
-            .unwrap_or_default()
-            .trim_end()
-            .to_string(),
     }
 }
 

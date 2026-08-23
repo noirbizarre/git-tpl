@@ -129,7 +129,8 @@ tree without changing a character of the template. None of that happens here:
 ```yaml
 country: no       # the string "no", not false
 at: 12:30:00      # the string "12:30:00"
-mode: 0755        # the string "0755"
+mode: 0755        # the integer 755 — leading zeros do not make a string;
+                  # quote it ("0755") if a string is what you want
 enabled: true     # a boolean, because it was written as one
 ```
 

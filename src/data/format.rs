@@ -63,10 +63,37 @@ pub fn parse_value(format: Format, bytes: &[u8]) -> Result<Value, String> {
         Format::Json => serde_json::from_str::<serde_json::Value>(text)
             .map(Value::from)
             .map_err(|e| e.to_string()),
-        // `serde_norway` rather than a YAML 1.1 parser: `no` is the string
-        // "no", not `false`. See `docs/data/index.md#about-yaml`.
-        Format::Yaml => serde_norway::from_str::<serde_norway::Value>(text)
-            .map(Value::from)
-            .map_err(|e| e.to_string()),
+        // `noyalib` rather than a YAML 1.1 parser: `no` is the string "no",
+        // not `false`. See `docs/data/index.md#about-yaml`. Its own defaults
+        // are looser than that contract, so `yaml_parser_config` tightens
+        // them back up before parsing.
+        Format::Yaml => {
+            noyalib::from_str_with_config::<noyalib::Value>(text, &yaml_parser_config())
+                .map(Value::from)
+                .map_err(|e| e.to_string())
+        }
     }
+}
+
+/// The YAML parser configuration a data source is held to.
+///
+/// Built on [`noyalib::ParserConfig::strict`] — a remote data source is
+/// untrusted input, so the tighter depth/alias/document budgets are the
+/// right starting point — with three further overrides restoring the exact
+/// behavior this project has always required and that `docs/data/index.md`
+/// documents:
+fn yaml_parser_config() -> noyalib::ParserConfig {
+    noyalib::ParserConfig::strict()
+        // A duplicate key is ambiguous, not a "last one wins" preference: two
+        // documents that look identical except for which value survives is
+        // exactly the kind of silent divergence invariant 2 forbids.
+        .duplicate_key_policy(noyalib::DuplicateKeyPolicy::Error)
+        // YAML 1.2 dropped the merge-key specification; auto-merging `<<`
+        // would resolve a key differently than the spec this project claims
+        // to follow. Keep it a literal `<<` entry instead.
+        .merge_key_policy(noyalib::MergeKeyPolicy::AsOrdinary)
+        // A second `---` document is a different question answered in the
+        // same file; taking the first and discarding the rest silently would
+        // hide a mistake the author never intended.
+        .max_documents(1)
 }
