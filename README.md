@@ -69,6 +69,9 @@ git tpl diff     # what would change
 git tpl merge    # take it
 ```
 
+Have an agent do this for you? See the [AI agent skill](https://noirbizarre.github.io/git-tpl/usage/skill/) —
+`skills/git-tpl/SKILL.md` in this repository.
+
 ## The model
 
 ```
