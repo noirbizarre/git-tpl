@@ -1268,13 +1268,20 @@ mod tests {
     /// would silently change a rendered tree. If this test ever fails, the
     /// dependency has regressed to 1.1 and YAML support should be withdrawn
     /// rather than patched around.
+    ///
+    /// `0755` is the one case that is genuinely spec-literal rather than a
+    /// 1.1/1.2 distinction: the Core Schema's `!!int` regex
+    /// (`[-+]?[0-9]+`, YAML 1.2 §10.3.2) permits leading zeros, so `0755`
+    /// resolves to the integer `755` under both versions. A template author
+    /// who wants the string must quote it (`"0755"`) — see
+    /// `docs/data/index.md#about-yaml`.
     #[rstest]
     #[case(b"country: no\n", "country", Value::String("no".into()))]
     #[case(b"country: NO\n", "country", Value::String("NO".into()))]
     #[case(b"answer: yes\n", "answer", Value::String("yes".into()))]
     #[case(b"toggle: on\n", "toggle", Value::String("on".into()))]
     #[case(b"at: 12:30:00\n", "at", Value::String("12:30:00".into()))]
-    #[case(b"mode: 0755\n", "mode", Value::String("0755".into()))]
+    #[case(b"mode: 0755\n", "mode", Value::Integer(755))]
     #[case(b"real: true\n", "real", Value::Bool(true))]
     fn yaml_uses_the_1_2_scalar_rules(
         #[case] input: &[u8],
