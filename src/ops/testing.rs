@@ -201,6 +201,12 @@ pub struct Expect {
     /// the case file wrote them in: reordering a case file must not reorder the
     /// output.
     pub contains: BTreeMap<String, Vec<String>>,
+    /// Path to the substrings that must not appear in it.
+    ///
+    /// A missing path is a failure rather than a vacuous pass — "this file
+    /// does not mention X" must not go green because the file stopped
+    /// rendering entirely.
+    pub lacks: BTreeMap<String, Vec<String>>,
     /// A diagnostic code the render must fail with.
     ///
     /// Present makes this a *failure* case: a successful render fails it. A
@@ -282,47 +288,24 @@ impl Expect {
         shape: &impl Fn(String) -> TestError,
     ) -> Result<Self, TestError> {
         for key in table.keys() {
-            if !matches!(key.as_str(), "files" | "absent" | "contains" | "error") {
-                let hint = closest(key, ["files", "absent", "contains", "error"])
+            if !matches!(
+                key.as_str(),
+                "files" | "absent" | "contains" | "lacks" | "error"
+            ) {
+                let hint = closest(key, ["files", "absent", "contains", "lacks", "error"])
                     .map(|near| format!(" Did you mean `{near}`?"))
                     .unwrap_or_default();
                 return Err(shape(format!(
                     "`expect.{key}` is not an expectation.{hint} \
-                     A case may expect `files`, `absent`, `contains` or `error`."
+                     A case may expect `files`, `absent`, `contains`, `lacks` or `error`."
                 )));
             }
         }
 
         let files = string_array(table.get("files"), "expect.files", shape)?;
         let absent = string_array(table.get("absent"), "expect.absent", shape)?;
-
-        let contains = match table.get("contains") {
-            None => BTreeMap::new(),
-            Some(Value::Table(entries)) => {
-                let mut out = BTreeMap::new();
-                for (path, value) in entries {
-                    // A bare string as well as an array, because
-                    // `"a.toml" = 'name = "x"'` is what people write and
-                    // refusing it would teach nothing.
-                    let needles = match value {
-                        Value::String(needle) => vec![needle.clone()],
-                        other => string_array(
-                            Some(other),
-                            &format!("expect.contains.\"{path}\""),
-                            shape,
-                        )?,
-                    };
-                    out.insert(path.clone(), needles);
-                }
-                out
-            }
-            Some(other) => {
-                return Err(shape(format!(
-                    "`expect.contains` must be a table of path to expected text, not {}.",
-                    other.type_name()
-                )));
-            }
-        };
+        let contains = substring_map(table, "contains", "expected text", shape)?;
+        let lacks = substring_map(table, "lacks", "forbidden text", shape)?;
 
         let error = match table.get("error") {
             None => None,
@@ -351,10 +334,15 @@ impl Expect {
 
         // A case that expects an error has no rendering to assert about, so a
         // case asking for both is a mistake rather than a combination.
-        if error.is_some() && (!files.is_empty() || !absent.is_empty() || !contains.is_empty()) {
+        if error.is_some()
+            && (!files.is_empty()
+                || !absent.is_empty()
+                || !contains.is_empty()
+                || !lacks.is_empty())
+        {
             return Err(shape(
                 "`expect.error` says the render fails, so there is no rendering for \
-                 `files`, `absent` or `contains` to describe. Split them into two cases."
+                 `files`, `absent`, `contains` or `lacks` to describe. Split them into two cases."
                     .to_string(),
             ));
         }
@@ -363,8 +351,42 @@ impl Expect {
             files,
             absent,
             contains,
+            lacks,
             error,
         })
+    }
+}
+
+/// Parse a `path -> substring(s)` table, shared by `contains` and `lacks`.
+///
+/// Both take the same shape and the same bare-string-or-array coercion, so a
+/// second copy of that logic would only be a place for the two to drift.
+fn substring_map(
+    table: &BTreeMap<String, Value>,
+    key: &str,
+    noun: &str,
+    shape: &impl Fn(String) -> TestError,
+) -> Result<BTreeMap<String, Vec<String>>, TestError> {
+    match table.get(key) {
+        None => Ok(BTreeMap::new()),
+        Some(Value::Table(entries)) => {
+            let mut out = BTreeMap::new();
+            for (path, value) in entries {
+                // A bare string as well as an array, because
+                // `"a.toml" = 'name = "x"'` is what people write and
+                // refusing it would teach nothing.
+                let needles = match value {
+                    Value::String(needle) => vec![needle.clone()],
+                    other => string_array(Some(other), &format!("expect.{key}.\"{path}\""), shape)?,
+                };
+                out.insert(path.clone(), needles);
+            }
+            Ok(out)
+        }
+        Some(other) => Err(shape(format!(
+            "`expect.{key}` must be a table of path to {noun}, not {}.",
+            other.type_name()
+        ))),
     }
 }
 
@@ -424,6 +446,27 @@ pub enum Failure {
     },
     /// `expect.contains` named a file that is not text.
     ContainsNotUtf8 {
+        /// The file that is not text.
+        path: String,
+    },
+    /// `expect.lacks` named a path the rendering does not have.
+    ///
+    /// A missing path is a failure rather than a vacuous pass: "this file does
+    /// not mention X" must not go green because the file stopped rendering
+    /// entirely.
+    LacksMissingFile {
+        /// The path that is missing.
+        path: String,
+    },
+    /// A forbidden substring is in the file.
+    LacksPresent {
+        /// The file that was searched.
+        path: String,
+        /// The text that must not be in it but is.
+        needle: String,
+    },
+    /// `expect.lacks` named a file that is not text.
+    LacksNotUtf8 {
         /// The file that is not text.
         path: String,
     },
@@ -854,6 +897,25 @@ fn check(expect: &Expect, rendered: &[Rendered], failures: &mut Vec<Failure>) {
             }
         }
     }
+
+    for (path, needles) in &expect.lacks {
+        let Some(file) = by_path.get(path.as_str()) else {
+            failures.push(Failure::LacksMissingFile { path: path.clone() });
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(&file.content) else {
+            failures.push(Failure::LacksNotUtf8 { path: path.clone() });
+            continue;
+        };
+        for needle in needles {
+            if text.contains(needle.as_str()) {
+                failures.push(Failure::LacksPresent {
+                    path: path.clone(),
+                    needle: needle.clone(),
+                });
+            }
+        }
+    }
 }
 
 /// Every diagnostic code in an error and its cause chain, outermost first.
@@ -1274,11 +1336,25 @@ mod tests {
     }
 
     #[test]
+    fn a_near_miss_of_lacks_is_suggested() {
+        let reason = shape_reason(case("[expect]\nlack = []\n"));
+        assert!(reason.contains("Did you mean `lacks`?"), "{reason}");
+    }
+
+    #[test]
     fn contains_accepts_a_bare_string_as_well_as_an_array() {
         let parsed =
             case("[expect.contains]\n\"a.toml\" = \"x\"\n\"b.toml\" = [\"y\", \"z\"]\n").unwrap();
         assert_eq!(parsed.expect.contains["a.toml"], vec!["x"]);
         assert_eq!(parsed.expect.contains["b.toml"], vec!["y", "z"]);
+    }
+
+    #[test]
+    fn lacks_accepts_a_bare_string_as_well_as_an_array() {
+        let parsed =
+            case("[expect.lacks]\n\"a.toml\" = \"x\"\n\"b.toml\" = [\"y\", \"z\"]\n").unwrap();
+        assert_eq!(parsed.expect.lacks["a.toml"], vec!["x"]);
+        assert_eq!(parsed.expect.lacks["b.toml"], vec!["y", "z"]);
     }
 
     #[test]
@@ -1291,6 +1367,14 @@ mod tests {
     fn a_case_cannot_expect_an_error_and_a_file_at_once() {
         let reason = shape_reason(case(
             "[expect]\nerror = \"tpl::eval::wrong_type\"\nfiles = [\"a\"]\n",
+        ));
+        assert!(reason.contains("Split them into two cases"), "{reason}");
+    }
+
+    #[test]
+    fn a_case_cannot_expect_an_error_and_lacks_at_once() {
+        let reason = shape_reason(case(
+            "[expect]\nerror = \"tpl::eval::wrong_type\"\n\n[expect.lacks]\n\"a\" = \"x\"\n",
         ));
         assert!(reason.contains("Split them into two cases"), "{reason}");
     }
@@ -1323,6 +1407,11 @@ mod tests {
     #[case(
         "[expect.contains]\n\"a\" = 1\n",
         "`expect.contains.\"a\"` must be an array of strings"
+    )]
+    #[case("[expect]\nlacks = 1\n", "`expect.lacks` must be a table")]
+    #[case(
+        "[expect.lacks]\n\"a\" = 1\n",
+        "`expect.lacks.\"a\"` must be an array of strings"
     )]
     fn a_section_of_the_wrong_type_names_the_type_it_should_be(
         #[case] body: &str,

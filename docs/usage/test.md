@@ -28,6 +28,9 @@ absent = [".github/workflows/ci.yml"]
 
 [expect.contains]
 "pyproject.toml" = ['name = "thing"']
+
+[expect.lacks]
+".github/workflows/ci.yml" = ["deploy"]
 ```
 
 | Key | Meaning |
@@ -36,7 +39,12 @@ absent = [".github/workflows/ci.yml"]
 | `expect.files` | Paths the rendering must contain. |
 | `expect.absent` | Paths it must not. |
 | `expect.contains` | Path to the text that must appear in it. A bare string or an array. |
+| `expect.lacks` | Path to the text that must not appear in it. Same shape as `contains`. |
 | `expect.error` | A [diagnostic code](../reference/diagnostics.md) the render must fail with. |
+
+A path named in `expect.contains` or `expect.lacks` that the rendering never
+produces is a failure either way — never a pass, vacuous or otherwise. "This
+file does not mention `deploy`" is not proven by a file that never rendered.
 
 Everything is optional. A case with only `[answers]` asserts that the answer
 set renders at all, which is a real and frequently sufficient test.
@@ -78,8 +86,8 @@ The code is matched anywhere in the failure's cause chain. `tpl::render::content
 says a file failed to render; only the `tpl::eval::expression` beneath it says
 why, and that is usually the one worth naming. Either passes.
 
-A case with `error` cannot also have `files`, `absent` or `contains` — there is
-no rendering for them to describe. Split it into two cases.
+A case with `error` cannot also have `files`, `absent`, `contains` or `lacks` —
+there is no rendering for them to describe. Split it into two cases.
 
 ## Snapshots
 

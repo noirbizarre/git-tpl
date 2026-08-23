@@ -399,6 +399,59 @@ fn contains_accepts_a_bare_string_as_well_as_an_array() {
 }
 
 #[test]
+fn a_forbidden_substring_that_is_truly_absent_passes() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\nproject_name = \"thing\"\n\n[expect.lacks]\n\"pyproject.toml\" = \"other\"\n",
+        )],
+    );
+
+    run(&template, &["--json"]).success();
+}
+
+#[test]
+fn a_forbidden_substring_present_names_the_file_and_the_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\nproject_name = \"thing\"\n\n[expect.lacks]\n\"pyproject.toml\" = \"thing\"\n",
+        )],
+    );
+
+    let output = run(&template, &["--json"]).code(1);
+    let failure = &output.json()["cases"][0]["failures"][0];
+    assert_eq!(failure["kind"], "lacksPresent");
+    assert_eq!(failure["path"], "pyproject.toml");
+    assert_eq!(failure["needle"], "thing");
+}
+
+#[test]
+fn lacks_accepts_a_bare_string_as_well_as_an_array() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[
+            (
+                "tests/bare.toml",
+                "[answers]\nproject_name = \"thing\"\n\n[expect.lacks]\n\"pyproject.toml\" = \"other\"\n",
+            ),
+            (
+                "tests/array.toml",
+                "[answers]\nproject_name = \"thing\"\n\n[expect.lacks]\n\"pyproject.toml\" = [\"other\", \"else\"]\n",
+            ),
+        ],
+    );
+
+    let output = run(&built, &["--json"]).success();
+    assert_eq!(output.json()["summary"]["passed"], 2);
+}
+
+#[test]
 fn a_case_expecting_an_error_passes_when_the_render_fails_with_that_code() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(
@@ -1053,6 +1106,26 @@ fn contains_naming_a_file_the_template_does_not_render_says_so() {
 }
 
 #[test]
+fn lacks_naming_a_file_the_template_does_not_render_fails() {
+    // A vacuous pass is exactly the bug class `lacks` exists to catch: "this
+    // file does not mention X" must not go green because the file never
+    // rendered at all.
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\nproject_name = \"a\"\n\n[expect.lacks]\n\"absent.txt\" = \"x\"\n",
+        )],
+    );
+
+    let output = run(&built, &["--json"]).code(1);
+    let failure = &output.json()["cases"][0]["failures"][0];
+    assert_eq!(failure["kind"], "lacksMissingFile");
+    assert_eq!(failure["path"], "absent.txt");
+}
+
+#[test]
 fn contains_cannot_look_inside_a_file_that_is_not_text() {
     let dir = tempfile::tempdir().unwrap();
     let built = Template::minimal(dir.path(), "name = \"bin\"\n", &[]);
@@ -1079,6 +1152,35 @@ fn contains_cannot_look_inside_a_file_that_is_not_text() {
     run(&built, &[])
         .code(1)
         .says("`logo.png` is not text, so `contains` cannot look in it");
+}
+
+#[test]
+fn lacks_cannot_look_inside_a_file_that_is_not_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(dir.path(), "name = \"bin\"\n", &[]);
+    std::fs::create_dir_all(built.repo.path.join("template")).unwrap();
+    // Genuinely not UTF-8: a lone 0xff is not a valid encoding of anything.
+    // `[0, 1, 2, 3]` would decode fine as control characters and only report a
+    // missing substring, which is a different failure.
+    std::fs::write(
+        built.repo.path.join("template/logo.png"),
+        [0xffu8, 0xfe, 0, 1],
+    )
+    .unwrap();
+    built
+        .repo
+        .write("tests/c.toml", "[expect.lacks]\n\"logo.png\" = \"x\"\n");
+    built.repo.commit_all("test: a binary file");
+
+    let output = run(&built, &["--json"]).code(1);
+    assert_eq!(
+        output.json()["cases"][0]["failures"][0]["kind"],
+        "lacksNotUtf8"
+    );
+
+    run(&built, &[])
+        .code(1)
+        .says("`logo.png` is not text, so `lacks` cannot look in it");
 }
 
 /// The snapshot goes to the working tree, so the working tree can refuse it.
@@ -1209,6 +1311,10 @@ fn the_human_output_explains_every_kind_of_failure() {
                 "[answers]\nproject_name = \"a\"\n\n[expect.contains]\n\"absent.txt\" = \"x\"\n",
             ),
             (
+                "tests/forbidden.toml",
+                "[answers]\nproject_name = \"a\"\n\n[expect.lacks]\n\"pyproject.toml\" = \"a\"\n",
+            ),
+            (
                 "tests/wrongcode.toml",
                 "[answers]\nwith_ci = \"not a boolean\"\n\n[expect]\nerror = \"tpl::render::collision\"\n",
             ),
@@ -1231,11 +1337,12 @@ fn the_human_output_explains_every_kind_of_failure() {
         .says("unexpected file   ci.yml")
         .says("`pyproject.toml` does not contain: nowhere")
         .says("named by `contains`")
+        .says("`pyproject.toml` contains: a")
         .says("expected tpl::render::collision, got")
         .says("expected the render to fail with tpl::eval::wrong_type, but it succeeded")
         .says("the render failed:")
         .says("add `error = \"tpl::eval::wrong_type\"` if that is the point of the case")
-        .says("0 passed, 7 failed");
+        .says("0 passed, 8 failed");
 }
 
 #[test]

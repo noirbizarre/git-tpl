@@ -185,6 +185,17 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
                 "`{path}` is not text, so `contains` cannot look in it"
             ));
         }
+        Failure::LacksMissingFile { path } => {
+            say(format!("missing file      {path} (named by `lacks`)"));
+        }
+        Failure::LacksPresent { path, needle } => {
+            say(format!("`{path}` contains: {needle}"));
+        }
+        Failure::LacksNotUtf8 { path } => {
+            say(format!(
+                "`{path}` is not text, so `lacks` cannot look in it"
+            ));
+        }
         Failure::ExpectedError { code } => {
             say(format!(
                 "expected the render to fail with {code}, but it succeeded"
@@ -299,6 +310,15 @@ fn failure_json(failure: &Failure) -> serde_json::Value {
         }),
         Failure::ContainsNotUtf8 { path } => serde_json::json!({
             "kind": "containsNotUtf8", "path": path,
+        }),
+        Failure::LacksMissingFile { path } => serde_json::json!({
+            "kind": "lacksMissingFile", "path": path,
+        }),
+        Failure::LacksPresent { path, needle } => serde_json::json!({
+            "kind": "lacksPresent", "path": path, "needle": needle,
+        }),
+        Failure::LacksNotUtf8 { path } => serde_json::json!({
+            "kind": "lacksNotUtf8", "path": path,
         }),
         Failure::ExpectedError { code } => serde_json::json!({
             "kind": "expectedError", "expected": code,
