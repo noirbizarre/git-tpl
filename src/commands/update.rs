@@ -148,10 +148,13 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
             if answers_changed {
                 // The one exception, so it must be said rather than discovered
-                // in `git status`.
+                // in `git status`. Not always a new question: `--answer`
+                // overriding an already-recorded answer changes the same
+                // file for the same reason, and the message must not claim a
+                // cause it cannot tell apart from the other.
                 ctx.out.say(muted(
                     &ctx.out.theme,
-                    "The template added a question, so .config/git.tpl.toml was updated.",
+                    "The recorded answers changed, so .config/git.tpl.toml was updated.",
                 ));
             }
 
