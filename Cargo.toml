@@ -132,7 +132,7 @@ clap = { version = "4", features = ["derive", "env", "wrap_help", "string"] }
 # longer exists — and the man page is not a nicety: Git intercepts
 # `git tpl --help` and runs `man git-tpl`, which fails without one.
 clap_complete = "4"
-clap_mangen = "0.2"
+clap_mangen = "0.3"
 console = "0.16"
 demand = "2"
 
