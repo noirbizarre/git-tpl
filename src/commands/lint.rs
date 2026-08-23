@@ -60,7 +60,7 @@ pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             }))
         );
     } else {
-        report(&ctx, &verdicts, errors, denied);
+        print_text(&ctx, &verdicts, errors, denied);
     }
 
     // Warnings alone are not a failure by default: they are things a template
@@ -74,7 +74,7 @@ pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     })
 }
 
-fn report(ctx: &Standalone, verdicts: &[Verdict], errors: usize, denied: usize) {
+fn print_text(ctx: &Standalone, verdicts: &[Verdict], errors: usize, denied: usize) {
     ctx.out.blank();
     if verdicts.is_empty() {
         ctx.out.say(muted(&ctx.out.theme, "No problems found."));
