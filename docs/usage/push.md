@@ -14,8 +14,8 @@ refs/tpl/<id>:refs/tpl/<id>
 
 ## Why this is a separate command
 
-Rendered refs are never pushed implicitly. `git push` does not push them, and
-nothing git-tpl does changes what `git push` sends.
+Rendered refs are never pushed implicitly.
+`git push` does not push them, and nothing git-tpl does changes what `git push` sends.
 
 The two modes this gives you are both first-class:
 
@@ -27,9 +27,9 @@ The two modes this gives you are both first-class:
     └── refs/tpl/foo         local
     ```
 
-    Nobody else needs it. The template attachment is fully described by
-    `.config/git.tpl.toml`, which *is* pushed — so a collaborator can run
-    `git tpl update` and render an identical ref for themselves.
+    Nobody else needs it.
+    The template attachment is fully described by `.config/git.tpl.toml`, which *is* pushed — so a collaborator
+    can run `git tpl update` and render an identical ref for themselves.
 
 === "Shared"
 
@@ -39,8 +39,8 @@ The two modes this gives you are both first-class:
     └── refs/tpl/foo         pushed explicitly
     ```
 
-    Useful when several people run updates, when CI does, or when you want the
-    rendering history visible to the team.
+    Useful when several people run updates, when CI does, or when you want the rendering history visible to the
+    team.
 
 ## Never forced
 
@@ -67,14 +67,13 @@ Both were rendered independently. Reconcile them first:
   git tpl push
 ```
 
-There is no `--force`. A rendered ref is history that others may have merged
-from, and overwriting it destroys the merge base their branch depends on — which
-turns their next update into a whole-file conflict.
+There is no `--force`.
+A rendered ref is history that others may have merged from, and overwriting it destroys the merge base their
+branch depends on — which turns their next update into a whole-file conflict.
 
-Reconciling is a merge, like everything else here. The rendered tree is
-deterministic, so two renderings of the same template revision with the same
-answers merge without conflict; if they *do* conflict, the answers genuinely
-differ and that is worth seeing.
+Reconciling is a merge, like everything else here.
+The rendered tree is deterministic, so two renderings of the same template revision with the same answers merge
+without conflict; if they *do* conflict, the answers genuinely differ and that is worth seeing.
 
 ## Options
 
@@ -93,6 +92,5 @@ Or per-invocation, `git tpl update --push`.
 
 ## Machine-readable output
 
-`git tpl --json push` emits its outcome on stdout as a single JSON object, with
-the prose on stderr. The payload is described in
-[JSON output](../reference/json.md#push).
+`git tpl --json push` emits its outcome on stdout as a single JSON object, with the prose on stderr.
+The payload is described in [JSON output](../reference/json.md#push).

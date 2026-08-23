@@ -5,8 +5,8 @@ If you already have a template, skip to [Use it](#use-it).
 
 ## Write a template
 
-A template is a normal Git repository with a `template.toml` at its root and the
-files to render in a `template/` directory.
+A template is a normal Git repository with a `template.toml` at its root and the files to render in a
+`template/` directory.
 
 ```sh
 mkdir rust-library-template && cd rust-library-template
@@ -56,9 +56,10 @@ license = "{{ license }}"
 Licensed under {{ license }}.
 ```
 
-And a file rendered only when asked for. Path segments are rendered too, and a
-segment that comes out empty skips that entry — and, for a directory,
-everything beneath it. So put the condition in the path:
+And a file rendered only when asked for.
+Path segments are rendered too, and a segment that comes out empty skips that entry — and, for a directory,
+everything beneath it.
+So put the condition in the path:
 
 ```
 template/{% if ci %}.github{% endif %}/workflows/ci.yml
@@ -81,17 +82,16 @@ git init
 git tpl init ../rust-library-template
 ```
 
-`init` also accepts the destination directly, which is `mkdir`, `git init` and
-`init` in one line — see [Starting from nothing](../usage/init.md#starting-from-nothing).
-The template path stays relative to wherever you run the command though, so
-that form reads `../rust-library-template` differently; commands below assume
-you `cd`ed into `my-project` as above.
+`init` also accepts the destination directly, which is `mkdir`, `git init` and `init` in one line — see
+[Starting from nothing](../usage/init.md#starting-from-nothing).
+The template path stays relative to wherever you run the command though, so that form reads
+`../rust-library-template` differently; commands below assume you `cd`ed into `my-project` as above.
 
-git-tpl asks the questions, writes `.config/git.tpl.toml`, renders the template
-into `refs/tpl/rust-library-template`, and merges it into your branch.
+git-tpl asks the questions, writes `.config/git.tpl.toml`, renders the template into
+`refs/tpl/rust-library-template`, and merges it into your branch.
 
-This works on a project that already has files too — the merge reconciles the
-two sides. See [an existing project](../usage/init.md#an-existing-project).
+This works on a project that already has files too — the merge reconciles the two sides.
+See [an existing project](../usage/init.md#an-existing-project).
 
 ```console
 Template:  ../rust-library-template
@@ -157,17 +157,17 @@ Run:
   git tpl merge
 ```
 
-Note "Your working tree was not modified." `update` moved a ref and nothing
-else — `git status` is still clean, `HEAD` has not moved.
+Note "Your working tree was not modified."
+`update` moved a ref and nothing else — `git status` is still clean, `HEAD` has not moved.
 
 ```sh
 git tpl diff     # exactly what merging would bring in
 git tpl merge    # bring it in
 ```
 
-If you had also edited `README.md` yourself, that merge behaves like any other
-Git merge: it combines the changes, or it stops with conflict markers and you
-resolve them. `git merge --abort` works, because it *is* a merge.
+If you had also edited `README.md` yourself, that merge behaves like any other Git merge: it combines the
+changes, or it stops with conflict markers and you resolve them.
+`git merge --abort` works, because it *is* a merge.
 
 ## Where to go next
 

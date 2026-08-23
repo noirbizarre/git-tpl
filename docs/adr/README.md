@@ -1,12 +1,11 @@
 # Architecture decisions
 
-Short records of decisions that are hard to reverse, where there was a real
-alternative, or where the reasoning would otherwise be lost.
+Short records of decisions that are hard to reverse, where there was a real alternative, or where the reasoning
+would otherwise be lost.
 
-They are referenced by number from code comments, hooks, workflows and the rest
-of the documentation. A decision that changes gets a new ADR that supersedes the
-old one; the old one stays, because the reasoning still explains the code that
-existed.
+They are referenced by number from code comments, hooks, workflows and the rest of the documentation.
+A decision that changes gets a new ADR that supersedes the old one; the old one stays, because the reasoning still
+explains the code that existed.
 
 | # | Decision |
 |---|---|

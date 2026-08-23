@@ -24,29 +24,29 @@ The template has moved. Run:
 
 ## What each line means
 
-**Template** — `source` from `.config/git.tpl.toml`, exactly as it is written
-there.
+**Template** — `source` from `.config/git.tpl.toml`, exactly as it is written there.
 
 **Ref** — `refs/tpl/<id>`, and whether it exists locally at all.
 
-**Revision** — the revision the ref was last rendered from, and what the
-configured `ref` resolves to *now*. When they differ, the template has moved and
-an `update` has something to do. Both sides are written as the name asked for
-plus the commit it resolved to, so a branch that moved is visible even though
-its name did not change.
+**Revision** — the revision the ref was last rendered from, and what the configured `ref` resolves to *now*.
+When they differ, the template has moved and an `update` has something to do.
+Both sides are written as the name asked for plus the commit it resolved to, so a branch that moved is visible
+even though its name did not change.
 
-**Rendered** — how many renderings are on the ref. Read from the
-[commit trailers](../concepts/git-model.md#what-is-in-the-commit).
+**Rendered** — how many renderings are on the ref.
+Read from the [commit trailers](../concepts/git-model.md#what-is-in-the-commit).
 
-**Merged** — whether the ref tip is an ancestor of `HEAD`. `no` means there is a
-rendering you have not taken yet, and `git tpl diff` will show it. `n/a` when
-nothing has been rendered.
+**Merged** — whether the ref tip is an ancestor of `HEAD`.
+`no` means there is a rendering you have not taken yet, and `git tpl diff` will show it.
+`n/a` when nothing has been rendered.
 
-**Remote** — the remote-tracking ref, and how the local ref compares to it. Only
-shown when a remote copy exists. `ahead` means you have renderings to
-`git tpl push`; `behind` means someone else does and you should `git tpl fetch`.
+**Remote** — the remote-tracking ref, and how the local ref compares to it.
+Only shown when a remote copy exists.
+`ahead` means you have renderings to `git tpl push`; `behind` means someone else does and you should
+`git tpl fetch`.
 
-**Worktree** — clean or dirty. `update` does not care, but `merge` does.
+**Worktree** — clean or dirty.
+`update` does not care, but `merge` does.
 
 ## Options
 
@@ -55,9 +55,8 @@ shown when a remote copy exists. `ahead` means you have renderings to
 | `--dirty` | Compare against the template's working tree rather than the revision its `ref` resolves to. Local templates only. |
 | [`--json`](../reference/json.md) | A global flag. The report on stdout as one object; everything else on stderr. |
 
-`--dirty` answers "does my uncommitted template edit change anything here?"
-without committing it first. It is how an author checks a work-in-progress
-against a real project.
+`--dirty` answers "does my uncommitted template edit change anything here?" without committing it first.
+It is how an author checks a work-in-progress against a real project.
 
 ## Exit codes
 
@@ -67,8 +66,7 @@ against a real project.
 | `1` | An error. |
 | `2` | Something is pending — the template moved, or the ref is not merged. |
 
-Useful in CI, where `--quiet` — a global flag — suppresses the report and
-leaves only the exit code:
+Useful in CI, where `--quiet` — a global flag — suppresses the report and leaves only the exit code:
 
 ```sh
 git tpl status --quiet || echo "template drift detected"
@@ -104,6 +102,6 @@ git tpl --json status
 }
 ```
 
-`remote` is `null` when no remote copy exists. `dirty` records whether the
-rendering on the ref was produced from a template working tree rather than a
-commit. Human output goes to stderr, so `--json` leaves stdout machine-readable.
+`remote` is `null` when no remote copy exists.
+`dirty` records whether the rendering on the ref was produced from a template working tree rather than a commit.
+Human output goes to stderr, so `--json` leaves stdout machine-readable.

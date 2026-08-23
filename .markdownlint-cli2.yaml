@@ -1,0 +1,34 @@
+---
+config:
+  # The one rule this project enforces mechanically: no prose line over 120
+  # columns. Tables and code blocks are exempt because they can't be
+  # rewrapped without breaking their content; standalone link lines are
+  # exempt by the rule itself (see MD013's docs) because a URL can't be
+  # split either. What *kind* of break (semantic vs. columnar) a line under
+  # 120 uses is a review concern — see AGENTS.md's Style section.
+  MD013:
+    line_length: 120
+    tables: false
+    code_blocks: false
+    heading_line_length: 120
+
+  # Everything below is a pre-existing, intentional convention this task
+  # does not touch — each was confirmed to fire on real content, not a
+  # config mistake.
+  MD014: false # usage/backport.md, usage/init.md show `$ command` without inline output on purpose
+  MD024: false # development/releasing.md repeats "Configuration" as a legitimate sibling heading
+  MD026: false # AGENTS.md's "## When you touch..." heading uses the ellipsis on purpose
+  MD033: false # docs/index.md's centered hero block needs raw HTML (mkdocs-material convention)
+  MD040: false # many fenced blocks are shell output or tree diagrams with no meaningful language
+  MD041: false # docs/index.md opens with the HTML hero block before its H1, by design
+  MD046: false # completion.md and others use indented blocks for shell snippets
+  MD060: false # existing tables use spaced ("loose") pipe style, not the compact style this rule wants
+
+# No fix: true. MD013 has no autofix, but other default-enabled rules do
+# (list markers, blank lines), and autofixing them would rewrite the
+# convention's semantic-vs-columnar judgement calls into whatever markdownlint
+# happens to prefer, silently, on the next commit that touched an unrelated
+# line. Fix by hand.
+noBanner: true
+noProgress: true
+showFound: false

@@ -12,13 +12,12 @@ mise install
 prek install
 ```
 
-`mise install` reads `mise.toml` and `mise.lock`, so you get the same tool
-versions CI does. `prek install` wires up the Git hooks.
+`mise install` reads `mise.toml` and `mise.lock`, so you get the same tool versions CI does. `prek install` wires
+up the Git hooks.
 
-Rust itself is deliberately not managed by mise: CI needs per-job components
-(`rustfmt`, `clippy`, `llvm-tools-preview`) and cross-compilation targets, which
-`dtolnay/rust-toolchain` handles better. `rust-toolchain.toml` pins the channel
-for both.
+Rust itself is deliberately not managed by mise: CI needs per-job components (`rustfmt`, `clippy`,
+`llvm-tools-preview`) and cross-compilation targets, which `dtolnay/rust-toolchain` handles better.
+`rust-toolchain.toml` pins the channel for both.
 
 ## Tasks
 
@@ -88,35 +87,30 @@ src/
 └── commands/        one module per subcommand
 ```
 
-`ops/` holds one *function* per command in `mod.rs` — `init`, `update`,
-`status`, `diff`, `merge`, `fetch`, `push`, `lint`, `questions` and the rest —
-and a file of its own for each command too large to be one: `backport`,
-`testing`, `hunks`, `unsubstitute`, plus `resolve` for fetching a template.
-`commands/` is the directory with one module per subcommand; that is where
-argument handling and output formatting live, and nothing else.
+`ops/` holds one *function* per command in `mod.rs` — `init`, `update`, `status`, `diff`, `merge`, `fetch`, `push`,
+`lint`, `questions` and the rest — and a file of its own for each command too large to be one: `backport`,
+`testing`, `hunks`, `unsubstitute`, plus `resolve` for fetching a template. `commands/` is the directory with one
+module per subcommand; that is where argument handling and output formatting live, and nothing else.
 
-Dependencies point inward. `ops` uses `render`, `graph`, `git`; nothing in
-`template/` or `render.rs` knows a command exists.
+Dependencies point inward. `ops` uses `render`, `graph`, `git`; nothing in `template/` or `render.rs` knows a
+command exists.
 
 ## Invariants
 
 These are enforced, not merely intended. Breaking one fails a hook or a test.
 
-**`git2` appears only in `src/git/libgit2.rs`.** The `GitBackend` trait is the
-boundary; a `use git2::Oid` anywhere else makes it decorative. The
-`git-backend-isolation` prek hook is what actually stops that. If you need a
-Git capability the trait lacks, add it to the trait — not a `git2` import.
+**`git2` appears only in `src/git/libgit2.rs`.** The `GitBackend` trait is the boundary; a `use git2::Oid` anywhere
+else makes it decorative. The `git-backend-isolation` prek hook is what actually stops that. If you need a Git
+capability the trait lacks, add it to the trait — not a `git2` import.
 
-**`update` does not modify the worktree.** An integration test asserts `HEAD`,
-the index and the worktree are byte-identical across an update. The renderer
-writes to a Git tree builder and never to the filesystem, so this is structural —
-the test exists to keep it that way.
+**`update` does not modify the worktree.** An integration test asserts `HEAD`, the index and the worktree are
+byte-identical across an update. The renderer writes to a Git tree builder and never to the filesystem, so this is
+structural — the test exists to keep it that way.
 
 **Rendering is deterministic.** A test renders twice and compares trees. See
 [Determinism](../concepts/determinism.md).
 
-**No code execution from templates.** No subprocess, no shell, no eval, no HTTP
-outside `src/data/`.
+**No code execution from templates.** No subprocess, no shell, no eval, no HTTP outside `src/data/`.
 
 ## Tests
 
@@ -126,13 +120,11 @@ mise run test init          # nextest selectors
 cargo nextest run --no-capture
 ```
 
-Unit tests live at the bottom of the module they test. Integration tests are in
-`tests/` and build **real** Git repositories in temporary directories — nothing
-about Git is mocked, because the entire premise of the project is that Git's
-behaviour is the behaviour.
+Unit tests live at the bottom of the module they test. Integration tests are in `tests/` and build **real** Git
+repositories in temporary directories — nothing about Git is mocked, because the entire premise of the project is
+that Git's behaviour is the behaviour.
 
-Test names are sentences: `an_unchanged_template_produces_no_commit`,
-`a_cycle_is_reported_before_any_prompt`.
+Test names are sentences: `an_unchanged_template_produces_no_commit`, `a_cycle_is_reported_before_any_prompt`.
 
 Snapshots use `insta`:
 
@@ -140,16 +132,13 @@ Snapshots use `insta`:
 mise run snapshots     # cargo insta review
 ```
 
-They live in `tests/snapshots.rs`, and they pin the transcripts quoted by
-`docs/usage/` and the envelopes described in `docs/reference/json.md`. A failing
-snapshot there is not necessarily a bug: it means documented output changed, and
-accepting it commits you to the matching documentation edit in the same pull
-request.
+They live in `tests/snapshots.rs`, and they pin the transcripts quoted by `docs/usage/` and the envelopes described
+in `docs/reference/json.md`. A failing snapshot there is not necessarily a bug: it means documented output changed,
+and accepting it commits you to the matching documentation edit in the same pull request.
 
 ### Git identity
 
-The integration tests commit, and libgit2 refuses to build a signature without
-one:
+The integration tests commit, and libgit2 refuses to build a signature without one:
 
 ```sh
 git config --global user.name  "Your Name"
@@ -158,7 +147,6 @@ git config --global user.email "you@example.com"
 
 ## Style
 
-Follow what is there. The one convention worth stating explicitly: **every
-non-obvious line carries a comment saying why**, ideally naming the failure it
-prevents. A comment that restates the code is worse than none; a comment that
-records the bug that motivated the line saves the next person an afternoon.
+Follow what is there. The one convention worth stating explicitly: **every non-obvious line carries a comment
+saying why**, ideally naming the failure it prevents. A comment that restates the code is worse than none; a
+comment that records the bug that motivated the line saves the next person an afternoon.
