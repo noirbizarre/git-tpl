@@ -314,7 +314,7 @@ what a URL prefix abbreviates, and which templates you have already agreed to le
 
 ## The environment
 
-git-tpl reads five environment variables and writes none.
+git-tpl reads six environment variables and writes none.
 Everything else it knows comes from a file you can point at.
 
 | Variable | Read for |
