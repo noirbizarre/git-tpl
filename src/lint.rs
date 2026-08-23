@@ -5,7 +5,7 @@
 //! failures this catches are the ones that otherwise surface in someone else's
 //! generated repository.
 //!
-//! Two of the checks exist because of specific, silent failures:
+//! Three of the checks exist because of specific, silent failures:
 //!
 //! - A conditional path segment that leaves its suffix outside the block. With
 //!   two such files you get a collision, named and diagnosed. With one you get
@@ -13,6 +13,10 @@
 //! - A `.jinja` file emitting another templating language. `${{ github.ref }}`
 //!   is inside MiniJinja's syntax, so it renders to `$` and leaves valid YAML
 //!   behind.
+//! - A `when`-gated question read outside its own guard. It is declared, so
+//!   `undeclared` has nothing to say, but it has no value at all for every
+//!   answer set where its `when` is false — and renders fine for every other
+//!   one, which is exactly the failure mode that goes unnoticed until it ships.
 
 use miette::Diagnostic;
 use thiserror::Error;
@@ -38,6 +42,7 @@ pub const CODES: &[&str] = &[
     "tpl::lint::shadowed_name",
     "tpl::lint::syntax",
     "tpl::lint::undeclared",
+    "tpl::lint::unguarded_gate",
 ];
 
 /// The word that stands for the whole warning severity in `--deny`/`--allow`.
@@ -338,6 +343,13 @@ pub fn lint(
         let foreign = foreign_expression_roots(&text);
         findings.extend(check_foreign_expressions(&entry.path, &text));
         findings.extend(check_undeclared(
+            &entry.path,
+            &text,
+            manifest,
+            partials,
+            &foreign,
+        ));
+        findings.extend(check_unguarded_gate(
             &entry.path,
             &text,
             manifest,
@@ -795,6 +807,141 @@ fn is_builtin(name: &str) -> bool {
         name,
         "loop" | "self" | "range" | "dict" | "namespace" | "debug" | "true" | "false" | "none"
     )
+}
+
+/// A `when`-gated question read outside its own guard.
+///
+/// ADR-014 exempts manifest expressions from `strict` for exactly this reason
+/// (see `docs/adr/014-strict-undefined.md`): a question whose `when` is false
+/// has **no value** — it is absent from the context, not null — and the
+/// documented idiom for reading one anywhere else is
+/// `{% if name is defined %}` or `{{ name | default(...) }}`
+/// (`docs/templates/questions.md`). File bodies get no such exemption, so
+/// `{{ docs_accent }}` in a file that is not itself gated by `docs` renders
+/// fine for every answer set that turns `docs` on, and fails for the one that
+/// turns it off — and once `strict` is the default, fails with no warning
+/// ever having been given, because `docs_accent` is a name the manifest does
+/// declare. `undeclared` has nothing to say about *where* a declared name is
+/// safe to read.
+///
+/// A whole-file search for the guard idiom, not control-flow analysis:
+///
+/// - a guard anywhere in the file silences every read of the name in it, even
+///   one that does not sit in the guarded branch. A missed violation still
+///   renders; a false positive on already-correct code is the worse failure
+///   for a check people are meant to trust;
+/// - a guard inside an imported macro is invisible, for the same reason
+///   `undeclared` cannot see one — `undeclared_variables` does not follow
+///   `{% import %}`;
+/// - a `computed` value that reads a gated question is not itself treated as
+///   gated. Propagating gatedness through `computed` is a bigger job than a
+///   first cut needs.
+fn check_unguarded_gate(
+    path: &str,
+    text: &str,
+    manifest: &Manifest,
+    partials: &std::sync::Arc<Partials>,
+    foreign: &std::collections::BTreeSet<String>,
+) -> Vec<Finding> {
+    let gated = gated_names(manifest);
+    if gated.is_empty() {
+        return Vec::new();
+    }
+
+    let env = environment(partials);
+    let Ok(template) = env.template_from_str(text) else {
+        // `check_syntax` already reported it.
+        return Vec::new();
+    };
+
+    let mut unguarded: Vec<&str> = template
+        .undeclared_variables(false)
+        .into_iter()
+        .filter(|name| !foreign.contains(name))
+        .filter_map(|name| gated.get(name.as_str()).copied())
+        .filter(|name| !is_guarded(text, name))
+        .collect();
+    unguarded.sort_unstable();
+    unguarded.dedup();
+
+    unguarded
+        .into_iter()
+        .map(|name| {
+            Finding::warning(
+                "tpl::lint::unguarded_gate",
+                path,
+                format!(
+                    "`{path}` reads `{name}`, which only has a value when its own `when` \
+                     is true"
+                ),
+                format!(
+                    "for every answer set where `{name}`'s `when` is false it is absent \
+                     from the context, not null or false, and this file does not check \
+                     that before reading it. Guard the read with `{{% if {name} is defined \
+                     %}}`, or write `{{{{ {name} | default(...) }}}}` if a fallback is \
+                     enough."
+                ),
+            )
+        })
+        .collect()
+}
+
+/// The question keys whose `when` can leave them absent from the context.
+fn gated_names(manifest: &Manifest) -> std::collections::BTreeSet<&str> {
+    manifest
+        .questions
+        .iter()
+        .filter(|(_, question)| question.when.is_some())
+        .map(|(key, _)| key.as_str())
+        .collect()
+}
+
+/// Whether `char` can be part of an identifier.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+/// `text` with `expected` stripped off the front, if `expected` ends there as
+/// a whole word rather than a prefix of something longer — `default_if_none`
+/// must not count as `default`.
+fn take_word<'a>(text: &'a str, expected: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix(expected)?;
+    (!rest.chars().next().is_some_and(is_word_char)).then_some(rest)
+}
+
+/// Whether some occurrence of `name` as a whole word in `text` is immediately
+/// followed by `is defined`, `is not defined`, or `| default`.
+///
+/// A textual search, not a scope-aware one — see `check_unguarded_gate`'s doc
+/// comment for why that is the accepted trade-off for a first cut.
+fn is_guarded(text: &str, name: &str) -> bool {
+    let mut rest = text;
+    while let Some(at) = rest.find(name) {
+        let before_ok = !rest[..at].chars().next_back().is_some_and(is_word_char);
+        let tail = &rest[at + name.len()..];
+        let after_ok = !tail.chars().next().is_some_and(is_word_char);
+
+        if before_ok && after_ok {
+            let tail = tail.trim_start();
+            let is_defined = take_word(tail, "is").is_some_and(|after_is| {
+                let after_is = after_is.trim_start();
+                take_word(after_is, "defined").is_some()
+                    || take_word(after_is, "not")
+                        .map(str::trim_start)
+                        .is_some_and(|after_not| take_word(after_not, "defined").is_some())
+            });
+            let defaulted = tail
+                .strip_prefix('|')
+                .map(str::trim_start)
+                .is_some_and(|filter| take_word(filter, "default").is_some());
+            if is_defined || defaulted {
+                return true;
+            }
+        }
+
+        rest = &rest[at + name.len()..];
+    }
+    false
 }
 
 /// A binding in a file body that hides an answer or a computed value.
@@ -1257,6 +1404,81 @@ mod tests {
         let partials = crate::eval::no_partials();
         let findings = check_syntax("broken.jinja", "{% if x %}unterminated\n", partials);
         assert_eq!(codes(&findings), ["tpl::lint::syntax"]);
+    }
+
+    #[rstest]
+    #[case("{{ docs_accent }}", false)]
+    #[case("{% if docs_accent is defined %}{{ docs_accent }}{% endif %}", true)]
+    #[case(
+        "{% if docs_accent is not defined %}none{% else %}{{ docs_accent }}{% endif %}",
+        true
+    )]
+    #[case("{{ docs_accent | default('') }}", true)]
+    #[case("{{ docs_accent|default('x') }}", true)]
+    // A longer name sharing a prefix must not count: the boundary check is
+    // what tells `docs_accent` apart from `docs_accented`.
+    #[case("{{ docs_accented is defined }}", false)]
+    // `default_if_none` is not the `default` filter, whatever it starts with.
+    #[case("{{ docs_accent | default_if_none('') }}", false)]
+    fn is_guarded_recognises_the_documented_idiom(#[case] text: &str, #[case] guarded: bool) {
+        assert_eq!(is_guarded(text, "docs_accent"), guarded, "for {text:?}");
+    }
+
+    // The gap #88 closes: `docs_accent` is declared, so `undeclared` has
+    // nothing to say, but it has no value at all when `docs` is false.
+    #[test]
+    fn a_gated_question_read_without_a_guard_is_reported() {
+        let manifest = manifest_with(
+            "[questions.docs]\ntype = \"boolean\"\ndefault = true\n\n\
+             [questions.docs_accent]\ntype = \"string\"\nwhen = \"{{ docs }}\"\n\
+             default = \"blue\"\n",
+        );
+        let partials = crate::eval::no_partials();
+        let foreign = std::collections::BTreeSet::new();
+        let findings = check_unguarded_gate(
+            "mkdocs.yml.jinja",
+            "accent: {{ docs_accent }}\n",
+            &manifest,
+            partials,
+            &foreign,
+        );
+        assert_eq!(codes(&findings), ["tpl::lint::unguarded_gate"]);
+        assert!(findings[0].message.contains("docs_accent"));
+    }
+
+    #[test]
+    fn a_guarded_read_of_a_gated_question_is_not_reported() {
+        let manifest = manifest_with(
+            "[questions.docs]\ntype = \"boolean\"\ndefault = true\n\n\
+             [questions.docs_accent]\ntype = \"string\"\nwhen = \"{{ docs }}\"\n\
+             default = \"blue\"\n",
+        );
+        let partials = crate::eval::no_partials();
+        let foreign = std::collections::BTreeSet::new();
+        let text = "{% if docs_accent is defined %}accent: {{ docs_accent }}{% endif %}\n";
+        assert!(
+            check_unguarded_gate("mkdocs.yml.jinja", text, &manifest, partials, &foreign)
+                .is_empty()
+        );
+    }
+
+    // A question with no `when` at all is never absent, so nothing to guard.
+    #[test]
+    fn an_ungated_question_is_never_reported() {
+        let manifest =
+            manifest_with("[questions.project_name]\ntype = \"string\"\ndefault = \"x\"\n");
+        let partials = crate::eval::no_partials();
+        let foreign = std::collections::BTreeSet::new();
+        assert!(
+            check_unguarded_gate(
+                "a.jinja",
+                "{{ project_name }}",
+                &manifest,
+                partials,
+                &foreign
+            )
+            .is_empty()
+        );
     }
 
     // The bug report itself: an import alias silently replaces a question, and

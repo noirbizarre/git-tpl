@@ -93,3 +93,15 @@ alias itself — is checked, separately, by `tpl::lint::shadowed_name`: an alias
 that reuses a question or computed name shadows it, and no name is ever
 undefined, so the strict-undefined path above cannot catch it. See
 [`lint`](../usage/lint.md#shadowed-names-tpllintshadowed_name).
+
+A `when`-gated question is a third way an author can be caught out without any
+name ever being undeclared. It is declared — it is a manifest key — so
+`tpl::lint::undeclared` has nothing to say about it; the gap named above, in
+the reason manifest expressions stay lenient, is precisely that it has no
+*value* for every answer set where its `when` is false, and reading it bare in
+a file that is not itself gated the same way renders fine for every other
+answer set. `tpl::lint::unguarded_gate` closes that: a warning when a file
+body reads a `when`-gated question without the
+`is defined`/`is not defined`/`default(...)` idiom this ADR already
+recommends. See
+[`lint`](../usage/lint.md#unguarded-gate-reads-tpllintunguarded_gate).

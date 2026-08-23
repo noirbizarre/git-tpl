@@ -130,6 +130,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::lint::shadowed_name",
     "tpl::lint::syntax",
     "tpl::lint::undeclared",
+    "tpl::lint::unguarded_gate",
     "tpl::lint::unknown_code",
     "tpl::manifest::conflicting_note",
     "tpl::manifest::invalid_question",
