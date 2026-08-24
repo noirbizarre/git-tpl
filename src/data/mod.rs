@@ -878,6 +878,11 @@ impl<'a> Loader<'a> {
             });
         }
 
+        // No retry setting here on purpose: ureq only retries when a
+        // `Middleware` adds it, and none is installed, so this agent already
+        // matches docs/data/remote.md's "Retries: none" bound. Worth
+        // re-checking against ureq's changelog if that default ever changes,
+        // since this comment is the only thing tying the two together.
         let agent = self.agent.get_or_insert_with(|| {
             ureq::Agent::config_builder()
                 .timeout_global(Some(REMOTE_TIMEOUT))

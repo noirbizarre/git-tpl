@@ -822,3 +822,33 @@ fn a_migration_does_not_touch_head_the_index_or_the_worktree() {
     assert_eq!(before.index, after.index, "the index changed");
     assert_eq!(before.worktree, after.worktree, "the worktree changed");
 }
+
+/// `--strict-answers` was accepted here but silently ignored — only `render`
+/// enforced it. A typo'd `--answer` at `update` time must refuse the same
+/// way, and before `.config/git.tpl.toml` is rewritten or the ref advanced.
+#[test]
+fn strict_answers_refuses_a_key_that_names_no_question() {
+    let world = World::new();
+    world.init(&[]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+
+    let output = tpl(
+        &world.project,
+        &[
+            "--json",
+            "update",
+            "--defaults",
+            "--answer",
+            "projct_name=oops",
+            "--strict-answers",
+        ],
+    )
+    .failure();
+
+    assert_eq!(output.error_code(), "tpl::answers::unknown_key");
+    assert_eq!(
+        world.project.rev_parse(&world.ref_name()),
+        before,
+        "a refused update must not advance the ref"
+    );
+}

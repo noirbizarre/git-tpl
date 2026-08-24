@@ -24,6 +24,7 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             &ctx.root,
             supplied(&args.answers)?,
             true,
+            args.answers.strict_answers,
             &ctx.user,
             answering(&args.answers, preferences.interactive, &mut prompter),
             trust(

@@ -4,7 +4,10 @@ use tpl::git::GitBackend;
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::{self, OpError, UpdateOutcome};
 
-use super::{Session, answering, report_ignored, report_ignored_paths, supplied, trust};
+use super::{
+    Session, answering, enforce_strict_answers, report_ignored, report_ignored_paths, supplied,
+    trust,
+};
 use crate::cli::{GlobalArgs, UpdateArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, headline, muted, note_block, transition};
@@ -42,6 +45,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         &ctx.root,
         overrides,
         args.dirty,
+        args.answers.strict_answers,
         &ctx.user,
         answering(&args.answers, preferences.interactive, &mut prompter),
         trust(
@@ -148,10 +152,13 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
             if answers_changed {
                 // The one exception, so it must be said rather than discovered
-                // in `git status`.
+                // in `git status`. Not always a new question: `--answer`
+                // overriding an already-recorded answer changes the same
+                // file for the same reason, and the message must not claim a
+                // cause it cannot tell apart from the other.
                 ctx.out.say(muted(
                     &ctx.out.theme,
-                    "The template added a question, so .config/git.tpl.toml was updated.",
+                    "The recorded answers changed, so .config/git.tpl.toml was updated.",
                 ));
             }
 
@@ -251,6 +258,11 @@ fn dry_run(
         trust(&args.answers, args.trust, interactive, &mut confirmer),
     )?;
 
+    enforce_strict_answers(
+        &args.answers,
+        &rendered.ignored_answers,
+        rendered.template.manifest.questions.keys().cloned(),
+    )?;
     report_ignored(&ctx.out, &rendered.ignored_answers);
 
     let (id, ref_name) = ops::identify(&ctx.root)?;

@@ -12,6 +12,8 @@ rust-library-template/
 ├── data/                  ← optional structured data
 │   ├── licenses.toml
 │   └── defaults.toml
+├── migrations/            ← optional file moves to apply across a version jump
+│   └── 2026-08-config-move.toml
 ├── macros.jinja           ← a shared partial, not rendered
 ├── macros/
 │   └── rust.jinja         ← likewise
@@ -33,6 +35,9 @@ use it.
 
 The exception, and the only one, is a `.jinja` file outside `template/`: it is still never rendered into a
 project, but it *is* importable as a [shared partial](#shared-partials).
+
+`migrations/` is likewise never rendered — it declares file moves for `update` to apply when a project crosses
+them. See [Migrations](../usage/update.md#migrations).
 
 The rendered subdirectory is configurable:
 

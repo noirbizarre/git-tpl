@@ -160,3 +160,30 @@ fn show_writes_raw_bytes_even_under_json() {
         json.stdout
     );
 }
+
+/// `--strict-answers` was accepted on `show --dirty` but silently ignored —
+/// only `render` enforced it. A failure still goes through the ordinary
+/// `--json` error envelope: the exemption above is for `show`'s *success*
+/// output only, and errors are wrapped at the binary edge regardless of
+/// which command produced them.
+#[test]
+fn dirty_strict_answers_refuses_a_key_that_names_no_question() {
+    let world = World::new();
+    world.init(&[]).success();
+
+    let output = tpl(
+        &world.project,
+        &[
+            "--json",
+            "show",
+            "--dirty",
+            "README.md",
+            "--answer",
+            "projct_name=oops",
+            "--strict-answers",
+        ],
+    )
+    .failure();
+
+    assert_eq!(output.error_code(), "tpl::answers::unknown_key");
+}

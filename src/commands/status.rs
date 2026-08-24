@@ -126,7 +126,7 @@ fn json(status: &ops::Status) -> serde_json::Value {
         "ref": status.ref_name,
         "tip": status.tip.map(|o| o.to_hex()),
         "renderedRevision": recorded.and_then(|r| r.reference.clone()),
-        "renderedCommit": recorded.and_then(|r| r.commit.map(|c| c.to_hex())),
+        "renderedCommit": recorded.and_then(|r| r.revision.map(|c| c.to_hex())),
         "dirty": recorded.map(|r| r.dirty).unwrap_or(false),
         "availableRevision": status.available_revision_description,
         "templateMoved": status.template_moved,
