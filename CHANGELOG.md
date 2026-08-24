@@ -4,6 +4,49 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0](https://github.com/noirbizarre/git-tpl/compare/0.7.0..0.8.0) - 2026-08-24
+
+### 💫 Features
+
+- **lint** Warn on a when-gated question read outside its guard ([#106](https://github.com/noirbizarre/git-tpl/issues/106)) - ([3eb266e](https://github.com/noirbizarre/git-tpl/commit/3eb266ed17191457bf3e5c10284c4a3048be934e))
+- **skill** Add an agent skill for driving git-tpl ([#104](https://github.com/noirbizarre/git-tpl/issues/104)) - ([e7f0801](https://github.com/noirbizarre/git-tpl/commit/e7f08015ba51d787711a21801d33c49de5aaffc9))
+- **testing** Add `expect.lacks`, the negative partner to `expect.contains` ([#105](https://github.com/noirbizarre/git-tpl/issues/105)) - ([c125b3b](https://github.com/noirbizarre/git-tpl/commit/c125b3b19a63dc4d8ac4ae7925378d112e6d9de4))
+- **update** Discover and apply template migrations ([#108](https://github.com/noirbizarre/git-tpl/issues/108)) - ([1803298](https://github.com/noirbizarre/git-tpl/commit/1803298385f93868f54afa8706a27e503c21528b))
+
+### 🐛 Bug Fixes
+
+- **answers** Enforce --strict-answers on init, update, context, diff and show - ([7746fbb](https://github.com/noirbizarre/git-tpl/commit/7746fbb87963e3a43ee3d90e5bd8b2bfdec2bf5c))
+- **update** Stop claiming a new question caused every answers-file change - ([765454d](https://github.com/noirbizarre/git-tpl/commit/765454dc00a83c60be3fbb7800d77dff0320e1a4))
+
+### 🔨 Refactor
+
+- **backport** Rename report()/payload() to print_text()/json() - ([5984de3](https://github.com/noirbizarre/git-tpl/commit/5984de3ccb411586d318de6f586b0d4998f34c50))
+- **lint** Rename report() to print_text() for naming consistency - ([93ff33d](https://github.com/noirbizarre/git-tpl/commit/93ff33d5268042057449af5572f9f43b11d3dc86))
+- **provenance**  🚨 **breaking** Rename commit field to revision - ([650b5be](https://github.com/noirbizarre/git-tpl/commit/650b5beb45928700ad0f9c634fd3ed760ce98e50))
+
+### 📚 Documentation
+
+- **data** Pin down why the remote agent has no retry setting - ([d4a44b0](https://github.com/noirbizarre/git-tpl/commit/d4a44b031728f976d518d8170e3529977107e966))
+- **skill** Simplify agent skill installation to two global paths ([#107](https://github.com/noirbizarre/git-tpl/issues/107)) - ([6d1b4a3](https://github.com/noirbizarre/git-tpl/commit/6d1b4a38ceeb94fbc741b6d02bd07af8f7627831))
+- **templates** Document the migrations/ directory in the layout tree - ([f38f7f0](https://github.com/noirbizarre/git-tpl/commit/f38f7f0ba86561d729df86457d8b300cb99d1424))
+- Clarify when an ops/ mechanism needs its own error type - ([06d8318](https://github.com/noirbizarre/git-tpl/commit/06d8318edb542460d9f3c6a4866c6517234ef4ab))
+- Correct environment variable count from five to six - ([623ec18](https://github.com/noirbizarre/git-tpl/commit/623ec18ceaf0a243792d1f24f67f24ebfe3aa16f))
+- Bump stale 0.6.0 examples to the current 0.7.0 release - ([3adb0d7](https://github.com/noirbizarre/git-tpl/commit/3adb0d78e22d667f8237f70d6659572a609206f2))
+- Add migration.rs to the src/ layout trees - ([48ed046](https://github.com/noirbizarre/git-tpl/commit/48ed046324f57581dad969626850ce2cdf681e7e))
+- Rewrap to semantic line breaks capped at 120 characters ([#109](https://github.com/noirbizarre/git-tpl/issues/109)) - ([f29e810](https://github.com/noirbizarre/git-tpl/commit/f29e81075cef195edbe633c32d3fb5d44db8e6ef))
+
+### 🧪 Tests
+
+- Adopt std::assert_matches! for structural assertions - ([16866ea](https://github.com/noirbizarre/git-tpl/commit/16866ea7dc757891cc339cc67d46026d1b22d7b4))
+
+### 🏗️ Build
+
+- **deps** Replace serde_norway with noyalib for YAML parsing ([#103](https://github.com/noirbizarre/git-tpl/issues/103)) - ([3981d93](https://github.com/noirbizarre/git-tpl/commit/3981d93fc092fc7d9c4bd41db2f9a688008f6bb2))
+
+### 🧹 Chores
+
+- Raise the MSRV to Rust 1.96 - ([80dde48](https://github.com/noirbizarre/git-tpl/commit/80dde482ab3f4d6d98d7d89c1be526560d1a9d4b))
+
 ## [0.7.0](https://github.com/noirbizarre/git-tpl/compare/0.6.0..0.7.0) - 2026-08-19
 
 ### 💫 Features
@@ -18,6 +61,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### 🐛 Bug Fixes
 
 - **backport** Describe the revision through describe_revision - ([8017fd9](https://github.com/noirbizarre/git-tpl/commit/8017fd9c12cdb6916d72ce0ac1e3e4a52f29803d))
+- **lint** Recognise raw blocks with trailing whitespace control ([#98](https://github.com/noirbizarre/git-tpl/issues/98)) - ([d14ffdd](https://github.com/noirbizarre/git-tpl/commit/d14ffddbd866b1808f75ed7c347ede672538d2a5))
 - **lint** Report a binding that shadows a question or computed name ([#94](https://github.com/noirbizarre/git-tpl/issues/94)) - ([725b819](https://github.com/noirbizarre/git-tpl/commit/725b819e119ec5c3682d31d20b42ae69606e928f))
 - **lint** Warn on a top-level manifest key absorbed by a table ([#93](https://github.com/noirbizarre/git-tpl/issues/93)) - ([d2fb940](https://github.com/noirbizarre/git-tpl/commit/d2fb9409c4131541e284d4686e412dbcfa994c10))
 - **render** Report output write failures as tpl::ops::write_failed - ([38fdd6c](https://github.com/noirbizarre/git-tpl/commit/38fdd6c7a06bdcc29a7a579e79975c4da6c47356))
