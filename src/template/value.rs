@@ -332,7 +332,14 @@ impl Value {
                 }
             }
             ValueKind::String => Value::String(v.to_string()),
-            ValueKind::Seq => {
+            // `Iterable` alongside `Seq`: MiniJinja's `+` on two sequences
+            // (`['a'] + ['b']`) does not build a `Seq`, it builds a lazy
+            // concatenation object of kind `Iterable`. Without this arm that
+            // fell through to the catch-all below, which renders it as the
+            // *string* `"['a', 'b']"` — a `[computed]` value that looked like
+            // an array but silently was not one. Both kinds iterate their
+            // items identically, so the conversion is the same either way.
+            ValueKind::Seq | ValueKind::Iterable => {
                 let mut items = Vec::new();
                 for item in v.try_iter().map_err(|_| ValueError::TypeMismatch {
                     expected: "an array",
@@ -356,8 +363,8 @@ impl Value {
                 }
                 Value::Table(map)
             }
-            // Bytes, iterators, and anything else MiniJinja may add. Rendering
-            // to a string is the only meaningful thing to do, and is what a
+            // Bytes, and anything else MiniJinja may add. Rendering to a
+            // string is the only meaningful thing to do, and is what a
             // template would have got by interpolating it.
             _ => Value::String(v.to_string()),
         })
@@ -458,6 +465,37 @@ mod tests {
     fn values_survive_a_round_trip_through_minijinja(#[case] original: Value) {
         let mj: minijinja::Value = original.clone().into();
         assert_eq!(Value::from_minijinja(&mj).unwrap(), original);
+    }
+
+    /// Issue #111: `+` on two sequences does not build a `Seq`, it builds
+    /// MiniJinja's lazy concatenation object, whose kind is `Iterable`. A
+    /// `[computed]` value built this way must still come back as
+    /// `Value::Array`, not the string `"['a', 'b', 'c']"` that the `Iterable`
+    /// catch-all used to produce.
+    #[test]
+    fn a_sequence_concatenation_through_plus_keeps_its_array_type() {
+        let env = minijinja::Environment::new();
+        let context = minijinja::context! {
+            a => minijinja::Value::from(vec!["a", "b"]),
+            b => minijinja::Value::from(vec!["c"]),
+        };
+        let result = env
+            .compile_expression("a + b")
+            .unwrap()
+            .eval(context)
+            .unwrap();
+
+        // Not `ValueKind::Seq` — this is the whole point of the regression:
+        // the value that reaches `from_minijinja` here is `Iterable`.
+        assert_eq!(result.kind(), minijinja::value::ValueKind::Iterable);
+        assert_eq!(
+            Value::from_minijinja(&result).unwrap(),
+            Value::Array(vec![
+                Value::String("a".into()),
+                Value::String("b".into()),
+                Value::String("c".into()),
+            ])
+        );
     }
 
     #[rstest]

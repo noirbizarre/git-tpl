@@ -943,6 +943,23 @@ mod tests {
             evaluate("{{ cli and count > 0 }}", &context, "test", no_partials()).unwrap(),
             Value::Bool(false)
         );
+        // Issue #111: `+` on two sequences builds MiniJinja's lazy
+        // concatenation object (kind `Iterable`), not a `Seq`. Without
+        // handling that kind, `Value::from_minijinja` stringified it to
+        // `"['serde', 'extra']"` instead of keeping it an array.
+        assert_eq!(
+            evaluate(
+                "{{ features + ['extra'] }}",
+                &context,
+                "test",
+                no_partials()
+            )
+            .unwrap(),
+            Value::Array(vec![
+                Value::String("serde".into()),
+                Value::String("extra".into())
+            ])
+        );
     }
 
     #[test]
