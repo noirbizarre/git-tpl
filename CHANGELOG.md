@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1](https://github.com/noirbizarre/git-tpl/compare/0.8.0..0.8.1) - 2026-08-24
+
+### 🐛 Bug Fixes
+
+- **value** Keep `+`-concatenated sequences as arrays ([#112](https://github.com/noirbizarre/git-tpl/issues/112)) - ([1e4e1cb](https://github.com/noirbizarre/git-tpl/commit/1e4e1cba392afaf143c66537f2c39d43115b1f3c))
+
 ## [0.8.0](https://github.com/noirbizarre/git-tpl/compare/0.7.0..0.8.0) - 2026-08-24
 
 ### 💫 Features
