@@ -154,6 +154,33 @@ impl LibGit2 {
     fn signature(&self) -> Result<git2::Signature<'_>, GitError> {
         self.repo.signature().map_err(|_| GitError::NoIdentity)
     }
+
+    /// Turn `collect_workdir`'s output into blobs and a tree.
+    ///
+    /// Shared by `tree_from_workdir` and `tree_from_directory`: both walk a
+    /// directory into the same `(relative path, absolute path, executable)`
+    /// shape, and differ only in whether that walk consulted an `IgnoreStack`.
+    fn tree_from_entries(&self, entries: Vec<(String, PathBuf, bool)>) -> Result<Oid, GitError> {
+        let mut blobs = Vec::new();
+        for (path, absolute, executable) in entries {
+            let content = std::fs::read(&absolute).map_err(|e| GitError::Backend {
+                context: format!("read `{}`", absolute.display()),
+                reason: e.to_string(),
+            })?;
+            let oid = self.write_blob(&content)?;
+            blobs.push(TreeEntry {
+                path,
+                oid,
+                mode: if executable {
+                    FileMode::BlobExecutable
+                } else {
+                    FileMode::Blob
+                },
+            });
+        }
+
+        self.build_tree(&blobs)
+    }
 }
 
 impl GitBackend for LibGit2 {
@@ -954,29 +981,23 @@ impl GitBackend for LibGit2 {
 
         let mut entries = Vec::new();
         let mut ignored = Vec::new();
-        collect_workdir(root, root, &stack, &mut entries, &mut ignored)?;
+        collect_workdir(root, root, Some(&stack), &mut entries, &mut ignored)?;
         ignored.sort();
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
-        let mut blobs = Vec::new();
-        for (path, absolute, executable) in entries {
-            let content = std::fs::read(&absolute).map_err(|e| GitError::Backend {
-                context: format!("read `{}`", absolute.display()),
-                reason: e.to_string(),
-            })?;
-            let oid = self.write_blob(&content)?;
-            blobs.push(TreeEntry {
-                path,
-                oid,
-                mode: if executable {
-                    FileMode::BlobExecutable
-                } else {
-                    FileMode::Blob
-                },
-            });
-        }
+        Ok((self.tree_from_entries(entries)?, ignored))
+    }
 
-        Ok((self.build_tree(&blobs)?, ignored))
+    fn tree_from_directory(&self, dir: &Path) -> Result<Oid, GitError> {
+        let mut entries = Vec::new();
+        // Discarded: nothing here is ignored, because nothing is checked
+        // against an `IgnoreStack` — `collect_workdir` is only asked to skip
+        // `.git` and to walk in a deterministic order.
+        let mut ignored = Vec::new();
+        collect_workdir(dir, dir, None, &mut entries, &mut ignored)?;
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        self.tree_from_entries(entries)
     }
 
     fn read_path(&self, tree: Oid, path: &str) -> Result<Option<Vec<u8>>, GitError> {
@@ -1320,18 +1341,23 @@ fn credential_callbacks(url: &str) -> RemoteCallbacks<'static> {
     callbacks
 }
 
-/// Walk a working directory, collecting files Git would track.
+/// Walk a directory, collecting the files Git would track — or, with `stack`
+/// `None`, every file, unconditionally.
 ///
 /// `stack` holds the ignore rules in force *above* `dir`; this call adds
-/// `dir`'s own `.gitignore` before looking at anything inside it.
+/// `dir`'s own `.gitignore` before looking at anything inside it. `None` is
+/// for `tree_from_directory`, which reads a snapshot's own directory and must
+/// not let a project's `.gitignore` govern it — there is no stack to extend,
+/// so nothing is ever reported as ignored either.
 fn collect_workdir(
     root: &Path,
     dir: &Path,
-    stack: &IgnoreStack,
+    stack: Option<&IgnoreStack>,
     out: &mut Vec<(String, PathBuf, bool)>,
     ignored: &mut Vec<String>,
 ) -> Result<(), GitError> {
-    let stack = stack.entering(dir);
+    let entered = stack.map(|stack| stack.entering(dir));
+    let stack = entered.as_ref();
 
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .map_err(|e| GitError::Backend {
@@ -1375,13 +1401,15 @@ fn collect_workdir(
         // rule rather than an optimisation: a file cannot be re-included once
         // one of its parent directories is excluded, so descending to look for
         // a negation inside would resurrect files `git add -A` leaves alone.
-        if stack.is_ignored(&path, file_type.is_dir()) {
+        if let Some(stack) = stack
+            && stack.is_ignored(&path, file_type.is_dir())
+        {
             ignored.push(relative.to_string_lossy().replace('\\', "/"));
             continue;
         }
 
         if file_type.is_dir() {
-            collect_workdir(root, &path, &stack, out, ignored)?;
+            collect_workdir(root, &path, stack, out, ignored)?;
         } else if file_type.is_file() {
             let relative_str = relative.to_string_lossy().replace('\\', "/");
             out.push((relative_str, path.clone(), is_executable(&path)));
@@ -1491,6 +1519,27 @@ mod tests {
         let (_dir, repo) = scratch();
         let tree = repo.build_tree(&[]).unwrap();
         assert!(repo.list_tree(tree).unwrap().is_empty());
+    }
+
+    /// #116. `tree_from_directory` builds a tree from a directory's own
+    /// contents, with no `IgnoreStack` in the loop at all — unlike
+    /// `tree_from_workdir`, it must not care what the repository's
+    /// `.gitignore` says about a path inside that directory.
+    #[test]
+    fn tree_from_directory_ignores_no_files_regardless_of_gitignore() {
+        let (dir, repo) = scratch();
+        // A rule that would drop `MANIFEST` from `tree_from_workdir`, proving
+        // `tree_from_directory` never consults it.
+        std::fs::write(dir.path().join(".gitignore"), "MANIFEST\n").unwrap();
+        let snapshot = dir.path().join("snapshot");
+        std::fs::create_dir(&snapshot).unwrap();
+        std::fs::write(snapshot.join("MANIFEST"), "# git-tpl snapshot 1\n").unwrap();
+
+        let tree = repo.tree_from_directory(&snapshot).unwrap();
+        let entries = repo.list_tree(tree).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "MANIFEST");
     }
 
     #[test]

@@ -625,6 +625,17 @@ pub trait GitBackend {
     /// author can see, and a render has no `git status` to explain it with.
     fn tree_from_workdir(&self, root: &Path) -> Result<(Oid, Vec<String>), GitError>;
 
+    /// Build a tree from a directory's contents, ignoring `.gitignore` entirely.
+    ///
+    /// For reading a `--dirty` snapshot back: `--write` writes a snapshot straight
+    /// to disk, bypassing Git and its ignore rules on purpose (see
+    /// `write_snapshot`), so a symmetric read must not let an ordinary rule
+    /// matching a snapshot's own filename — a bare `MANIFEST`, say — make a file
+    /// `--write` just produced disappear from what `--dirty` reads back (#116). A
+    /// snapshot is recorded data, not a project file `git add -A` would ever
+    /// decide about.
+    fn tree_from_directory(&self, dir: &Path) -> Result<Oid, GitError>;
+
     /// Read a file from a tree by path.
     fn read_path(&self, tree: Oid, path: &str) -> Result<Option<Vec<u8>>, GitError>;
 

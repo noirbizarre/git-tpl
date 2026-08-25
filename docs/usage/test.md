@@ -140,6 +140,11 @@ Reading cases off the filesystem instead would make `--ref` mean something diffe
 The one exception is `--write`, which writes to the working tree — there is nowhere else to put a file somebody
 has to review.
 
+A snapshot is not subject to the project's `.gitignore` either, deliberately: it is data `--write` recorded, not a
+project file a render produced.
+An ordinary rule matching a snapshot's own filename — a bare `MANIFEST`, say, the Python `setup.py sdist`
+convention — does not stop `--dirty` from reading it back.
+
 ## In CI
 
 ```sh
