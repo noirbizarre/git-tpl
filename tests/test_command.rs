@@ -693,6 +693,32 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
     assert_eq!(output.json()["cases"][0]["snapshot"], "compared");
 }
 
+/// #116. Distinct from #51 above: no negation involved, just an ordinary
+/// rule — a bare `MANIFEST`, as Python's `setup.py sdist` convention writes —
+/// matching the snapshot's own manifest file at any depth. `--write` put the
+/// file on disk regardless, since it never goes through Git at all; before
+/// the fix, `--dirty` read-back dropped it from the synthetic tree anyway and
+/// reported `tpl::testing::snapshot_read`: "there is no `MANIFEST`".
+#[test]
+fn a_snapshot_whose_manifest_matches_an_ordinary_gitignore_rule_reads_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(dir.path(), &[("tests/case.toml", "[answers]\n")]);
+    template.repo.write(".gitignore", "MANIFEST\n");
+    template.repo.commit_all("test: an ordinary MANIFEST rule");
+
+    run(&template, &["--dirty", "--write"]).success();
+    assert!(
+        template
+            .repo
+            .git(&["ls-files", "tests/__snapshots__/case/MANIFEST"])
+            .is_empty(),
+        "sanity: the rule really does keep git from tracking it"
+    );
+
+    let output = run(&template, &["--dirty", "--json"]).success();
+    assert_eq!(output.json()["cases"][0]["snapshot"], "compared");
+}
+
 /// #83, as reported: through `git tpl test`, where the warning was the first
 /// thing printed and pushed the actual results one line down. `.opencode/` is
 /// beside `template.toml` rather than under `root`, and the rule hiding it is

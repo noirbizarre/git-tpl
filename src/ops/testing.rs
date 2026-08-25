@@ -1011,20 +1011,41 @@ fn snapshot_step(
 /// From the tree, like the cases themselves, so `--ref v1.2.0` compares against
 /// that tag's snapshots. Reading them off the filesystem would make `--ref` a
 /// lie.
+///
+/// `--dirty` is the one exception, and reads the snapshot's own directory
+/// straight off disk rather than through `template.tree` — the
+/// whole-repository dirty tree, already filtered by `.gitignore`. A snapshot
+/// is data `--write` puts on disk directly, bypassing Git on purpose; letting
+/// an ordinary rule matching its own filename, a bare `MANIFEST` say, make
+/// that file disappear on read-back would disagree with what `--write` just
+/// produced (#116). There is no `--ref` to be a lie about here: `--dirty`
+/// already means "read the workdir", for the snapshot exactly as for
+/// everything else it reads.
 fn read_snapshot(
     template: &Resolved,
     tests_dir: &str,
     case: &Case,
 ) -> Result<Option<BTreeMap<String, SnapshotEntry>>, OpError> {
     let dir = snapshot_path(tests_dir, &case.name);
-    let Some(tree) = template.repo.subtree(template.tree, &dir)? else {
-        return Ok(None);
-    };
 
     let unreadable = |reason: String| TestError::SnapshotRead {
         case: case.name.clone(),
         path: dir.clone(),
         reason,
+    };
+
+    let tree = if template.dirty {
+        let workdir = template.repo.workdir()?;
+        let path = workdir.join(&dir);
+        if !path.is_dir() {
+            return Ok(None);
+        }
+        Some(template.repo.tree_from_directory(&path)?)
+    } else {
+        template.repo.subtree(template.tree, &dir)?
+    };
+    let Some(tree) = tree else {
+        return Ok(None);
     };
 
     let entries = template.repo.list_tree(tree)?;
