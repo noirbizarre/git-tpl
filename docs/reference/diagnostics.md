@@ -47,7 +47,7 @@ Something is wrong with the template itself.
 |---|---|
 | `tpl::render::content` | A file failed to render. The cause names the expression. |
 | `tpl::render::path` | A path segment failed to render. |
-| `tpl::render::escapes_tree` | A segment rendered to `.`, `..`, or something containing a separator. |
+| `tpl::render::escapes_tree` | A piece of a rendered path is `..`, contains a backslash, or is the file's own name vanishing (empty or `.` in the last position). A segment may otherwise contain `/` — fanning out into real directories — or render `.` on a directory segment, which is transparent rather than an error. |
 | `tpl::render::collision` | Two template files render to the same output path. |
 | `tpl::render::partial_not_utf8` | A `.jinja` file outside the render root is not text. |
 

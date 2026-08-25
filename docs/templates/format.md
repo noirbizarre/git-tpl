@@ -216,12 +216,46 @@ template/{% if ci %}.github{% endif %}/workflows/ci.yml
 
 That is how you make a whole subtree conditional.
 
+A directory segment that renders to `.` is different: it is *transparent*, not skipped.
+It contributes nothing to the output path, but — unlike an empty segment — nothing beneath it is skipped either;
+the rest of the path renders one level up, exactly as if that segment were never there:
+
+```
+template/{% if use_src %}src{% else %}.{% endif %}/{{ package_name }}/mod.rs
+```
+
+renders to `{{ package_name }}/mod.rs` when `use_src` is false, and to `src/{{ package_name }}/mod.rs` when it is
+true — one subtree, not two copies kept in sync by hand. Each level is independent, so several such segments
+compose: a template with both a `src/` toggle and a namespace toggle needs one physical copy of the subtree, not
+one per combination.
+
+`.` only means this on a *directory* segment. On the file's own name — the last segment of the path — it is still
+an error; a file has no "above" to promote its content to.
+
+A rendered value may also contain `/` itself, and it is split the same way: each piece between the separators
+becomes its own real directory level, exactly as if the template had that many nested directories.
+
+```
+template/{{ package_path }}pkg/__init__.py
+```
+
+with `package_path` a computed value of `"{{ 'src/' if use_src else '' }}"` renders to `pkg/__init__.py` or
+`src/pkg/__init__.py` depending on `use_src` — one expression, one subtree, no `{% if %}` needed at all. This is
+the same mechanism as the `.`-transparent form above, generalized: a chain of `{% if %}...{% else %}.{% endif
+%}` segments and one fanning-out expression build the same variable-depth path. Use whichever reads more clearly
+for the template — several independent booleans usually read better one level at a time, while a single computed
+path reads better as one expression.
+
 !!! warning "A rendered path may not escape the tree"
 
-    A path segment that renders to `..`, to an absolute path, or to something containing a `/` is an error, not
-    a traversal.
-    The rendered tree is built directly as a Git tree, so this is caught before anything is written, but it is
-    rejected explicitly rather than left to chance.
+    A piece may not be `..`, or contain a backslash — unconditionally, at any position. That is the actual
+    danger: `..` is a request to write outside the render root, and a backslash is a separator Git itself treats
+    differently across platforms. Neither is about `/` itself, which is why `/` inside a rendered value is safe
+    to allow: it only ever produces more pieces, each checked the same way.
+    A piece that disappears — empty or `.` — is otherwise dropped in place, except as the file's own name, which
+    has no "above" to promote its content to and so still rejects both there.
+    The rendered tree is built directly as a Git tree, so all of this is caught before anything is written, but
+    it is rejected explicitly rather than left to chance.
 
 ### Shared partials
 

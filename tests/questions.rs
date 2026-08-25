@@ -468,6 +468,110 @@ default = true
     assert!(world.project.exists(".github/workflows/ci.yml"));
 }
 
+/// A directory segment rendering to `.` is transparent, not pruned: its
+/// children still render, one level up from where the directory would have
+/// been.
+#[test]
+fn a_transparent_path_segment_flattens_its_directory() {
+    let world = World::with_template(
+        r#"
+name = "transparent"
+[questions.use_mid]
+type = "boolean"
+default = false
+"#,
+        &[(
+            "{% if use_mid %}mid{% else %}.{% endif %}/leaf.txt",
+            "hello\n",
+        )],
+    );
+
+    world.init(&["--answer", "use_mid=false"]).success();
+    assert!(!world.project.exists("mid"));
+    assert_eq!(world.project.read("leaf.txt"), "hello\n");
+}
+
+#[test]
+fn the_same_transparent_segment_keeps_the_directory_when_its_condition_holds() {
+    let world = World::with_template(
+        r#"
+name = "transparent"
+[questions.use_mid]
+type = "boolean"
+default = false
+"#,
+        &[(
+            "{% if use_mid %}mid{% else %}.{% endif %}/leaf.txt",
+            "hello\n",
+        )],
+    );
+
+    world.init(&["--answer", "use_mid=true"]).success();
+    assert!(!world.project.exists("leaf.txt"));
+    assert_eq!(world.project.read("mid/leaf.txt"), "hello\n");
+}
+
+/// `.` has no "above" to promote to when it is the file's own name, so it
+/// still escapes the tree there.
+#[test]
+fn init_refuses_a_transparent_marker_on_a_files_own_name() {
+    let world = World::with_template(
+        r#"
+name = "transparent"
+[questions.named]
+type = "boolean"
+default = false
+"#,
+        &[("dir/{% if named %}name{% else %}.{% endif %}", "x")],
+    );
+
+    world
+        .init(&["--answer", "named=false"])
+        .failure()
+        .says("escapes the tree");
+}
+
+/// The issue's own motivating example: one computed value builds a
+/// variable-depth path by fanning out across `/`, rather than duplicating
+/// the subtree once per layout or chaining a `.`-transparent segment per
+/// level.
+#[test]
+fn a_computed_path_segment_fans_out_into_nested_directories() {
+    let world = World::with_template(
+        r#"
+name = "fanout"
+[questions.use_src]
+type = "boolean"
+default = false
+[computed]
+package_path = "{{ 'src/' if use_src else '' }}"
+"#,
+        &[("{{ package_path }}pkg/__init__.py", "# pkg\n")],
+    );
+
+    world.init(&["--answer", "use_src=false"]).success();
+    assert!(world.project.exists("pkg/__init__.py"));
+    assert!(!world.project.exists("src"));
+}
+
+#[test]
+fn the_same_computed_path_segment_nests_deeper_when_the_toggle_is_on() {
+    let world = World::with_template(
+        r#"
+name = "fanout"
+[questions.use_src]
+type = "boolean"
+default = false
+[computed]
+package_path = "{{ 'src/' if use_src else '' }}"
+"#,
+        &[("{{ package_path }}pkg/__init__.py", "# pkg\n")],
+    );
+
+    world.init(&["--answer", "use_src=true"]).success();
+    assert!(world.project.exists("src/pkg/__init__.py"));
+}
+
 #[test]
 fn a_templated_path_segment_reaches_the_project_rendered() {
     let world = World::with_template(

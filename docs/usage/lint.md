@@ -53,6 +53,10 @@ For a `.jinja` file the outer form is correct, because the suffix is stripped fi
 `{% if docs %}zensical.toml{% endif %}.jinja` collapses to nothing, as intended.
 The check knows the difference.
 
+A directory segment's `{% else %}.{% endif %}` — the documented way to make that segment
+[transparent](../templates/format.md#paths-are-templates-too) rather than skipped — is not flagged either, for
+the same reason: the whole thing, `.` included, sits inside the block.
+
 ### Foreign expressions — `tpl::lint::foreign_expression`
 
 `${{ github.ref }}` contains `{{`, so MiniJinja consumes it: the result is `$`, the YAML is still valid, and
