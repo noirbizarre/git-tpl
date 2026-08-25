@@ -661,6 +661,38 @@ default = "demo"
     assert!(codes(&output).is_empty(), "{:?}", codes(&output));
 }
 
+/// The bug report itself (#115): `namespace` is one of the four global functions
+/// MiniJinja registers, and the question is absent, not undefined, whenever
+/// `kind != "lib"`. Neither `strict = true` nor the manifest catches it, but this
+/// does.
+#[test]
+fn a_gated_question_named_after_a_builtin_is_reported() {
+    let world = World::with_template(
+        r#"
+name = "probe"
+strict = true
+
+[questions.kind]
+type = "string"
+default = "python"
+
+[questions.namespace]
+type = "string"
+when = "{{ kind == 'lib' }}"
+default = ""
+"#,
+        &[("keep.txt", "kept\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert_eq!(codes(&output), ["tpl::lint::shadowed_builtin"]);
+
+    let json = output.json();
+    let message = json["diagnostics"][0]["message"].as_str().expect("message");
+    assert!(message.contains("namespace"), "no name in: {message}");
+}
+
 #[test]
 fn a_declared_name_and_a_builtin_are_not_reported() {
     let world = World::with_template(

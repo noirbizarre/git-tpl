@@ -41,6 +41,7 @@ pub const CODES: &[&str] = &[
     "tpl::lint::invalid_migration",
     "tpl::lint::missing_migration_file",
     "tpl::lint::missing_note_file",
+    "tpl::lint::shadowed_builtin",
     "tpl::lint::shadowed_name",
     "tpl::lint::syntax",
     "tpl::lint::undeclared",
@@ -364,6 +365,7 @@ pub fn lint(
     findings.extend(check_path_collisions(entries));
     findings.extend(check_note_file(manifest, repo_entries));
     findings.extend(check_absorbed_keys(manifest_text));
+    findings.extend(check_shadowed_builtins(manifest));
     findings.extend(check_migrations(template, repo_entries)?);
 
     Ok(findings)
@@ -886,6 +888,17 @@ fn is_builtin(name: &str) -> bool {
     )
 }
 
+/// The global functions `minijinja::Environment::new()` actually registers.
+///
+/// Not [`is_builtin`]'s list: `loop`/`self` are for-loop/macro pseudo-variables and
+/// `true`/`false`/`none` are parser literals, never looked up via `env.get_global()` — a
+/// manifest name colliding with one of those fails a different way, if at all, not the one
+/// [`check_shadowed_builtins`] reports. Named explicitly rather than derived, so a MiniJinja
+/// upgrade that adds `cycler`, `joiner` or `lipsum` (Jinja2 builtins this version does not
+/// implement) is caught by the test that pins this list, instead of silently reopening the
+/// hole.
+const GLOBAL_FUNCTIONS: &[&str] = &["range", "dict", "namespace", "debug"];
+
 /// A `when`-gated question read outside its own guard.
 ///
 /// ADR-014 exempts manifest expressions from `strict` for exactly this reason
@@ -1023,6 +1036,68 @@ fn is_guarded(text: &str, name: &str) -> bool {
         rest = &rest[at + name.len()..];
     }
     false
+}
+
+/// A question or computed value whose name is one MiniJinja itself provides as a global
+/// function.
+///
+/// A computed value has no `when`, and an ungated question always ends up answered, so
+/// today the manifest's own value always wins in the rendered context and nothing
+/// breaks — this half of the report is about a hole that isn't open yet.
+///
+/// A `when`-gated question is different: whenever its own `when` is false it is absent
+/// from the context, not null, and MiniJinja's lookup falls through the (absent) context
+/// entry straight to `env.get_global(name)`. `{% if name is defined %}` then reports
+/// `true` for the builtin, and `{{ name }}` renders the builtin's own representation —
+/// the guard idiom `tpl::lint::unguarded_gate`/ADR-014 recommends does not help, because
+/// nothing is ever undefined. See #115.
+///
+/// Flagged regardless of whether a `when` is present right now: renaming later is cheaper
+/// than discovering, after the fact, that a `when` was added to a name that looked safe.
+fn check_shadowed_builtins(manifest: &Manifest) -> Vec<Finding> {
+    let mut names: Vec<(&str, bool)> = manifest
+        .questions
+        .iter()
+        .map(|(key, question)| (key.as_str(), question.when.is_some()))
+        .chain(manifest.computed.keys().map(|key| (key.as_str(), false)))
+        .filter(|(name, _)| GLOBAL_FUNCTIONS.contains(name))
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+
+    names
+        .into_iter()
+        .map(|(name, gated)| {
+            let kind = if manifest.questions.contains_key(name) {
+                "question"
+            } else {
+                "computed value"
+            };
+            let risk = if gated {
+                format!(
+                    "whenever `{name}`'s own `when` is false it is absent from the context, \
+                     and MiniJinja resolves the bare name to its own builtin function instead \
+                     of leaving it undefined: `{{% if {name} is defined %}}` reports `true`, \
+                     and `{{{{ {name} }}}}` renders the builtin's own representation."
+                )
+            } else {
+                format!(
+                    "harmless today — a {kind} is always present in the context, so it wins \
+                     over the builtin — but adding a `when` to it later reopens exactly that \
+                     hole, silently."
+                )
+            };
+            Finding::warning(
+                "tpl::lint::shadowed_builtin",
+                MANIFEST_NAME,
+                format!(
+                    "`{name}` is declared as a {kind}, but MiniJinja itself provides a `{name}` \
+                     function"
+                ),
+                format!("{risk} Rename the {kind}."),
+            )
+        })
+        .collect()
 }
 
 /// A binding in a file body that hides an answer or a computed value.
@@ -1583,6 +1658,82 @@ mod tests {
                 &foreign
             )
             .is_empty()
+        );
+    }
+
+    // The bug report itself (#115): a gated question named after a real MiniJinja
+    // global is absent, not undefined, whenever its `when` is false — and MiniJinja
+    // resolves the bare name to the builtin instead.
+    #[test]
+    fn a_gated_question_named_after_a_builtin_is_shadowed() {
+        let manifest = manifest_with(
+            "[questions.kind]\ntype = \"string\"\ndefault = \"python\"\n\n\
+             [questions.namespace]\ntype = \"string\"\nwhen = \"{{ kind == 'lib' }}\"\n\
+             default = \"\"\n",
+        );
+        let findings = check_shadowed_builtins(&manifest);
+        assert_eq!(codes(&findings), ["tpl::lint::shadowed_builtin"]);
+        assert!(findings[0].message.contains("namespace"));
+        assert!(findings[0].help.contains("is defined"));
+    }
+
+    // Ungated, the question's own value always wins over the builtin, so nothing
+    // breaks today — but the manifest still names it, because a `when` added later
+    // would reopen the hole with no new warning to catch it.
+    #[test]
+    fn an_ungated_question_named_after_a_builtin_is_flagged_as_fragile() {
+        let manifest = manifest_with("[questions.range]\ntype = \"string\"\ndefault = \"x\"\n");
+        let findings = check_shadowed_builtins(&manifest);
+        assert_eq!(codes(&findings), ["tpl::lint::shadowed_builtin"]);
+        assert!(findings[0].help.contains("harmless today"));
+    }
+
+    #[test]
+    fn a_computed_value_named_after_a_builtin_is_flagged() {
+        let manifest = manifest_with("[computed]\ndebug = \"'x'\"\n");
+        let findings = check_shadowed_builtins(&manifest);
+        assert_eq!(codes(&findings), ["tpl::lint::shadowed_builtin"]);
+        assert!(findings[0].message.contains("computed value"));
+    }
+
+    #[test]
+    fn a_question_not_named_after_a_builtin_is_not_flagged() {
+        let manifest =
+            manifest_with("[questions.project_name]\ntype = \"string\"\ndefault = \"x\"\n");
+        assert!(check_shadowed_builtins(&manifest).is_empty());
+    }
+
+    // `loop`, `self`, `true`, `false` and `none` are in `is_builtin`'s list for
+    // `check_undeclared`'s different purpose — none of them are ever resolved via
+    // `env.get_global()`, so a manifest name that collides with one of those fails a
+    // different way, if at all, and this check must not conflate the two lists.
+    #[rstest]
+    #[case("loop")]
+    #[case("self")]
+    #[case("true")]
+    #[case("false")]
+    #[case("none")]
+    fn a_question_named_after_an_is_builtin_entry_that_is_not_a_global_is_not_flagged(
+        #[case] name: &str,
+    ) {
+        let manifest = manifest_with(&format!(
+            "[questions.{name}]\ntype = \"string\"\ndefault = \"x\"\n"
+        ));
+        assert!(check_shadowed_builtins(&manifest).is_empty());
+    }
+
+    #[rstest]
+    #[case("range")]
+    #[case("dict")]
+    #[case("namespace")]
+    #[case("debug")]
+    fn every_registered_global_is_detected(#[case] name: &str) {
+        let manifest = manifest_with(&format!(
+            "[questions.{name}]\ntype = \"string\"\ndefault = \"x\"\n"
+        ));
+        assert_eq!(
+            codes(&check_shadowed_builtins(&manifest)),
+            ["tpl::lint::shadowed_builtin"]
         );
     }
 

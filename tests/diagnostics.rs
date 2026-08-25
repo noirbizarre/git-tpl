@@ -129,6 +129,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::lint::invalid_migration",
     "tpl::lint::missing_migration_file",
     "tpl::lint::missing_note_file",
+    "tpl::lint::shadowed_builtin",
     "tpl::lint::shadowed_name",
     "tpl::lint::syntax",
     "tpl::lint::undeclared",

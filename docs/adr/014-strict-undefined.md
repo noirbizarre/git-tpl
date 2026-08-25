@@ -94,3 +94,13 @@ every other answer set.
 `tpl::lint::unguarded_gate` closes that: a warning when a file body reads a `when`-gated question without the
 `is defined`/`is not defined`/`default(...)` idiom this ADR already recommends.
 See [`lint`](../usage/lint.md#unguarded-gate-reads-tpllintunguarded_gate).
+
+A fourth way an author can be caught out even while following that idiom correctly: `is defined`/`default(...)`
+above assumes an absent name resolves to nothing at all, but MiniJinja does not stop looking there. It falls
+through the absent context entry to its own registered globals — `range`, `dict`, `namespace`, `debug` — before
+finally giving up. A `when`-gated question named after one of those four is never undefined: `is defined` reports
+`true` for the builtin, and printing the bare name renders the builtin's own representation, not the empty value
+the idiom above is written to produce. `tpl::lint::shadowed_builtin` reports a question or computed value
+declared with one of those four names, whether or not it is gated right now, since a name that is safe unguarded
+today is not proof it stays safe once a `when` is added to it later.
+See [`lint`](../usage/lint.md#shadowed-builtins-tpllintshadowed_builtin).

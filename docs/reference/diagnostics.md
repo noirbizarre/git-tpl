@@ -68,6 +68,7 @@ or the whole severity.
 | `tpl::lint::unguarded_gate` | warning | A file body reads a `when`-gated question without checking `is defined`/`is not defined` or defaulting it. Absent, not null, whenever its `when` is false — unless `default_when_skipped = true`, which excludes the question from this rule. |
 | `tpl::lint::absorbed_key` | warning | A top-level manifest key is written after a table header, so TOML gives it to that table. The top-level key is never set. |
 | `tpl::lint::shadowed_name` | warning | An `{% import %}`/`{% from %}` alias, or a `set`/`with`/`for`/`macro` binding, reuses a question or computed name — the rest of the file sees the binding, not the answer, and a comparison against it is silently never true. |
+| `tpl::lint::shadowed_builtin` | warning | A question or computed value is named after a MiniJinja global (`range`, `dict`, `namespace`, `debug`). Harmless while always present, but a `when`-gated question by that name is absent, not undefined, whenever its `when` is false — the builtin wins instead. |
 | `tpl::lint::missing_note_file` | error | `note_file` names a path the template repository does not contain. Reported without a repository, before an `init` refuses. |
 | `tpl::lint::invalid_migration` | error | A file in `migrations/` is not valid TOML, or does not match the schema — see [Migrations](#migrations). |
 | `tpl::lint::missing_migration_file` | error | A migration's `message_file` names a path the template repository does not contain. |

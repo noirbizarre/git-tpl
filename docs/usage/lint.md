@@ -179,6 +179,38 @@ A warning, the same as `tpl::lint::undeclared`: the binding is legal MiniJinja, 
 The manifest refuses the same collision between a question and a computed value outright — this is that
 collision arriving from a third direction.
 
+### Shadowed builtins — `tpl::lint::shadowed_builtin`
+
+MiniJinja itself registers four global functions: `range`, `dict`, `namespace`, `debug`.
+A question or computed value declared with one of those names collides with a name the manifest never wrote —
+git-tpl did not put it there, MiniJinja did.
+
+For a computed value, or a question with no `when`, this is harmless today: the manifest's own value is always
+present in the rendered context, and always wins.
+A `when`-gated question is not — whenever its own `when` is false it is *absent* from the context, not null, and
+MiniJinja's lookup falls through the absent entry straight to its own builtin:
+
+```toml
+[questions.kind]
+type = "string"
+default = "python"
+
+[questions.namespace]
+type = "string"
+when = "{{ kind == 'lib' }}"
+default = ""
+```
+
+For every answer set where `kind != "lib"`, `namespace` is absent — but `{% if namespace is defined %}` reports
+`true` anyway, and `{{ namespace }}` renders the builtin function's own representation instead of nothing.
+The guard idiom `tpl::lint::unguarded_gate` recommends for reading a gated question does not help here, because
+nothing is ever undefined to begin with.
+
+The fix is to rename the question or computed value.
+A warning rather than an error, and reported regardless of whether a `when` is present right now: the collision
+is invisible either way, and adding a `when` to an already-declared name later would reopen the hole with no new
+warning to catch it.
+
 ## Options
 
 | Flag | Effect |
