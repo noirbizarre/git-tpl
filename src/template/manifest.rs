@@ -380,6 +380,25 @@ impl Manifest {
                 });
             }
 
+            if question.default_when_skipped {
+                // Both are checked here, at load time, rather than left to
+                // silently do nothing: a flag with no `when` to skip or no
+                // `default` to inject is a mistake, not a no-op a template
+                // author would want.
+                if question.when.is_none() {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: "`default_when_skipped` has no `when` to skip".into(),
+                    });
+                }
+                if question.default.is_none() {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: "`default_when_skipped` has no `default` to inject".into(),
+                    });
+                }
+            }
+
             if let Some(source) = &question.default_from {
                 // Everything below is rejected here rather than at prompt time:
                 // a template author who wrote `env:USER` must find out on the
@@ -1102,6 +1121,83 @@ mod tests {
         };
         assert_eq!(name, "slug");
         assert!(reason.contains("`message` has no `pattern`"), "{reason}");
+    }
+
+    /// Without `when` there is nothing for the flag to skip — it would be a
+    /// silent no-op rather than the opt-in the name promises.
+    #[test]
+    fn default_when_skipped_without_when_is_rejected() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.docs_accent]
+            type = "string"
+            default = "blue"
+            default_when_skipped = true
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "docs_accent");
+        assert!(
+            reason.contains("`default_when_skipped` has no `when`"),
+            "{reason}"
+        );
+    }
+
+    /// Without `default` there is nothing for the flag to inject.
+    #[test]
+    fn default_when_skipped_without_a_default_is_rejected() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.docs]
+            type = "boolean"
+            default = true
+
+            [questions.docs_accent]
+            type = "string"
+            when = "{{ docs }}"
+            default_when_skipped = true
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidQuestion { name, reason } = error else {
+            panic!("expected an invalid question, got {error:?}");
+        };
+        assert_eq!(name, "docs_accent");
+        assert!(
+            reason.contains("`default_when_skipped` has no `default`"),
+            "{reason}"
+        );
+    }
+
+    /// The combination the flag exists for: `when` and `default` both set.
+    #[test]
+    fn default_when_skipped_with_when_and_default_is_accepted() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+            [questions.docs]
+            type = "boolean"
+            default = true
+
+            [questions.docs_accent]
+            type = "string"
+            when = "{{ docs }}"
+            default = "blue"
+            default_when_skipped = true
+            "#,
+            MANIFEST_NAME,
+        )
+        .expect("a fully-configured flag should parse");
+        assert!(manifest.questions["docs_accent"].default_when_skipped);
     }
 
     #[test]

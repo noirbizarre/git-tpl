@@ -31,7 +31,7 @@ Something is wrong with the template itself.
 | `tpl::manifest::missing` | No `template.toml` at the source. |
 | `tpl::manifest::parse` | `template.toml` is not valid TOML, or a key it declares has the wrong type. An unknown key is ignored, not diagnosed, so a misspelled one reads as unset. |
 | `tpl::manifest::name_collision` | A question and a computed value share a name. |
-| `tpl::manifest::invalid_question` | A question declaration is not coherent — see the message. Covers a `default_from` naming no source, one whose expression does not parse, and one referencing something that is not a [seed namespace](../templates/questions.md#machine-seeded-defaults). |
+| `tpl::manifest::invalid_question` | A question declaration is not coherent — see the message. Covers a `default_from` naming no source, one whose expression does not parse, one referencing something that is not a [seed namespace](../templates/questions.md#machine-seeded-defaults), and a `default_when_skipped` with no `when` to skip or no `default` to inject. |
 | `tpl::manifest::conflicting_note` | Both `note` and `note_file` are declared. Keep one. |
 | `tpl::manifest::invalid_remote` | A `[remotes]` entry has no name, no URL, or a name Git will not accept. |
 | `tpl::graph::invalid_expression` | An expression in the manifest does not parse. |
@@ -65,7 +65,7 @@ or the whole severity.
 | `tpl::lint::syntax` | error | A `.jinja` file does not parse, including in branches no answer set reaches. |
 | `tpl::lint::foreign_expression` | warning | A `${{ ... }}` MiniJinja will consume, rendering it to `$`. |
 | `tpl::lint::undeclared` | warning | A file body uses a name the template does not declare. Renders empty unless `strict = true`. |
-| `tpl::lint::unguarded_gate` | warning | A file body reads a `when`-gated question without checking `is defined`/`is not defined` or defaulting it. Absent, not null, whenever its `when` is false. |
+| `tpl::lint::unguarded_gate` | warning | A file body reads a `when`-gated question without checking `is defined`/`is not defined` or defaulting it. Absent, not null, whenever its `when` is false — unless `default_when_skipped = true`, which excludes the question from this rule. |
 | `tpl::lint::absorbed_key` | warning | A top-level manifest key is written after a table header, so TOML gives it to that table. The top-level key is never set. |
 | `tpl::lint::shadowed_name` | warning | An `{% import %}`/`{% from %}` alias, or a `set`/`with`/`for`/`macro` binding, reuses a question or computed name — the rest of the file sees the binding, not the answer, and a comparison against it is silently never true. |
 | `tpl::lint::missing_note_file` | error | `note_file` names a path the template repository does not contain. Reported without a repository, before an `init` refuses. |

@@ -118,6 +118,11 @@ It is a whole-file text search for the guard idiom, not control-flow analysis â€
 silences every read of the name in it, and one inside an imported macro is invisible, for the same reason
 `undeclared` cannot see one.
 
+A question declared with
+[`default_when_skipped = true`](../templates/questions.md#keeping-a-default-when-skipped) is excluded: its
+default fills in for a false `when`, so it is never actually absent, and a bare read of it is not the trap this
+rule warns about.
+
 ### Absorbed keys â€” `tpl::lint::absorbed_key`
 
 In TOML a bare key belongs to the table that most recently opened.

@@ -1220,6 +1220,33 @@ default = "indigo"
     assert_eq!(accent["choices"].as_array().expect("choices").len(), 2);
 }
 
+/// The opt-in ADR-025 adds (issue #117): the schema mirrors the manifest key
+/// verbatim, the same way `when` and `pattern` already do.
+#[test]
+fn default_when_skipped_is_reported_in_the_schema() {
+    let world = World::with_template(
+        r#"
+name = "gated"
+
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.docs_accent]
+type = "string"
+when = "{{ docs }}"
+default = "blue"
+default_when_skipped = true
+"#,
+        &[("file.txt.jinja", "x\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch.ask(&world.template.source());
+    assert_eq!(question(&json, "docs_accent")["defaultWhenSkipped"], true);
+    assert_eq!(question(&json, "docs")["defaultWhenSkipped"], false);
+}
+
 #[test]
 fn a_pattern_and_its_message_are_reported() {
     let world = World::with_template(

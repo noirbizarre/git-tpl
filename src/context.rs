@@ -83,6 +83,13 @@ pub struct Context {
     computed: BTreeMap<String, Value>,
     data: BTreeMap<String, Value>,
     template: BTreeMap<String, Value>,
+    // A `default_when_skipped` question's own default, injected while its
+    // `when` was false. Kept apart from `answers` on purpose: it must reach
+    // `to_minijinja`/`to_json` like any other value, but must never reach
+    // `answers()` or `answers_digest()` — the question was not answered, and
+    // recording it as one would write it back to `.config/git.tpl.toml` as
+    // though a human chose it.
+    gated_defaults: BTreeMap<String, Value>,
 }
 
 impl Context {
@@ -114,6 +121,16 @@ impl Context {
         self.data.insert(key.into(), value);
     }
 
+    /// Inject a `default_when_skipped` question's default while it is
+    /// skipped (issue #117, ADR-025).
+    ///
+    /// Deliberately not [`set_answer`](Self::set_answer): the question was
+    /// not asked, so its own default landing in `answers()` would tell
+    /// `update` and the answers digest that it was.
+    pub fn set_gated_default(&mut self, key: impl Into<String>, value: Value) {
+        self.gated_defaults.insert(key.into(), value);
+    }
+
     /// The answers, for writing back to `.config/git.tpl.toml`.
     ///
     /// Only answers are recorded. Computed values are a function of the answers
@@ -121,6 +138,15 @@ impl Context {
     /// change it for existing projects too.
     pub fn answers(&self) -> &BTreeMap<String, Value> {
         &self.answers
+    }
+
+    /// Defaults injected for skipped `default_when_skipped` questions.
+    ///
+    /// The counterpart of [`answers`](Self::answers) for values that reach a
+    /// file body without ever being answered — shown by `git tpl context` so
+    /// the distinction stays visible rather than folded silently into `flat`.
+    pub fn gated_defaults(&self) -> &BTreeMap<String, Value> {
+        &self.gated_defaults
     }
 
     /// The loaded data.
@@ -169,13 +195,16 @@ impl Context {
                 let rest = rest?;
                 return self.template.get(rest);
             }
-            // Answers and computed values are flat at the top level. Answers
-            // are checked first only because a collision is rejected at load
-            // time, so the order can never actually matter.
+            // Answers, computed values and gated defaults are flat at the top
+            // level. Checked in this order only because a collision between
+            // them is impossible by construction — a question resolves to
+            // exactly one of "answered" or "skipped-with-injected-default",
+            // never both — so the order can never actually matter.
             other => self
                 .answers
                 .get(other)
-                .or_else(|| self.computed.get(other))?,
+                .or_else(|| self.computed.get(other))
+                .or_else(|| self.gated_defaults.get(other))?,
         };
 
         match rest {
@@ -195,6 +224,9 @@ impl Context {
             root.insert(key.clone(), value.clone().into());
         }
         for (key, value) in &self.computed {
+            root.insert(key.clone(), value.clone().into());
+        }
+        for (key, value) in &self.gated_defaults {
             root.insert(key.clone(), value.clone().into());
         }
 
@@ -224,10 +256,10 @@ impl Context {
 
     /// Everything a template sees, as JSON.
     ///
-    /// `flat` mirrors [`to_minijinja`](Self::to_minijinja): answers and
-    /// computed values at the top level, `data` and `template` namespaced. A
-    /// dump that did not match what the renderer sees would be worse than
-    /// none, because it would be believed.
+    /// `flat` mirrors [`to_minijinja`](Self::to_minijinja): answers, computed
+    /// values and gated defaults at the top level, `data` and `template`
+    /// namespaced. A dump that did not match what the renderer sees would be
+    /// worse than none, because it would be believed.
     pub fn to_json(&self) -> serde_json::Value {
         let table = |map: &BTreeMap<String, Value>| {
             serde_json::to_value(Value::Table(map.clone())).unwrap_or(serde_json::Value::Null)
@@ -235,10 +267,12 @@ impl Context {
 
         let mut flat = self.answers.clone();
         flat.extend(self.computed.clone());
+        flat.extend(self.gated_defaults.clone());
 
         serde_json::json!({
             "answers": table(&self.answers),
             "computed": table(&self.computed),
+            "gatedDefaults": table(&self.gated_defaults),
             "data": table(&self.data),
             "template": table(&self.template),
             "flat": table(&flat),
@@ -297,6 +331,41 @@ mod tests {
             ctx.get_path("package_name"),
             Some(&Value::String("my-project".into()))
         );
+    }
+
+    /// A gated default is reachable exactly like an answer, but is not one —
+    /// that is the whole point of the feature (issue #117).
+    #[test]
+    fn a_gated_default_is_reachable_but_is_not_an_answer() {
+        let mut ctx = context();
+        ctx.set_gated_default("cli", Value::Bool(true));
+
+        assert_eq!(ctx.get_path("cli"), Some(&Value::Bool(true)));
+        assert!(!ctx.answers().contains_key("cli"));
+        assert_eq!(ctx.gated_defaults().get("cli"), Some(&Value::Bool(true)));
+
+        let value = ctx.to_minijinja();
+        assert!(!value.get_attr("cli").unwrap().is_undefined());
+
+        let json = ctx.to_json();
+        assert_eq!(json["flat"]["cli"], true);
+        assert_eq!(json["gatedDefaults"]["cli"], true);
+        assert!(json["answers"].get("cli").is_none());
+    }
+
+    /// The digest is recorded in commit trailers and compared across runs —
+    /// a gated default appearing or disappearing there, for a question that
+    /// was never answered, would make `update` think the answers changed.
+    #[test]
+    fn a_gated_default_does_not_change_the_answers_digest() {
+        let without = context();
+        let mut with = context();
+        with.set_gated_default("cli", Value::Bool(true));
+
+        assert_eq!(without.answers_digest(), with.answers_digest());
+        // Sanity check the setup actually differs, so the assertion above
+        // is not vacuously true.
+        assert_ne!(without.gated_defaults().len(), with.gated_defaults().len());
     }
 
     #[test]

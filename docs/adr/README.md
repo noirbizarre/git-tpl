@@ -33,3 +33,4 @@ explains the code that existed.
 | [022](022-backport-unsubstitutes.md) | Un-substitution is proved per line, and confirmed by a human |
 | [023](023-hunk-selection-precedes-the-proof.md) | Hunk selection precedes the proof, and is taken on your own edits |
 | [024](024-template-migrations.md) | A migration is a file, discovered by diffing the template's own history |
+| [025](025-default-when-skipped.md) | A question may keep its default when skipped |
