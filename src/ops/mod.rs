@@ -1442,6 +1442,23 @@ pub enum UpdateOutcome {
     },
 }
 
+/// Recorded answers first, then command-line overrides.
+///
+/// A question added to the template since the last render has no recorded
+/// answer and is prompted for. `update`, `render_preview` and `update`'s own
+/// `--dry-run` path all need exactly this order, so it lives here once
+/// instead of being copied at each call site — a divergence between copies
+/// would mean two of the three disagreed about what a project's answers
+/// actually are.
+pub fn merge_answers(
+    recorded: BTreeMap<String, Value>,
+    overrides: BTreeMap<String, Value>,
+) -> BTreeMap<String, Value> {
+    let mut supplied = recorded;
+    supplied.extend(overrides);
+    supplied
+}
+
 /// Re-render and advance the rendered ref.
 ///
 /// Never touches `HEAD`, the index or the worktree. That is structural: the
@@ -1460,11 +1477,7 @@ pub fn update(
 ) -> Result<UpdateOutcome, OpError> {
     let mut config = Config::load(project_root)?;
 
-    // Recorded answers first, then command-line overrides. A question added to
-    // the template since the last render has no recorded answer and is
-    // prompted for.
-    let mut supplied = config.answers.clone();
-    supplied.extend(overrides);
+    let supplied = merge_answers(config.answers.clone(), overrides);
 
     let rendered = render(
         project,
@@ -1477,10 +1490,6 @@ pub fn update(
         trust,
     )?;
 
-    // Before any migration is discovered or any commit created: `update`
-    // writes `.config/git.tpl.toml` back further down, and a refusal that
-    // arrived after that write would leave the recorded answers changed for
-    // a run that ultimately failed.
     enforce_strict_answers(
         strict_answers,
         &rendered.ignored_answers,
@@ -1802,13 +1811,11 @@ pub fn render_preview(
 ) -> Result<Preview, OpError> {
     let config = Config::load(project_root)?;
 
-    // Recorded answers first, then command-line overrides — the same order
-    // `update` uses. Without the recorded ones a preview would prompt for
-    // every question the project already answered, which for a
-    // non-interactive caller means hanging and for an interactive one means
-    // answering the questionnaire again to look at a diff.
-    let mut supplied = config.answers.clone();
-    supplied.extend(overrides);
+    // Without the recorded answers a preview would prompt for every question
+    // the project already answered, which for a non-interactive caller means
+    // hanging and for an interactive one means answering the questionnaire
+    // again to look at a diff.
+    let supplied = merge_answers(config.answers.clone(), overrides);
 
     let rendered = render(
         project,
