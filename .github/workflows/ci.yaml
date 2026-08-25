@@ -91,6 +91,18 @@ jobs:
           git config --global user.email "ci@example.invalid"
           git config --global init.defaultBranch main
 
+      - name: Disable Windows Defender real-time scanning
+        if: matrix.os.flag == 'windows'
+        shell: pwsh
+        # This suite spawns thousands of short-lived `git`/`git-tpl` processes and
+        # writes just as many small files into fresh temp directories per test.
+        # Defender's real-time protection inspects both, and that inspection is
+        # the standard, documented reason this workload is dramatically slower on
+        # `windows-latest` than on Linux/macOS — matching the "~4x slower" this
+        # project already lives with per `.github/codecov.yml`. The runner is
+        # destroyed at the end of the job, so there is nothing to re-enable.
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+
       - name: Run tests (with coverage)
         run: |
           cargo llvm-cov nextest --profile ci

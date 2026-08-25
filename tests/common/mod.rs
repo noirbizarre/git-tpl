@@ -156,21 +156,37 @@ impl Repo {
     /// constructors cannot drift apart. Set per-repository rather than
     /// globally so the tests cannot depend on — or disturb — the developer's
     /// own config.
+    ///
+    /// Written directly to `.git/config` instead of through five `git config`
+    /// subprocesses. Every repository this harness builds pays for this, and
+    /// the suite builds on the order of a thousand of them — on Windows,
+    /// where process creation (no `fork`) and antivirus scanning of every
+    /// spawned `git.exe` dominate, that is thousands of avoidable spawns and
+    /// most of the reason a Windows leg is several times slower than Linux or
+    /// macOS. Git's config format tolerates a section name appearing more
+    /// than once — it merges rather than requiring one write per key — so
+    /// this produces exactly the file `git config` would have, without
+    /// spawning it five times.
     fn configure(&self) {
-        // libgit2 refuses to build a signature without an identity, and a
-        // fresh CI runner has none.
-        self.git(&["config", "user.name", "Test"]);
-        self.git(&["config", "user.email", "test@example.invalid"]);
-        self.git(&["config", "commit.gpgsign", "false"]);
-        // Windows runners ship `core.autocrlf=true` globally. Rendering is
-        // deterministic, but the checkout that materialises the merge applies
-        // the repository's line-ending filters, so an inherited `autocrlf`
-        // rewrites LF to CRLF on the way into the worktree and every assertion
-        // comparing a rendered file against an LF literal fails — on Windows
-        // and nowhere else. Pin the repository rather than teach those
-        // assertions about the host's Git configuration.
-        self.git(&["config", "core.autocrlf", "false"]);
-        self.git(&["config", "core.eol", "lf"]);
+        let config_path = self.path.join(".git").join("config");
+        let mut config = std::fs::read_to_string(&config_path).expect("read git config");
+        config.push_str(
+            // `user.*`: libgit2 refuses to build a signature without an
+            // identity, and a fresh CI runner has none.
+            //
+            // `core.autocrlf` / `core.eol`: Windows runners ship
+            // `core.autocrlf=true` globally. Rendering is deterministic, but
+            // the checkout that materialises the merge applies the
+            // repository's line-ending filters, so an inherited `autocrlf`
+            // rewrites LF to CRLF on the way into the worktree and every
+            // assertion comparing a rendered file against an LF literal
+            // fails — on Windows and nowhere else. Pin the repository rather
+            // than teach those assertions about the host's Git configuration.
+            "[user]\n\tname = Test\n\temail = test@example.invalid\n\
+             [commit]\n\tgpgsign = false\n\
+             [core]\n\tautocrlf = false\n\teol = lf\n",
+        );
+        std::fs::write(&config_path, config).expect("write git config");
     }
 
     /// An existing repository at a path, with its own isolated config home.
@@ -228,9 +244,10 @@ impl Repo {
             permissions.set_mode(0o755);
             std::fs::set_permissions(&path, permissions).expect("chmod");
         }
-        // `update-index` can only speak about a tracked path, so stage it first.
-        self.git(&["add", "--", relative]);
-        self.git(&["update-index", "--chmod=+x", "--", relative]);
+        // `--add` stages the path in the same invocation as the chmod, rather
+        // than a separate `git add` first — one process instead of two, on
+        // every fixture that needs an executable bit.
+        self.git(&["update-index", "--add", "--chmod=+x", "--", relative]);
         self
     }
 
