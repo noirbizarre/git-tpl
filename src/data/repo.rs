@@ -20,7 +20,7 @@ const SCHEMES: &[&str] = &["https", "http", "ssh", "git", "file"];
 pub struct GitLocation {
     /// The repository to clone.
     pub repo: String,
-    /// The revision to read at — branch, tag or SHA, as written.
+    /// The reference to read at — branch, tag or SHA, as written.
     pub reference: String,
     /// The path inside that repository's tree.
     pub path: String,

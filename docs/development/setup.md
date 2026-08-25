@@ -53,7 +53,7 @@ src/
 ├── main.rs          the git-tpl binary
 ├── exit.rs          exit codes, defined once
 ├── config.rs        .config/git.tpl.toml
-├── gitconfig.rs     tpl.* keys and their precedence
+├── gitconfig.rs     tpl.* preferences and their precedence
 ├── refs.rs          template id → refs/tpl/<id>
 ├── provenance.rs    commit trailers
 ├── template/        manifest, questions, the Value type
@@ -69,9 +69,9 @@ src/
 ├── note.rs          terminal-safe rendering of a template's note (ADR-019)
 ├── migration.rs     discovering and applying template migrations (ADR-024)
 ├── suggest.rs       "did you mean?"
-├── data/            data source abstraction and loaders
+├── data/            data sources
 ├── git/             the Git abstraction
-│   ├── mod.rs       the GitBackend trait — our types, never git2's
+│   ├── mod.rs       GitBackend — our types, never git2's
 │   ├── ignore.rs    .gitignore evaluation, ours not libgit2's (ADR-017)
 │   └── libgit2.rs   the only implementation
 ├── ops/             orchestration, one function per command
@@ -111,7 +111,12 @@ structural — the test exists to keep it that way.
 **Rendering is deterministic.** A test renders twice and compares trees. See
 [Determinism](../concepts/determinism.md).
 
-**No code execution from templates.** No subprocess, no shell, no eval, no HTTP outside `src/data/`.
+**Template refs are append-only.** The parent is always the previous tip — `push` never forces. Rewriting a
+template ref would destroy the merge base a user's branch depends on.
+
+**No code execution from templates.** No subprocess, no shell, no eval, no HTTP data-source access outside
+`src/data/`; git-backed network access (cloning or fetching a template) is confined to `src/git/libgit2.rs` by the
+`git2`-isolation invariant above.
 
 ## Tests
 

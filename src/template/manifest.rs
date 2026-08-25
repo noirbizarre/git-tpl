@@ -126,7 +126,7 @@ pub struct DataSourceDecl {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
 
-    /// The revision a `git` source is read at — branch, tag or SHA. May be an
+    /// The reference a `git` source is read at — branch, tag or SHA. May be an
     /// expression.
     //
     // `reference`, not `ref`: `ref` is a Rust keyword, and the one-name-per-

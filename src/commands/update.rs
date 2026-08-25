@@ -235,8 +235,7 @@ fn dry_run(
     overrides: std::collections::BTreeMap<String, tpl::template::Value>,
     interactive: bool,
 ) -> Result<serde_json::Value, OpError> {
-    let mut answers = config.answers.clone();
-    answers.extend(overrides);
+    let answers = ops::merge_answers(config.answers.clone(), overrides);
 
     // The same two helpers the real run uses. Reimplementing them here dropped
     // the `--defaults` term, so `update --dry-run --defaults` prompted and

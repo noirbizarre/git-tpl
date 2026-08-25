@@ -320,7 +320,7 @@ Everything else it knows comes from a file you can point at.
 | Variable | Read for |
 |---|---|
 | `XDG_CONFIG_HOME` | Where `git-tpl/config.toml` and the global ignore file live. Honoured only when **absolute**; an empty or relative value is unset, per the XDG specification. |
-| `HOME` | The fallback for the above: `$HOME/.config`. |
+| `HOME` | The fallback for the above: `$HOME/.config`. Also where default SSH keys (`~/.ssh/id_ed25519` and the rest) are looked up when a git remote needs authenticating. |
 | `USERPROFILE` | The Windows fallback for `HOME`, and the one libgit2 itself uses. Git for Windows usually exports `HOME`, but nothing guarantees it. |
 | `NO_COLOR` | [no-color.org](https://no-color.org). Presence is the signal, whatever the value. |
 | `CLICOLOR_FORCE` | [force-color.org](https://force-color.org). Any value but `0` forces colour. |

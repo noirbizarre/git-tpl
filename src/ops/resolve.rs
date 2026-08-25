@@ -85,7 +85,7 @@ pub struct Resolved {
     pub root: String,
     /// The commit the revision resolved to.
     pub revision: Oid,
-    /// The revision as configured — a branch, tag, SHA, or `<worktree>`.
+    /// The reference as configured — a branch, tag, SHA, or `<worktree>`.
     pub reference: String,
     /// Whether an uncommitted working tree was read.
     pub dirty: bool,
