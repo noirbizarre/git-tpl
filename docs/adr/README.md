@@ -34,3 +34,4 @@ explains the code that existed.
 | [023](023-hunk-selection-precedes-the-proof.md) | Hunk selection precedes the proof, and is taken on your own edits |
 | [024](024-template-migrations.md) | A migration is a file, discovered by diffing the template's own history |
 | [025](025-default-when-skipped.md) | A question may keep its default when skipped |
+| [026](026-transparent-path-segments.md) | A rendered path piece may be `.` or fan out across `/`; only `..` and a backslash are rejected |

@@ -567,6 +567,11 @@ fn check_note_file(manifest: &Manifest, repo_entries: &[TreeEntry]) -> Vec<Findi
 /// rendered, so `{% if docs %}zensical.toml{% endif %}.jinja` is correct and
 /// collapses to nothing. Flagging it would make the check unusable on precisely
 /// the templates that need it most.
+///
+/// A transparent directory segment — `{% if use_src %}src{% else %}.{% endif
+/// %}` — is the other case that must not be flagged: the whole thing, `.`
+/// included, sits inside the `{% if %}...{% endif %}`, so there is no text
+/// outside the block and [`literal_residue`] already reports it as clean.
 fn check_path(path: &str) -> Vec<Finding> {
     let stripped = path.strip_suffix(TEMPLATE_SUFFIX).unwrap_or(path);
 
@@ -1256,6 +1261,17 @@ fn mentions(expression: &str, name: &str) -> bool {
 /// is checked structurally: two paths whose conditional segments can both
 /// collapse to the same literal will collide for *some* answer set, and finding
 /// out which one is not the author's job.
+///
+/// A known gap: [`literal_residue`] only reports the text sitting *outside* a
+/// segment's `{% if %}...{% endif %}`, not what either branch itself renders
+/// to, so it cannot tell `{% if a %}x{% endif %}` (empty when false) from
+/// `{% if a %}x{% else %}y{% endif %}` or from a transparent
+/// `{% if a %}x{% else %}.{% endif %}` (neither empty when false). All three
+/// report an empty residue, and are treated the same way below — the entry is
+/// left out of the structural comparison rather than guessed at. This
+/// under-detects a collision that only occurs through such a segment; the
+/// runtime [`crate::render::RenderError::Collision`] still catches it for the
+/// answer set that was actually rendered.
 fn check_path_collisions(entries: &[TreeEntry]) -> Vec<Finding> {
     use std::collections::BTreeMap;
 
@@ -1340,6 +1356,9 @@ mod tests {
     #[case("{% if docs %}docs{% endif %}/index.md.jinja")]
     #[case("plain/path/file.txt")]
     #[case("{{ name }}.rs.jinja")]
+    // A transparent directory segment: `.`, like the taken branch, sits
+    // entirely inside the `{% if %}...{% endif %}`, so there is no residue.
+    #[case("{% if use_src %}src{% else %}.{% endif %}/lib.rs")]
     fn a_correct_path_is_not_flagged(#[case] path: &str) {
         assert!(check_path(path).is_empty(), "{path} was flagged");
     }

@@ -58,8 +58,10 @@ pub enum RenderError {
     #[diagnostic(
         code(tpl::render::escapes_tree),
         help(
-            "a rendered path segment may not be `.`, `..`, absolute, or contain a `/`. \
-             Use separate directories in the template instead."
+            "a rendered piece may not be `..`, and may not contain a backslash — unconditionally, \
+             at any position. A segment may render `/`-separated pieces, or `.`: each is dropped \
+             in place, except at the file's own name, which has no \"above\" to promote its \
+             content to and so still rejects both."
         )
     )]
     EscapesTree {
@@ -159,10 +161,11 @@ pub struct Rendered {
     ///
     /// The only inverse of [`render_path`] there can be. It cannot be
     /// recovered by recomputation: a path segment that renders empty erases
-    /// its whole subtree, so the mapping is not onto and inverting it means
-    /// guessing which of the erased sources a name came from. `backport` needs
-    /// to name the `.jinja` its patch edits, so the mapping is kept rather
-    /// than rediscovered.
+    /// its whole subtree, and a piece rendering to `.` or fanning out across
+    /// `/` vanishes from — or reshapes — the output without erasing anything
+    /// — either way the mapping is not onto, and inverting it means guessing
+    /// which source a name came from. `backport` needs to name the `.jinja`
+    /// its patch edits, so the mapping is kept rather than rediscovered.
     pub source: String,
     /// The output bytes.
     pub content: Vec<u8>,
@@ -303,7 +306,23 @@ pub fn render_entries(
 
 /// Render a path, stripping `.jinja` and evaluating each segment.
 ///
-/// Returns `None` when a segment renders empty, meaning the entry is skipped.
+/// Each raw segment renders to one of three outcomes:
+///
+/// - Empty: the whole entry — and, for a directory, everything beneath it —
+///   is skipped. `Ok(None)`.
+/// - Anything else: the rendered value may itself contain `/`. It is split
+///   again, and each resulting *piece* is validated exactly as if it were its
+///   own segment — this is what lets one expression build a variable-depth
+///   path (`"src/pkg"`, `"pkg"`, ...) instead of forcing one `{% if %}` per
+///   level. Within that split, a piece that is empty (a leading, trailing, or
+///   doubled separator) or `.` contributes nothing and is dropped — the
+///   *transparent* case — except at the very last piece of the very last
+///   segment, the file's own basename, which has no "above" to promote its
+///   content to and so still falls through to the escape check below.
+///
+/// The actual danger was never `/` — it is `..` (a request to write outside
+/// the render root) and `\` (a separator Git itself treats differently
+/// across platforms). Both are rejected unconditionally, at any position.
 fn render_path(
     path: &str,
     context: &Context,
@@ -314,8 +333,12 @@ fn render_path(
     // in `.jinja` is not mistaken for a template file.
     let stripped = path.strip_suffix(TEMPLATE_SUFFIX).unwrap_or(path);
 
+    let raw: Vec<&str> = stripped.split('/').collect();
+    // `split` never returns an empty vector, so this cannot underflow.
+    let last_raw = raw.len() - 1;
+
     let mut segments = Vec::new();
-    for segment in stripped.split('/') {
+    for (raw_index, segment) in raw.into_iter().enumerate() {
         let rendered =
             render_string_with(segment, context, path, partials, undefined).map_err(|source| {
                 RenderError::Path {
@@ -329,19 +352,41 @@ fn render_path(
             return Ok(None);
         }
 
-        // Rejected rather than resolved. A template repository is untrusted
-        // input, and `..` here is a request to write outside the tree. The tree
-        // builder would reject it too, but the error would name a libgit2
-        // internal rather than the template file that caused it.
-        if rendered == "." || rendered == ".." || rendered.contains('/') || rendered.contains('\\')
-        {
-            return Err(RenderError::EscapesTree {
-                path: path.to_string(),
-                rendered,
-            });
-        }
+        // A rendered value may itself contain `/`: split again, and validate
+        // each piece as if it were its own segment.
+        let pieces: Vec<&str> = rendered.split('/').collect();
+        let last_piece = pieces.len() - 1;
 
-        segments.push(rendered);
+        for (piece_index, piece) in pieces.into_iter().enumerate() {
+            // The file's own name — the very last piece of the very last raw
+            // segment — has no "above" to promote its content to.
+            let is_basename = raw_index == last_raw && piece_index == last_piece;
+
+            // Empty (a leading, trailing, or doubled separator — `"src/"`,
+            // `"/etc"`, `"a//b"`) and `.` both mean "nothing here": dropped,
+            // not an error — except at the basename, where either would make
+            // the file's own name vanish.
+            if (piece.is_empty() || piece == ".") && !is_basename {
+                continue;
+            }
+
+            // Rejected rather than resolved. A template repository is
+            // untrusted input, and `..` here is a request to write outside
+            // the tree. The tree builder would reject it too, but the error
+            // would name a libgit2 internal rather than the template file
+            // that caused it.
+            if piece.is_empty() || piece == "." || piece == ".." || piece.contains('\\') {
+                return Err(RenderError::EscapesTree {
+                    path: path.to_string(),
+                    // The whole segment's value, not just the offending
+                    // piece — `a/../b` is clearer than a lone `..`, and an
+                    // empty piece on its own would show nothing at all.
+                    rendered: rendered.clone(),
+                });
+            }
+
+            segments.push(piece.to_string());
+        }
     }
 
     if segments.is_empty() {
@@ -498,6 +543,87 @@ mod tests {
         assert_eq!(rendered[0].path, ".github/workflows/ci.yml");
     }
 
+    /// A directory segment rendering to `.` is transparent: dropped, but
+    /// unlike an empty segment it does not skip anything beneath it — this is
+    /// what lets one subtree serve a variable-depth layout.
+    #[test]
+    fn a_transparent_segment_flattens_into_its_parent() {
+        let f = Fixture::new();
+        let mut context = Context::new();
+        context.set_answer("use_mid", Value::Bool(false));
+
+        let entries = [f.entry(
+            "{% if use_mid %}mid{% else %}.{% endif %}/leaf.txt",
+            b"hello",
+        )];
+
+        let rendered = f.render(&entries, &context);
+
+        assert_eq!(rendered[0].path, "leaf.txt");
+    }
+
+    #[test]
+    fn the_same_segment_keeps_the_directory_when_its_condition_holds() {
+        let f = Fixture::new();
+        let mut context = Context::new();
+        context.set_answer("use_mid", Value::Bool(true));
+
+        let entries = [f.entry(
+            "{% if use_mid %}mid{% else %}.{% endif %}/leaf.txt",
+            b"hello",
+        )];
+
+        let rendered = f.render(&entries, &context);
+
+        assert_eq!(rendered[0].path, "mid/leaf.txt");
+    }
+
+    /// A file's own name has no "above" to promote to — allowing `.` there
+    /// would let a file's name vanish and land at the path of what should
+    /// have been its own parent directory.
+    #[test]
+    fn a_transparent_marker_on_the_files_own_name_still_escapes_the_tree() {
+        let f = Fixture::new();
+        let mut context = Context::new();
+        context.set_answer("named", Value::Bool(false));
+
+        let error = render_entries(
+            &f.repo,
+            &[f.entry("dir/{% if named %}name{% else %}.{% endif %}", b"x")],
+            &context,
+            no_partials(),
+            Undefined::Lenient,
+        )
+        .unwrap_err();
+
+        std::assert_matches!(error, RenderError::EscapesTree { .. }, "{error:?}");
+    }
+
+    /// Two differently-named transparent directories flattening onto the same
+    /// leaf name still collide — transparency changes where a file lands, not
+    /// whether two files can land in the same place.
+    #[test]
+    fn two_entries_flattened_to_the_same_path_still_collide() {
+        let f = Fixture::new();
+        let mut context = Context::new();
+        context.set_answer("use_a", Value::Bool(false));
+        context.set_answer("use_b", Value::Bool(false));
+
+        let error = render_entries(
+            &f.repo,
+            &[
+                f.entry("{% if use_a %}a{% else %}.{% endif %}/leaf.txt", b"x"),
+                f.entry("{% if use_b %}b{% else %}.{% endif %}/leaf.txt", b"y"),
+            ],
+            &context,
+            no_partials(),
+            Undefined::Lenient,
+        )
+        .unwrap_err();
+
+        std::assert_matches!(error, RenderError::Collision { .. }, "{error:?}");
+    }
+
     /// A template repository is untrusted input, and `..` in a rendered path is
     /// a request to write outside the tree.
     #[test]
@@ -518,11 +644,27 @@ mod tests {
         std::assert_matches!(error, RenderError::EscapesTree { .. }, "{error:?}");
     }
 
+    /// The real danger was never `/` — it's `..` and a backslash. Once those
+    /// are checked per resulting piece, a rendered value fanning out across
+    /// `/` is exactly as safe as a literal directory of the same name.
     #[test]
-    fn a_path_segment_rendering_a_separator_is_rejected() {
+    fn a_segment_rendering_multiple_pieces_fans_out_into_real_directories() {
         let f = Fixture::new();
         let mut context = Context::new();
-        context.set_answer("evil", Value::String("a/b".into()));
+        context.set_answer("value", Value::String("a/b".into()));
+
+        let rendered = f.render(&[f.entry("{{ value }}/x", b"x")], &context);
+
+        assert_eq!(rendered[0].path, "a/b/x");
+    }
+
+    /// A fanned-out piece is validated exactly like any other segment — `..`
+    /// still escapes the tree no matter where in the split it lands.
+    #[test]
+    fn a_fanned_out_piece_equal_to_parent_dir_still_escapes_the_tree() {
+        let f = Fixture::new();
+        let mut context = Context::new();
+        context.set_answer("evil", Value::String("a/../b".into()));
 
         let error = render_entries(
             &f.repo,
@@ -534,6 +676,53 @@ mod tests {
         .unwrap_err();
 
         std::assert_matches!(error, RenderError::EscapesTree { .. }, "{error:?}");
+    }
+
+    /// A trailing separator on a directory segment is an artifact, not a
+    /// signal — dropped like any other empty piece, not an escape.
+    #[test]
+    fn a_trailing_separator_on_a_directory_segment_is_dropped() {
+        let f = Fixture::new();
+        let mut context = Context::new();
+        context.set_answer("value", Value::String("a/".into()));
+
+        let rendered = f.render(&[f.entry("{{ value }}/x", b"x")], &context);
+
+        assert_eq!(rendered[0].path, "a/x");
+    }
+
+    /// The same trailing separator on the file's own name is different: the
+    /// basename has no "above" to promote its content to, so it still
+    /// escapes the tree there.
+    #[test]
+    fn a_trailing_separator_on_the_files_own_name_still_escapes_the_tree() {
+        let f = Fixture::new();
+        let mut context = Context::new();
+        context.set_answer("value", Value::String("name/".into()));
+
+        let error = render_entries(
+            &f.repo,
+            &[f.entry("dir/{{ value }}", b"x")],
+            &context,
+            no_partials(),
+            Undefined::Lenient,
+        )
+        .unwrap_err();
+
+        std::assert_matches!(error, RenderError::EscapesTree { .. }, "{error:?}");
+    }
+
+    /// `.` is transparent wherever it lands in a fanned-out value, not only
+    /// when it is the whole segment.
+    #[test]
+    fn a_dot_piece_in_the_middle_of_a_fanned_out_value_is_dropped() {
+        let f = Fixture::new();
+        let mut context = Context::new();
+        context.set_answer("value", Value::String("a/./b".into()));
+
+        let rendered = f.render(&[f.entry("{{ value }}/x", b"x")], &context);
+
+        assert_eq!(rendered[0].path, "a/b/x");
     }
 
     /// Rendering a PNG would corrupt it, and the corruption would be silent.
