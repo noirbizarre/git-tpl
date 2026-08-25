@@ -32,7 +32,7 @@ pub const WORKTREE_REF: &str = "<worktree>";
 pub struct Provenance {
     /// The template source, as configured.
     pub source: String,
-    /// The revision that was asked for — a branch, tag or SHA.
+    /// The reference that was asked for — a branch, tag or SHA.
     pub reference: String,
     /// The commit it resolved to.
     pub revision: Oid,
