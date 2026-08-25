@@ -17,7 +17,7 @@ without touching that project's own files.
 ### With `gh skill`
 
 ```sh
-gh skill install noirbizarre/git-tpl git-tpl --agent universal --scope user --pin 0.7.0
+gh skill install noirbizarre/git-tpl git-tpl --agent universal --scope user
 ```
 
 - `--scope user` installs it once, for every project, instead of only the current repository.
@@ -35,12 +35,11 @@ location:
 
 ```sh
 mkdir -p ~/.agents/skills/git-tpl
-curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/0.7.0/skills/git-tpl/SKILL.md \
+curl -fsSL https://raw.githubusercontent.com/noirbizarre/git-tpl/main/skills/git-tpl/SKILL.md \
   -o ~/.agents/skills/git-tpl/SKILL.md
 ```
 
-Pin the ref (here `0.7.0`) to a released tag rather than `main` — the same reason you would pin any dependency: a
-moving target is a surprise later, not a convenience now.
+The skill file changes independently of git-tpl's own releases — re-run the command above to pick up updates.
 
 ## Content
 
