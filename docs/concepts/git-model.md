@@ -141,7 +141,7 @@ Template-Ref: v1.4.0
 Template-Commit: 4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29
 Answers-Digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 Data-Source: licenses = template:data/licenses.toml@4f2c1a9
-Tpl-Version: 0.7.0
+Tpl-Version: X.Y.Z
 ```
 
 The subject names the template's manifest `name` and the revision asked for.
