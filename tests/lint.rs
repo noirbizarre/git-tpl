@@ -530,6 +530,32 @@ default = "blue"
     assert!(message.contains("docs_accent"), "no name in: {message}");
 }
 
+/// The opt-in ADR-025 adds (issue #117): a question that always has a value,
+/// `when` or not, is nothing to guard against.
+#[test]
+fn a_default_when_skipped_question_read_bare_is_not_reported() {
+    let world = World::with_template(
+        r#"
+name = "probe"
+
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.docs_accent]
+type = "string"
+when = "{{ docs }}"
+default = "blue"
+default_when_skipped = true
+"#,
+        &[("mkdocs.yml.jinja", "accent: {{ docs_accent }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let output = scratch.lint(&world.template.source(), &[]).success();
+    assert!(codes(&output).is_empty(), "{:?}", codes(&output));
+}
+
 /// The three forms the docs recommend, all accepted.
 #[rstest]
 #[case("{% if docs_accent is defined %}accent: {{ docs_accent }}{% endif %}\n")]

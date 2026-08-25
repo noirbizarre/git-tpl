@@ -17,6 +17,7 @@ help = "Used for the package name and the README title"
 | `help` | string | A line of explanation under the prompt. |
 | `default` | any / expression | The pre-filled value. |
 | `when` | expression | Ask only if this evaluates truthy. |
+| `default_when_skipped` | boolean | Inject `default` into the context even when `when` is false. |
 | `choices` | array | The offered choices, for `choice` and `multi_choice`. |
 | `choices_from` | string | A reference to a list, instead of `choices`. |
 | `default_from` | string | Where the *prompt default* comes from. `git:<key>`, or an expression over `git`, `dir` and `remote`. |
@@ -113,6 +114,51 @@ empty `[[bin]]` section for libraries.
 
 [`git tpl lint`](../usage/lint.md#unguarded-gate-reads-tpllintunguarded_gate) warns (`tpl::lint::unguarded_gate`)
 about a file that reads `cli` without this guard.
+
+### Keeping a default when skipped
+
+Guarding every read is the right default, but for some questions the skipped case is never meant to differ from
+the default at the call sites that read it — migrating a template from a tool that keeps a skipped question's
+default in context is the common reason to reach for this.
+`default_when_skipped = true` opts a single question into that behaviour:
+
+```toml
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.docs_accent]
+type = "string"
+when = "{{ docs }}"
+default = "blue"
+default_when_skipped = true
+```
+
+```jinja
+accent: {{ docs_accent }}
+```
+
+`accent: blue` for every answer set now, `docs` true or false — no guard needed at this call site, or any other
+that reads `docs_accent` bare.
+
+The question is still **not asked**, and its default still does not count as an answer: it is absent from
+`.config/git.tpl.toml`, from the answers digest in the commit trailers, and from the dependency graph's notion of
+what was answered. Only what a file body sees when it reads the name bare changes.
+
+That comes at a real cost, paid deliberately: `docs_accent is defined` is now `true` whether `docs` is or is not,
+so this gives up the "not applicable vs. declined" distinction the guard idiom above exists to preserve — for
+this one question. [`git tpl lint`](../usage/lint.md#unguarded-gate-reads-tpllintunguarded_gate) stops warning
+about a bare read of it, because it is no longer a trap.
+
+Two cases this does not cover, deliberately, for a first cut:
+
+- **A `choice`/`multi_choice` question whose `choices_from` filters to nothing.** That is a different skip from a
+  false `when`, handled the same way today (absent, not null) but not extended by this flag.
+- **A `[computed]` value that reads a `default_when_skipped` question.** It sees the injected default like any
+  other reachable name — nothing extra to configure — but gatedness itself is not propagated through `computed`,
+  the same limitation `tpl::lint::unguarded_gate` already has.
+
+See [ADR-025](../adr/025-default-when-skipped.md).
 
 ## Dynamic defaults
 

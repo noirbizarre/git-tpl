@@ -109,8 +109,8 @@ An `--allow`ed finding appears nowhere and is counted nowhere.
   "template": { "name": "rust", "description": "…", "root": "template" },
   "questions": [{ "name": "crate", "order": 0, "type": "string", "prompt": "Crate name",
                   "help": null, "default": null, "defaultIsExpression": false,
-                  "when": null, "pattern": "^[a-z0-9-]+$", "message": "…",
-                  "defaultFrom": null }],
+                  "when": null, "defaultWhenSkipped": false, "pattern": "^[a-z0-9-]+$",
+                  "message": "…", "defaultFrom": null }],
   "computed": ["lib_name"],
   "data": [{ "name": "targets", "source": "data/targets.toml", "kind": "template",
              "format": "toml", "sha256": null }] }
@@ -122,6 +122,9 @@ references an earlier answer.
 `defaultIsExpression` distinguishes `"{{ crate }}"` from a literal.
 `defaultFrom` is the [machine-seeded default](../templates/questions.md#machine-seeded-defaults), which pre-fills
 a prompt and is never the answer.
+`defaultWhenSkipped` mirrors the manifest's
+[`default_when_skipped`](../templates/questions.md#keeping-a-default-when-skipped): when true, `default` reaches
+the context even while the question is skipped, though it is still never the answer.
 
 Three keys appear only when the question declares them: `choices`, an array of `{ value, label, help }`;
 `choicesFrom`, the reference a `choices_from` names; and `choicesResolved`, that reference's values, present only
@@ -132,11 +135,14 @@ remote source has no resolved form here.
 
 ```json
 { "ok": true,
-  "answers": {…}, "computed": {…}, "data": {…}, "template": {…}, "flat": {…} }
+  "answers": {…}, "computed": {…}, "gatedDefaults": {…}, "data": {…}, "template": {…}, "flat": {…} }
 ```
 
-`flat` is what a template body sees: answers and computed values merged into one table.
-`data` and `template` are not in it — they are siblings of it here, and namespaces of their own in a template.
+`flat` is what a template body sees: answers, computed values and `gatedDefaults` merged into one table.
+`gatedDefaults` holds the values injected for skipped
+[`default_when_skipped`](../templates/questions.md#keeping-a-default-when-skipped) questions — kept apart from
+`answers` because they are not answers.
+`data` and `template` are not in `flat` — they are siblings of it here, and namespaces of their own in a template.
 
 With `--eval`:
 

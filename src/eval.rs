@@ -291,6 +291,17 @@ pub fn resolve(
                         partials,
                     )?;
                     if !condition.is_truthy() {
+                        // Opt-in (issue #117, ADR-025): still not asked and
+                        // still not an answer, but a file body reading this
+                        // name bare now sees the declared default instead of
+                        // nothing, for an author who has decided the two
+                        // never need to differ here.
+                        if question.default_when_skipped
+                            && let Some(default) =
+                                resolve_default(&node.key, question, &context, partials)?
+                        {
+                            context.set_gated_default(&node.key, default);
+                        }
                         continue;
                     }
                 }
@@ -1165,6 +1176,93 @@ mod tests {
         .unwrap();
 
         assert_eq!(context.get_path("cli"), Some(&Value::Bool(true)));
+    }
+
+    const CONDITIONAL_WITH_GATED_DEFAULT: &str = r#"
+        name = "t"
+
+        [questions.project_type]
+        type = "choice"
+        choices = ["library", "application"]
+        default = "library"
+
+        [questions.cli]
+        type = "boolean"
+        when = "{{ project_type == 'application' }}"
+        default = true
+        default_when_skipped = true
+
+        [questions.project_name]
+        type = "string"
+        default = "My Project"
+
+        [questions.package_name]
+        type = "string"
+        when = "{{ project_type == 'application' }}"
+        default = "{{ project_name | lower | replace(' ', '-') }}"
+        default_when_skipped = true
+    "#;
+
+    /// The opt-in the issue asks for (#117): the default is visible, but the
+    /// question is still not asked and still not an answer.
+    #[test]
+    fn a_default_when_skipped_question_exposes_its_default_but_is_not_answered() {
+        let context = resolve_with(CONDITIONAL_WITH_GATED_DEFAULT, &[]).unwrap();
+
+        assert_eq!(context.get_path("cli"), Some(&Value::Bool(true)));
+        assert!(
+            !context.answers().contains_key("cli"),
+            "a skipped question stays unanswered even once its default is exposed"
+        );
+        assert!(context.gated_defaults().contains_key("cli"));
+    }
+
+    /// An expression default for a skipped question is evaluated the same
+    /// way an asked question's would be — against what resolved before it.
+    #[test]
+    fn a_default_when_skipped_expression_is_evaluated_against_the_resolved_context() {
+        let context = resolve_with(
+            CONDITIONAL_WITH_GATED_DEFAULT,
+            &[("project_name", Value::String("My Great Project".into()))],
+        )
+        .unwrap();
+
+        assert_eq!(
+            context.get_path("package_name"),
+            Some(&Value::String("my-great-project".into()))
+        );
+        assert!(!context.answers().contains_key("package_name"));
+    }
+
+    /// A question whose condition is true is asked normally — the flag only
+    /// changes what happens when it is skipped.
+    #[test]
+    fn a_default_when_skipped_question_is_asked_normally_once_its_when_is_true() {
+        let context = resolve_with(
+            CONDITIONAL_WITH_GATED_DEFAULT,
+            &[("project_type", Value::String("application".into()))],
+        )
+        .unwrap();
+
+        assert_eq!(context.get_path("cli"), Some(&Value::Bool(true)));
+        assert!(context.answers().contains_key("cli"));
+        assert!(!context.gated_defaults().contains_key("cli"));
+    }
+
+    /// The digest, recorded in commit trailers and compared by `status`, must
+    /// not change depending on whether a skipped question exposed its
+    /// default — only answers are input.
+    #[test]
+    fn a_gated_default_does_not_change_the_answers_digest() {
+        let with_flag = resolve_with(CONDITIONAL_WITH_GATED_DEFAULT, &[]).unwrap();
+        let without_flag = resolve_with(CONDITIONAL, &[]).unwrap();
+
+        assert_eq!(
+            with_flag.answers_digest(),
+            without_flag.answers_digest(),
+            "the two manifests answer the same questions the same way; only \
+             `cli`'s exposure to skipped file bodies differs"
+        );
     }
 
     #[test]

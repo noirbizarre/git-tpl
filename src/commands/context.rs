@@ -93,6 +93,7 @@ pub fn run(args: ContextArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
     section("Answers", rendered.context.answers());
     section("Computed", rendered.context.computed());
+    section("Gated defaults", rendered.context.gated_defaults());
     section("Template", rendered.context.template());
     section("Data", rendered.context.data());
 

@@ -964,11 +964,15 @@ fn check_unguarded_gate(
 }
 
 /// The question keys whose `when` can leave them absent from the context.
+///
+/// Excludes a `default_when_skipped` question (issue #117, ADR-025): it is
+/// never absent — its own default fills in for a false `when` — so an
+/// unguarded read of it is no longer the trap this rule exists to catch.
 fn gated_names(manifest: &Manifest) -> std::collections::BTreeSet<&str> {
     manifest
         .questions
         .iter()
-        .filter(|(_, question)| question.when.is_some())
+        .filter(|(_, question)| question.when.is_some() && !question.default_when_skipped)
         .map(|(key, _)| key.as_str())
         .collect()
 }
@@ -1536,6 +1540,30 @@ mod tests {
         assert!(
             check_unguarded_gate("mkdocs.yml.jinja", text, &manifest, partials, &foreign)
                 .is_empty()
+        );
+    }
+
+    // The opt-in the rule's own doc comment on `gated_names` names: a
+    // question that always has a value, `when` or not, is nothing to guard
+    // against either.
+    #[test]
+    fn a_default_when_skipped_question_is_never_reported() {
+        let manifest = manifest_with(
+            "[questions.docs]\ntype = \"boolean\"\ndefault = true\n\n\
+             [questions.docs_accent]\ntype = \"string\"\nwhen = \"{{ docs }}\"\n\
+             default = \"blue\"\ndefault_when_skipped = true\n",
+        );
+        let partials = crate::eval::no_partials();
+        let foreign = std::collections::BTreeSet::new();
+        assert!(
+            check_unguarded_gate(
+                "mkdocs.yml.jinja",
+                "accent: {{ docs_accent }}\n",
+                &manifest,
+                partials,
+                &foreign
+            )
+            .is_empty()
         );
     }
 

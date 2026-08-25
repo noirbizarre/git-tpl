@@ -95,6 +95,18 @@ pub struct Question {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<String>,
 
+    /// Inject `default` into the context even when `when` is false.
+    ///
+    /// The question is still not asked, and still not recorded as an answer —
+    /// only what a file body sees when it reads the name bare changes. An
+    /// author who sets this has decided that, for this one question, "absent"
+    /// and "the default" never need to differ at the call sites that read it
+    /// (issue #117). `{{ name is defined }}` becomes true either way, which is
+    /// exactly the trade-off: the "not applicable vs. declined" distinction
+    /// `when` alone gives up for this question. See ADR-025.
+    #[serde(default)]
+    pub default_when_skipped: bool,
+
     /// The choices, for `choice` and `multi_choice`.
     ///
     /// A choice is a bare string, or a table carrying a `label` and `help`
@@ -274,6 +286,7 @@ mod tests {
             help: None,
             default: Some(Value::Bool(true)),
             when: None,
+            default_when_skipped: false,
             choices: None,
             choices_from: None,
             default_from: None,
@@ -297,6 +310,7 @@ mod tests {
             help: None,
             default: None,
             when: None,
+            default_when_skipped: false,
             choices: None,
             choices_from: None,
             default_from: default_from.map(str::to_string),
@@ -321,6 +335,7 @@ mod tests {
             help: None,
             default: None,
             when: None,
+            default_when_skipped: false,
             choices: None,
             choices_from: None,
             default_from: None,

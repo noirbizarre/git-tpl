@@ -32,9 +32,10 @@ Without `--eval`, the whole context, split the way the renderer sees it:
 |---|---|
 | `answers` | What was answered or supplied. |
 | `computed` | What `[computed]` produced. |
+| `Gated defaults` (JSON: `gatedDefaults`) | Defaults injected for skipped [`default_when_skipped`](../templates/questions.md#keeping-a-default-when-skipped) questions — not answers. |
 | `template` | `template.name`, `template.description`. |
 | `data` | What each data source parsed to. |
-| `flat` (JSON only) | Answers and computed values merged, as a body sees them. |
+| `flat` (JSON only) | Answers, computed values and gated defaults merged, as a body sees them. |
 
 `flat` mirrors the renderer exactly.
 A dump that disagreed with it would be worse than none, because it would be believed.

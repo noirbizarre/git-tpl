@@ -110,6 +110,7 @@ fn describe(
             .as_deref()
             .is_some_and(is_expression),
         "when": question.when,
+        "defaultWhenSkipped": question.default_when_skipped,
         "pattern": question.pattern,
         "message": question.pattern_message(),
         "defaultFrom": question.default_from,

@@ -173,6 +173,49 @@ fn answers_supplied_on_the_command_line_reach_the_context() {
     assert_eq!(json["computed"]["package_name"], "chosen-name");
 }
 
+/// The opt-in ADR-025 adds (issue #117): a skipped question's own default
+/// reaches `flat` and its own `gatedDefaults` section, but never `answers` —
+/// the question was not asked, so it must not look like it was.
+#[test]
+fn a_default_when_skipped_question_exposes_its_default_but_not_as_an_answer() {
+    let world = common::World::with_template(
+        r#"
+name = "probe"
+
+[questions.docs]
+type = "boolean"
+default = true
+
+[questions.docs_accent]
+type = "string"
+when = "{{ docs }}"
+default = "blue"
+default_when_skipped = true
+"#,
+        &[("mkdocs.yml.jinja", "accent: {{ docs_accent }}\n")],
+    );
+    let scratch = Scratch::new();
+
+    let json = scratch
+        .run(&[
+            "--json",
+            "context",
+            &world.template.source(),
+            "--defaults",
+            "--answer",
+            "docs=false",
+        ])
+        .success()
+        .json();
+
+    assert!(
+        json["answers"].get("docs_accent").is_none(),
+        "a skipped question must not be recorded as an answer: {json}"
+    );
+    assert_eq!(json["gatedDefaults"]["docs_accent"], "blue");
+    assert_eq!(json["flat"]["docs_accent"], "blue");
+}
+
 #[test]
 fn inspecting_a_template_needs_no_repository() {
     let (_keep, template) = template();
