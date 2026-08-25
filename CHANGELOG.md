@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0](https://github.com/noirbizarre/git-tpl/compare/0.8.1..0.9.0) - 2026-08-25
+
+### 💫 Features
+
+- **questions** Let a when-gated question keep its default when skipped ([#120](https://github.com/noirbizarre/git-tpl/issues/120)) - ([4e18adc](https://github.com/noirbizarre/git-tpl/commit/4e18adc7d38d8706c12c97ea29b637fe45077d93))
+- **render** Let a path piece be `.` or fan out across `/` ([#118](https://github.com/noirbizarre/git-tpl/issues/118)) - ([f48ffaf](https://github.com/noirbizarre/git-tpl/commit/f48ffaf6baf209c84b227b6c4fa3944878710cd4))
+
+### 🐛 Bug Fixes
+
+- **lint** Report a question or computed value named after a MiniJinja builtin ([#122](https://github.com/noirbizarre/git-tpl/issues/122)) - ([dbd0aae](https://github.com/noirbizarre/git-tpl/commit/dbd0aae9b6e19da196ab43aba9a035d1c839c007))
+- **testing** Stop letting .gitignore hide a --dirty snapshot's own files ([#119](https://github.com/noirbizarre/git-tpl/issues/119)) - ([55b29bf](https://github.com/noirbizarre/git-tpl/commit/55b29bf3dbe3a6fe130de8e5a849cd326abc33be))
+
+### ⚡ Performance
+
+- **test** Cut git subprocess spawns in the repository fixture harness - ([6a57d85](https://github.com/noirbizarre/git-tpl/commit/6a57d855604702de82766106e56a9a8c11b0ba15))
+
+### 🔨 Refactor
+
+- **ops** Extract merge_answers to de-duplicate the answers merge - ([d527c41](https://github.com/noirbizarre/git-tpl/commit/d527c41a265cea5d8e0340c9e9091b2c3b54bc0f))
+- **template** Derive Error for ChoiceError instead of hand-rolled Display - ([729282a](https://github.com/noirbizarre/git-tpl/commit/729282aae368a3e5df0664f76a9f96d00acec025))
+
+### 📚 Documentation
+
+- **configuration** Document HOME's SSH-key-discovery use - ([007f6be](https://github.com/noirbizarre/git-tpl/commit/007f6be53d1dadeaf3e6082950dfecd644fb8878))
+- **setup** Complete the invariants list and fix layout-tree wording drift - ([248189d](https://github.com/noirbizarre/git-tpl/commit/248189d3f31ea1c1a4a9957eb8d6ec8bf13b35c5))
+- **skill** Drop version pinning from install instructions - ([7cc131d](https://github.com/noirbizarre/git-tpl/commit/7cc131df31ff733075a6262f0ba54e3bbfe3dd5c))
+- **src** Stop calling a reference field a revision in doc comments - ([4fa3626](https://github.com/noirbizarre/git-tpl/commit/4fa3626c168f6bf83c57ad394bb1152cbdf836c6))
+- Clarify AGENTS.md invariant 5's network-access scope - ([2344148](https://github.com/noirbizarre/git-tpl/commit/2344148ea5f26ab5e482e224b03d008e7854cac6))
+- Replace the stale 0.7.0 example version with a version-agnostic placeholder - ([9576272](https://github.com/noirbizarre/git-tpl/commit/9576272be475e63a13b4b9a69c8199e94c09308f))
+
+### 🔧 CI
+
+- Disable windows defender real-time scanning for the test job - ([37b0951](https://github.com/noirbizarre/git-tpl/commit/37b09510c0696ba36208d0e78ef354e83d99a405))
+
+## ❤️ New Contributors
+
+* @ made their first contribution
 ## [0.8.1](https://github.com/noirbizarre/git-tpl/compare/0.8.0..0.8.1) - 2026-08-24
 
 ### 🐛 Bug Fixes
