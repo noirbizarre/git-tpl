@@ -1,6 +1,7 @@
 //! A single offered choice.
 
 use serde::{Deserialize, Serialize, Serializer, de};
+use thiserror::Error;
 
 use super::Value;
 
@@ -154,35 +155,29 @@ impl Serialize for Choice {
 }
 
 /// Why a value could not be read as a choice.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// No `Diagnostic`/`tpl::` code here, unlike most error types: a `ChoiceError`
+/// never reaches a diagnostic on its own — `eval.rs` folds it into
+/// `EvalError::BadChoices` (`tpl::eval::bad_choices`) via `to_string()`, so a
+/// code of its own would be unreachable and would undercut "codes are the
+/// stable surface".
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ChoiceError {
     /// A table with no `value` key.
+    #[error("a choice table needs a `value` key")]
     MissingValue,
     /// A choice whose value is not a string.
+    #[error("a choice value must be a string, found {found}")]
     NonStringValue {
         /// What was found instead.
         found: String,
     },
     /// A manifest choice carrying a key git-tpl does not know.
+    #[error("unknown key `{key}` in a choice; expected one of `value`, `label`, `help`")]
     UnknownKey {
         /// The offending key.
         key: String,
     },
-}
-
-impl std::fmt::Display for ChoiceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ChoiceError::MissingValue => write!(f, "a choice table needs a `value` key"),
-            ChoiceError::NonStringValue { found } => {
-                write!(f, "a choice value must be a string, found {found}")
-            }
-            ChoiceError::UnknownKey { key } => write!(
-                f,
-                "unknown key `{key}` in a choice; expected one of `value`, `label`, `help`"
-            ),
-        }
-    }
 }
 
 #[cfg(test)]
