@@ -17,6 +17,9 @@ git tpl --json questions ./my-template
 | `--dirty` | Read the template's working tree rather than its `HEAD`. Local templates only. |
 | [`--json`](../reference/json.md#questions) | A global flag. The schema on stdout as one object. |
 
+`--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser. With neither, a local
+template reads its checked-out branch's `HEAD`; a URL reads the remote's default branch.
+
 `--dirty` is the one to reach for while authoring: it shows the schema a question you have just added produces,
 before you commit it.
 

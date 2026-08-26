@@ -55,3 +55,6 @@ Takes the same answer flags as [`render`](render.md) — `--answer`, `--answers-
 
 `--trust` is not an answer flag, and it matters here: a template with a network data source will otherwise
 prompt, or fail outright where there is nobody to ask — which is exactly the case this command is used to debug.
+
+`--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser. With neither, a local
+template resolves its checked-out branch's `HEAD`; a URL resolves the remote's default branch.

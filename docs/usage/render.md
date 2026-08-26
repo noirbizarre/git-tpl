@@ -26,6 +26,9 @@ index or the worktree, and this is a different command whose entire purpose is a
 | `--strict-answers` | Fail on an answer that names no question. |
 | `--trust` | Allow remote data sources without asking. |
 
+`--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser. With neither, a local
+template renders its checked-out branch's `HEAD`; a URL renders the remote's default branch.
+
 ## The output directory is cleared, not merged into
 
 A template that stops producing a file has to be seen to stop.

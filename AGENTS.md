@@ -31,10 +31,13 @@ project.
 4. **`git2` appears only in `src/git/libgit2.rs`.** The `git-backend-isolation` prek hook fails the commit otherwise.
    If you need a Git capability, add it to the `GitBackend` trait — do not import `git2` "just this once".
 
-5. **Templates cannot execute code.** No subprocess, no shell, no eval, no hooks. HTTP data-source access exists
-   only in `src/data/` — the `http-isolation` prek hook fails the commit otherwise; git-backed network access
-   (cloning or fetching a template) is confined to `src/git/libgit2.rs` by invariant 4. Template repositories and
-   remote data are untrusted input.
+5. **Templates cannot execute code.** No subprocess, no shell, no eval, no hooks — true without qualification of
+   `render`, `init` and `update`. HTTP data-source access exists only in `src/data/` — the `http-isolation` prek
+   hook fails the commit otherwise; git-backed network access (cloning or fetching a template) is confined to
+   `src/git/libgit2.rs` by invariant 4. Template repositories and remote data are untrusted input. The one narrow,
+   deliberate exception is `git tpl test`'s `[commands]` (ADR-027): the test *harness* — never a render — may spawn
+   a process, because running `test` at all is the same consent as cloning a repository and running its own test
+   suite. `src/ops/testing.rs` is the only place in `src/` that spawns one.
 
 ## Layout
 

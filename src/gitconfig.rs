@@ -16,6 +16,7 @@ mod keys {
     pub const REMOTE: &str = "tpl.remote";
     pub const AUTO_PUSH: &str = "tpl.autoPush";
     pub const INTERACTIVE: &str = "tpl.interactive";
+    pub const TEST_COMMANDS: &str = "tpl.testCommands";
 }
 
 /// Read an arbitrary Git configuration value, to seed a prompt.
@@ -43,6 +44,8 @@ pub struct Preferences {
     pub auto_push: bool,
     /// Whether to prompt for unanswered questions.
     pub interactive: bool,
+    /// Whether `git tpl test` runs a case's `[commands]` at all. See ADR-027.
+    pub test_commands: bool,
 }
 
 impl Default for Preferences {
@@ -54,6 +57,10 @@ impl Default for Preferences {
             // template just added, are each worse than the extra command.
             auto_push: false,
             interactive: true,
+            // Opt-out, not opt-in: a suite whose setup/teardown silently
+            // never ran would report false confidence, which is worse than
+            // the machine it happens to run on having no sandboxing story.
+            test_commands: true,
         }
     }
 }
@@ -77,6 +84,9 @@ impl Preferences {
             interactive: repo
                 .config_bool(keys::INTERACTIVE)?
                 .unwrap_or(defaults.interactive),
+            test_commands: repo
+                .config_bool(keys::TEST_COMMANDS)?
+                .unwrap_or(defaults.test_commands),
         })
     }
 
@@ -93,6 +103,14 @@ impl Preferences {
         }
         if overrides.non_interactive {
             self.interactive = false;
+        }
+        // `--skip-commands` can only disable, mirroring `non_interactive`
+        // above and unlike `push`: there is no way to force `[commands]` back
+        // on from the command line once `tpl.testCommands false` has said no
+        // — running `git tpl test` at all is already all the consent this
+        // needs (ADR-027), so a flag has nothing left to grant.
+        if overrides.skip_commands {
+            self.test_commands = false;
         }
         self
     }
@@ -121,6 +139,8 @@ pub struct Overrides<'a> {
     pub push: bool,
     /// `--defaults`: there is nobody to prompt.
     pub non_interactive: bool,
+    /// `--skip-commands`.
+    pub skip_commands: bool,
 }
 
 /// The refspec that pushes one template ref.
@@ -151,6 +171,7 @@ mod tests {
         assert_eq!(preferences.remote, "origin");
         assert!(!preferences.auto_push, "pushing must be opt-in");
         assert!(preferences.interactive);
+        assert!(preferences.test_commands, "commands run unless disabled");
     }
 
     #[test]
@@ -159,12 +180,32 @@ mod tests {
         repo.set_config_str("tpl.remote", "upstream").unwrap();
         repo.set_config_bool("tpl.autoPush", true).unwrap();
         repo.set_config_bool("tpl.interactive", false).unwrap();
+        repo.set_config_bool("tpl.testCommands", false).unwrap();
 
         let preferences = Preferences::load(&repo).unwrap();
 
         assert_eq!(preferences.remote, "upstream");
         assert!(preferences.auto_push);
         assert!(!preferences.interactive);
+        assert!(!preferences.test_commands);
+    }
+
+    /// `--skip-commands` can turn `[commands]` off; nothing can force it back
+    /// on once configuration has said no.
+    #[test]
+    fn skip_commands_can_only_disable() {
+        let (_dir, repo) = repo();
+        repo.set_config_bool("tpl.testCommands", false).unwrap();
+
+        let preferences = Preferences::load(&repo).unwrap().with_overrides(Overrides {
+            skip_commands: false,
+            ..Default::default()
+        });
+
+        assert!(
+            !preferences.test_commands,
+            "an absent --skip-commands must not re-enable what configuration disabled"
+        );
     }
 
     #[test]

@@ -88,7 +88,7 @@ the expanded URL that is recorded in the project, so the shortcut never leaves y
 | Option | Meaning |
 |---|---|
 | `<dir>` | Where to render it. Defaults to the current directory. Everything else — a template given as a path, `--answers-from` — stays relative to where you ran the command, not to `<dir>`. |
-| `--ref <ref>` | Branch, tag or commit. Defaults to the remote's default branch. |
+| `--ref <ref>` | Branch, tag or commit. Defaults to a local template's checked-out branch, or a URL's remote default branch. |
 | `--init` | Create the directory and the repository if there is not one here. |
 | `--answer k=v` | Supply an answer, skipping its prompt. Repeatable. |
 | `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
@@ -100,6 +100,8 @@ the expanded URL that is recorded in the project, so the shortcut never leaves y
 | `--no-merge` | Create the ref, do not merge it. |
 | `--dirty` | Render the template's working tree rather than its `HEAD`. Local templates only. |
 | `--dry-run` | Report what would be asked and rendered; create nothing. |
+
+`--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser.
 
 ## Example
 

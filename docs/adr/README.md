@@ -35,3 +35,4 @@ explains the code that existed.
 | [024](024-template-migrations.md) | A migration is a file, discovered by diffing the template's own history |
 | [025](025-default-when-skipped.md) | A question may keep its default when skipped |
 | [026](026-transparent-path-segments.md) | A rendered path piece may be `.` or fan out across `/`; only `..` and a backslash are rejected |
+| [027](027-test-case-commands.md) | A test case may declare commands, run by the harness alone |

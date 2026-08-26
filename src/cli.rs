@@ -137,7 +137,7 @@ pub struct InitArgs {
     pub directory: Option<PathBuf>,
 
     /// Branch, tag or commit to render
-    #[arg(long, value_name = "REF")]
+    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
     pub r#ref: Option<String>,
 
     /// Override the derived template id, and so the ref name
@@ -181,7 +181,7 @@ pub struct InitArgs {
 #[derive(Debug, clap::Args)]
 pub struct UpdateArgs {
     /// Render this revision instead of the configured one
-    #[arg(long, value_name = "REF")]
+    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
     pub r#ref: Option<String>,
 
     #[command(flatten)]
@@ -276,7 +276,7 @@ pub struct RenderArgs {
     pub output: PathBuf,
 
     /// The branch, tag or commit to render
-    #[arg(long, value_name = "REF")]
+    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
     pub r#ref: Option<String>,
 
     /// Render this subdirectory instead of the manifest's root
@@ -307,7 +307,7 @@ pub struct LintArgs {
     pub template: String,
 
     /// The branch, tag or commit to check
-    #[arg(long, value_name = "REF")]
+    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
     pub r#ref: Option<String>,
 
     /// Check this subdirectory instead of the manifest's root
@@ -356,7 +356,7 @@ pub struct TestArgs {
     pub tests: Option<String>,
 
     /// The branch, tag or commit to test
-    #[arg(long, value_name = "REF")]
+    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
     pub r#ref: Option<String>,
 
     /// Test this subdirectory instead of the manifest's root
@@ -374,6 +374,14 @@ pub struct TestArgs {
     /// Allow the template's remote data sources without asking
     #[arg(long)]
     pub trust: bool,
+
+    /// Skip a case's `[commands]`, if it has any
+    ///
+    /// `tpl.testCommands` can already disable this by default; this flag
+    /// only disables further — there is no way to force commands back on
+    /// from the command line once configuration has said no.
+    #[arg(long)]
+    pub skip_commands: bool,
 }
 
 /// `git tpl backport`
@@ -441,7 +449,7 @@ pub struct QuestionsArgs {
     pub template: String,
 
     /// The branch, tag or commit to inspect
-    #[arg(long, value_name = "REF")]
+    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
     pub r#ref: Option<String>,
 
     /// Read this subdirectory instead of the manifest's root
@@ -461,7 +469,7 @@ pub struct ContextArgs {
     pub template: String,
 
     /// The branch, tag or commit to resolve
-    #[arg(long, value_name = "REF")]
+    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
     pub r#ref: Option<String>,
 
     /// Use this subdirectory instead of the manifest's root
@@ -813,6 +821,41 @@ mod tests {
     fn init_requires_a_template() {
         assert!(Cli::try_parse_from(["git-tpl", "init"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "init", "../tpl"]).is_ok());
+    }
+
+    /// `--dirty` reads the working tree; `--ref` names a committed revision.
+    /// Combined, `--dirty` used to win silently and `--ref` had no effect at
+    /// all — refusing the combination is better than a flag that is accepted
+    /// and then ignored.
+    #[test]
+    fn ref_and_dirty_are_mutually_exclusive_everywhere_both_exist() {
+        assert!(Cli::try_parse_from(["git-tpl", "init", "t", "--ref", "main", "--dirty"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "update", "--ref", "main", "--dirty"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "git-tpl", "render", "t", "-o", "out", "--ref", "main", "--dirty"
+            ])
+            .is_err()
+        );
+        assert!(Cli::try_parse_from(["git-tpl", "lint", "t", "--ref", "main", "--dirty"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "test", "t", "--ref", "main", "--dirty"]).is_err());
+        assert!(
+            Cli::try_parse_from(["git-tpl", "questions", "t", "--ref", "main", "--dirty"]).is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["git-tpl", "context", "t", "--ref", "main", "--dirty"]).is_err()
+        );
+    }
+
+    /// `--skip-commands` can only disable `[commands]`; it takes no value and
+    /// is accepted on its own.
+    #[test]
+    fn test_accepts_skip_commands() {
+        let cli = Cli::try_parse_from(["git-tpl", "test", "--skip-commands"]).unwrap();
+        let Command::Test(args) = cli.command else {
+            panic!("expected test")
+        };
+        assert!(args.skip_commands);
     }
 
     #[test]

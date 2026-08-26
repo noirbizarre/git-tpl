@@ -191,7 +191,10 @@ fn the_snapshots_directory_is_not_mistaken_for_a_case() {
     let template = template(
         dir.path(),
         &[
-            ("tests/minimal.toml", "[answers]\nproject_name = \"a\"\n"),
+            (
+                "tests/minimal.toml",
+                "snapshot = true\n[answers]\nproject_name = \"a\"\n",
+            ),
             // A snapshot manifest is not a case, and neither is a snapshotted
             // TOML file — which this deliberately is.
             (
@@ -610,7 +613,7 @@ fn write_records_the_rendered_tree_under_the_snapshots_directory() {
         dir.path(),
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
         )],
     );
 
@@ -636,7 +639,7 @@ fn a_recorded_snapshot_is_compared_on_the_next_run() {
         dir.path(),
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
         )],
     );
 
@@ -670,7 +673,9 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
             (".gitignore", "!mise.toml\n"),
         ],
     );
-    template.repo.write("tests/case.toml", "[answers]\n");
+    template
+        .repo
+        .write("tests/case.toml", "snapshot = true\n[answers]\n");
     template.repo.commit_all("test: a case");
 
     // The rule the whole bug depends on, in an isolated config so the test
@@ -702,7 +707,10 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
 #[test]
 fn a_snapshot_whose_manifest_matches_an_ordinary_gitignore_rule_reads_back() {
     let dir = tempfile::tempdir().unwrap();
-    let template = template(dir.path(), &[("tests/case.toml", "[answers]\n")]);
+    let template = template(
+        dir.path(),
+        &[("tests/case.toml", "snapshot = true\n[answers]\n")],
+    );
     template.repo.write(".gitignore", "MANIFEST\n");
     template.repo.commit_all("test: an ordinary MANIFEST rule");
 
@@ -744,7 +752,7 @@ fn a_changed_template_makes_the_snapshot_diff_name_the_file() {
         dir.path(),
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
         )],
     );
 
@@ -778,7 +786,7 @@ fn write_over_an_existing_snapshot_removes_files_the_template_no_longer_produces
         dir.path(),
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\nwith_ci = true\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\nwith_ci = true\n",
         )],
     );
 
@@ -795,7 +803,7 @@ fn write_over_an_existing_snapshot_removes_files_the_template_no_longer_produces
     // would let the author conclude their conditional works.
     template.repo.write(
         "tests/minimal.toml",
-        "[answers]\nproject_name = \"thing\"\nwith_ci = false\n",
+        "snapshot = true\n[answers]\nproject_name = \"thing\"\nwith_ci = false\n",
     );
     template.repo.commit_all("test: turn CI off");
 
@@ -817,7 +825,7 @@ fn write_reports_a_snapshot_that_did_not_change_as_unchanged() {
         dir.path(),
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
         )],
     );
 
@@ -839,7 +847,10 @@ fn a_case_with_no_snapshot_is_not_a_failure() {
     let template = template(
         dir.path(),
         &[
-            ("tests/recorded.toml", "[answers]\nproject_name = \"a\"\n"),
+            (
+                "tests/recorded.toml",
+                "snapshot = true\n[answers]\nproject_name = \"a\"\n",
+            ),
             ("tests/bare.toml", "[answers]\nproject_name = \"b\"\n"),
         ],
     );
@@ -853,6 +864,103 @@ fn a_case_with_no_snapshot_is_not_a_failure() {
     assert_eq!(json["cases"][1]["snapshot"], "compared", "recorded");
 }
 
+/// Explicit opt-in must be enforced, not silently skipped: a case that says
+/// `snapshot = true` but was never recorded (no prior `--write`) fails
+/// outright rather than reporting `none`.
+#[test]
+fn snapshot_true_with_nothing_recorded_yet_is_a_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
+        )],
+    );
+
+    let output = run(&template, &["--json"]).code(1);
+    let json = output.json();
+    assert_eq!(json["cases"][0]["snapshot"], "none");
+    assert_eq!(json["cases"][0]["failures"][0]["kind"], "snapshotMissing");
+}
+
+/// `--write` only records a snapshot for a case that asked for one — a case
+/// with `snapshot` unset must not get a `__snapshots__` directory at all,
+/// even under `--write`.
+#[test]
+fn write_does_not_record_a_snapshot_for_a_case_that_did_not_ask_for_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[("tests/bare.toml", "[answers]\nproject_name = \"a\"\n")],
+    );
+
+    let output = run(&template, &["--json", "--write"]).success();
+    assert_eq!(output.json()["cases"][0]["snapshot"], "none");
+    assert!(
+        !template.repo.path.join("tests/__snapshots__/bare").exists(),
+        "a case that never asked for a snapshot must not get one written"
+    );
+}
+
+/// `snapshot = true` combined with `expect.error` is a contradiction — a
+/// render that never succeeds has nothing to snapshot — refused at parse
+/// time, the same way `expect.error` with `expect.files` already is.
+#[test]
+fn snapshot_true_cannot_combine_with_expect_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "snapshot = true\n[answers]\nproject_name = \"a\"\n\n\
+             [expect]\nerror = \"tpl::eval::unanswered\"\n",
+        )],
+    );
+
+    let output = run(&template, &["--json"]).failure();
+    assert_eq!(output.error_code(), "tpl::testing::case_shape");
+}
+
+/// `commands.rendered`/`commands.after` need a rendering to run against, so
+/// `expect.error` — which says the render never succeeds — cannot combine
+/// with either, the same contradiction `expect.error` already refuses for
+/// `files`/`absent`/`contains`/`lacks`.
+#[test]
+fn commands_rendered_cannot_combine_with_expect_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\nproject_name = \"a\"\n\n\
+             [expect]\nerror = \"tpl::eval::unanswered\"\n\n\
+             [commands]\nrendered = [\"ls\"]\n",
+        )],
+    );
+
+    let output = run(&template, &["--json"]).failure();
+    assert_eq!(output.error_code(), "tpl::testing::case_shape");
+}
+
+/// An unknown `[commands]` key is refused with a suggestion, the same
+/// strictness the top-level and `[expect]` keys already get.
+#[test]
+fn an_unknown_commands_key_is_refused_with_a_suggestion() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n[commands]\nbefor = [\"ls\"]\n",
+        )],
+    );
+
+    let output = run(&template, &["--json"]).failure();
+    assert_eq!(output.error_code(), "tpl::testing::case_shape");
+    assert!(output.stdout.contains("before"), "{}", output.stdout);
+}
+
 #[cfg(unix)]
 #[test]
 fn the_snapshot_manifest_records_the_executable_bit() {
@@ -863,7 +971,9 @@ fn the_snapshot_manifest_records_the_executable_bit() {
         &[("run.sh", "#!/bin/sh\necho hi\n")],
     );
     built.repo.make_executable("template/run.sh");
-    built.repo.write("tests/c.toml", "[answers]\n");
+    built
+        .repo
+        .write("tests/c.toml", "snapshot = true\n[answers]\n");
     built.repo.commit_all("test: an executable");
 
     run(&built, &["--write"]).success();
@@ -897,7 +1007,9 @@ fn a_binary_file_round_trips_through_a_snapshot_without_a_patch() {
     let built = Template::minimal(dir.path(), "name = \"bin\"\n", &[]);
     std::fs::create_dir_all(built.repo.path.join("template")).unwrap();
     std::fs::write(built.repo.path.join("template/logo.png"), [0u8, 1, 2, 3]).unwrap();
-    built.repo.write("tests/c.toml", "[answers]\n");
+    built
+        .repo
+        .write("tests/c.toml", "snapshot = true\n[answers]\n");
     built.repo.commit_all("test: a binary file");
 
     run(&built, &["--write"]).success();
@@ -953,7 +1065,10 @@ fn write_does_not_stage_or_commit_the_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(
         dir.path(),
-        &[("tests/c.toml", "[answers]\nproject_name = \"a\"\n")],
+        &[(
+            "tests/c.toml",
+            "snapshot = true\n[answers]\nproject_name = \"a\"\n",
+        )],
     );
     let before = template.repo.git(&["rev-parse", "HEAD"]);
 
@@ -978,7 +1093,7 @@ fn write_still_fails_a_case_whose_expectations_are_unmet() {
         dir.path(),
         &[(
             "tests/c.toml",
-            "[answers]\nproject_name = \"a\"\n\n[expect]\nfiles = [\"nope\"]\n",
+            "snapshot = true\n[answers]\nproject_name = \"a\"\n\n[expect]\nfiles = [\"nope\"]\n",
         )],
     );
 
@@ -1002,7 +1117,7 @@ fn corrupted_snapshot(dir: &Path, corrupt: impl Fn(&Template)) -> common::Output
         dir,
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
         )],
     );
     run(&built, &["--write"]).success();
@@ -1093,7 +1208,7 @@ fn write_over_a_changed_snapshot_reports_it_as_updated() {
         dir.path(),
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
         )],
     );
     run(&built, &["--write"]).success();
@@ -1220,7 +1335,10 @@ fn a_snapshot_that_cannot_be_written_names_the_path_and_the_reason() {
     let dir = tempfile::tempdir().unwrap();
     let built = template(
         dir.path(),
-        &[("tests/c.toml", "[answers]\nproject_name = \"a\"\n")],
+        &[(
+            "tests/c.toml",
+            "snapshot = true\n[answers]\nproject_name = \"a\"\n",
+        )],
     );
 
     let tests_dir = built.repo.path.join("tests");
@@ -1378,7 +1496,7 @@ fn the_human_output_of_a_snapshot_difference_says_how_to_re_record_it() {
         dir.path(),
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
         )],
     );
     run(&built, &["--write"]).success();
@@ -1410,7 +1528,7 @@ fn the_human_output_reports_what_write_did_to_each_snapshot() {
         dir.path(),
         &[(
             "tests/minimal.toml",
-            "[answers]\nproject_name = \"thing\"\n",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
         )],
     );
 
