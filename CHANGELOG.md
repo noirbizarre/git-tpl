@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0](https://github.com/noirbizarre/git-tpl/compare/0.9.0..0.10.0) - 2026-08-26
+
+### 💫 Features
+
+- **testing**  🚨 **breaking** Replace git tpl test --trust with a per-case trust attribute ([#127](https://github.com/noirbizarre/git-tpl/issues/127)) - ([ce1e747](https://github.com/noirbizarre/git-tpl/commit/ce1e7470e98282319b542b0fad7335bf94961b9d))
+- **testing** Let a test case run commands and opt explicitly into a snapshot - ([40515ec](https://github.com/noirbizarre/git-tpl/commit/40515ec08231cbad9f3ae6dee98bed9aa6028681))
+
+### 🐛 Bug Fixes
+
+- **cli** Refuse --ref together with --dirty instead of silently discarding --ref - ([83fd89c](https://github.com/noirbizarre/git-tpl/commit/83fd89c55cf3f1bbd7767b4ea26f527aa3542cd9))
+
 ## [0.9.0](https://github.com/noirbizarre/git-tpl/compare/0.8.1..0.9.0) - 2026-08-25
 
 ### 💫 Features
