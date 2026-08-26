@@ -195,6 +195,8 @@ then an error.
 | `--remote <name>` | The remote `--push` uses. Default `origin`, or `tpl.remote`. |
 | `--dry-run` | Report what would change; write nothing. |
 
+`--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser.
+
 ## Machine-readable output
 
 `git tpl --json update` emits its outcome on stdout as a single JSON object, with the prose on stderr.

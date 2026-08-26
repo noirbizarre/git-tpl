@@ -220,12 +220,15 @@ warning to catch it.
 | Flag | Effect |
 |---|---|
 | `<template>` | The template — a Git URL or a path. Defaults to `.`. |
-| `--ref` | Branch, tag or commit to check. Defaults to the remote's default branch. |
+| `--ref` | Branch, tag or commit to check. |
 | `--root` | Check this subdirectory instead of the manifest's. |
 | `--dirty` | Include the template's uncommitted changes. Local templates only. |
 | `-D`, `--deny <CODE\|warnings>` | The finding fails the lint. Repeatable. |
 | `-A`, `--allow <CODE\|warnings>` | The finding is not reported at all. Repeatable. |
 | [`--json`](../reference/json.md#lint) | A global flag. The findings on stdout as one object. |
+
+`--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser. With neither, a local
+template checks its checked-out branch's `HEAD`; a URL checks the remote's default branch.
 
 ## Choosing what fails
 
