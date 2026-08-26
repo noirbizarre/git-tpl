@@ -1547,10 +1547,10 @@ fn the_human_output_reports_what_write_did_to_each_snapshot() {
 }
 
 #[test]
-fn trust_allows_a_remote_data_source_without_asking() {
+fn a_case_trusts_a_remote_data_source_by_default() {
     let dir = tempfile::tempdir().unwrap();
-    // The source is never reachable. What is under test is that `--trust`
-    // takes the decision without a prompt — so the failure is the fetch, not a
+    // The source is never reachable. What is under test is that an omitted
+    // `trust` decides without a prompt — so the failure is the fetch, not a
     // refusal, and certainly not a hang waiting for an answer nobody can give.
     let built = Template::minimal(
         dir.path(),
@@ -1565,13 +1565,49 @@ source = "https://127.0.0.1:1/things.toml"
     built.repo.write("tests/c.toml", "[answers]\n");
     built.repo.commit_all("test: a remote source");
 
-    let output = run(&built, &["--json", "--trust"]).code(1);
+    let output = run(&built, &["--json"]).code(1);
     let failure = &output.json()["cases"][0]["failures"][0];
     assert_eq!(failure["kind"], "unexpectedError");
     assert_ne!(
         failure["code"], "tpl::data::untrusted",
-        "--trust decides, so the source is reached rather than refused"
+        "trust defaults to true, so the source is reached rather than refused"
     );
+}
+
+#[test]
+fn a_case_with_trust_false_refuses_a_remote_data_source() {
+    let dir = tempfile::tempdir().unwrap();
+    // Unlike the default-trust case above, this source does not even need to
+    // be reachable in principle: `trust = false` refuses it before anything
+    // touches the network, which is exactly what makes the refused path
+    // testable at all without a TTY or a live host to refuse a connection.
+    let built = Template::minimal(
+        dir.path(),
+        r#"
+name = "remote-data"
+
+[data.things]
+source = "https://127.0.0.1:1/things.toml"
+"#,
+        &[("a.txt.jinja", "{{ data.things.name }}\n")],
+    );
+    built.repo.write(
+        "tests/c.toml",
+        "trust = false\n\n[expect]\nerror = \"tpl::data::untrusted\"\n",
+    );
+    built.repo.commit_all("test: an untrusted remote source");
+
+    run(&built, &["--json"]).success();
+}
+
+#[test]
+fn git_tpl_test_no_longer_accepts_a_trust_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(dir.path(), &[("tests/c.toml", "[answers]\n")]);
+
+    run(&built, &["--trust"])
+        .failure()
+        .says("unexpected argument");
 }
 
 // --- behaviour and plumbing -------------------------------------------------

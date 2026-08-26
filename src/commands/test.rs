@@ -11,7 +11,6 @@ use tpl::ops::{self, OpError, Target};
 
 use super::{Standalone, report_ignored_paths};
 use crate::cli::{GlobalArgs, TestArgs};
-use crate::prompt::Confirmer;
 use crate::theme::{field, heading, muted, warning};
 
 pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
@@ -19,7 +18,6 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let source = ctx.user.expand(&args.template).into_owned();
     let run_commands = test_commands_enabled(args.skip_commands)?;
 
-    let mut confirmer = Confirmer;
     let report = ops::testing::run(
         Target {
             source: &source,
@@ -32,9 +30,6 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         args.write,
         run_commands,
         &ctx.user,
-        // The runner confirms once for the whole run, so this gate is consulted
-        // at most once however many cases there are.
-        trust_for(args.trust, &mut confirmer),
     )?;
 
     report_ignored_paths(&ctx.out, &report.template.ignored);
@@ -52,22 +47,6 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     } else {
         crate::exit::SUCCESS
     })
-}
-
-/// The trust gate.
-///
-/// Built here rather than by [`super::trust`], which reads `--defaults` to
-/// decide whether there is anybody to ask. `test` has no `--defaults`: it is
-/// *always* non-interactive about questions, because a prompt in a test runner
-/// is a hang. That says nothing about trust — a person running `git tpl test`
-/// at a terminal can still answer "may this template reach that host?", and it
-/// is asked once for the whole run.
-fn trust_for(trusted: bool, confirmer: &mut Confirmer) -> ops::Trust<'_> {
-    if trusted {
-        ops::Trust::always()
-    } else {
-        ops::Trust::Ask(confirmer)
-    }
 }
 
 /// Whether this run's `[commands]` execute at all. See ADR-027.

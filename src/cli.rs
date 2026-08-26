@@ -371,10 +371,6 @@ pub struct TestArgs {
     #[arg(long)]
     pub write: bool,
 
-    /// Allow the template's remote data sources without asking
-    #[arg(long)]
-    pub trust: bool,
-
     /// Skip a case's `[commands]`, if it has any
     ///
     /// `tpl.testCommands` can already disable this by default; this flag

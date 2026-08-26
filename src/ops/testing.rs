@@ -1,12 +1,13 @@
 //! `git tpl test` — running a template's own test cases.
 //!
-//! A case is *data*: an answer set, a set of expectations and, since ADR-027,
-//! a list of commands, written in the template repository and read by the
-//! same parsers `--answers-from` uses. The assertion vocabulary is closed to
-//! `files`, `absent`, `contains`, `lacks`, `error` and a snapshot. A case's
-//! `[commands]` are the one place invariant 5 has a narrow, deliberate
+//! A case is *data*: an answer set, a set of expectations, since ADR-027 a
+//! list of commands, and since ADR-028 whether it trusts the template's own
+//! declared remote data sources — written in the template repository and read
+//! by the same parsers `--answers-from` uses. The assertion vocabulary is
+//! closed to `files`, `absent`, `contains`, `lacks`, `error` and a snapshot. A
+//! case's `[commands]` are the one place invariant 5 has a narrow, deliberate
 //! exception — the harness spawns the process, never a `render`, `init` or an
-//! `update`. See ADR-016 and ADR-027.
+//! `update`. See ADR-016, ADR-027 and ADR-028.
 //!
 //! The area of every diagnostic here is `testing` rather than `test`, because
 //! `tests/diagnostics.rs` deliberately ignores codes whose area is `test` —
@@ -21,7 +22,7 @@ use thiserror::Error;
 
 use super::{Answering, OpError, RenderedOnce, Resolved, Target, Trust, render_resolved, resolve};
 use crate::data::format::{Format, parse_value};
-use crate::data::{Decision, REMOTE_LIMIT_BYTES, declared_remotes};
+use crate::data::{Decision, declared_remotes};
 use crate::git::{ChangeKind, FileMode, Oid};
 use crate::render::Rendered;
 use crate::suggest::closest;
@@ -54,10 +55,10 @@ const BINARY_SNIFF_LEN: usize = 8000;
 
 /// How much of a command's stdout/stderr is kept in a [`Failure::CommandFailed`].
 ///
-/// Far smaller than [`REMOTE_LIMIT_BYTES`]: that bounds a network response
-/// this process reads once; this bounds a diagnostic a person reads on a
-/// terminal or in a CI log, and 64 KiB of a failing build's tail is already
-/// generous for either.
+/// Far smaller than `REMOTE_LIMIT_BYTES`: that bounds a network response this
+/// process reads once; this bounds a diagnostic a person reads on a terminal
+/// or in a CI log, and 64 KiB of a failing build's tail is already generous
+/// for either.
 const COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 
 /// Errors that stop a test run.
@@ -233,6 +234,17 @@ pub struct Case {
     /// on disk — a case that never asked for one must never start being
     /// tested against one merely because `--write` ran for another case.
     pub snapshot: bool,
+    /// Whether this case's render may reach the template's declared remote
+    /// data sources.
+    ///
+    /// `true` on omission: a case renders for real unless it says otherwise,
+    /// because the point of a suite is to prove what the template's own
+    /// output actually looks like — an untested remote source is a gap, not a
+    /// safety margin. `trust = false` is the deliberate opt-out, for a case
+    /// whose whole point is proving the refused path
+    /// (`tpl::data::untrusted`), deterministically and without a network.
+    /// See ADR-028.
+    pub trust: bool,
 }
 
 /// What a case asserts.
@@ -370,13 +382,16 @@ impl Case {
         // written for this one purpose, and a typo'd `[expects]` would be a
         // test that passes forever having asserted nothing.
         for key in table.keys() {
-            if !matches!(key.as_str(), "answers" | "expect" | "commands" | "snapshot") {
-                let hint = closest(key, ["answers", "expect", "commands", "snapshot"])
+            if !matches!(
+                key.as_str(),
+                "answers" | "trust" | "expect" | "commands" | "snapshot"
+            ) {
+                let hint = closest(key, ["answers", "trust", "expect", "commands", "snapshot"])
                     .map(|near| format!(" Did you mean `{near}`?"))
                     .unwrap_or_default();
                 return Err(shape(format!(
                     "`{key}` is not a test case key.{hint} \
-                     A case has `answers`, `expect`, `commands` and `snapshot`."
+                     A case has `answers`, `trust`, `expect`, `commands` and `snapshot`."
                 )));
             }
         }
@@ -387,6 +402,19 @@ impl Case {
             Some(other) => {
                 return Err(shape(format!(
                     "`answers` must be a table of answers, not {}.",
+                    other.type_name()
+                )));
+            }
+        };
+
+        // `true` on omission, unlike `snapshot`: a case renders for real
+        // unless it deliberately says otherwise. See ADR-028.
+        let trust = match table.get("trust") {
+            None => true,
+            Some(Value::Bool(trust)) => *trust,
+            Some(other) => {
+                return Err(shape(format!(
+                    "`trust` must be `true` or `false`, not {}.",
                     other.type_name()
                 )));
             }
@@ -453,6 +481,7 @@ impl Case {
             name: name.to_string(),
             path: path.to_string(),
             answers,
+            trust,
             expect,
             commands,
             snapshot,
@@ -845,7 +874,6 @@ pub fn run(
     write: bool,
     run_commands: bool,
     user: &UserConfig,
-    mut trust: Trust<'_>,
 ) -> Result<Report, OpError> {
     // Before anything is resolved or rendered: `--write` on a source with no
     // working tree cannot succeed, and finding that out after twelve renders
@@ -868,23 +896,37 @@ pub fn run(
     let tests_dir = tests_dir.unwrap_or(DEFAULT_TESTS_DIR).trim_end_matches('/');
     let cases = discover(&template, tests_dir, filter)?;
 
-    // Confirmed once for the whole run rather than once per case. The consent
-    // being asked for is "may this template reach these hosts?", and the answer
-    // does not change between two answer sets — asking twelve times would train
-    // the user to say yes without reading.
-    //
-    // The decisions are replayed rather than collapsed to "allowed": a source
-    // the user *refused* has to stay refused for every case, and a gate that
-    // replayed a yes would turn one refusal into an allowance.
+    // Nobody is asked. A case decides for itself, in the file, via its own
+    // `trust` field — the same authority ADR-027 already gives a case's
+    // `[commands]`, extended by ADR-028 to a template's declared remote data
+    // sources. Both outcomes are built once, up front, and every case simply
+    // picks between them: "allow everything declared" or "skip everything
+    // declared", never a mix, because `declared_remotes` is read from the
+    // manifest once and a case's `trust` is all-or-nothing over that set.
     let requests = declared_remotes(&template.manifest.data);
-    let decisions: BTreeMap<String, Decision> = if requests.is_empty() {
-        BTreeMap::new()
-    } else {
-        trust.gate().confirm(&requests, REMOTE_LIMIT_BYTES)?
+    let trusted: BTreeMap<String, Decision> = requests
+        .iter()
+        .map(|request| (request.name.clone(), Decision::Allow))
+        .collect();
+    let untrusted: BTreeMap<String, Decision> = requests
+        .iter()
+        .map(|request| (request.name.clone(), Decision::Skip))
+        .collect();
+
+    // The persistent `[trust]` list (ADR-013) exists for `init`/`update`,
+    // which act on a real project one person owns. A case's `trust` has to
+    // mean the same thing on every machine that runs it, so it is decided
+    // without ever consulting that list — a config file on the machine
+    // running the suite must not be able to turn a `trust = false` case into
+    // a pass, or a `trust = true` case into a surprise on someone else's.
+    let user = &UserConfig {
+        trust: crate::userconfig::Trust::default(),
+        ..user.clone()
     };
 
     let mut outcomes = Vec::with_capacity(cases.len());
     for case in &cases {
+        let decisions = if case.trust { &trusted } else { &untrusted };
         outcomes.push(run_case(
             &template,
             target.source,
@@ -893,7 +935,7 @@ pub fn run(
             write,
             run_commands,
             user,
-            &decisions,
+            decisions,
         )?);
     }
 
@@ -1080,8 +1122,8 @@ fn run_case(
                 case.answers.clone(),
                 user,
                 Answering::defaults(),
-                // Replaying what was confirmed once in `run`, before the
-                // first case.
+                // Replaying this case's own `trust` field, decided in `run`
+                // without asking anybody. See ADR-028.
                 Trust::decided(decisions.clone()),
             );
 
@@ -1226,7 +1268,8 @@ fn run_case_plain(
         case.answers.clone(),
         user,
         Answering::defaults(),
-        // Replaying what was confirmed once in `run`, before the first case.
+        // Replaying this case's own `trust` field, decided in `run` without
+        // asking anybody. See ADR-028.
         Trust::decided(decisions.clone()),
     );
 
@@ -1944,6 +1987,7 @@ mod tests {
     /// author nothing they cannot already see.
     #[rstest]
     #[case("answers = 1\n", "`answers` must be a table")]
+    #[case("trust = 1\n", "`trust` must be `true` or `false`")]
     #[case("expect = 1\n", "`expect` must be a table")]
     #[case("[expect]\ncontains = 1\n", "`expect.contains` must be a table")]
     #[case("[expect]\nerror = 1\n", "`expect.error` must be a diagnostic code")]

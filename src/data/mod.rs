@@ -222,7 +222,7 @@ pub enum DataError {
         code(tpl::data::untrusted),
         url("https://noirbizarre.github.io/git-tpl/data/remote/"),
         help(
-            "source: {location}\npass `--trust` to allow this template's network data sources for this run, or answer the confirmation interactively"
+            "source: {location}\npass `--trust` to allow this template's network data sources for this run, add it to `[trust]`, or answer the confirmation interactively — for `git tpl test`, set `trust = true` on the case instead"
         )
     )]
     Untrusted {

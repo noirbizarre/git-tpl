@@ -36,6 +36,7 @@ absent = [".github/workflows/ci.yml"]
 | Key | Meaning |
 |---|---|
 | `answers` | The answer set to render with. Same shape as an [answers file](answers.md). |
+| `trust` | Whether this case's render may reach the template's declared remote data sources. `true` unless set to `false`. See [Trust](#trust). |
 | `expect.files` | Paths the rendering must contain. |
 | `expect.absent` | Paths it must not. |
 | `expect.contains` | Path to the text that must appear in it. A bare string or an array. |
@@ -66,7 +67,6 @@ fails the case with `tpl::eval::unanswered`, which is a true thing to know about
 | `--root` | Test this subdirectory instead of the manifest's. |
 | `--dirty` | Test the working tree. Local templates only. |
 | `--write` | Record each case's rendering as its snapshot. |
-| `--trust` | Allow remote data sources without asking. |
 | `--skip-commands` | Skip every case's `[commands]` for this run. |
 
 There is no `--answer`, `--answers-from` or `--defaults`.
@@ -129,13 +129,41 @@ There is no timeout. A hanging command hangs the run.
 
 ### Running `git tpl test` is the consent
 
-Unlike a template's [remote data sources](../data/index.md), a case's `[commands]` need no `--trust`: the two are
-unrelated capabilities, and running `git tpl test` on a template you have in front of you is already the same act
-as cloning a repository and running `make test` in it. Commands run by default. To skip them for one invocation,
-pass `--skip-commands`; to disable them for yourself by default, set `tpl.testCommands` to `false`
-(`git config tpl.testCommands false`) — `--skip-commands` can only disable further, never re-enable what
+A case's `[commands]` need no confirmation: running `git tpl test` on a template you have in front of you is
+already the same act as cloning a repository and running `make test` in it. Commands run by default. To skip them
+for one invocation, pass `--skip-commands`; to disable them for yourself by default, set `tpl.testCommands` to
+`false` (`git config tpl.testCommands false`) — `--skip-commands` can only disable further, never re-enable what
 configuration turned off. See [ADR-027](../adr/027-test-case-commands.md) for the full reasoning, including why
 this does not reopen the rule that a *rendered* project — `render`, `init`, `update` — cannot execute anything.
+
+A case's [`trust`](#trust) rests on the same act of consent, extended to a template's declared remote data sources
+— see [ADR-028](../adr/028-test-case-trust.md).
+
+## Trust
+
+```toml
+# tests/remote.toml
+trust = false
+
+[expect]
+error = "tpl::data::untrusted"
+```
+
+`trust` decides whether this case's render may reach the template's declared remote data sources — a `[data.*]`
+source that is `remote` or `git`.
+It defaults to `true`: a case renders for real unless it says otherwise, because the point of a suite is to prove
+what the template's output actually looks like, and an untested remote source is a gap in the suite, not a safety
+margin.
+
+Set `trust = false` to assert the *refused* path instead — the render fails with
+[`tpl::data::untrusted`](../reference/diagnostics.md) before anything reaches the network, deterministically and
+with no host to reach.
+
+This is not the `--trust`/`[trust]` mechanism `render`, `init`, `update` and `backport` use.
+Those act on a real project for a real person, so they refuse by default and ask, once, for consent; `test` never
+asks anybody, and the persistent `[trust]` list in `~/.config/git-tpl/config.toml` is not consulted here either —
+a case's `trust` must mean the same thing on every machine that runs the suite, including CI, where there is
+nobody to ask and nothing pre-trusted. See [ADR-028](../adr/028-test-case-trust.md) for the reasoning.
 
 ## Snapshots
 
