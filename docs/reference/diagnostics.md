@@ -108,7 +108,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::data::needs_project` | A `local` source was reached by a command with no project — `render`, `lint`, `context`. Use a `template` source, or run inside a project. |
 | `tpl::data::unknown_setting` | An unknown `kind` or `format`. |
 | `tpl::data::invalid_git_source` | A `git` source's `source`, `ref` and `path` do not name a file. Write all three keys, or a `<scheme>://<repo>@<ref>:<path>` source. |
-| `tpl::data::untrusted` | A network source — remote or `git` — was not authorised. Pass `--trust`, or add the template to `[trust]`. |
+| `tpl::data::untrusted` | A network source — remote or `git` — was not authorised. Pass `--trust`, add the template to `[trust]`, or, in `git tpl test`, set `trust = true` on the case. |
 | `tpl::data::undeclared_remote` | A source that reached the network only after interpolation, so it could not be confirmed beforehand. Declare its kind. |
 | `tpl::data::cancelled` | The user declined a fetch or a clone. |
 | `tpl::data::checksum` | A remote source did not match its `sha256`. |

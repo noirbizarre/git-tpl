@@ -36,3 +36,4 @@ explains the code that existed.
 | [025](025-default-when-skipped.md) | A question may keep its default when skipped |
 | [026](026-transparent-path-segments.md) | A rendered path piece may be `.` or fan out across `/`; only `..` and a backslash are rejected |
 | [027](027-test-case-commands.md) | A test case may declare commands, run by the harness alone |
+| [028](028-test-case-trust.md) | A test case declares its own trust in remote data sources |
