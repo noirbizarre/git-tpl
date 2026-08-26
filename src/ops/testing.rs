@@ -1,11 +1,12 @@
 //! `git tpl test` — running a template's own test cases.
 //!
-//! A case is *data*: an answer set and a set of expectations, written in the
-//! template repository and read by the same parsers `--answers-from` uses.
-//! Nothing here executes anything the template asks for — that is invariant 5,
-//! and it is why the assertion vocabulary is deliberately closed to `files`,
-//! `absent`, `contains`, `error` and a snapshot. Checking a rendering with the
-//! tools that understand it is the author's own CI's job.
+//! A case is *data*: an answer set, a set of expectations and, since ADR-027,
+//! a list of commands, written in the template repository and read by the
+//! same parsers `--answers-from` uses. The assertion vocabulary is closed to
+//! `files`, `absent`, `contains`, `lacks`, `error` and a snapshot. A case's
+//! `[commands]` are the one place invariant 5 has a narrow, deliberate
+//! exception — the harness spawns the process, never a `render`, `init` or an
+//! `update`. See ADR-016 and ADR-027.
 //!
 //! The area of every diagnostic here is `testing` rather than `test`, because
 //! `tests/diagnostics.rs` deliberately ignores codes whose area is `test` —
@@ -50,6 +51,14 @@ const SNAPSHOT_VERSION: &str = "# git-tpl snapshot 1";
 /// Git's own heuristic. A binary file is stored verbatim like any other, but no
 /// patch is attempted for it.
 const BINARY_SNIFF_LEN: usize = 8000;
+
+/// How much of a command's stdout/stderr is kept in a [`Failure::CommandFailed`].
+///
+/// Far smaller than [`REMOTE_LIMIT_BYTES`]: that bounds a network response
+/// this process reads once; this bounds a diagnostic a person reads on a
+/// terminal or in a CI log, and 64 KiB of a failing build's tail is already
+/// generous for either.
+const COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 
 /// Errors that stop a test run.
 ///
@@ -164,6 +173,38 @@ pub enum TestError {
         /// What is wrong with it.
         reason: String,
     },
+
+    /// A case's sandbox — the scratch directory `[commands]` and the
+    /// materialised rendering share — could not be created.
+    ///
+    /// A fact about the machine running the suite, not about the template, so
+    /// it aborts the run rather than being reported per case. See ADR-027.
+    #[error("could not create a sandbox for `{case}`")]
+    #[diagnostic(
+        code(tpl::testing::sandbox_failed),
+        help("reason: {reason}\ncheck that a temporary directory can be created (see $TMPDIR)")
+    )]
+    SandboxFailed {
+        /// The case whose sandbox could not be created.
+        case: String,
+        /// What the operating system reported.
+        reason: String,
+    },
+
+    /// The rendering could not be materialised into a case's sandbox.
+    #[error("could not write into the sandbox for `{case}`")]
+    #[diagnostic(
+        code(tpl::testing::sandbox_write),
+        help("path:   {path}\nreason: {reason}")
+    )]
+    SandboxWrite {
+        /// The case whose sandbox could not be written to.
+        case: String,
+        /// The path that failed.
+        path: String,
+        /// What the operating system reported.
+        reason: String,
+    },
 }
 
 /// One test case, as written in the template repository.
@@ -183,6 +224,15 @@ pub struct Case {
     pub answers: BTreeMap<String, Value>,
     /// What the rendering must look like.
     pub expect: Expect,
+    /// What to run before, around and after the rendering. See ADR-027.
+    pub commands: Commands,
+    /// Whether this case is tested against a recorded snapshot at all.
+    ///
+    /// `false` on omission: writing and comparing a snapshot are both
+    /// explicit opt-ins, not a side effect of a directory happening to exist
+    /// on disk — a case that never asked for one must never start being
+    /// tested against one merely because `--write` ran for another case.
+    pub snapshot: bool,
 }
 
 /// What a case asserts.
@@ -215,6 +265,85 @@ pub struct Expect {
     pub error: Option<String>,
 }
 
+/// A case's setup, teardown, and everything run against the merged sandbox.
+///
+/// Not gated behind `Option`: an absent `[commands]` and an empty one mean
+/// the same thing — nothing runs — and `Default` already gives every list an
+/// empty `Vec`, the same choice `Expect::default()` makes for the same
+/// reason. See ADR-027.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Commands {
+    /// Run before anything is rendered, in an empty sandbox.
+    pub before: Vec<String>,
+    /// Run after the rendering is materialised onto the sandbox, before
+    /// `expect` is checked.
+    pub rendered: Vec<String>,
+    /// Run after `expect` and the snapshot are checked.
+    pub after: Vec<String>,
+    /// Run always, last, regardless of anything above. Best-effort: every
+    /// entry runs even when an earlier one in this same list failed.
+    pub finally: Vec<String>,
+}
+
+impl Commands {
+    /// Whether every list is empty — the case declared no `[commands]`, or
+    /// wrote one with nothing in it.
+    pub fn is_empty(&self) -> bool {
+        self.before.is_empty()
+            && self.rendered.is_empty()
+            && self.after.is_empty()
+            && self.finally.is_empty()
+    }
+
+    fn parse(
+        table: &BTreeMap<String, Value>,
+        shape: &impl Fn(String) -> TestError,
+    ) -> Result<Self, TestError> {
+        for key in table.keys() {
+            if !matches!(key.as_str(), "before" | "rendered" | "after" | "finally") {
+                let hint = closest(key, ["before", "rendered", "after", "finally"])
+                    .map(|near| format!(" Did you mean `{near}`?"))
+                    .unwrap_or_default();
+                return Err(shape(format!(
+                    "`commands.{key}` is not a command list.{hint} \
+                     A case may run `before`, `rendered`, `after` or `finally`."
+                )));
+            }
+        }
+        Ok(Commands {
+            before: string_array(table.get("before"), "commands.before", shape)?,
+            rendered: string_array(table.get("rendered"), "commands.rendered", shape)?,
+            after: string_array(table.get("after"), "commands.after", shape)?,
+            finally: string_array(table.get("finally"), "commands.finally", shape)?,
+        })
+    }
+}
+
+/// Which `[commands]` list a [`Failure::CommandFailed`] came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandStep {
+    /// `commands.before`.
+    Before,
+    /// `commands.rendered`.
+    Rendered,
+    /// `commands.after`.
+    After,
+    /// `commands.finally`.
+    Finally,
+}
+
+impl CommandStep {
+    /// The machine-readable name, matching the case file's own key.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            CommandStep::Before => "before",
+            CommandStep::Rendered => "rendered",
+            CommandStep::After => "after",
+            CommandStep::Finally => "finally",
+        }
+    }
+}
+
 impl Case {
     /// Parse a case file.
     pub fn parse(name: &str, path: &str, bytes: &[u8]) -> Result<Self, TestError> {
@@ -241,12 +370,13 @@ impl Case {
         // written for this one purpose, and a typo'd `[expects]` would be a
         // test that passes forever having asserted nothing.
         for key in table.keys() {
-            if key != "answers" && key != "expect" {
-                let hint = closest(key, ["answers", "expect"])
+            if !matches!(key.as_str(), "answers" | "expect" | "commands" | "snapshot") {
+                let hint = closest(key, ["answers", "expect", "commands", "snapshot"])
                     .map(|near| format!(" Did you mean `{near}`?"))
                     .unwrap_or_default();
                 return Err(shape(format!(
-                    "`{key}` is not a test case key.{hint} A case has `answers` and `expect`."
+                    "`{key}` is not a test case key.{hint} \
+                     A case has `answers`, `expect`, `commands` and `snapshot`."
                 )));
             }
         }
@@ -273,11 +403,59 @@ impl Case {
             }
         };
 
+        let commands = match table.get("commands") {
+            None => Commands::default(),
+            Some(Value::Table(commands)) => Commands::parse(commands, &shape)?,
+            Some(other) => {
+                return Err(shape(format!(
+                    "`commands` must be a table, not {}.",
+                    other.type_name()
+                )));
+            }
+        };
+
+        let snapshot = match table.get("snapshot") {
+            None => false,
+            Some(Value::Bool(snapshot)) => *snapshot,
+            Some(other) => {
+                return Err(shape(format!(
+                    "`snapshot` must be `true` or `false`, not {}.",
+                    other.type_name()
+                )));
+            }
+        };
+
+        // A case expecting an error has no rendering for `commands.rendered`
+        // or `commands.after` to run against — the same vacuous-assertion
+        // refusal `Expect::parse` already applies to `files`/`absent`/
+        // `contains`/`lacks`, extended to the two lists that need a rendering
+        // to run against at all.
+        if expect.error.is_some() && (!commands.rendered.is_empty() || !commands.after.is_empty()) {
+            return Err(shape(
+                "`expect.error` says the render fails, so there is nothing for \
+                 `commands.rendered` or `commands.after` to run against. \
+                 Move them to `commands.before` or `commands.finally`, or split into two cases."
+                    .to_string(),
+            ));
+        }
+
+        // Likewise, a snapshot of a rendering that is never expected to exist
+        // is not a coherent request.
+        if expect.error.is_some() && snapshot {
+            return Err(shape(
+                "`expect.error` says the render fails, so there is nothing for \
+                 `snapshot` to record or compare. Split into two cases."
+                    .to_string(),
+            ));
+        }
+
         Ok(Case {
             name: name.to_string(),
             path: path.to_string(),
             answers,
             expect,
+            commands,
+            snapshot,
         })
     }
 }
@@ -496,6 +674,33 @@ pub enum Failure {
         /// The differing paths.
         changes: Vec<SnapshotChange>,
     },
+    /// `snapshot = true`, but nothing has ever been recorded for this case.
+    ///
+    /// Snapshots are opt-in, but not silently so: a case that asks for one
+    /// and never gets it would report false confidence, exactly the gap
+    /// explicit opt-in is meant to close. `--write` records one.
+    SnapshotMissing,
+    /// A command declared in `[commands]` exited nonzero, or could not be run
+    /// at all.
+    ///
+    /// One variant for both: a program that does not exist and a program
+    /// that ran and failed are the same fact from the case's point of view —
+    /// this list did not do what the author said it would. See ADR-027.
+    CommandFailed {
+        /// Which list the command came from.
+        step: CommandStep,
+        /// The command exactly as written in the case file.
+        command: String,
+        /// The exit code, or `None` if the process could not be spawned at
+        /// all (no such program, not executable) or was killed by a signal.
+        code: Option<i32>,
+        /// Captured stdout, capped at [`COMMAND_OUTPUT_LIMIT_BYTES`], tail
+        /// kept — a failing build prints progress before its error.
+        stdout: String,
+        /// Captured stderr, capped the same way, or — when `code` is `None`
+        /// — the operating system's reason the process never ran at all.
+        stderr: String,
+    },
 }
 
 /// How a rendered path differs from the recorded snapshot.
@@ -514,10 +719,13 @@ pub struct SnapshotChange {
 /// What the snapshot step did for a case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotOutcome {
-    /// No snapshot is recorded, and `--write` was not given.
+    /// The case did not ask for a snapshot (`snapshot` is `false` or absent),
+    /// or asked for one that was never recorded.
     ///
-    /// Not a failure: snapshots are opt-in per case, so a template with three
-    /// cases and one snapshot is a normal state.
+    /// Not a failure on its own — snapshots are opt-in per case, so a
+    /// template with three cases and one `snapshot = true` is a normal state
+    /// — but the second case (asked for one, none recorded, not `--write`)
+    /// also carries a [`Failure::SnapshotMissing`] alongside this outcome.
     None,
     /// Compared against a recorded snapshot.
     Compared,
@@ -556,6 +764,10 @@ pub struct CaseOutcome {
     /// How many files the rendering produced. Zero for a case that expected a
     /// failure and got one.
     pub files: usize,
+    /// How many `[commands]` entries actually ran, across all four lists.
+    /// Zero for a case with no `[commands]`, and zero when commands were
+    /// disabled for the run.
+    pub commands_run: usize,
 }
 
 impl CaseOutcome {
@@ -573,6 +785,9 @@ pub struct Report {
     pub tests_dir: String,
     /// One per case, in name order.
     pub cases: Vec<CaseOutcome>,
+    /// Whether `[commands]` ran at all for this run — `false` when
+    /// `--skip-commands` or `tpl.testCommands = false` disabled them.
+    pub commands_enabled: bool,
 }
 
 impl Report {
@@ -611,6 +826,11 @@ impl Report {
             .filter(|case| case.snapshot == SnapshotOutcome::Compared)
             .count()
     }
+
+    /// How many `[commands]` entries ran, across every case.
+    pub fn commands_run(&self) -> usize {
+        self.cases.iter().map(|case| case.commands_run).sum()
+    }
 }
 
 /// Run a template's test cases.
@@ -623,6 +843,7 @@ pub fn run(
     tests_dir: Option<&str>,
     filter: &[String],
     write: bool,
+    run_commands: bool,
     user: &UserConfig,
     mut trust: Trust<'_>,
 ) -> Result<Report, OpError> {
@@ -670,6 +891,7 @@ pub fn run(
             tests_dir,
             case,
             write,
+            run_commands,
             user,
             &decisions,
         )?);
@@ -679,6 +901,7 @@ pub fn run(
         template,
         tests_dir: tests_dir.to_string(),
         cases: outcomes,
+        commands_enabled: run_commands,
     })
 }
 
@@ -793,6 +1016,202 @@ fn run_case(
     tests_dir: &str,
     case: &Case,
     write: bool,
+    run_commands: bool,
+    user: &UserConfig,
+    decisions: &BTreeMap<String, Decision>,
+) -> Result<CaseOutcome, OpError> {
+    // No `[commands]`, or commands disabled for this run: the exact
+    // pre-existing behaviour, unchanged, with no sandbox created at all. This
+    // is every case file written before ADR-027 and must keep working
+    // identically.
+    if !run_commands || case.commands.is_empty() {
+        return run_case_plain(template, source, tests_dir, case, write, user, decisions);
+    }
+
+    let sandbox = tempfile::tempdir().map_err(|error| TestError::SandboxFailed {
+        case: case.name.clone(),
+        reason: error.to_string(),
+    })?;
+    let cwd = sandbox.path();
+
+    // Rust has no try/finally. This closure is the substitute: everything
+    // that can fail with a genuine `?` — a materialised write, a snapshot
+    // read or write — runs inside it, so its *value* is captured here rather
+    // than unwinding straight past the `finally` list below, which still has
+    // to run against whatever state the sandbox is in.
+    let outcome: Result<(Vec<Failure>, SnapshotOutcome, usize, usize), OpError> = (|| {
+        let mut failures = Vec::new();
+        let mut snapshot = SnapshotOutcome::None;
+        let mut files = 0;
+
+        // `before`, into an empty sandbox: nothing has been rendered or
+        // materialised yet.
+        let mut commands_run = execute_commands(
+            CommandStep::Before,
+            &case.commands.before,
+            cwd,
+            true,
+            &mut failures,
+        );
+        let before_failed = failures.iter().any(|failure| {
+            matches!(
+                failure,
+                Failure::CommandFailed {
+                    step: CommandStep::Before,
+                    ..
+                }
+            )
+        });
+
+        // A failed `before` means the precondition the case described was
+        // never reached. Rendering onto it and checking `expect` against a
+        // sandbox that never got set up correctly would assert about a state
+        // that does not exist — skip straight to `finally`.
+        if !before_failed {
+            // Always defaults, never a prompt: there is nobody to ask in CI,
+            // and a prompt in a test runner is a hang. A question the case
+            // leaves unanswered with no default fails as
+            // `tpl::eval::unanswered`, which is a true statement about the
+            // template.
+            let rendered = render_resolved(
+                template,
+                source,
+                None,
+                case.answers.clone(),
+                user,
+                Answering::defaults(),
+                // Replaying what was confirmed once in `run`, before the
+                // first case.
+                Trust::decided(decisions.clone()),
+            );
+
+            match rendered {
+                Err(error) => {
+                    // No merged tree exists either way: `commands.rendered`
+                    // and `commands.after` have nothing to run against, for
+                    // the same reason a `before` failure skips them.
+                    let codes = codes(&error);
+                    match &case.expect.error {
+                        Some(expected) if codes.iter().any(|code| code == expected) => {}
+                        Some(expected) => failures.push(Failure::WrongError {
+                            expected: expected.clone(),
+                            actual: codes,
+                            message: error.to_string(),
+                        }),
+                        None => failures.push(Failure::UnexpectedError {
+                            code: codes.into_iter().next(),
+                            message: error.to_string(),
+                        }),
+                    }
+                }
+                Ok(RenderedOnce {
+                    files: rendered_files,
+                    ..
+                }) => {
+                    files = rendered_files.len();
+
+                    // Not `clear_directory`: that removes the directory
+                    // first, erasing exactly what `before` just seeded.
+                    // `materialise` alone only ever creates and overwrites
+                    // the paths the rendering names, which is the render's
+                    // tree laid on top of the sandbox's existing state — the
+                    // whole point of seeding it.
+                    let case_name = case.name.clone();
+                    super::materialise(
+                        cwd,
+                        rendered_files.iter().map(|file| {
+                            (file.path.as_str(), file.content.as_slice(), file.executable)
+                        }),
+                        &|path, verb, io_error| TestError::SandboxWrite {
+                            case: case_name.clone(),
+                            path: path.display().to_string(),
+                            reason: format!("could not {verb} it: {io_error}"),
+                        },
+                    )?;
+
+                    // `rendered`: after materialising, before `expect`.
+                    commands_run += execute_commands(
+                        CommandStep::Rendered,
+                        &case.commands.rendered,
+                        cwd,
+                        true,
+                        &mut failures,
+                    );
+
+                    if let Some(expected) = &case.expect.error {
+                        failures.push(Failure::ExpectedError {
+                            code: expected.clone(),
+                        });
+                    } else {
+                        check(&case.expect, &rendered_files, &mut failures);
+                    }
+                    snapshot = snapshot_step(
+                        template,
+                        tests_dir,
+                        case,
+                        &rendered_files,
+                        write,
+                        &mut failures,
+                    )?;
+
+                    // `after`: once `expect` and the snapshot are settled.
+                    commands_run += execute_commands(
+                        CommandStep::After,
+                        &case.commands.after,
+                        cwd,
+                        true,
+                        &mut failures,
+                    );
+                }
+            }
+        }
+
+        Ok((failures, snapshot, files, commands_run))
+    })();
+
+    // `finally` always runs, against whatever the sandbox holds, and every
+    // entry in it runs even if an earlier one failed — cleanup left half done
+    // because a step before it failed is a worse outcome than one more
+    // reported failure. Note this runs *before* `outcome?` below: that
+    // ordering is the whole mechanism, since nothing between the closure and
+    // this point can skip it.
+    let mut finally_failures = Vec::new();
+    let finally_ran = execute_commands(
+        CommandStep::Finally,
+        &case.commands.finally,
+        cwd,
+        false,
+        &mut finally_failures,
+    );
+    // `sandbox` is dropped when it goes out of scope below, deleting the
+    // temporary directory.
+
+    let (mut failures, snapshot, files, mut commands_run) = outcome?;
+    failures.extend(finally_failures);
+    commands_run += finally_ran;
+
+    Ok(CaseOutcome {
+        name: case.name.clone(),
+        path: case.path.clone(),
+        failures,
+        snapshot,
+        files,
+        commands_run,
+    })
+}
+
+/// `run_case`, before ADR-027: no sandbox, no `[commands]`, the render
+/// checked directly against `expect` and the snapshot. Kept as its own
+/// function so a case with no `[commands]` — the overwhelming majority —
+/// takes a path that is byte-for-byte what it always has been, with no
+/// temporary directory created for nothing.
+#[allow(clippy::too_many_arguments)]
+fn run_case_plain(
+    template: &Resolved,
+    source: &str,
+    tests_dir: &str,
+    case: &Case,
+    write: bool,
     user: &UserConfig,
     decisions: &BTreeMap<String, Decision>,
 ) -> Result<CaseOutcome, OpError> {
@@ -854,7 +1273,102 @@ fn run_case(
         failures,
         snapshot,
         files,
+        commands_run: 0,
     })
+}
+
+/// Run one list of shell-like command strings in `cwd`.
+///
+/// `stop_on_failure` decides what happens once one fails: `before`,
+/// `rendered` and `after` are sequential — a case writes `mkdir -p src` then
+/// `touch src/existing.rs` because the second assumes the first worked — so
+/// `true` there ends the list rather than running commands whose own
+/// precondition just failed to appear. `finally` passes `false`: it is
+/// cleanup, and a step left undone because an earlier one failed is a worse
+/// outcome than one more line in the report.
+///
+/// Returns how many commands were actually attempted, so a caller can add it
+/// to [`CaseOutcome::commands_run`] regardless of how the list ended.
+fn execute_commands(
+    step: CommandStep,
+    commands: &[String],
+    cwd: &Path,
+    stop_on_failure: bool,
+    failures: &mut Vec<Failure>,
+) -> usize {
+    let mut run = 0;
+    for command in commands {
+        run += 1;
+        if let Err((code, stdout, stderr)) = run_one(command, cwd) {
+            failures.push(Failure::CommandFailed {
+                step,
+                command: command.clone(),
+                code,
+                stdout,
+                stderr,
+            });
+            if stop_on_failure {
+                break;
+            }
+        }
+    }
+    run
+}
+
+/// Word-split `command` and run it directly — never through a shell.
+///
+/// `shlex::split` honours quotes and backslash escapes and nothing else: no
+/// pipe, no glob, no redirection, no `$VAR` expansion. A case file is the
+/// same untrusted-repository input invariant 5 already governs everywhere
+/// else, and a real shell would hand every one of those to it for free. See
+/// ADR-027.
+fn run_one(command: &str, cwd: &Path) -> Result<(), (Option<i32>, String, String)> {
+    let argv = match shlex::split(command) {
+        Some(argv) if !argv.is_empty() => argv,
+        // Empty, or an unterminated quote. Reported like any other failed
+        // command: a fact about this one entry, not a reason to stop the run.
+        _ => {
+            return Err((
+                None,
+                String::new(),
+                format!("`{command}` is not a runnable command"),
+            ));
+        }
+    };
+
+    match std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(cwd)
+        .output()
+    {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err((
+            output.status.code(),
+            cap_output(&output.stdout),
+            cap_output(&output.stderr),
+        )),
+        // No such program, not executable, or `cwd` could not be entered.
+        // `code: None` for the same reason a signal-killed process gets one:
+        // there is nothing to report but the operating system's own words.
+        Err(error) => Err((
+            None,
+            String::new(),
+            format!("could not run `{command}`: {error}"),
+        )),
+    }
+}
+
+/// Keep the last [`COMMAND_OUTPUT_LIMIT_BYTES`] of a stream, not the first.
+///
+/// A failing build prints progress before its error. A head-truncated capture
+/// would show the progress and lose the one line that explains why it failed.
+fn cap_output(bytes: &[u8]) -> String {
+    let tail = if bytes.len() > COMMAND_OUTPUT_LIMIT_BYTES {
+        &bytes[bytes.len() - COMMAND_OUTPUT_LIMIT_BYTES..]
+    } else {
+        bytes
+    };
+    String::from_utf8_lossy(tail).into_owned()
 }
 
 /// Check a rendering against a case's expectations.
@@ -961,6 +1475,17 @@ fn snapshot_step(
     write: bool,
     failures: &mut Vec<Failure>,
 ) -> Result<SnapshotOutcome, OpError> {
+    // Snapshots are opt-in per case, and now explicitly so: a case that never
+    // wrote `snapshot = true` is never written to and never compared, no
+    // matter what `--write` does or what happens to be sitting on disk. This
+    // is the whole point of making the opt-in explicit rather than inferred
+    // from a directory's existence — reading the recorded snapshot is skipped
+    // entirely, so a case that doesn't want one never even touches disk for
+    // it.
+    if !case.snapshot {
+        return Ok(SnapshotOutcome::None);
+    }
+
     let recorded = read_snapshot(template, tests_dir, case)?;
 
     let current: BTreeMap<String, SnapshotEntry> = rendered
@@ -978,9 +1503,11 @@ fn snapshot_step(
 
     if !write {
         let Some(recorded) = recorded else {
-            // Snapshots are opt-in per case. Failing a case that never asked
-            // for one would force `--write` on people who only wanted
-            // `expect.files`.
+            // `snapshot = true` asked for one, and none is recorded yet.
+            // Silently skipping this — the pre-opt-in behaviour — would
+            // report false confidence, exactly what the explicit flag exists
+            // to prevent.
+            failures.push(Failure::SnapshotMissing);
             return Ok(SnapshotOutcome::None);
         };
         let changes = compare(&recorded, &current);

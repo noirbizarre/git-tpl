@@ -41,6 +41,8 @@ absent = [".github/workflows/ci.yml"]
 | `expect.contains` | Path to the text that must appear in it. A bare string or an array. |
 | `expect.lacks` | Path to the text that must not appear in it. Same shape as `contains`. |
 | `expect.error` | A [diagnostic code](../reference/diagnostics.md) the render must fail with. |
+| `commands` | Setup, checks and teardown run around the rendering. See [Commands](#commands). |
+| `snapshot` | Whether this case is written and compared against a recorded snapshot. `false` unless set. See [Snapshots](#snapshots). |
 
 A path named in `expect.contains` or `expect.lacks` that the rendering never produces is a failure either way —
 never a pass, vacuous or otherwise.
@@ -65,6 +67,7 @@ fails the case with `tpl::eval::unanswered`, which is a true thing to know about
 | `--dirty` | Test the working tree. Local templates only. |
 | `--write` | Record each case's rendering as its snapshot. |
 | `--trust` | Allow remote data sources without asking. |
+| `--skip-commands` | Skip every case's `[commands]` for this run. |
 
 There is no `--answer`, `--answers-from` or `--defaults`.
 The case file *is* the answer set: a flag that changed the answers would change what every case asserts while
@@ -90,13 +93,67 @@ A case with `error` cannot also have `files`, `absent`, `contains` or `lacks` �
 describe.
 Split it into two cases.
 
+## Commands
+
+```toml
+[commands]
+before   = ["mkdir -p src", "touch src/existing.py"]
+rendered = ["python -m venv .venv"]
+after    = [".venv/bin/pip install -e ."]
+finally  = ["rm -rf .venv"]
+```
+
+Four lists, each run in a fresh, empty scratch directory created just for this case and thrown away afterward:
+
+| List | Runs | Sees |
+|---|---|---|
+| `before` | Before anything is rendered. | Nothing but what it creates itself. |
+| `rendered` | After the rendering is written into the sandbox, before `expect` is checked. | `before`'s files, merged with the render. |
+| `after` | After `expect` and the snapshot are checked. | The same merged sandbox. |
+| `finally` | Always, last, regardless of anything above. | Whatever state the sandbox is in. |
+
+The render is written **on top of** whatever `before` created, not into a directory cleared first — this is what
+lets a case simulate rendering into a project that already exists, the way `update` actually renders, which
+`--dirty`/`render` alone cannot exercise.
+
+Each entry is a plain string, split into a program and its arguments the way a shell would parse quoting and
+escapes — but no shell actually runs. There is no pipe, no glob, no redirection and no `$VAR` expansion. A
+pipeline needs a script file: write it with `before`, then name it in `rendered`.
+
+`before`, `rendered` and `after` each stop at their own first failure — they are sequential, and a later entry
+usually assumes an earlier one worked. A failing `before`, or a render that fails without `expect.error` naming
+it, skips straight to `finally`: there is nothing for `rendered`/`after` to run against. `finally` is the
+opposite: every entry in it runs regardless of anything failing before or within it, because it is cleanup.
+
+There is no timeout. A hanging command hangs the run.
+
+### Running `git tpl test` is the consent
+
+Unlike a template's [remote data sources](../data/index.md), a case's `[commands]` need no `--trust`: the two are
+unrelated capabilities, and running `git tpl test` on a template you have in front of you is already the same act
+as cloning a repository and running `make test` in it. Commands run by default. To skip them for one invocation,
+pass `--skip-commands`; to disable them for yourself by default, set `tpl.testCommands` to `false`
+(`git config tpl.testCommands false`) — `--skip-commands` can only disable further, never re-enable what
+configuration turned off. See [ADR-027](../adr/027-test-case-commands.md) for the full reasoning, including why
+this does not reopen the rule that a *rendered* project — `render`, `init`, `update` — cannot execute anything.
+
 ## Snapshots
+
+```toml
+# tests/minimal.toml
+snapshot = true
+```
 
 ```sh
 git tpl test ./my-template --write
 ```
 
 records each case's rendering under `tests/__snapshots__/<case>/`, and every later run compares against it.
+
+A case is written and compared only when it says `snapshot = true`. This is explicit for a reason: without it,
+`--write` would silently start recording (and every future run silently start comparing) a case that never asked
+for one. A case that says `snapshot = true` but has never been recorded fails outright — "record one with
+`git tpl test --write`" — rather than passing having asserted nothing.
 
 ```
 tests/
@@ -119,9 +176,11 @@ each.
 A Windows checkout loses the mode on disk, and a snapshot that silently stopped asserting on `chmod +x` would be
 worse than none.
 
-Three things worth knowing:
+Four things worth knowing:
 
-- **A case with no snapshot is not a failure.** Snapshots are opt-in per case.
+- **A case with `snapshot` unset (or `false`) is not a failure.** Snapshots are opt-in per case, and are neither
+  written nor compared for it.
+- **`snapshot = true` with nothing recorded yet is a failure, not a pass.** Run `--write` once to record it.
 - **`--write` clears the case's snapshot directory rather than merging into it.** A template that stops
   producing a file has to be seen to stop.
 - **`--write` does not stage or commit anything, and does not bless a broken case.** The `expect` assertions
@@ -132,10 +191,19 @@ On a template with none, it fails with `tpl::testing::write_needs_local`.
 
 ## Cases come from the revision, not from disk
 
+| Given | Cases and snapshots come from |
+|---|---|
+| neither `--ref` nor `--dirty` | The local checkout's checked-out branch, at its `HEAD` — or, for a remote source, the remote's default branch. |
+| `--ref X` | Commit, branch or tag `X`, committed. |
+| `--dirty` | The working tree, uncommitted changes included. Local templates only. |
+
 `git tpl test ./tpl --ref v1.2.0` runs *that tag's* cases against that tag's template, and compares against that
 tag's snapshots.
 `--dirty` runs the uncommitted ones.
 Reading cases off the filesystem instead would make `--ref` mean something different here from everywhere else.
+
+`--ref` and `--dirty` are mutually exclusive: a working tree and a named revision cannot both be "the" version
+under test, and asking for both is refused at the parser rather than silently picking one.
 
 The one exception is `--write`, which writes to the working tree — there is nowhere else to put a file somebody
 has to review.
@@ -167,11 +235,13 @@ resolved", and both are non-zero exits.
 
 ## What a case cannot do
 
-There is no `command` key, and there will not be one.
-git-tpl runs nothing over a rendering — [templates cannot execute code](../adr/016-template-tests-are-data.md),
-and a test runner is exactly where that rule is most tempting to break.
+`[commands]` runs against a scratch sandbox the test harness creates and destroys for one case — never against a
+`render`, `init` or `update`, none of which can execute anything, still, unconditionally. See
+[Commands](#commands) and [ADR-027](../adr/027-test-case-commands.md) for exactly what a case's commands can and
+cannot see.
 
-Checking the output with the tools that understand it is your own CI's job, and it does it better:
+For everything outside that sandbox — checking a real, project-shaped rendering with the tools that understand
+it, `actionlint`, a full `npm ci`, a linter with its own config discovery — your own CI still does it better:
 
 ```sh
 git tpl render . --dirty -o /tmp/out --answers-from tests/minimal.toml

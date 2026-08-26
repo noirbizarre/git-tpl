@@ -176,6 +176,12 @@ similar = { version = "3.2", features = ["unicode"] }
 # old template is a far worse failure than a slow fetch — in a tool whose whole
 # premise is reproducibility.
 tempfile = "3"
+# Word-splitting for a `git tpl test` case's `[commands]` entries — quotes and
+# backslash escapes honoured, nothing else: no pipe, no glob, no redirection,
+# no `$VAR` expansion, and no shell process runs. Already present transitively
+# through `cc`'s build script; promoted to a direct dependency because a
+# case's commands are parsed by the library itself, at runtime. See ADR-027.
+shlex = "1"
 # The remote data source client. Blocking, because everything below `ops` is
 # synchronous and an async runtime would exist solely to be blocked on. Default
 # features give rustls plus the platform verifier, so no release target needs a

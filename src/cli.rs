@@ -374,6 +374,14 @@ pub struct TestArgs {
     /// Allow the template's remote data sources without asking
     #[arg(long)]
     pub trust: bool,
+
+    /// Skip a case's `[commands]`, if it has any
+    ///
+    /// `tpl.testCommands` can already disable this by default; this flag
+    /// only disables further — there is no way to force commands back on
+    /// from the command line once configuration has said no.
+    #[arg(long)]
+    pub skip_commands: bool,
 }
 
 /// `git tpl backport`
@@ -837,6 +845,17 @@ mod tests {
         assert!(
             Cli::try_parse_from(["git-tpl", "context", "t", "--ref", "main", "--dirty"]).is_err()
         );
+    }
+
+    /// `--skip-commands` can only disable `[commands]`; it takes no value and
+    /// is accepted on its own.
+    #[test]
+    fn test_accepts_skip_commands() {
+        let cli = Cli::try_parse_from(["git-tpl", "test", "--skip-commands"]).unwrap();
+        let Command::Test(args) = cli.command else {
+            panic!("expected test")
+        };
+        assert!(args.skip_commands);
     }
 
     #[test]

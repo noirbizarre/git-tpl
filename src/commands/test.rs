@@ -3,6 +3,9 @@
 //! Runs the cases a template carries. No project, no ref, and — beyond
 //! `--write` recording a snapshot — nothing written anywhere.
 
+use tpl::git::GitError;
+use tpl::git::libgit2::LibGit2;
+use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::testing::{CaseOutcome, Failure, Report, SnapshotOutcome};
 use tpl::ops::{self, OpError, Target};
 
@@ -14,6 +17,7 @@ use crate::theme::{field, heading, muted, warning};
 pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
     let source = ctx.user.expand(&args.template).into_owned();
+    let run_commands = test_commands_enabled(args.skip_commands)?;
 
     let mut confirmer = Confirmer;
     let report = ops::testing::run(
@@ -26,6 +30,7 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         args.tests.as_deref(),
         &args.cases,
         args.write,
+        run_commands,
         &ctx.user,
         // The runner confirms once for the whole run, so this gate is consulted
         // at most once however many cases there are.
@@ -63,6 +68,32 @@ fn trust_for(trusted: bool, confirmer: &mut Confirmer) -> ops::Trust<'_> {
     } else {
         ops::Trust::Ask(confirmer)
     }
+}
+
+/// Whether this run's `[commands]` execute at all. See ADR-027.
+///
+/// Reads `tpl.testCommands` from whatever repository contains the current
+/// directory — never `Resolved.repo`, the template under test, which may be a
+/// temporary clone of a remote source with no configuration a person put
+/// there on purpose. A personal opt-out has to live somewhere the person
+/// running the command controls: their own machine's Git configuration.
+///
+/// Unlike every other command, `test` must keep working with no such
+/// repository at all — testing a remote template from a scratch directory has
+/// no `.git` to discover — so a missing repository here falls back to the
+/// built-in default silently, the same way an unconfigured one already does.
+fn test_commands_enabled(skip: bool) -> Result<bool, OpError> {
+    let preferences = match LibGit2::discover(&super::current_dir()?) {
+        Ok(repo) => Preferences::load(&repo)?,
+        Err(GitError::NotARepository { .. }) => Preferences::default(),
+        Err(other) => return Err(other.into()),
+    };
+    Ok(preferences
+        .with_overrides(Overrides {
+            skip_commands: skip,
+            ..Default::default()
+        })
+        .test_commands)
 }
 
 fn print_text(ctx: &Standalone, report: &Report, write: bool) {
@@ -146,6 +177,13 @@ fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize) {
         case.files,
         if case.files == 1 { "" } else { "s" }
     )];
+    if case.commands_run > 0 {
+        detail.push(format!(
+            "{} command{}",
+            case.commands_run,
+            if case.commands_run == 1 { "" } else { "s" }
+        ));
+    }
     match case.snapshot {
         SnapshotOutcome::None => {}
         SnapshotOutcome::Compared => detail.push("snapshot ok".into()),
@@ -251,6 +289,29 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
                 "      re-record with `git tpl test --write` once the change is intended",
             ));
         }
+        Failure::SnapshotMissing => {
+            say("snapshot requested but never recorded".to_string());
+            ctx.out
+                .say(muted(theme, "      record one with `git tpl test --write`"));
+        }
+        Failure::CommandFailed {
+            step,
+            command,
+            code,
+            stdout,
+            stderr,
+        } => {
+            match code {
+                Some(code) => say(format!("[{}] `{command}` exited {code}", step.as_str())),
+                None => say(format!("[{}] `{command}` could not be run", step.as_str())),
+            }
+            // stderr first: it is where a failing command explains itself.
+            // stdout only when there is nothing on stderr to show instead.
+            let output = if stderr.is_empty() { stdout } else { stderr };
+            for line in output.lines() {
+                ctx.out.say(muted(theme, &format!("      {line}")));
+            }
+        }
     }
 }
 
@@ -278,6 +339,8 @@ fn json(report: &Report) -> serde_json::Value {
             "failed": report.failed(),
             "snapshotsWritten": report.snapshots_written(),
             "snapshotsCompared": report.snapshots_compared(),
+            "commandsEnabled": report.commands_enabled,
+            "commandsRun": report.commands_run(),
         },
         "cases": report.cases.iter().map(|case| serde_json::json!({
             "name": case.name,
@@ -285,6 +348,7 @@ fn json(report: &Report) -> serde_json::Value {
             "passed": case.passed(),
             "files": case.files,
             "snapshot": case.snapshot.as_str(),
+            "commandsRun": case.commands_run,
             "failures": case.failures.iter().map(failure_json).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })
@@ -342,6 +406,23 @@ fn failure_json(failure: &Failure) -> serde_json::Value {
                 "modeOnly": change.mode_only,
                 "patch": change.patch,
             })).collect::<Vec<_>>(),
+        }),
+        Failure::SnapshotMissing => serde_json::json!({
+            "kind": "snapshotMissing",
+        }),
+        Failure::CommandFailed {
+            step,
+            command,
+            code,
+            stdout,
+            stderr,
+        } => serde_json::json!({
+            "kind": "commandFailed",
+            "step": step.as_str(),
+            "command": command,
+            "code": code,
+            "stdout": stdout,
+            "stderr": stderr,
         }),
     }
 }

@@ -18,6 +18,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         remote: args.remote.as_deref(),
         push: args.push,
         non_interactive: args.answers.defaults,
+        ..Default::default()
     });
 
     let mut config = tpl::config::Config::load(&ctx.root)?;

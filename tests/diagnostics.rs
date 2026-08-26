@@ -172,6 +172,8 @@ const DOCUMENTED: &[&str] = &[
     "tpl::testing::case_shape",
     "tpl::testing::no_such_case",
     "tpl::testing::no_tests",
+    "tpl::testing::sandbox_failed",
+    "tpl::testing::sandbox_write",
     "tpl::testing::snapshot_read",
     "tpl::testing::snapshot_write",
     "tpl::testing::write_needs_local",
