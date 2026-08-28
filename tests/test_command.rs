@@ -961,6 +961,87 @@ fn an_unknown_commands_key_is_refused_with_a_suggestion() {
     assert!(output.stdout.contains("before"), "{}", output.stdout);
 }
 
+/// `commands.env`, and a list written as a table with its own `env`, both
+/// parse — the shape-level half of issue #130, run separately from whether
+/// the environment actually reaches a spawned process (`test_commands.rs`).
+#[cfg(unix)]
+#[test]
+fn commands_env_and_a_per_list_env_override_both_parse() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             env = { GLOBAL = \"1\" }\n\
+             before = [\"true\"]\n\n\
+             [commands.rendered]\n\
+             env = { LOCAL = \"2\" }\n\
+             run = [\"true\"]\n",
+        )],
+    );
+
+    let output = run(&template, &["--json"]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// A non-string value inside `commands.env` is refused, the same strictness
+/// `commands.before`'s own strings already get.
+#[test]
+fn a_non_string_commands_env_value_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n[commands]\nenv = { GLOBAL = 1 }\n",
+        )],
+    );
+
+    let output = run(&template, &["--json"]).failure();
+    assert_eq!(output.error_code(), "tpl::testing::case_shape");
+}
+
+/// An unknown key inside a list written as a table (`[commands.rendered]`)
+/// is refused with a suggestion, the same strictness `[commands]` itself
+/// already gets for `before`/`rendered`/`after`/`finally`/`env`.
+#[test]
+fn an_unknown_key_inside_a_command_list_table_is_refused_with_a_suggestion() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n[commands.rendered]\nrunn = [\"true\"]\n",
+        )],
+    );
+
+    let output = run(&template, &["--json"]).failure();
+    assert_eq!(output.error_code(), "tpl::testing::case_shape");
+    assert!(output.stdout.contains("run"), "{}", output.stdout);
+}
+
+/// `commands.before` that is neither an array nor a table is refused,
+/// naming both shapes it does accept.
+#[test]
+fn a_command_list_that_is_neither_an_array_nor_a_table_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[("tests/c.toml", "[answers]\n\n[commands]\nbefore = \"ls\"\n")],
+    );
+
+    let output = run(&template, &["--json"]).failure();
+    assert_eq!(output.error_code(), "tpl::testing::case_shape");
+    assert!(
+        output.stdout.contains("`run` and `env`"),
+        "{}",
+        output.stdout
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn the_snapshot_manifest_records_the_executable_bit() {

@@ -228,3 +228,88 @@ fn a_failing_command_names_the_step_and_the_command() {
     .says("[before]")
     .says("ls does-not-exist");
 }
+
+// --- `commands.env` (issue #130) --------------------------------------------
+
+#[test]
+fn commands_env_is_merged_into_every_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             env = { GTPL_TEST_VAR = \"1\" }\n\
+             before   = [\"printenv GTPL_TEST_VAR\"]\n\
+             rendered = [\"printenv GTPL_TEST_VAR\"]\n\
+             after    = [\"printenv GTPL_TEST_VAR\"]\n\
+             finally  = [\"printenv GTPL_TEST_VAR\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+    assert_eq!(json["cases"][0]["commandsRun"], 4);
+}
+
+/// A variable set only through one list's own `env` is not visible in a
+/// different list of the same case — the scoping issue #130 asks for, not
+/// just the ability to add a variable at all.
+#[test]
+fn a_list_only_env_variable_does_not_leak_into_a_different_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             after = [\"printenv GTPL_TEST_SCOPED\"]\n\n\
+             [commands.rendered]\n\
+             env = { GTPL_TEST_SCOPED = \"1\" }\n\
+             run = [\"printenv GTPL_TEST_SCOPED\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).code(1);
+    let json = output.json();
+    let failures = &json["cases"][0]["failures"];
+    // `rendered` sees it and passes; `after` does not and fails.
+    assert_eq!(failures.as_array().unwrap().len(), 1, "{json}");
+    assert_eq!(failures[0]["step"], "after");
+}
+
+/// A list's own `env` wins over `commands.env` for a key both set, and a
+/// list with no override of its own still gets `commands.env` alone — proved
+/// through a rendered script's exit code, since a successful command's
+/// stdout is not captured for the report to assert against.
+#[test]
+fn a_list_env_override_wins_over_commands_env_for_the_same_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(
+        dir.path(),
+        "name = \"envtest\"\n",
+        &[(
+            "check.sh",
+            "#!/bin/sh\n[ \"$GTPL_TEST_FOO\" = \"$1\" ] || exit 1\n",
+        )],
+    );
+    built.repo.make_executable("template/check.sh");
+    built.repo.write(
+        "tests/c.toml",
+        "[answers]\n\n\
+         [commands]\n\
+         env = { GTPL_TEST_FOO = \"global\" }\n\
+         after = [\"./check.sh global\"]\n\n\
+         [commands.rendered]\n\
+         env = { GTPL_TEST_FOO = \"override\" }\n\
+         run = [\"./check.sh override\"]\n",
+    );
+    built.repo.commit_all("test: env override");
+
+    let output = run(&built, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}

@@ -120,6 +120,33 @@ Each entry is a plain string, split into a program and its arguments the way a s
 escapes — but no shell actually runs. There is no pipe, no glob, no redirection and no `$VAR` expansion. A
 pipeline needs a script file: write it with `before`, then name it in `rendered`.
 
+### Environment
+
+Every command inherits the full environment `git tpl test` itself runs under. `commands.env` adds to it, for
+every list in the case:
+
+```toml
+[commands]
+env = { PDM_IGNORE_ACTIVE_VENV = "true" }
+rendered = ["pdm install --plugins", "pdm install -dG:all", "pdm test"]
+```
+
+A single list can override `commands.env` for itself alone by writing it as a table with `run` and `env` instead
+of a bare array:
+
+```toml
+[commands]
+env = { PDM_IGNORE_ACTIVE_VENV = "true" }
+
+[commands.after]
+env = { PDM_IGNORE_ACTIVE_VENV = "false" }
+run = ["pdm run something-that-needs-the-active-venv"]
+```
+
+`commands.after.env` wins over `commands.env` for a key both set; every other list still gets `commands.env`
+alone. Neither adds `$VAR` expansion to a command's own text — a value only ever reaches a process as an
+environment variable, never as text substituted into the command line before it runs.
+
 `before`, `rendered` and `after` each stop at their own first failure — they are sequential, and a later entry
 usually assumes an earlier one worked. A failing `before`, or a render that fails without `expect.error` naming
 it, skips straight to `finally`: there is nothing for `rendered`/`after` to run against. `finally` is the

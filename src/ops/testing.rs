@@ -286,25 +286,41 @@ pub struct Expect {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Commands {
     /// Run before anything is rendered, in an empty sandbox.
-    pub before: Vec<String>,
+    pub before: CommandList,
     /// Run after the rendering is materialised onto the sandbox, before
     /// `expect` is checked.
-    pub rendered: Vec<String>,
+    pub rendered: CommandList,
     /// Run after `expect` and the snapshot are checked.
-    pub after: Vec<String>,
+    pub after: CommandList,
     /// Run always, last, regardless of anything above. Best-effort: every
     /// entry runs even when an earlier one in this same list failed.
-    pub finally: Vec<String>,
+    pub finally: CommandList,
+}
+
+/// One `[commands]` list: the commands themselves, and the environment
+/// merged into every one of them.
+///
+/// Split out of `Commands` rather than kept as a bare `Vec<String>` so a list
+/// can carry its own `env` override on top of `commands.env`, scoped to
+/// itself alone. See "`env` scopes a command's environment" in ADR-027.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CommandList {
+    /// The commands themselves, in order.
+    pub commands: Vec<String>,
+    /// `commands.env`, merged with this list's own override if it wrote one
+    /// — the value already resolved at parse time, so nothing downstream
+    /// needs to know two tables were ever involved.
+    pub env: BTreeMap<String, String>,
 }
 
 impl Commands {
     /// Whether every list is empty — the case declared no `[commands]`, or
     /// wrote one with nothing in it.
     pub fn is_empty(&self) -> bool {
-        self.before.is_empty()
-            && self.rendered.is_empty()
-            && self.after.is_empty()
-            && self.finally.is_empty()
+        self.before.commands.is_empty()
+            && self.rendered.commands.is_empty()
+            && self.after.commands.is_empty()
+            && self.finally.commands.is_empty()
     }
 
     fn parse(
@@ -312,22 +328,77 @@ impl Commands {
         shape: &impl Fn(String) -> TestError,
     ) -> Result<Self, TestError> {
         for key in table.keys() {
-            if !matches!(key.as_str(), "before" | "rendered" | "after" | "finally") {
-                let hint = closest(key, ["before", "rendered", "after", "finally"])
+            if !matches!(
+                key.as_str(),
+                "before" | "rendered" | "after" | "finally" | "env"
+            ) {
+                let hint = closest(key, ["before", "rendered", "after", "finally", "env"])
                     .map(|near| format!(" Did you mean `{near}`?"))
                     .unwrap_or_default();
                 return Err(shape(format!(
                     "`commands.{key}` is not a command list.{hint} \
-                     A case may run `before`, `rendered`, `after` or `finally`."
+                     A case may run `before`, `rendered`, `after` or `finally`, \
+                     and set `env` for all of them."
                 )));
             }
         }
+        // Merged into every list below, before that list's own override (if
+        // any) is applied on top — see `CommandList::parse`.
+        let env = string_map(table.get("env"), "commands.env", shape)?;
         Ok(Commands {
-            before: string_array(table.get("before"), "commands.before", shape)?,
-            rendered: string_array(table.get("rendered"), "commands.rendered", shape)?,
-            after: string_array(table.get("after"), "commands.after", shape)?,
-            finally: string_array(table.get("finally"), "commands.finally", shape)?,
+            before: CommandList::parse(table.get("before"), "commands.before", &env, shape)?,
+            rendered: CommandList::parse(table.get("rendered"), "commands.rendered", &env, shape)?,
+            after: CommandList::parse(table.get("after"), "commands.after", &env, shape)?,
+            finally: CommandList::parse(table.get("finally"), "commands.finally", &env, shape)?,
         })
+    }
+}
+
+impl CommandList {
+    /// Parse one list: the existing bare array (no override, just
+    /// `inherited`), or a table with its own `run` and `env`.
+    ///
+    /// `inherited` is `commands.env`, already parsed once by the caller
+    /// rather than re-parsed per list — a case with four lists and a typo in
+    /// `commands.env` should get one diagnostic, not four identical ones.
+    fn parse(
+        value: Option<&Value>,
+        key: &str,
+        inherited: &BTreeMap<String, String>,
+        shape: &impl Fn(String) -> TestError,
+    ) -> Result<Self, TestError> {
+        match value {
+            None | Some(Value::Array(_)) => Ok(CommandList {
+                commands: string_array(value, key, shape)?,
+                env: inherited.clone(),
+            }),
+            Some(Value::Table(inner)) => {
+                for inner_key in inner.keys() {
+                    if !matches!(inner_key.as_str(), "run" | "env") {
+                        let hint = closest(inner_key, ["run", "env"])
+                            .map(|near| format!(" Did you mean `{near}`?"))
+                            .unwrap_or_default();
+                        return Err(shape(format!(
+                            "`{key}.{inner_key}` is not a command list key.{hint} \
+                             A list written as a table has `run` and `env`."
+                        )));
+                    }
+                }
+                // The list's own value wins over `commands.env` for the same
+                // key: the more specific table is the one the case's author
+                // was looking at when they wrote it.
+                let mut env = inherited.clone();
+                env.extend(string_map(inner.get("env"), &format!("{key}.env"), shape)?);
+                Ok(CommandList {
+                    commands: string_array(inner.get("run"), &format!("{key}.run"), shape)?,
+                    env,
+                })
+            }
+            Some(other) => Err(shape(format!(
+                "`{key}` must be an array of commands, or a table with `run` and `env`, not {}.",
+                other.type_name()
+            ))),
+        }
     }
 }
 
@@ -458,7 +529,9 @@ impl Case {
         // refusal `Expect::parse` already applies to `files`/`absent`/
         // `contains`/`lacks`, extended to the two lists that need a rendering
         // to run against at all.
-        if expect.error.is_some() && (!commands.rendered.is_empty() || !commands.after.is_empty()) {
+        if expect.error.is_some()
+            && (!commands.rendered.commands.is_empty() || !commands.after.commands.is_empty())
+        {
             return Err(shape(
                 "`expect.error` says the render fails, so there is nothing for \
                  `commands.rendered` or `commands.after` to run against. \
@@ -616,6 +689,36 @@ fn string_array(
             .collect(),
         Some(other) => Err(shape(format!(
             "`{what}` must be an array of strings, not {}.",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Parse a `name -> value` table of plain strings — the shape `commands.env`
+/// and `commands.<list>.env` share.
+///
+/// Unlike `string_array`'s callers, a bare-string coercion would not help
+/// here: an environment variable's value already is one, so there is nothing
+/// to coerce from.
+fn string_map(
+    value: Option<&Value>,
+    what: &str,
+    shape: &impl Fn(String) -> TestError,
+) -> Result<BTreeMap<String, String>, TestError> {
+    match value {
+        None => Ok(BTreeMap::new()),
+        Some(Value::Table(entries)) => entries
+            .iter()
+            .map(|(name, value)| match value {
+                Value::String(value) => Ok((name.clone(), value.clone())),
+                other => Err(shape(format!(
+                    "`{what}.{name}` must be a string, not {}.",
+                    other.type_name()
+                ))),
+            })
+            .collect(),
+        Some(other) => Err(shape(format!(
+            "`{what}` must be a table of strings, not {}.",
             other.type_name()
         ))),
     }
@@ -1090,8 +1193,9 @@ fn run_case(
         // materialised yet.
         let mut commands_run = execute_commands(
             CommandStep::Before,
-            &case.commands.before,
+            &case.commands.before.commands,
             cwd,
+            &case.commands.before.env,
             true,
             &mut failures,
         );
@@ -1174,8 +1278,9 @@ fn run_case(
                     // `rendered`: after materialising, before `expect`.
                     commands_run += execute_commands(
                         CommandStep::Rendered,
-                        &case.commands.rendered,
+                        &case.commands.rendered.commands,
                         cwd,
+                        &case.commands.rendered.env,
                         true,
                         &mut failures,
                     );
@@ -1199,8 +1304,9 @@ fn run_case(
                     // `after`: once `expect` and the snapshot are settled.
                     commands_run += execute_commands(
                         CommandStep::After,
-                        &case.commands.after,
+                        &case.commands.after.commands,
                         cwd,
+                        &case.commands.after.env,
                         true,
                         &mut failures,
                     );
@@ -1220,8 +1326,9 @@ fn run_case(
     let mut finally_failures = Vec::new();
     let finally_ran = execute_commands(
         CommandStep::Finally,
-        &case.commands.finally,
+        &case.commands.finally.commands,
         cwd,
+        &case.commands.finally.env,
         false,
         &mut finally_failures,
     );
@@ -1336,13 +1443,14 @@ fn execute_commands(
     step: CommandStep,
     commands: &[String],
     cwd: &Path,
+    env: &BTreeMap<String, String>,
     stop_on_failure: bool,
     failures: &mut Vec<Failure>,
 ) -> usize {
     let mut run = 0;
     for command in commands {
         run += 1;
-        if let Err((code, stdout, stderr)) = run_one(command, cwd) {
+        if let Err((code, stdout, stderr)) = run_one(command, cwd, env) {
             failures.push(Failure::CommandFailed {
                 step,
                 command: command.clone(),
@@ -1365,7 +1473,15 @@ fn execute_commands(
 /// same untrusted-repository input invariant 5 already governs everywhere
 /// else, and a real shell would hand every one of those to it for free. See
 /// ADR-027.
-fn run_one(command: &str, cwd: &Path) -> Result<(), (Option<i32>, String, String)> {
+///
+/// `env` is merged on top of the inherited environment — `Command::envs`,
+/// never `.env_clear()` — so a case that sets none behaves exactly as before
+/// `env` existed. See "`env` scopes a command's environment" in ADR-027.
+fn run_one(
+    command: &str,
+    cwd: &Path,
+    env: &BTreeMap<String, String>,
+) -> Result<(), (Option<i32>, String, String)> {
     let argv = match shlex::split(command) {
         Some(argv) if !argv.is_empty() => argv,
         // Empty, or an unterminated quote. Reported like any other failed
@@ -1382,6 +1498,7 @@ fn run_one(command: &str, cwd: &Path) -> Result<(), (Option<i32>, String, String
     match std::process::Command::new(&argv[0])
         .args(&argv[1..])
         .current_dir(cwd)
+        .envs(env)
         .output()
     {
         Ok(output) if output.status.success() => Ok(()),
