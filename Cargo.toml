@@ -155,7 +155,7 @@ indexmap = { version = "2", features = ["serde"] }
 # document streams are accepted, and `<<` auto-merges — so `format.rs` builds
 # an explicit `ParserConfig` to restore the strict, bounded behavior a remote
 # data source requires.
-noyalib = "0.0.24"
+noyalib = "0.0.28"
 # The answers digest recorded in the provenance trailers. `sha2` rather than a
 # faster non-cryptographic hash because the digest is written into Git history
 # and read back to decide whether a re-render is needed.
