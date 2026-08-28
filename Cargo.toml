@@ -181,7 +181,7 @@ tempfile = "3"
 # no `$VAR` expansion, and no shell process runs. Already present transitively
 # through `cc`'s build script; promoted to a direct dependency because a
 # case's commands are parsed by the library itself, at runtime. See ADR-027.
-shlex = "1"
+shlex = "2"
 # The remote data source client. Blocking, because everything below `ops` is
 # synchronous and an async runtime would exist solely to be blocked on. Default
 # features give rustls plus the platform verifier, so no release target needs a
