@@ -115,6 +115,30 @@ worse outcome than one more line in a failure report.
 No timeout exists in this version. A command that hangs, hangs the run. This is a documented limitation, not an
 oversight, and is left for a later ADR if it proves to matter in practice.
 
+### `env` scopes a command's environment (added, issue #130)
+
+Every entry in `[commands]` originally inherited the whole environment of the `git tpl test` process and nothing
+more — there was no way to add or override a variable for one list, or one case, without exporting it for the
+entire invocation and every case in it. A rendering that needs `pdm install` to ignore an already-active venv, say,
+had no way to say so without either repeating a `env VAR=value` prefix on every entry in every case that needed it,
+or setting the variable for the whole run and leaving every other case unable to tell, from its own file alone,
+that it depended on it.
+
+`commands.env` is a plain string map, merged into the inherited environment — never `.env_clear()` — of every
+command in every list of the case. A single list may override it for itself alone by writing itself as a table
+with `run` and `env` instead of a bare array; its own `env` wins over `commands.env` for a key both set, and every
+other list in the case is unaffected either way.
+
+None of the three exclusions above apply to it. It executes nothing itself, so invariant 5 is untouched. The
+command format is unchanged — still a string, still word-split by `shlex`, still no `$VAR` expansion, since `env`
+changes what a process is spawned *with*, never what its own argv line means. And it is scoped to the process
+`Command` already spawns for a case's own `[commands]`, not a new surface: the one place this ADR already decided
+`std::process::Command` may appear.
+
+It is additive rather than a revision of the decision above, so it amends this ADR in place instead of a
+superseding one: an old git-tpl reading a case with `commands.env`, or a list written as a table, fails loudly at
+the existing vocabulary or shape check, not silently.
+
 ## Consequences
 
 **What reopens.** A test case's *harness* — not a template's render — may spawn a process. This is a new
