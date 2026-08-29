@@ -37,3 +37,4 @@ explains the code that existed.
 | [026](026-transparent-path-segments.md) | A rendered path piece may be `.` or fan out across `/`; only `..` and a backslash are rejected |
 | [027](027-test-case-commands.md) | A test case may declare commands, run by the harness alone |
 | [028](028-test-case-trust.md) | A test case declares its own trust in remote data sources |
+| [029](029-test-case-answers-are-strict.md) | A test case's `[answers]` is always validated strictly |

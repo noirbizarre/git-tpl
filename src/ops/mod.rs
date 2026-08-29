@@ -572,6 +572,11 @@ pub struct RenderedOnce {
 /// layer may know `AnswerArgs` exists, but `init` and `update` must refuse
 /// *before* they write a commit, which is earlier than either ever returns
 /// to its caller — so the check has to live here, not in `commands/`.
+///
+/// `testing::run_case`/`run_case_plain` are the one caller that always passes
+/// `true`: a case's `[answers]` is hand-authored and has no `--strict-answers`
+/// to opt into, so the leniency this function otherwise defaults to has no
+/// argument in its favour there. See ADR-029.
 pub fn enforce_strict_answers(
     strict: bool,
     ignored: &[String],
