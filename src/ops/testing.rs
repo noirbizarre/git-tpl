@@ -20,7 +20,10 @@ use std::path::Path;
 use miette::Diagnostic;
 use thiserror::Error;
 
-use super::{Answering, OpError, RenderedOnce, Resolved, Target, Trust, render_resolved, resolve};
+use super::{
+    Answering, OpError, RenderedOnce, Resolved, Target, Trust, enforce_strict_answers,
+    render_resolved, resolve,
+};
 use crate::data::format::{Format, parse_value};
 use crate::data::{Decision, declared_remotes};
 use crate::git::{ChangeKind, FileMode, Oid};
@@ -1236,80 +1239,83 @@ fn run_case(
                     // No merged tree exists either way: `commands.rendered`
                     // and `commands.after` have nothing to run against, for
                     // the same reason a `before` failure skips them.
-                    let codes = codes(&error);
-                    match &case.expect.error {
-                        Some(expected) if codes.iter().any(|code| code == expected) => {}
-                        Some(expected) => failures.push(Failure::WrongError {
-                            expected: expected.clone(),
-                            actual: codes,
-                            message: error.to_string(),
-                        }),
-                        None => failures.push(Failure::UnexpectedError {
-                            code: codes.into_iter().next(),
-                            message: error.to_string(),
-                        }),
-                    }
+                    classify_render_error(error, &case.expect.error, &mut failures);
                 }
                 Ok(RenderedOnce {
                     files: rendered_files,
+                    ignored_answers,
                     ..
                 }) => {
-                    files = rendered_files.len();
-
-                    // Not `clear_directory`: that removes the directory
-                    // first, erasing exactly what `before` just seeded.
-                    // `materialise` alone only ever creates and overwrites
-                    // the paths the rendering names, which is the render's
-                    // tree laid on top of the sandbox's existing state — the
-                    // whole point of seeding it.
-                    let case_name = case.name.clone();
-                    super::materialise(
-                        cwd,
-                        rendered_files.iter().map(|file| {
-                            (file.path.as_str(), file.content.as_slice(), file.executable)
-                        }),
-                        &|path, verb, io_error| TestError::SandboxWrite {
-                            case: case_name.clone(),
-                            path: path.display().to_string(),
-                            reason: format!("could not {verb} it: {io_error}"),
-                        },
-                    )?;
-
-                    // `rendered`: after materialising, before `expect`.
-                    commands_run += execute_commands(
-                        CommandStep::Rendered,
-                        &case.commands.rendered.commands,
-                        cwd,
-                        &case.commands.rendered.env,
+                    // Unconditional: a case has no `--strict-answers` to opt
+                    // into and never will (`test`'s answers are the case
+                    // file, not a recorded set that might outlive a dropped
+                    // question) — see ADR-029 and #135. A violation is
+                    // classified exactly like a render that failed outright:
+                    // there is still nothing rendered for `expect` to check.
+                    if let Err(error) = enforce_strict_answers(
                         true,
-                        &mut failures,
-                    );
-
-                    if let Some(expected) = &case.expect.error {
-                        failures.push(Failure::ExpectedError {
-                            code: expected.clone(),
-                        });
+                        &ignored_answers,
+                        template.manifest.questions.keys().cloned(),
+                    ) {
+                        classify_render_error(error, &case.expect.error, &mut failures);
                     } else {
-                        check(&case.expect, &rendered_files, &mut failures);
-                    }
-                    snapshot = snapshot_step(
-                        template,
-                        tests_dir,
-                        case,
-                        &rendered_files,
-                        write,
-                        &mut failures,
-                    )?;
+                        files = rendered_files.len();
 
-                    // `after`: once `expect` and the snapshot are settled.
-                    commands_run += execute_commands(
-                        CommandStep::After,
-                        &case.commands.after.commands,
-                        cwd,
-                        &case.commands.after.env,
-                        true,
-                        &mut failures,
-                    );
+                        // Not `clear_directory`: that removes the directory
+                        // first, erasing exactly what `before` just seeded.
+                        // `materialise` alone only ever creates and
+                        // overwrites the paths the rendering names, which is
+                        // the render's tree laid on top of the sandbox's
+                        // existing state — the whole point of seeding it.
+                        let case_name = case.name.clone();
+                        super::materialise(
+                            cwd,
+                            rendered_files.iter().map(|file| {
+                                (file.path.as_str(), file.content.as_slice(), file.executable)
+                            }),
+                            &|path, verb, io_error| TestError::SandboxWrite {
+                                case: case_name.clone(),
+                                path: path.display().to_string(),
+                                reason: format!("could not {verb} it: {io_error}"),
+                            },
+                        )?;
+
+                        // `rendered`: after materialising, before `expect`.
+                        commands_run += execute_commands(
+                            CommandStep::Rendered,
+                            &case.commands.rendered.commands,
+                            cwd,
+                            &case.commands.rendered.env,
+                            true,
+                            &mut failures,
+                        );
+
+                        if let Some(expected) = &case.expect.error {
+                            failures.push(Failure::ExpectedError {
+                                code: expected.clone(),
+                            });
+                        } else {
+                            check(&case.expect, &rendered_files, &mut failures);
+                        }
+                        snapshot = snapshot_step(
+                            template,
+                            tests_dir,
+                            case,
+                            &rendered_files,
+                            write,
+                            &mut failures,
+                        )?;
+
+                        // `after`: once `expect` and the snapshot are settled.
+                        commands_run += execute_commands(
+                            CommandStep::After,
+                            &case.commands.after.commands,
+                            cwd,
+                            &case.commands.after.env,
+                            true,
+                            &mut failures,
+                        );
+                    }
                 }
             }
         }
@@ -1386,34 +1392,37 @@ fn run_case_plain(
 
     match rendered {
         Err(error) => {
-            let codes = codes(&error);
-            match &case.expect.error {
-                Some(expected) if codes.iter().any(|code| code == expected) => {}
-                Some(expected) => failures.push(Failure::WrongError {
-                    expected: expected.clone(),
-                    actual: codes,
-                    message: error.to_string(),
-                }),
-                None => failures.push(Failure::UnexpectedError {
-                    code: codes.into_iter().next(),
-                    message: error.to_string(),
-                }),
-            }
+            classify_render_error(error, &case.expect.error, &mut failures);
         }
         Ok(RenderedOnce {
-            files: rendered, ..
+            files: rendered,
+            ignored_answers,
+            ..
         }) => {
-            files = rendered.len();
-
-            if let Some(expected) = &case.expect.error {
-                failures.push(Failure::ExpectedError {
-                    code: expected.clone(),
-                });
+            // Unconditional: a case has no `--strict-answers` to opt into
+            // and never will — see ADR-029 and #135. A violation is
+            // classified exactly like a render that failed outright: there
+            // is still nothing rendered for `expect`/the snapshot to check.
+            if let Err(error) = enforce_strict_answers(
+                true,
+                &ignored_answers,
+                template.manifest.questions.keys().cloned(),
+            ) {
+                classify_render_error(error, &case.expect.error, &mut failures);
             } else {
-                check(&case.expect, &rendered, &mut failures);
-            }
+                files = rendered.len();
 
-            snapshot = snapshot_step(template, tests_dir, case, &rendered, write, &mut failures)?;
+                if let Some(expected) = &case.expect.error {
+                    failures.push(Failure::ExpectedError {
+                        code: expected.clone(),
+                    });
+                } else {
+                    check(&case.expect, &rendered, &mut failures);
+                }
+
+                snapshot =
+                    snapshot_step(template, tests_dir, case, &rendered, write, &mut failures)?;
+            }
         }
     }
 
@@ -1612,6 +1621,30 @@ fn codes(error: &dyn Diagnostic) -> Vec<String> {
         current = error.diagnostic_source();
     }
     out
+}
+
+/// Classify a render failure against `expect.error`.
+///
+/// Used both for a render that failed outright, and — since #135 — for one
+/// that succeeded but named an answer that matches no question: a case's
+/// `[answers]` is hand-authored and lives next to the manifest it must track,
+/// so an unrecognised key is unconditionally the case's own mistake, never a
+/// stale-but-innocent leftover the way a recorded `--answers-from` file can
+/// be. Either way there is no rendering for `expect`/the snapshot to check.
+fn classify_render_error(error: OpError, expected: &Option<String>, failures: &mut Vec<Failure>) {
+    let codes = codes(&error);
+    match expected {
+        Some(expected) if codes.iter().any(|code| code == expected) => {}
+        Some(expected) => failures.push(Failure::WrongError {
+            expected: expected.clone(),
+            actual: codes,
+            message: error.to_string(),
+        }),
+        None => failures.push(Failure::UnexpectedError {
+            code: codes.into_iter().next(),
+            message: error.to_string(),
+        }),
+    }
 }
 
 /// A file as a snapshot records it.

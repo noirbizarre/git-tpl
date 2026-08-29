@@ -57,6 +57,12 @@ Unanswered questions take their defaults.
 Nothing is ever prompted for — a prompt in a test runner is a hang — so a question with no default and no answer
 fails the case with `tpl::eval::unanswered`, which is a true thing to know about the template.
 
+An answer that names no question fails the case too, with `tpl::answers::unknown_key` — unconditionally, unlike
+`render`'s `--strict-answers`, which this command has no equivalent of and never will (see
+[Options](#options) below). A case's `[answers]` is hand-authored, not a recorded set that might outlive a dropped
+question, so an unrecognised key here is always the case's own mistake. See
+[ADR-029](../adr/029-test-case-answers-are-strict.md).
+
 ## Options
 
 | Flag | Effect |

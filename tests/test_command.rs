@@ -1682,6 +1682,42 @@ source = "https://127.0.0.1:1/things.toml"
 }
 
 #[test]
+fn a_case_fails_when_an_answer_names_no_question() {
+    let dir = tempfile::tempdir().unwrap();
+    // `projct_name` is the same deliberate typo `typos.toml` already
+    // allowlists for `strict_answers_refuses_a_key_that_names_no_question`
+    // in `tests/render.rs` — the repro from #135: a case's `[answers]` has
+    // no `--strict-answers` to catch this, so it must be caught
+    // unconditionally. See ADR-029.
+    let built = template(
+        dir.path(),
+        &[("tests/c.toml", "[answers]\nprojct_name = \"typo\"\n")],
+    );
+
+    let output = run(&built, &["--json"]).code(1);
+    let failure = &output.json()["cases"][0]["failures"][0];
+    assert_eq!(failure["code"], "tpl::answers::unknown_key");
+    assert!(
+        failure["message"]
+            .as_str()
+            .expect("message")
+            .contains("projct_name"),
+        "the message should name the offending key"
+    );
+}
+
+#[test]
+fn a_case_with_only_real_questions_in_its_answers_is_unaffected() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[("tests/c.toml", "[answers]\nproject_name = \"thing\"\n")],
+    );
+
+    run(&built, &["--json"]).success();
+}
+
+#[test]
 fn git_tpl_test_no_longer_accepts_a_trust_flag() {
     let dir = tempfile::tempdir().unwrap();
     let built = template(dir.path(), &[("tests/c.toml", "[answers]\n")]);
