@@ -105,3 +105,20 @@ git tpl --json status
 `remote` is `null` when no remote copy exists.
 `dirty` records whether the rendering on the ref was produced from a template working tree rather than a commit.
 Human output goes to stderr, so `--json` leaves stdout machine-readable.
+
+## Detaching
+
+There is no dedicated command for this — see
+[why](../development/contributing.md#things-that-will-be-declined). Removing the config is the whole thing:
+
+```sh
+git rm .config/git.tpl.toml
+git commit -m "chore(tpl): detach from <template>"
+```
+
+Every git-tpl command that needs a project refuses cleanly afterwards, with a message saying there is no template
+attached.
+
+`refs/tpl/<id>` is left untouched. It is not pushed by a bare `git push` and costs nothing to keep — and it is
+what a future `git tpl init` of the same template could use as a merge base again, rather than starting over with
+an unrelated history.
