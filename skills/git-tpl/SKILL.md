@@ -10,7 +10,7 @@ description: |
 license: MIT
 metadata:
   author: Axel Haustant
-  version: "1.0"
+  version: "1.1"
 ---
 
 # git-tpl
@@ -65,27 +65,32 @@ do not assume it is preinstalled.
    use it on an unfamiliar template or repository before acting for real.
 4. **`update` alone changes nothing you can see.** It only advances `refs/tpl/<id>`.
    Follow it with `git tpl diff` to preview and `git tpl merge` to apply — skipping the merge leaves the update inert.
-5. **`git tpl status --json` exits `2`**, not `0` or `1`,
+5. **A migration can ride along with an `update`.** `migrations[]` is empty on almost every update; when it isn't,
+   the template crossed a version boundary declared under its own `migrations/` directory (ADR-024). Read each
+   entry's `message` before merging — it is meant to be shown once, the same as `init`'s `note`. `movedCommit`,
+   when present, is an internal rename commit the merge machinery needs; it is not something to inspect or act on.
+   A migration always reports `"result": "updated"`, never `"upToDate"`, even if nothing else changed.
+6. **`git tpl status --json` exits `2`**, not `0` or `1`,
    when a template update is pending (`"templateMoved": true` or `"merged": false`).
    Treat that as a normal branch, not a failure.
-6. **`"ok": true` describes the command, not the outcome**, for two commands specifically:
+7. **`"ok": true` describes the command, not the outcome**, for two commands specifically:
    `lint` (check `errors`/`denied` in its `diagnostics[]`, not just `ok`)
    and `test` (check `summary.failed`).
-7. **Conflicts are resolved with plain Git, never invented tooling:**
+8. **Conflicts are resolved with plain Git, never invented tooling:**
    `git status`, `git tpl show <path>` (the template's/"theirs" side, without checking out the ref),
    edit, `git add`, `git commit`.
    `git merge --abort` bails out entirely, same as any Git merge.
-8. **`backport` never applies its own patch.** It only ever emits one, to stdout or `--output <file>`.
+9. **`backport` never applies its own patch.** It only ever emits one, to stdout or `--output <file>`.
    Hand it to `git -C <template-clone> am` yourself (or give it to the human to review first).
    Under `--json`, `-p`/`--patch` (interactive hunk selection) is refused with `tpl::backport::not_interactive` —
    pass `--unsubstitute` instead of trying to force interactivity,
    or narrow the backport with pathspecs / `--exclude`.
-9. **Sharing renderings across a team is explicit.**
-   `git tpl fetch` and `git tpl push` move `refs/tpl/*`; nothing else does.
-   `push` never forces — a diverged remote must be fetched and merged first, same as any ref.
-10. **Never amend, rebase, or force anything onto `refs/tpl/*`.**
+10. **Sharing renderings across a team is explicit.**
+    `git tpl fetch` and `git tpl push` move `refs/tpl/*`; nothing else does.
+    `push` never forces — a diverged remote must be fetched and merged first, same as any ref.
+11. **Never amend, rebase, or force anything onto `refs/tpl/*`.**
     It is append-only by design; treat it as a read-only history you inspect and merge from, not one you rewrite.
-11. **Templates cannot execute code.**
+12. **Templates cannot execute code.**
     git-tpl runs nothing over a rendering — no hooks, no scripts, no post-render commands.
     If a template's note or README documents a `scripts/bootstrap.sh`, running it is a separate, deliberate step
     for you or the user, never something `init`/`update` does on your behalf.
@@ -155,6 +160,8 @@ git tpl diff --json --stat     # preview the merge; "conflicts" array if any
 git tpl merge --json
 ```
 
+If `migrations` in the `update` payload is non-empty, read its entries before merging — see agent rule 5.
+
 ### Resolve a merge conflict
 
 ```sh
@@ -193,16 +200,19 @@ there is no fix to send; edit the template's `.jinja` source by hand instead.
 
 | Command | Synopsis | Key JSON fields |
 |---|---|---|
-| `questions` | `git tpl --json questions <template>` | `questions[]{name,default,defaultIsExpression,when,choices}` |
+| `questions` | `git tpl --json questions <template>` | `questions[]{name,default,defaultIsExpression,when,choices,defaultWhenSkipped}` |
 | `init` | `git tpl init <template> [<dir>] [--init] [--answer k=v]... [--answers-from f]... [--defaults] [--dry-run]` | `id`,`ref`,`revision`,`commit`,`changes[]`,`merge{result,...}` |
-| `status` | `git tpl status` | `templateMoved`,`merged`,`availableRevision`,`renderedRevision`,`worktreeClean`,`remote{ahead,behind}` |
-| `update` | `git tpl update [--answer k=v]... [--defaults] [--dry-run] [--push]` | `result`(`upToDate`\|`updated`),`previousRevision`,`revision`,`changes[]` |
+| `status` | `git tpl status` | `templateMoved`,`merged`,`availableRevision`,`availableCommit`,`renderedRevision`,`worktreeClean`,`remote{ahead,behind}` |
+| `update` | `git tpl update [--answer k=v]... [--defaults] [--dry-run] [--push]` | `result`(`upToDate`\|`updated`),`previousRevision`,`revision`,`changes[]`,`migrations[]`,`movedCommit` |
 | `diff` | `git tpl diff [--stat] [--name-only] [--exit-code] [-- <path>...]` | `conflicts[]`,`changes[]{path,kind,insertions,deletions}` |
 | `merge` | `git tpl merge [--no-commit] [-m <msg>]` / `git tpl merge --abort` | `result`(`upToDate`\|`fastForward`\|`merged`\|`staged`\|`conflicted`),`commit`,`conflicts[]` |
 | `show` | `git tpl show <path>` | no envelope — stdout **is** the file's bytes |
 | `backport` | `git tpl backport [<pathspec>...] [--exclude g]... [-o file] [--unsubstitute]` | `result`(`patched`\|`nothingToBackport`),`patch`,`unsubstituted[]` |
 | `fetch` | `git tpl fetch [--remote name] [--dry-run]` | `state`(`absent`\|`synced`\|`diverged`\|`behind`\|`ahead`),`relation{ahead,behind}` |
 | `push` | `git tpl push [--remote name] [--dry-run]` | `remote`,`ref` |
+
+`revision`/`previousRevision` above are always the object `{reference, commit, dirty}` —
+`reference`/`commit` independently optional, never a formatted string.
 
 Every command's full flag set and payload shape: <https://noirbizarre.github.io/git-tpl/reference/json/>.
 

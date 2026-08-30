@@ -85,7 +85,7 @@ run = "actionlint .github/workflows/*.yaml"
 [tasks."lint:md"]
 description = "Lint the documentation Markdown"
 tools = { "npm:markdownlint-cli2" = "latest" }
-run = 'markdownlint-cli2 --config .markdownlint-cli2.yaml "docs/**/*.md" AGENTS.md'
+run = 'markdownlint-cli2 --config .markdownlint-cli2.yaml "docs/**/*.md" "skills/**/*.md" AGENTS.md'
 
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"
