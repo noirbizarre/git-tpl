@@ -101,6 +101,11 @@ own right, so they carry no `Error` enum or `tpl::<name>::*` diagnostics catalog
 failures are `backport`'s failures. A change to a command-shaped file almost certainly needs a documentation change
 in `docs/usage/`; a change to a supporting mechanism does not, unless it changes what `backport` itself does.
 
+**`skills/git-tpl/SKILL.md`** — a second, independent description of the CLI surface, written for an agent
+working in *another* project. Nothing notices when it drifts except a human reading a diff, so treat any change to
+`src/cli.rs`, `src/report.rs`, a diagnostic code, or an `src/ops/` command the skill names in its "Commands used
+above" table as also needing this file updated, in the same PR — the same discipline `docs/usage/` already gets.
+
 **Anything user-visible** — update the corresponding page under `docs/`. In the same PR. A feature is not finished
 when it works; it is finished when someone else can find out that it works.
 
