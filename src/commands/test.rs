@@ -11,12 +11,14 @@ use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use tpl::git::GitError;
 use tpl::git::libgit2::LibGit2;
 use tpl::gitconfig::{Overrides, Preferences};
-use tpl::ops::testing::{CaseOutcome, Failure, Progress, Report, SnapshotOutcome, Status, Stream};
+use tpl::ops::testing::{
+    CaseOutcome, CommandStep, Failure, Progress, Report, SnapshotOutcome, Status, Stream,
+};
 use tpl::ops::{self, OpError, Target};
 
 use super::{Standalone, report_ignored_paths};
 use crate::cli::{GlobalArgs, TestArgs};
-use crate::theme::{Theme, field, heading, muted, warning};
+use crate::theme::{Theme, bold, field, heading, muted};
 
 pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
@@ -145,17 +147,50 @@ impl TestProgress {
     }
 }
 
-/// What a phase looks like on one line, shared by the spinner and the plain
-/// renderer so the two describe a case identically.
-///
-/// No brackets here: [`Progress::case_status`] wraps the whole result in one
-/// pair, so a `Status::Command`'s own `step` reads as part of that same
-/// bracketed phrase rather than a second, nested pair.
-fn status_text(status: &Status<'_>) -> String {
+/// `rendering`/`checking snapshot`, bracketed and dim: neither carries a
+/// pass/fail meaning of its own the way a command's exit status does, so
+/// unlike [`command_line`] there is nothing here to colour green or red.
+fn phase_line(theme: &Theme, status: &Status<'_>) -> String {
     match status {
-        Status::Rendering => "rendering".to_string(),
-        Status::Command { step, command } => format!("{}: $ {command}", step.as_str()),
-        Status::Snapshot => "checking snapshot".to_string(),
+        Status::Rendering => muted(theme, "[rendering]"),
+        Status::Snapshot => muted(theme, "[checking snapshot]"),
+        Status::Command { step, command } => command_line(theme, *step, command, true),
+    }
+}
+
+/// `[step] $ command`, coloured by whether it is known to have failed yet.
+///
+/// Green while only *about* to run — [`Progress::case_status`] always calls
+/// this with `ok: true`, since nothing has failed yet — and while it in fact
+/// succeeded; red once [`Progress::command_finished`] reports otherwise.
+/// `$` is always the same bold white regardless of outcome: it marks "a
+/// command follows", not a verdict.
+fn command_line(theme: &Theme, step: CommandStep, command: &str, ok: bool) -> String {
+    let step = format!("[{}]", step.as_str());
+    let step = if ok {
+        theme.added.apply_to(step).to_string()
+    } else {
+        theme.deleted.apply_to(step).to_string()
+    };
+    format!("{step} {} {command}", bold(theme, "$"))
+}
+
+/// `✔ case` (green tick, bold white name) or `✘ case` (red cross, yellow
+/// name) — printed once, permanently, above the still-running spinner (or as
+/// a plain line, piped) rather than overwritten like [`phase_line`]'s.
+fn case_summary(theme: &Theme, outcome: &CaseOutcome) -> String {
+    if outcome.passed() {
+        format!(
+            "{} {}",
+            theme.added.apply_to("✔"),
+            bold(theme, &outcome.name)
+        )
+    } else {
+        format!(
+            "{} {}",
+            theme.deleted.apply_to("✘"),
+            theme.warning.apply_to(&outcome.name)
+        )
     }
 }
 
@@ -163,27 +198,39 @@ impl Progress for TestProgress {
     fn case_started(&mut self, name: &str) {
         match self {
             Self::Silent => {}
-            Self::Spinner { bar, theme } => bar.set_message(format!("{} …", heading(theme, name))),
-            Self::Line { theme, .. } => eprintln!("{} …", heading(theme, name)),
+            Self::Spinner { bar, theme } => bar.set_message(format!("{} …", bold(theme, name))),
+            Self::Line { theme, .. } => eprintln!("{} …", bold(theme, name)),
         }
     }
 
     fn case_status(&mut self, name: &str, status: Status<'_>) {
-        // Case name and phase get their own colours — `heading`'s (cyan,
-        // bold) for the name, `muted`'s (dim) for the phase — so the two
-        // read apart from each other without a separator between them; the
-        // brackets around the phase already do that job.
+        match self {
+            Self::Silent => {}
+            Self::Spinner { bar, theme } => {
+                bar.set_message(format!(
+                    "{} {}",
+                    bold(theme, name),
+                    phase_line(theme, &status)
+                ));
+            }
+            Self::Line { theme, .. } => {
+                eprintln!("  {} {}", bold(theme, name), phase_line(theme, &status));
+            }
+        }
+    }
+
+    fn command_finished(&mut self, name: &str, step: CommandStep, command: &str, ok: bool) {
         match self {
             Self::Silent => {}
             Self::Spinner { bar, theme } => bar.set_message(format!(
                 "{} {}",
-                heading(theme, name),
-                muted(theme, &format!("[{}]", status_text(&status))),
+                bold(theme, name),
+                command_line(theme, step, command, ok)
             )),
             Self::Line { theme, .. } => eprintln!(
                 "  {} {}",
-                heading(theme, name),
-                muted(theme, &format!("[{}]", status_text(&status))),
+                bold(theme, name),
+                command_line(theme, step, command, ok)
             ),
         }
     }
@@ -199,11 +246,16 @@ impl Progress for TestProgress {
         }
     }
 
-    fn case_finished(&mut self, _outcome: &CaseOutcome) {
-        // Nothing to do: the next `case_started`/`case_status` overwrites the
-        // spinner's message, [`TestProgress::finish`] clears it once the
-        // whole run ends, and the `Line` variants already printed everything
-        // they will for this case.
+    fn case_finished(&mut self, outcome: &CaseOutcome) {
+        match self {
+            Self::Silent => {}
+            // `println` rather than `set_message`: this is history, not the
+            // current line, and must survive the next case overwriting the
+            // spinner. indicatif prints it above the bar and redraws the bar
+            // below it, so the spinner never stops ticking to make room.
+            Self::Spinner { bar, theme } => bar.println(case_summary(theme, outcome)),
+            Self::Line { theme, .. } => eprintln!("{}", case_summary(theme, outcome)),
+        }
     }
 }
 
@@ -272,12 +324,22 @@ fn print_text(ctx: &Standalone, report: &Report, write: bool) {
     }
 
     ctx.out.blank();
-    let summary = format!("{} passed, {} failed", report.passed(), report.failed());
-    if report.is_failure() {
-        ctx.out.say(warning(theme, &summary));
+    // Each half coloured only when it has something to say: an all-zero
+    // report (an empty filter matched, say) would otherwise print a red
+    // "0 failed" that reads as an alarm about nothing.
+    let passed = format!("{} passed", report.passed());
+    let passed = if report.passed() > 0 {
+        theme.added.apply_to(passed).to_string()
     } else {
-        ctx.out.say(muted(theme, &summary));
-    }
+        passed
+    };
+    let failed = format!("{} failed", report.failed());
+    let failed = if report.failed() > 0 {
+        theme.deleted.apply_to(failed).to_string()
+    } else {
+        failed
+    };
+    ctx.out.say(format!("{passed}, {failed}"));
     if write {
         ctx.out.say(muted(
             theme,

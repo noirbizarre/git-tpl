@@ -22,6 +22,11 @@ pub struct Theme {
     pub deleted: Style,
     pub warning: Style,
     pub command: Style,
+    /// Emphasis carrying no colour of its own — bold white — for text that
+    /// needs to stand out (a case name in `git tpl test`'s progress display)
+    /// without borrowing a hue that already means something else (`added`'s
+    /// green, `deleted`'s red, `heading`'s cyan).
+    pub bold: Style,
 }
 
 impl Theme {
@@ -36,6 +41,7 @@ impl Theme {
             deleted: Style::new(),
             warning: Style::new(),
             command: Style::new(),
+            bold: Style::new(),
         }
     }
 
@@ -51,6 +57,7 @@ impl Theme {
             deleted: Style::new().red(),
             warning: Style::new().yellow(),
             command: Style::new().cyan(),
+            bold: Style::new().white().bold(),
         }
     }
 
@@ -289,6 +296,11 @@ pub fn hunks(theme: &Theme, selection: &Selection<'_>) -> String {
 /// A dimmed note.
 pub fn muted(theme: &Theme, text: &str) -> String {
     theme.muted.apply_to(text).to_string()
+}
+
+/// Bold white — emphasis with no other meaning attached.
+pub fn bold(theme: &Theme, text: &str) -> String {
+    theme.bold.apply_to(text).to_string()
 }
 
 /// A warning line.

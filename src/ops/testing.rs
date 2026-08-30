@@ -487,6 +487,13 @@ pub trait Progress {
     fn case_started(&mut self, _name: &str) {}
     /// The case entered a new phase.
     fn case_status(&mut self, _name: &str, _status: Status<'_>) {}
+    /// A `[commands]` entry finished; `ok` says whether it succeeded.
+    ///
+    /// Separate from [`case_status`](Self::case_status), which fires *before*
+    /// a command runs and so cannot say how it turned out — a caller that
+    /// wants to say "this one failed" needs this second event once the
+    /// answer exists.
+    fn command_finished(&mut self, _name: &str, _step: CommandStep, _command: &str, _ok: bool) {}
     /// A chunk of a running command's own stdout/stderr, as it is produced.
     ///
     /// Raw bytes, not lossily converted: a caller forwarding them to a
@@ -1587,8 +1594,9 @@ fn execute_commands(
     for command in commands {
         run += 1;
         progress.case_status(name, Status::Command { step, command });
-        if let Err((code, stdout, stderr)) = run_one(command, cwd, root, env, color, name, progress)
-        {
+        let result = run_one(command, cwd, root, env, color, name, progress);
+        progress.command_finished(name, step, command, result.is_ok());
+        if let Err((code, stdout, stderr)) = result {
             failures.push(Failure::CommandFailed {
                 step,
                 command: command.clone(),
