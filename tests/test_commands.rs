@@ -211,6 +211,30 @@ fn a_failing_command_names_the_step_and_the_command() {
         .says("ls does-not-exist");
 }
 
+/// Guards the fix for `TestProgress::Line`'s duplicate announcement: before
+/// it, a successful command's `[step] $ command` line was printed once by
+/// `case_status` (about to run) and again, identically, by
+/// `command_finished` (the verdict) — every CI log line doubled.
+#[test]
+fn a_successful_commands_progress_line_is_printed_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n[commands]\nbefore = [\"true\"]\n",
+        )],
+    );
+
+    let output = tpl(&template.repo, &["test"]).success();
+    assert_eq!(
+        output.stderr.matches("[before] $ true").count(),
+        1,
+        "{}",
+        output.stderr
+    );
+}
+
 // --- `commands.env` (issue #130) --------------------------------------------
 
 #[test]

@@ -184,6 +184,21 @@ colour and silently prints in black and white, which is backwards when that outp
 terminal either way. `commands.env` (or a list's own `env`) still wins for either variable, so a case that wants
 plain output from a tool that only checks these two can still ask for it.
 
+A CI job wants colour for the same reason, but has to ask for it explicitly: a runner's shell is not a terminal,
+so `--color auto` (the default) never colourises there on its own — the same reason a workflow already sets
+`CARGO_TERM_COLOR=always` to get colour out of `cargo` itself. Set `CLICOLOR_FORCE=1` (or pass `--color always`)
+in the job's own environment:
+
+```yaml
+env:
+  CLICOLOR_FORCE: "1"
+```
+
+One variable does double duty: it colourises `git tpl test`'s own progress output below, *and* is what causes
+`CLICOLOR_FORCE`/`FORCE_COLOR` to be forwarded to `[commands]` children, as described above — so a case's own
+`cargo build` no longer needs `CARGO_TERM_COLOR` set separately for that part either. See
+[the environment](../configuration.md#the-environment) for the full colour precedence.
+
 ### Progress
 
 A case in progress shows on stderr: a spinner naming the current case and phase — `rendering`, or a running
