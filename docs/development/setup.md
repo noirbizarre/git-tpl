@@ -104,7 +104,7 @@ These are enforced, not merely intended. Breaking one fails a hook or a test.
 else makes it decorative. The `git-backend-isolation` prek hook is what actually stops that. If you need a Git
 capability the trait lacks, add it to the trait — not a `git2` import.
 
-**`update` does not modify the worktree.** An integration test asserts `HEAD`, the index and the worktree are
+**`update` does not modify `HEAD`, the index or the worktree.** An integration test asserts all three are
 byte-identical across an update. The renderer writes to a Git tree builder and never to the filesystem, so this is
 structural — the test exists to keep it that way.
 
