@@ -3,21 +3,32 @@
 //! Runs the cases a template carries. No project, no ref, and — beyond
 //! `--write` recording a snapshot — nothing written anywhere.
 
+use std::io::Write as _;
+use std::time::Duration;
+
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+
 use tpl::git::GitError;
 use tpl::git::libgit2::LibGit2;
 use tpl::gitconfig::{Overrides, Preferences};
-use tpl::ops::testing::{CaseOutcome, Failure, Report, SnapshotOutcome};
+use tpl::ops::testing::{
+    CaseOutcome, CommandStep, Failure, Progress, Report, SnapshotOutcome, Status, Stream,
+};
 use tpl::ops::{self, OpError, Target};
 
 use super::{Standalone, report_ignored_paths};
 use crate::cli::{GlobalArgs, TestArgs};
-use crate::theme::{field, heading, muted, warning};
+use crate::theme::{Theme, bold, field, heading, muted};
 
 pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
     let source = ctx.user.expand(&args.template).into_owned();
     let run_commands = test_commands_enabled(args.skip_commands)?;
 
+    // Chosen once, up front: `--quiet`/`--json` get nothing, `-v` gets a
+    // scrolling log with live command output, a real terminal otherwise gets
+    // a spinner, and anything else (piped, in a CI log) gets plain lines.
+    let mut progress = TestProgress::new(&ctx, global.verbose > 0);
     let report = ops::testing::run(
         Target {
             source: &source,
@@ -33,7 +44,16 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         args.write,
         run_commands,
         &ctx.user,
+        // Told to `[commands]` children so a colour-aware tool does not
+        // silently mute itself just because its stdout/stderr are pipes —
+        // never on `--color=never`/`NO_COLOR`, since that already decided
+        // `is_colored()` to be false.
+        ctx.out.theme.is_colored(),
+        &mut progress,
     )?;
+    // Clears any spinner before the final report prints, so its last
+    // message does not linger above it.
+    progress.finish();
 
     report_ignored_paths(&ctx.out, &report.template.ignored);
 
@@ -50,6 +70,218 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     } else {
         crate::exit::SUCCESS
     })
+}
+
+/// How `git tpl test` reports what is happening while it happens.
+///
+/// [`tpl::ops::testing::Progress`] knows nothing about a terminal — that is
+/// the whole point of the trait, see its own doc — so this is the one
+/// implementation, chosen once per invocation in [`TestProgress::new`]
+/// depending on `--quiet`/`--json`, `-v`, and whether stderr is a real
+/// terminal.
+enum TestProgress {
+    /// `--quiet` or `--json`: nothing to show.
+    Silent,
+    /// The default, on a real terminal: one line, updated in place.
+    Spinner {
+        bar: ProgressBar,
+        /// Cloned rather than borrowed, for the same reason [`Line`](Self::Line)'s
+        /// does: `Standalone` outlives this value, but borrowing it would tie
+        /// `TestProgress` to a lifetime for no benefit.
+        theme: Theme,
+    },
+    /// Piped, or `-v`: one printed line per event.
+    Line {
+        /// Cloned rather than borrowed: `Standalone` outlives this value, but
+        /// borrowing it would tie `TestProgress` to a lifetime for no benefit
+        /// — a `Theme` is cheap to clone and never changes mid-run.
+        theme: Theme,
+        /// Whether a running command's own stdout/stderr is also forwarded,
+        /// live, as it is produced. `false` for the plain-lines fallback: a
+        /// non-tty, non-verbose run shows *which* command runs, not what it
+        /// prints — that is what `-v` adds.
+        verbose: bool,
+    },
+}
+
+impl TestProgress {
+    fn new(ctx: &Standalone, verbose: bool) -> Self {
+        Self::choose(
+            ctx.out.speaks(),
+            verbose,
+            console::user_attended_stderr(),
+            ctx.out.theme.clone(),
+        )
+    }
+
+    /// The dispatch itself, with every input a parameter rather than read
+    /// from the environment — the same separation [`crate::theme::decide`]
+    /// already uses for the same reason: a real terminal cannot be faked for
+    /// a test, but a `bool` can, so the *decision* stays testable even though
+    /// [`new`](Self::new) that supplies it is not.
+    fn choose(speaks: bool, verbose: bool, is_terminal: bool, theme: Theme) -> Self {
+        if !speaks {
+            return Self::Silent;
+        }
+        if verbose {
+            return Self::Line {
+                theme,
+                verbose: true,
+            };
+        }
+        if is_terminal {
+            let bar = ProgressBar::new_spinner();
+            bar.set_draw_target(ProgressDrawTarget::stderr());
+            bar.enable_steady_tick(Duration::from_millis(100));
+            // A literal template, checked once here rather than at every
+            // tick: `unwrap` is the right tool for a string that cannot come
+            // from anywhere but this line. `.cyan.bold` so the glyph itself
+            // reads as "in progress" even before a message is set — plain
+            // `{spinner}` renders in whatever the terminal's default
+            // foreground is, easy to miss beside a coloured report.
+            bar.set_style(ProgressStyle::with_template("{spinner:.cyan.bold} {msg}").unwrap());
+            return Self::Spinner { bar, theme };
+        }
+        Self::Line {
+            theme,
+            verbose: false,
+        }
+    }
+
+    /// Clear the spinner, if any, so its last message does not linger above
+    /// the final report. A no-op for every other variant, which never drew
+    /// anything that needs clearing.
+    fn finish(&self) {
+        if let Self::Spinner { bar, .. } = self {
+            bar.finish_and_clear();
+        }
+    }
+}
+
+/// `rendering`/`checking snapshot`, bracketed and dim: neither carries a
+/// pass/fail meaning of its own the way a command's exit status does, so
+/// unlike [`command_line`] there is nothing here to colour green or red.
+fn phase_line(theme: &Theme, status: &Status<'_>) -> String {
+    match status {
+        Status::Rendering => muted(theme, "[rendering]"),
+        Status::Snapshot => muted(theme, "[checking snapshot]"),
+        Status::Command { step, command } => command_line(theme, *step, command, true),
+    }
+}
+
+/// `[step] $ command`, coloured by whether it is known to have failed yet.
+///
+/// Green while only *about* to run — [`Progress::case_status`] always calls
+/// this with `ok: true`, since nothing has failed yet — and while it in fact
+/// succeeded; red once [`Progress::command_finished`] reports otherwise.
+/// `$` is always the same bold white regardless of outcome: it marks "a
+/// command follows", not a verdict.
+fn command_line(theme: &Theme, step: CommandStep, command: &str, ok: bool) -> String {
+    let step = format!("[{}]", step.as_str());
+    let step = if ok {
+        theme.added.apply_to(step).to_string()
+    } else {
+        theme.deleted.apply_to(step).to_string()
+    };
+    format!("{step} {} {command}", bold(theme, "$"))
+}
+
+/// `N label`, styled only when `count` has something to report.
+///
+/// A zero count styled the same as a positive one would read as an alarm
+/// about nothing — the summary line's `0 failed` on an all-green run being
+/// the case this exists for.
+fn counted(style: &console::Style, count: usize, label: &str) -> String {
+    let text = format!("{count} {label}");
+    if count > 0 {
+        style.apply_to(text).to_string()
+    } else {
+        text
+    }
+}
+
+/// `✔ case` (green tick, bold white name) or `✘ case` (red cross, yellow
+/// name) — printed once, permanently, above the still-running spinner (or as
+/// a plain line, piped) rather than overwritten like [`phase_line`]'s.
+fn case_summary(theme: &Theme, outcome: &CaseOutcome) -> String {
+    if outcome.passed() {
+        format!(
+            "{} {}",
+            theme.added.apply_to("✔"),
+            bold(theme, &outcome.name)
+        )
+    } else {
+        format!(
+            "{} {}",
+            theme.deleted.apply_to("✘"),
+            theme.warning.apply_to(&outcome.name)
+        )
+    }
+}
+
+impl Progress for TestProgress {
+    fn case_started(&mut self, name: &str) {
+        match self {
+            Self::Silent => {}
+            Self::Spinner { bar, theme } => bar.set_message(format!("{} …", bold(theme, name))),
+            Self::Line { theme, .. } => eprintln!("{} …", bold(theme, name)),
+        }
+    }
+
+    fn case_status(&mut self, name: &str, status: Status<'_>) {
+        match self {
+            Self::Silent => {}
+            Self::Spinner { bar, theme } => {
+                bar.set_message(format!(
+                    "{} {}",
+                    bold(theme, name),
+                    phase_line(theme, &status)
+                ));
+            }
+            Self::Line { theme, .. } => {
+                eprintln!("  {} {}", bold(theme, name), phase_line(theme, &status));
+            }
+        }
+    }
+
+    fn command_finished(&mut self, name: &str, step: CommandStep, command: &str, ok: bool) {
+        match self {
+            Self::Silent => {}
+            Self::Spinner { bar, theme } => bar.set_message(format!(
+                "{} {}",
+                bold(theme, name),
+                command_line(theme, step, command, ok)
+            )),
+            Self::Line { theme, .. } => eprintln!(
+                "  {} {}",
+                bold(theme, name),
+                command_line(theme, step, command, ok)
+            ),
+        }
+    }
+
+    fn command_output(&mut self, _name: &str, _stream: Stream, chunk: &[u8]) {
+        // Raw, not reformatted: a chunk may cut a line or a multi-byte
+        // sequence mid-way, and writing it straight through is what keeps an
+        // embedded ANSI escape intact. Only under `-v` — the spinner and the
+        // plain fallback both already say *which* command is running; this
+        // is what it printed while doing so.
+        if let Self::Line { verbose: true, .. } = self {
+            let _ = std::io::stderr().write_all(chunk);
+        }
+    }
+
+    fn case_finished(&mut self, outcome: &CaseOutcome) {
+        match self {
+            Self::Silent => {}
+            // `println` rather than `set_message`: this is history, not the
+            // current line, and must survive the next case overwriting the
+            // spinner. indicatif prints it above the bar and redraws the bar
+            // below it, so the spinner never stops ticking to make room.
+            Self::Spinner { bar, theme } => bar.println(case_summary(theme, outcome)),
+            Self::Line { theme, .. } => eprintln!("{}", case_summary(theme, outcome)),
+        }
+    }
 }
 
 /// Whether this run's `[commands]` execute at all. See ADR-027.
@@ -117,12 +349,11 @@ fn print_text(ctx: &Standalone, report: &Report, write: bool) {
     }
 
     ctx.out.blank();
-    let summary = format!("{} passed, {} failed", report.passed(), report.failed());
-    if report.is_failure() {
-        ctx.out.say(warning(theme, &summary));
-    } else {
-        ctx.out.say(muted(theme, &summary));
-    }
+    ctx.out.say(format!(
+        "{}, {}",
+        counted(&theme.added, report.passed(), "passed"),
+        counted(&theme.deleted, report.failed(), "failed"),
+    ));
     if write {
         ctx.out.say(muted(
             theme,
@@ -289,11 +520,18 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
                 Some(code) => say(format!("[{}] `{command}` exited {code}", step.as_str())),
                 None => say(format!("[{}] `{command}` could not be run", step.as_str())),
             }
-            // stderr first: it is where a failing command explains itself.
-            // stdout only when there is nothing on stderr to show instead.
-            let output = if stderr.is_empty() { stdout } else { stderr };
-            for line in output.lines() {
-                ctx.out.say(muted(theme, &format!("      {line}")));
+            // Under `-v` this was already shown live, byte for byte, as the
+            // command produced it — repeating the captured (lossily
+            // converted, tail-capped) copy here would only be a worse
+            // version of what the user already watched happen.
+            if ctx.out.global.verbose == 0 {
+                // stderr first: it is where a failing command explains
+                // itself. stdout only when there is nothing on stderr to
+                // show instead.
+                let output = if stderr.is_empty() { stdout } else { stderr };
+                for line in output.lines() {
+                    ctx.out.say(muted(theme, &format!("      {line}")));
+                }
             }
         }
     }
@@ -408,5 +646,211 @@ fn failure_json(failure: &Failure) -> serde_json::Value {
             "stdout": stdout,
             "stderr": stderr,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use tpl::ops::testing::SnapshotOutcome;
+
+    use super::*;
+
+    /// A minimal outcome, passed or failed — enough to drive
+    /// [`case_summary`] and [`Progress::case_finished`], which look only at
+    /// `name` and `passed()`.
+    fn outcome(name: &str, passed: bool) -> CaseOutcome {
+        CaseOutcome {
+            name: name.to_string(),
+            path: format!("tests/{name}.toml"),
+            failures: if passed {
+                Vec::new()
+            } else {
+                vec![Failure::UnexpectedError {
+                    code: None,
+                    message: "boom".to_string(),
+                }]
+            },
+            snapshot: SnapshotOutcome::None,
+            files: 1,
+            commands_run: 0,
+        }
+    }
+
+    /// The spinner's own message, or a panic naming which variant it was —
+    /// every test using this constructs the spinner itself, so a mismatch
+    /// here is this module's own bug, not something to report gracefully.
+    fn spinner_message(progress: &TestProgress) -> String {
+        match progress {
+            TestProgress::Spinner { bar, .. } => bar.message(),
+            other => panic!("expected a spinner, got {other:?}"),
+        }
+    }
+
+    /// `Theme::colored()`, with every style forced on regardless of what
+    /// `console`'s own terminal auto-detection decides — which, in a test
+    /// process, is "no" every time, since it is neither a real terminal nor
+    /// told `--color=always`. Exists only so a test can see the very escape
+    /// codes a real colourised run would produce.
+    fn forced() -> Theme {
+        fn force(style: console::Style) -> console::Style {
+            style.force_styling(true)
+        }
+        let mut theme = Theme::colored();
+        theme.heading = force(theme.heading);
+        theme.muted = force(theme.muted);
+        theme.added = force(theme.added);
+        theme.modified = force(theme.modified);
+        theme.deleted = force(theme.deleted);
+        theme.warning = force(theme.warning);
+        theme.command = force(theme.command);
+        theme.bold = force(theme.bold);
+        theme
+    }
+
+    impl std::fmt::Debug for TestProgress {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                Self::Silent => "Silent",
+                Self::Spinner { .. } => "Spinner",
+                Self::Line { .. } => "Line",
+            })
+        }
+    }
+
+    #[test]
+    fn phase_line_names_rendering_and_snapshot_with_no_colour_of_their_own() {
+        let theme = Theme::plain();
+        assert_eq!(phase_line(&theme, &Status::Rendering), "[rendering]");
+        assert_eq!(phase_line(&theme, &Status::Snapshot), "[checking snapshot]");
+    }
+
+    #[test]
+    fn phase_line_delegates_a_running_command_to_command_line() {
+        let theme = Theme::plain();
+        let status = Status::Command {
+            step: CommandStep::Rendered,
+            command: "echo hi",
+        };
+        assert_eq!(
+            phase_line(&theme, &status),
+            command_line(&theme, CommandStep::Rendered, "echo hi", true)
+        );
+    }
+
+    #[test]
+    fn command_line_shows_the_step_the_dollar_and_the_command() {
+        let theme = Theme::plain();
+        assert_eq!(
+            command_line(&theme, CommandStep::Before, "mkdir -p src", true),
+            "[before] $ mkdir -p src"
+        );
+    }
+
+    #[test]
+    fn command_line_colours_the_step_differently_once_it_has_failed() {
+        let theme = forced();
+        let running = command_line(&theme, CommandStep::After, "true", true);
+        let failed = command_line(&theme, CommandStep::After, "true", false);
+        assert_ne!(running, failed, "{running:?} / {failed:?}");
+        assert!(running.contains('\x1b'), "{running:?}");
+    }
+
+    #[rstest]
+    #[case(true)]
+    #[case(false)]
+    fn case_summary_names_the_case_either_way(#[case] passed: bool) {
+        let theme = Theme::plain();
+        let line = case_summary(&theme, &outcome("basic", passed));
+        assert!(line.contains("basic"), "{line}");
+        assert_eq!(line.starts_with('✔'), passed, "{line}");
+        assert_eq!(line.starts_with('✘'), !passed, "{line}");
+    }
+
+    #[test]
+    fn counted_is_styled_only_when_positive() {
+        let theme = forced();
+        assert_eq!(counted(&theme.added, 0, "passed"), "0 passed");
+        let styled = counted(&theme.added, 1, "passed");
+        assert_ne!(styled, "1 passed", "{styled:?}");
+        assert!(styled.contains('\x1b'), "{styled:?}");
+    }
+
+    #[rstest]
+    // `--quiet`/`--json`: silent regardless of `-v` or a terminal.
+    #[case(false, false, false, "Silent")]
+    #[case(false, true, true, "Silent")]
+    // `-v`: a scrolling log either way.
+    #[case(true, true, false, "Line")]
+    #[case(true, true, true, "Line")]
+    // The default: a spinner only on a real terminal.
+    #[case(true, false, true, "Spinner")]
+    #[case(true, false, false, "Line")]
+    fn choose_dispatches_on_speaks_verbose_and_terminal(
+        #[case] speaks: bool,
+        #[case] verbose: bool,
+        #[case] is_terminal: bool,
+        #[case] expected: &str,
+    ) {
+        let progress = TestProgress::choose(speaks, verbose, is_terminal, Theme::plain());
+        assert_eq!(format!("{progress:?}"), expected);
+    }
+
+    #[test]
+    fn a_spinner_reflects_every_progress_event_in_its_own_message() {
+        let mut progress = TestProgress::choose(true, false, true, Theme::plain());
+
+        progress.case_started("basic");
+        assert!(spinner_message(&progress).contains("basic"));
+
+        progress.case_status("basic", Status::Rendering);
+        assert!(spinner_message(&progress).contains("[rendering]"));
+
+        progress.command_finished("basic", CommandStep::Rendered, "true", true);
+        assert!(spinner_message(&progress).contains("[rendered]"));
+
+        // A no-op for the spinner: it says which command is running, not
+        // what that command prints — calling it here only proves it does not
+        // panic or change the message.
+        let before = spinner_message(&progress);
+        progress.command_output("basic", Stream::Stdout, b"noise\n");
+        assert_eq!(spinner_message(&progress), before);
+
+        // `case_finished` prints history above the bar; it must not touch
+        // the bar's own current message.
+        progress.case_finished(&outcome("basic", true));
+        assert_eq!(spinner_message(&progress), before);
+
+        // Clears the bar; exercised for its own sake; no further message to
+        // assert on once finished.
+        progress.finish();
+    }
+
+    #[test]
+    fn silent_does_nothing_for_every_event() {
+        // The point of this test is that none of the following panics —
+        // `Silent` has no state for an assertion to inspect.
+        let mut progress = TestProgress::Silent;
+        progress.case_started("basic");
+        progress.case_status("basic", Status::Rendering);
+        progress.command_finished("basic", CommandStep::Before, "true", true);
+        progress.command_output("basic", Stream::Stdout, b"noise\n");
+        progress.case_finished(&outcome("basic", false));
+        progress.finish();
+    }
+
+    #[test]
+    fn a_verbose_line_accepts_every_event_including_raw_command_output() {
+        // As with `Silent`: there is no in-process way to capture what a
+        // child writes to the real stderr, so this proves the `-v` path
+        // runs end to end without panicking rather than asserting on bytes
+        // already covered by the integration suite's own `-v` runs.
+        let mut progress = TestProgress::choose(true, true, false, Theme::plain());
+        progress.case_started("basic");
+        progress.case_status("basic", Status::Rendering);
+        progress.command_finished("basic", CommandStep::Rendered, "true", true);
+        progress.command_output("basic", Stream::Stdout, b"hello\n");
+        progress.case_finished(&outcome("basic", true));
+        progress.finish();
     }
 }

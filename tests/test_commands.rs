@@ -12,7 +12,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{Repo, Template, tpl, tpl_outside};
+use common::{Repo, Template, tpl, tpl_colored, tpl_outside};
 
 /// A template with one file, `marker.txt`, so a case's `commands.rendered`/
 /// `commands.after` have something in the sandbox that came from the render
@@ -376,4 +376,138 @@ fn the_template_root_variable_is_the_same_for_a_local_ref_as_for_dirty() {
     let output = run(&built, &["--ref", "v1"]).success();
     let json = output.json();
     assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// A command talking to a pipe rather than a terminal otherwise assumes
+/// nobody can see colour and silently prints in black and white — exactly
+/// backwards when `git tpl test`'s own output is colourised. `tpl_colored`
+/// forces that decision the same way `--color always` would, so the branch
+/// that sets these two variables is actually exercised.
+#[test]
+fn commands_see_clicolor_force_and_force_color_when_output_is_coloured() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            r#"[answers]
+
+[commands]
+rendered = ["sh -c '[ \"$CLICOLOR_FORCE\" = 1 ] && [ \"$FORCE_COLOR\" = 1 ]'"]
+"#,
+        )],
+    );
+
+    let output = tpl_colored(&template.repo, &["--json", "test"]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// The same run, without colour, must *not* see them — a case's own script
+/// checking for their absence is the negative half of the test above.
+#[test]
+fn commands_do_not_see_clicolor_force_or_force_color_by_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            r#"[answers]
+
+[commands]
+rendered = ["sh -c '[ -z \"$CLICOLOR_FORCE\" ] && [ -z \"$FORCE_COLOR\" ]'"]
+"#,
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// An unterminated quote (or an empty string) never reaches a shell at all
+/// — `shlex` refuses it before anything is spawned — and is reported like
+/// any other failed command rather than panicking the run.
+#[test]
+fn a_command_shlex_cannot_parse_is_reported_as_not_runnable() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             rendered = [\"'unterminated\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).code(1);
+    let json = output.json();
+    let failures = &json["cases"][0]["failures"];
+    assert_eq!(failures[0]["kind"], "commandFailed", "{json}");
+    assert_eq!(failures[0]["code"], serde_json::Value::Null, "{json}");
+    assert!(
+        failures[0]["stderr"]
+            .as_str()
+            .unwrap()
+            .contains("is not a runnable command"),
+        "{json}"
+    );
+}
+
+/// A program that does not exist fails to spawn at all — distinct from one
+/// that spawns and exits non-zero, which every other failing-command test
+/// here already covers.
+#[test]
+fn a_command_naming_no_such_program_is_reported_as_not_runnable() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             rendered = [\"there-is-no-such-program-anywhere\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).code(1);
+    let json = output.json();
+    let failures = &json["cases"][0]["failures"];
+    assert_eq!(failures[0]["kind"], "commandFailed", "{json}");
+    assert_eq!(failures[0]["code"], serde_json::Value::Null, "{json}");
+    assert!(
+        failures[0]["stderr"]
+            .as_str()
+            .unwrap()
+            .contains("could not run"),
+        "{json}"
+    );
+}
+
+/// A case with `[commands]` can still opt into a snapshot: the sandboxed
+/// path and the plain path must both reach `snapshot_step`, and this is the
+/// only test exercising that combination.
+#[test]
+fn a_case_with_commands_can_also_record_a_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "snapshot = true\n\
+             [answers]\n\n\
+             [commands]\n\
+             rendered = [\"ls marker.txt\"]\n",
+        )],
+    );
+
+    let output = run(&template, &["--write"]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+    assert_eq!(json["cases"][0]["snapshot"], "written", "{json}");
+    assert_eq!(
+        template.repo.read("tests/__snapshots__/c/files/marker.txt"),
+        "hello\n"
+    );
 }

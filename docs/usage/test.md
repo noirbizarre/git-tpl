@@ -173,6 +173,24 @@ opposite: every entry in it runs regardless of anything failing before or within
 
 There is no timeout. A hanging command hangs the run.
 
+Every command also gets `CLICOLOR_FORCE=1` and `FORCE_COLOR=1` added to its environment, whenever `git tpl test`'s
+own output is colourised (never under `--color=never`, `NO_COLOR`, or a non-terminal stderr). A command talking to
+a pipe rather than a terminal — which is what capturing its output requires — otherwise assumes nobody can see
+colour and silently prints in black and white, which is backwards when that output is about to be shown on a real
+terminal either way. `commands.env` (or a list's own `env`) still wins for either variable, so a case that wants
+plain output from a tool that only checks these two can still ask for it.
+
+### Progress
+
+A case in progress shows on stderr: a spinner naming the current case and phase — `rendering`, or a running
+command — on a real terminal, or the same events as plain scrolling lines when stderr is not one (a CI log, say).
+Neither shows under `--quiet` or `--json`.
+
+`-v`/`--verbose` replaces the spinner with a full scrolling log: every phase, and every command's own stdout/stderr
+forwarded live, exactly as it writes it — ANSI included. The final report no longer repeats a failed command's
+captured output in that case, since it was already shown as it happened; `--json` is unaffected either way, and
+always carries it.
+
 ### Running `git tpl test` is the consent
 
 A case's `[commands]` need no confirmation: running `git tpl test` on a template you have in front of you is
