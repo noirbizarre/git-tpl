@@ -190,7 +190,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::testing::no_such_case` | A named case does not exist. Carries a suggestion and the available names. |
 | `tpl::testing::case_parse` | A case file is not valid TOML, JSON or YAML. |
 | `tpl::testing::case_shape` | A case file parses but is not a coherent case — an unknown key, a wrong type, contradictory expectations, or two files claiming one case name. |
-| `tpl::testing::write_needs_local` | `--write` was used on a template with no working tree to write a snapshot into. |
+| `tpl::testing::remote_not_supported` | `test` was pointed at a remote source; it only reads a local working tree, with or without `--ref`. |
 | `tpl::testing::snapshot_read` | A recorded snapshot is unreadable, or its `MANIFEST` contradicts the files beside it. |
 | `tpl::testing::snapshot_write` | A snapshot could not be written to the working tree. |
 | `tpl::testing::sandbox_failed` | A case's temporary sandbox, for `[commands]`, could not be created. |

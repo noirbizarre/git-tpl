@@ -22,8 +22,11 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         Target {
             source: &source,
             reference: args.r#ref.as_deref(),
-            root: args.root.as_deref(),
-            dirty: args.dirty,
+            root: None,
+            // Dirty unless `--ref` names a committed revision to check
+            // instead: testing is for what is in front of you right now, not
+            // what was last committed.
+            dirty: args.r#ref.is_none(),
         },
         args.tests.as_deref(),
         &args.cases,
@@ -52,15 +55,17 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 /// Whether this run's `[commands]` execute at all. See ADR-027.
 ///
 /// Reads `tpl.testCommands` from whatever repository contains the current
-/// directory — never `Resolved.repo`, the template under test, which may be a
-/// temporary clone of a remote source with no configuration a person put
-/// there on purpose. A personal opt-out has to live somewhere the person
-/// running the command controls: their own machine's Git configuration.
+/// directory — never `Resolved.repo`, the template under test, which may be
+/// a different local checkout entirely (`TEMPLATE` need not be `.`). A
+/// personal opt-out has to live somewhere the person running the command
+/// controls: their own machine's Git configuration, not a repository they
+/// are merely pointing a test run at.
 ///
-/// Unlike every other command, `test` must keep working with no such
-/// repository at all — testing a remote template from a scratch directory has
-/// no `.git` to discover — so a missing repository here falls back to the
-/// built-in default silently, the same way an unconfigured one already does.
+/// A missing repository here falls back to the built-in default silently:
+/// running `test` from outside any repository at all is fine as long as
+/// `TEMPLATE` names one — `resolve::resolve` is what actually enforces that,
+/// and this function must not fail first over configuration nobody asked
+/// about.
 fn test_commands_enabled(skip: bool) -> Result<bool, OpError> {
     let preferences = match LibGit2::discover(&super::current_dir()?) {
         Ok(repo) => Preferences::load(&repo)?,
