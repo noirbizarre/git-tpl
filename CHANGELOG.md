@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0](https://github.com/noirbizarre/git-tpl/compare/0.11.0..0.12.0) - 2026-08-30
+
+### 🐛 Bug Fixes
+
+- **jj** Diagnose non-colocated Jujutsu workspaces, document compatibility ([#145](https://github.com/noirbizarre/git-tpl/issues/145)) - ([59e2c8f](https://github.com/noirbizarre/git-tpl/commit/59e2c8ffb53d50f1adb32620016e627194b7c422))
+- **status**  🚨 **breaking** Rename JSON fields to match the reference/description naming convention - ([0c88996](https://github.com/noirbizarre/git-tpl/commit/0c889964b9a33bba5e9e440b1373a74bc9f03e3a))
+- **testing** Stop `git tpl test`'s progress line from printing twice ([#148](https://github.com/noirbizarre/git-tpl/issues/148)) - ([675a6c2](https://github.com/noirbizarre/git-tpl/commit/675a6c28c36e286b80b1c868e8d45b1211074221))
+- **testing**  🚨 **breaking** --write only records a snapshot, not a case ([#146](https://github.com/noirbizarre/git-tpl/issues/146)) - ([b54554b](https://github.com/noirbizarre/git-tpl/commit/b54554b1d2846439cf64d3961891cd707eb0bda8))
+- **testing** Colour +/- lines in git tpl test's snapshot diff ([#142](https://github.com/noirbizarre/git-tpl/issues/142)) - ([2088e25](https://github.com/noirbizarre/git-tpl/commit/2088e2505e152c5c43b1618165b7508366d79f91))
+
+### 📚 Documentation
+
+- **config** Document tpl.testCommands - ([17644bc](https://github.com/noirbizarre/git-tpl/commit/17644bc91d89e0598670ec29c6146a69badb61da))
+- **skill** Document merge --abort's aborted result - ([0d5f8c4](https://github.com/noirbizarre/git-tpl/commit/0d5f8c45f695bebdfd4e742ddb89861d588b3daa))
+- **skill** Refresh the agent skill and guard against future drift ([#143](https://github.com/noirbizarre/git-tpl/issues/143)) - ([cf83e04](https://github.com/noirbizarre/git-tpl/commit/cf83e047400b4a5b76269f1de96ccac1a381fc09))
+
+### 🧪 Tests
+
+- **cli** Drop redundant test_ prefix from test names - ([bffc605](https://github.com/noirbizarre/git-tpl/commit/bffc605bd9ff17ddead6cf839e0d6473e425a38e))
+
 ## [0.11.0](https://github.com/noirbizarre/git-tpl/compare/0.10.0..0.11.0) - 2026-08-30
 
 ### 💫 Features
