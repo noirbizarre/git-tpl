@@ -717,6 +717,7 @@ pub fn render_resolved(
             repo: template.repo.as_ref(),
             tree: template.tree,
             revision: template.revision,
+            reference: template.reference.clone(),
         },
         project.map(|(_, root)| root.to_path_buf()),
     )
