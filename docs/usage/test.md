@@ -157,6 +157,15 @@ run = ["pdm run something-that-needs-the-active-venv"]
 alone. Neither adds `$VAR` expansion to a command's own text — a value only ever reaches a process as an
 environment variable, never as text substituted into the command line before it runs.
 
+Every command also sees `TEMPLATE_ROOT`, set to the resolved template's root on disk — the working tree for
+`--dirty`, and the same working tree for a local `--ref`, since `test` never resolves a remote (see
+[ADR-030](../adr/030-test-never-resolves-a-remote-template.md)). It is distinct from both `cwd` (each list's own
+throwaway sandbox) and from a template's declared render subdirectory: a case's script does not live in the
+sandbox, so a command that needs more than a line or two writes it once, commits it in the template repository,
+and names it directly — `"$TEMPLATE_ROOT/tests/scripts/check.sh"` — instead of synthesizing it inline via `before`
+on every run. A case's own `env`/`commands.env` may still override it for a key it deliberately sets, the same as
+any other default.
+
 `before`, `rendered` and `after` each stop at their own first failure — they are sequential, and a later entry
 usually assumes an earlier one worked. A failing `before`, or a render that fails without `expect.error` naming
 it, skips straight to `finally`: there is nothing for `rendered`/`after` to run against. `finally` is the
