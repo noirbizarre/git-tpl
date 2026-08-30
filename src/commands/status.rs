@@ -43,7 +43,7 @@ fn print_text(ctx: &Session, status: &ops::Status) {
         .unwrap_or_else(|| "never rendered".into());
 
     let revision_line = match (
-        &status.available_revision_description,
+        &status.available_reference_description,
         status.template_moved,
     ) {
         (Some(available), true) => transition(
@@ -125,10 +125,10 @@ fn json(status: &ops::Status) -> serde_json::Value {
         "id": status.id.as_str(),
         "ref": status.ref_name,
         "tip": status.tip.map(|o| o.to_hex()),
-        "renderedRevision": recorded.and_then(|r| r.reference.clone()),
+        "renderedReference": recorded.and_then(|r| r.reference.clone()),
         "renderedCommit": recorded.and_then(|r| r.revision.map(|c| c.to_hex())),
         "dirty": recorded.map(|r| r.dirty).unwrap_or(false),
-        "availableRevision": status.available_revision_description,
+        "availableReferenceDescription": status.available_reference_description,
         "availableCommit": status.available_commit.map(|c| c.to_hex()),
         "templateMoved": status.template_moved,
         "merged": status.merged,

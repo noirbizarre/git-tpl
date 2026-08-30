@@ -32,7 +32,7 @@ fn status_json_reports_nothing_rendered_before_init() {
     assert_eq!(json["ok"], true);
     assert_eq!(json["ref"], "refs/tpl/template");
     assert_eq!(json["tip"], serde_json::Value::Null);
-    assert_eq!(json["renderedRevision"], serde_json::Value::Null);
+    assert_eq!(json["renderedReference"], serde_json::Value::Null);
     assert_eq!(json["renderedCommit"], serde_json::Value::Null);
     assert_eq!(json["dirty"], false);
     assert_eq!(json["renderingCount"], 0);
@@ -80,7 +80,7 @@ fn status_json_says_pending_when_the_template_has_moved() {
     assert_eq!(json["templateMoved"], true);
     assert_eq!(json["pending"], true);
     assert!(
-        json["availableRevision"].is_string(),
+        json["availableReferenceDescription"].is_string(),
         "the revision that could be rendered is named: {json}"
     );
 }
