@@ -81,7 +81,13 @@ enum TestProgress {
     /// `--quiet` or `--json`: nothing to show.
     Silent,
     /// The default, on a real terminal: one line, updated in place.
-    Spinner(ProgressBar),
+    Spinner {
+        bar: ProgressBar,
+        /// Cloned rather than borrowed, for the same reason [`Line`](Self::Line)'s
+        /// does: `Standalone` outlives this value, but borrowing it would tie
+        /// `TestProgress` to a lifetime for no benefit.
+        theme: Theme,
+    },
     /// Piped, or `-v`: one printed line per event.
     Line {
         /// Cloned rather than borrowed: `Standalone` outlives this value, but
@@ -113,9 +119,15 @@ impl TestProgress {
             bar.enable_steady_tick(Duration::from_millis(100));
             // A literal template, checked once here rather than at every
             // tick: `unwrap` is the right tool for a string that cannot come
-            // from anywhere but this line.
-            bar.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
-            return Self::Spinner(bar);
+            // from anywhere but this line. `.cyan.bold` so the glyph itself
+            // reads as "in progress" even before a message is set — plain
+            // `{spinner}` renders in whatever the terminal's default
+            // foreground is, easy to miss beside a coloured report.
+            bar.set_style(ProgressStyle::with_template("{spinner:.cyan.bold} {msg}").unwrap());
+            return Self::Spinner {
+                bar,
+                theme: ctx.out.theme.clone(),
+            };
         }
         Self::Line {
             theme: ctx.out.theme.clone(),
@@ -127,7 +139,7 @@ impl TestProgress {
     /// the final report. A no-op for every other variant, which never drew
     /// anything that needs clearing.
     fn finish(&self) {
-        if let Self::Spinner(bar) = self {
+        if let Self::Spinner { bar, .. } = self {
             bar.finish_and_clear();
         }
     }
@@ -135,10 +147,14 @@ impl TestProgress {
 
 /// What a phase looks like on one line, shared by the spinner and the plain
 /// renderer so the two describe a case identically.
+///
+/// No brackets here: [`Progress::case_status`] wraps the whole result in one
+/// pair, so a `Status::Command`'s own `step` reads as part of that same
+/// bracketed phrase rather than a second, nested pair.
 fn status_text(status: &Status<'_>) -> String {
     match status {
         Status::Rendering => "rendering".to_string(),
-        Status::Command { step, command } => format!("[{}] $ {command}", step.as_str()),
+        Status::Command { step, command } => format!("{}: $ {command}", step.as_str()),
         Status::Snapshot => "checking snapshot".to_string(),
     }
 }
@@ -147,19 +163,28 @@ impl Progress for TestProgress {
     fn case_started(&mut self, name: &str) {
         match self {
             Self::Silent => {}
-            Self::Spinner(bar) => bar.set_message(format!("{name} …")),
-            Self::Line { theme, .. } => eprintln!("{}", muted(theme, &format!("{name} …"))),
+            Self::Spinner { bar, theme } => bar.set_message(format!("{} …", heading(theme, name))),
+            Self::Line { theme, .. } => eprintln!("{} …", heading(theme, name)),
         }
     }
 
     fn case_status(&mut self, name: &str, status: Status<'_>) {
-        let text = status_text(&status);
+        // Case name and phase get their own colours — `heading`'s (cyan,
+        // bold) for the name, `muted`'s (dim) for the phase — so the two
+        // read apart from each other without a separator between them; the
+        // brackets around the phase already do that job.
         match self {
             Self::Silent => {}
-            Self::Spinner(bar) => bar.set_message(format!("{name} — {text}")),
-            Self::Line { theme, .. } => {
-                eprintln!("{}", muted(theme, &format!("  {name} — {text}")));
-            }
+            Self::Spinner { bar, theme } => bar.set_message(format!(
+                "{} {}",
+                heading(theme, name),
+                muted(theme, &format!("[{}]", status_text(&status))),
+            )),
+            Self::Line { theme, .. } => eprintln!(
+                "  {} {}",
+                heading(theme, name),
+                muted(theme, &format!("[{}]", status_text(&status))),
+            ),
         }
     }
 
