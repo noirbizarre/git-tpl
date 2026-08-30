@@ -1,0 +1,21 @@
+# Exposes `git tpl lint` as a hook a template repository can run on itself —
+# see docs/usage/lint.md#as-a-prek-or-pre-commit-hook.
+#
+# `language: system` assumes `git-tpl` is already on PATH. The alternative,
+# `language: rust`, would have prek/pre-commit `cargo install --bins` this
+# crate from source into their own hook cache on first run — slow, and
+# redundant with the five prebuilt channels git-tpl already ships (see
+# docs/getting-started/installation.md). A missing binary fails the hook
+# loudly instead, which is the tradeoff this makes.
+#
+# No `files:` filter: lint is a whole-template static check, not a per-file
+# one (a change to one file can make a completely different one wrong — see
+# tpl::lint::collision, tpl::lint::shadowed_name), so it always runs, the
+# same way this repo's own `typos` hook in prek.toml does.
+- id: git-tpl-lint
+  name: git tpl lint
+  description: Check a git-tpl template for structural mistakes a render alone would not catch.
+  entry: git-tpl lint --dirty
+  language: system
+  pass_filenames: false
+  stages: [pre-commit, pre-merge-commit, pre-push, manual]

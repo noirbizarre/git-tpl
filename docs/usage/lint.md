@@ -293,3 +293,57 @@ For a repository where warnings are errors:
 ```
 
 Or with [`--json`](../reference/json.md) for anything that needs to read the findings rather than print them.
+
+## As a prek or pre-commit hook
+
+git-tpl publishes a `.pre-commit-hooks.yaml`, so a template repository can run `lint` on itself before every
+commit — the same manifest format [prek](https://prek.j178.dev) and [pre-commit](https://pre-commit.com) both
+read.
+
+With prek, in the template repository's own `prek.toml`:
+
+```toml
+[[repos]]
+repo = "https://github.com/noirbizarre/git-tpl"
+rev = "v0.12.1"
+hooks = [{ id = "git-tpl-lint" }]
+```
+
+With pre-commit, in `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/noirbizarre/git-tpl
+    rev: v0.12.1
+    hooks:
+      - id: git-tpl-lint
+```
+
+The hook runs `git tpl lint . --dirty` and expects `git-tpl` already on `PATH` —
+[install it](../getting-started/installation.md) the same way you would to run it by hand; neither tool builds
+it for you. It checks the whole template on every commit rather than just the files that changed, because a
+change to one file can make an entirely different one wrong.
+
+### Without installing it first
+
+The hook is declared with `language: system` — the manifest field both tools read the same way — so it stays
+usable from plain pre-commit, which has no other way to run an arbitrary Rust binary. prek reads the same
+manifest but lets a caller override a hook's `language` and `additional_dependencies` in its own config, and one
+of the languages only prek has is [`mise`](https://prek.j178.dev/languages/#mise): give it a
+[mise tool spec](../getting-started/installation.md) and prek installs that tool into the hook's own isolated
+environment before running `entry` — no separate install step, and nothing added to your own mise config.
+
+```toml
+[[repos]]
+repo = "https://github.com/noirbizarre/git-tpl"
+rev = "v0.12.1"
+hooks = [
+  { id = "git-tpl-lint", language = "mise", additional_dependencies = ["github:noirbizarre/git-tpl@0.12.1"] },
+]
+```
+
+`github:noirbizarre/git-tpl` names the release-binary backend —
+see [With mise](../getting-started/installation.md#with-mise) — so nothing is compiled. The `cargo:git-tpl`
+backend also works here, at the cost of building from source on the first run, same as `language: rust` would.
+This is a `prek run` (or a template repository's own commit) concern only: pre-commit has no `mise` language, so
+a repository that must stay pre-commit-compatible keeps `language: system`.
