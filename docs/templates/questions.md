@@ -253,7 +253,7 @@ appears, so a typo is your problem on your first render and never your users'.
 Precedence, highest first:
 
 ```
---answer  >  --answers-from  >  answers in .config/git.tpl.toml
+--answer  >  --answers-from  >  answers in .config/git.tpl.toml (update only)
           >  [defaults] (only when asked)  >  default_from (only when asked)
           >  default
 ```

@@ -157,7 +157,7 @@ Precedence, highest first:
 ```
 1.  --answer
 2.  --answers-from                    (the last file given wins)
-3.  answers in .config/git.tpl.toml
+3.  answers in .config/git.tpl.toml   (update only)
 4.  [defaults]                        ← this file
 5.  default_from
 6.  the question's own default
