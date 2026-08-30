@@ -936,7 +936,9 @@ fn snapshot_true_with_nothing_recorded_yet_is_a_failure() {
 
 /// `--write` only records a snapshot for a case that asked for one — a case
 /// with `snapshot` unset must not get a `__snapshots__` directory at all,
-/// even under `--write`.
+/// even under `--write`. It is not merely uninvolved, either (`"none"`, what
+/// a plain run reports for the same case): `--write` skips it entirely,
+/// reported as `"skipped"`. See ADR-032.
 #[test]
 fn write_does_not_record_a_snapshot_for_a_case_that_did_not_ask_for_one() {
     let dir = tempfile::tempdir().unwrap();
@@ -946,7 +948,7 @@ fn write_does_not_record_a_snapshot_for_a_case_that_did_not_ask_for_one() {
     );
 
     let output = run(&template, &["--json", "--write"]).success();
-    assert_eq!(output.json()["cases"][0]["snapshot"], "none");
+    assert_eq!(output.json()["cases"][0]["snapshot"], "skipped");
     assert!(
         !template.repo.path.join("tests/__snapshots__/bare").exists(),
         "a case that never asked for a snapshot must not get one written"
@@ -1188,8 +1190,11 @@ fn write_does_not_stage_or_commit_the_snapshot() {
     );
 }
 
+/// ADR-032: `--write` only records what a case renders; it does not also
+/// prove it. A plain `git tpl test` right after this one still catches the
+/// unmet `expect.files` — this asserts `--write` itself does not.
 #[test]
-fn write_still_fails_a_case_whose_expectations_are_unmet() {
+fn write_does_not_check_a_case_s_expectations() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(
         dir.path(),
@@ -1199,9 +1204,19 @@ fn write_still_fails_a_case_whose_expectations_are_unmet() {
         )],
     );
 
-    // Recording a rendering is not blessing it.
-    let output = run(&template, &["--json", "--write"]).code(1);
+    let output = run(&template, &["--json", "--write"]).success();
     assert_eq!(output.json()["cases"][0]["snapshot"], "written");
+    assert_eq!(output.json()["cases"][0]["passed"], true);
+    assert!(
+        output.json()["cases"][0]["failures"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+
+    // The plain run afterward still catches it: `--write` deferred the
+    // check, it did not remove it.
+    let output = run(&template, &["--json"]).code(1);
     assert_eq!(
         output.json()["cases"][0]["failures"][0]["kind"],
         "missingFile"
@@ -1681,15 +1696,140 @@ fn the_human_output_reports_what_write_did_to_each_snapshot() {
     run(&built, &["--write"])
         .success()
         .says("snapshot written")
-        .says("1 snapshot(s) recorded, 0 unchanged");
+        .says("1 written, 0 updated, 0 unchanged");
     built.repo.commit_all("test: record");
 
     run(&built, &["--write"])
         .success()
         .says("snapshot unchanged")
-        .says("0 snapshot(s) recorded, 1 unchanged");
+        .says("0 written, 0 updated, 1 unchanged");
 
     run(&built, &[]).success().says("snapshot ok");
+}
+
+/// ADR-032: with `[commands]` and `expect` gone from a `--write` run, `-v`
+/// has nothing left to stream live. In their place it shows the same
+/// unified diff a normal run's `Failure::SnapshotDiff` already shows —
+/// without `-v`, only the fact that it changed, not the diff itself.
+#[test]
+fn verbose_write_shows_a_diff_for_an_updated_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
+        )],
+    );
+    run(&built, &["--write"]).success();
+    built.repo.commit_all("test: record");
+
+    built.repo.write(
+        "template/pyproject.toml.jinja",
+        "name = \"{{ project_name }}\"\nnew = 1\n",
+    );
+    built.repo.commit_all("feat: change the template");
+
+    // Without -v: the fact that it changed, not the diff itself.
+    run(&built, &["--write"])
+        .success()
+        .says("snapshot updated")
+        .silent_about("+new = 1");
+    built.repo.git(&["checkout", "--", "tests/__snapshots__"]);
+
+    run(&built, &["--write", "-v"])
+        .success()
+        .says("modified pyproject.toml")
+        .says("+new = 1");
+}
+
+/// The footer names which cases fell into which bucket, so a suite with more
+/// than one snapshot case does not require reading every per-case line to
+/// know what `--write` actually changed.
+#[test]
+fn verbose_write_names_which_cases_were_written_or_updated_in_the_footer() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[
+            (
+                "tests/fresh.toml",
+                "snapshot = true\n[answers]\nproject_name = \"fresh\"\n",
+            ),
+            (
+                "tests/changed.toml",
+                "snapshot = true\n[answers]\nproject_name = \"changed\"\n",
+            ),
+        ],
+    );
+    run(&built, &["--write", "changed"]).success();
+    built.repo.commit_all("test: record changed only");
+
+    built.repo.write(
+        "template/pyproject.toml.jinja",
+        "name = \"{{ project_name }}\"\nnew = 1\n",
+    );
+    built.repo.commit_all("feat: change the template");
+
+    run(&built, &["--write", "-v"])
+        .success()
+        .says("1 written, 1 updated, 0 unchanged")
+        .says("updated: changed")
+        .says("written: fresh");
+}
+
+/// A `--json --write` caller has no terminal to colourise a patch for, so the
+/// diff itself has to travel in the payload rather than only on stderr.
+#[test]
+fn json_write_carries_the_snapshot_diff_for_an_updated_case() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
+        )],
+    );
+    run(&built, &["--write"]).success();
+    built.repo.commit_all("test: record");
+
+    built.repo.write(
+        "template/pyproject.toml.jinja",
+        "name = \"{{ project_name }}\"\nnew = 1\n",
+    );
+    built.repo.commit_all("feat: change the template");
+
+    let output = run(&built, &["--json", "--write"]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["snapshot"], "updated");
+    let changes = &json["cases"][0]["snapshotChanges"];
+    assert_eq!(changes[0]["path"], "pyproject.toml");
+    assert_eq!(changes[0]["kind"], "modified");
+    assert!(
+        changes[0]["patch"].as_str().unwrap().contains("+new = 1"),
+        "expected a unified diff in {json}"
+    );
+}
+
+/// A case with no `snapshot = true` is not merely uninvolved under
+/// `--write` — it is never rendered and its `[commands]` never run at all.
+/// A `before` that would fail if it ran must not fail the run.
+#[test]
+fn write_never_renders_or_runs_commands_for_a_skipped_case() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/bare.toml",
+            "[answers]\nproject_name = \"a\"\n\n[commands]\nbefore = [\"false\"]\n",
+        )],
+    );
+
+    let output = run(&template, &["--json", "--write"]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+    assert_eq!(json["cases"][0]["snapshot"], "skipped", "{json}");
+    assert_eq!(json["cases"][0]["commandsRun"], 0, "{json}");
 }
 
 #[test]

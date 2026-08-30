@@ -76,7 +76,7 @@ question, so an unrecognised key here is always the case's own mistake. See
 | `--template` | The local checkout to test; defaults to the current directory. Never a remote source. |
 | `--tests` | Read cases from this directory instead of `tests`. |
 | `--ref` | Branch, tag or commit to test; without it, the working tree. |
-| `--write` | Record each case's rendering as its snapshot. |
+| `--write` | Record each case's rendering as its snapshot. Only the cases that declare `snapshot = true` are touched; see [Snapshots](#snapshots). |
 | `--skip-commands` | Skip every case's `[commands]` for this run. |
 
 There is no `--answer`, `--answers-from` or `--defaults`.
@@ -129,6 +129,10 @@ lets a case simulate rendering into a project that already exists, the way `upda
 Each entry is a plain string, split into a program and its arguments the way a shell would parse quoting and
 escapes — but no shell actually runs. There is no pipe, no glob, no redirection and no `$VAR` expansion. A
 pipeline needs a script file: write it with `before`, then name it in `rendered`.
+
+`--write` never runs any of the four lists. It only records what a case renders; proving what running it *does* is
+what a plain `git tpl test` is for. See [Snapshots](#snapshots) and
+[ADR-032](../adr/032-write-only-writes.md).
 
 ### Environment
 
@@ -190,6 +194,11 @@ Neither shows under `--quiet` or `--json`.
 forwarded live, exactly as it writes it — ANSI included. The final report no longer repeats a failed command's
 captured output in that case, since it was already shown as it happened; `--json` is unaffected either way, and
 always carries it.
+
+Under `--write`, no `[commands]` run at all (see [Snapshots](#snapshots)), so there is nothing for `-v` to stream
+live. In its place, `-v` shows the same coloured unified diff a normal run's snapshot-mismatch failure already
+shows, once per case whose snapshot changed — and the final summary names which cases were written, updated or
+left unchanged. See [ADR-032](../adr/032-write-only-writes.md).
 
 ### Running `git tpl test` is the consent
 
@@ -268,15 +277,20 @@ each.
 A Windows checkout loses the mode on disk, and a snapshot that silently stopped asserting on `chmod +x` would be
 worse than none.
 
-Four things worth knowing:
+Things worth knowing:
 
-- **A case with `snapshot` unset (or `false`) is not a failure.** Snapshots are opt-in per case, and are neither
-  written nor compared for it.
+- **A case with `snapshot` unset (or `false`) is not a failure** on a plain run. Snapshots are opt-in per case, and
+  are neither written nor compared for it.
 - **`snapshot = true` with nothing recorded yet is a failure, not a pass.** Run `--write` once to record it.
 - **`--write` clears the case's snapshot directory rather than merging into it.** A template that stops
   producing a file has to be seen to stop.
-- **`--write` does not stage or commit anything, and does not bless a broken case.** The `expect` assertions
-  still run and still fail. You review the diff and commit it.
+- **`--write` does not stage or commit anything.** You review the diff and commit it.
+- **`--write` only records; it does not run a case.** A case's `[commands]` never run, and `expect` is never
+  checked, under `--write` — recording a broken rendering is not the same as passing it. Run a plain
+  `git tpl test` afterward (or let CI do it) to prove the recording still holds. See
+  [ADR-032](../adr/032-write-only-writes.md).
+- **A case with no `snapshot = true` is skipped entirely under `--write`** — not rendered, not checked, not
+  counted as run. `--write`'s only reason to look at a case is to write its snapshot.
 
 `--write` writes into the checked-out template's working tree — there is nowhere else for a snapshot to go.
 

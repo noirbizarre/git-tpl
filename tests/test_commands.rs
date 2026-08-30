@@ -486,10 +486,12 @@ fn a_command_naming_no_such_program_is_reported_as_not_runnable() {
 }
 
 /// A case with `[commands]` can still opt into a snapshot: the sandboxed
-/// path and the plain path must both reach `snapshot_step`, and this is the
-/// only test exercising that combination.
+/// path must also reach `snapshot_step`, not only the plain path
+/// `run_case_plain` takes. Since ADR-032, `--write` itself always takes the
+/// plain path regardless of `[commands]` — this combination is exercised by
+/// a normal, comparing run instead.
 #[test]
-fn a_case_with_commands_can_also_record_a_snapshot() {
+fn a_case_with_commands_can_also_compare_a_snapshot() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(
         dir.path(),
@@ -502,10 +504,44 @@ fn a_case_with_commands_can_also_record_a_snapshot() {
         )],
     );
 
+    run(&template, &["--write"]).success();
+    template.repo.commit_all("test: record the snapshot");
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+    assert_eq!(json["cases"][0]["snapshot"], "compared", "{json}");
+    assert_eq!(json["cases"][0]["commandsRun"], 1, "{json}");
+}
+
+/// ADR-032: `--write` never runs a case's `[commands]`, even one that
+/// declares `snapshot = true` and would otherwise take the sandboxed path.
+/// `marker.txt` is a plain file the template always renders (not something
+/// `rendered` creates), so it must still land in the snapshot even though
+/// the command that used to check for it never runs.
+#[test]
+fn write_skips_a_case_s_commands_but_still_records_its_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "snapshot = true\n\
+             [answers]\n\n\
+             [commands]\n\
+             before   = [\"false\"]\n\
+             rendered = [\"false\"]\n\
+             after    = [\"false\"]\n\
+             finally  = [\"false\"]\n",
+        )],
+    );
+
+    // Every list would fail the case if it ran at all.
     let output = run(&template, &["--write"]).success();
     let json = output.json();
     assert_eq!(json["cases"][0]["passed"], true, "{json}");
     assert_eq!(json["cases"][0]["snapshot"], "written", "{json}");
+    assert_eq!(json["cases"][0]["commandsRun"], 0, "{json}");
     assert_eq!(
         template.repo.read("tests/__snapshots__/c/files/marker.txt"),
         "hello\n"
