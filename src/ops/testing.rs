@@ -2560,4 +2560,34 @@ mod tests {
         assert_eq!(changes[0].kind, ChangeKind::Modified);
         assert!(changes[0].patch.is_none(), "no patch for binary");
     }
+
+    /// `Silent` is what a caller with nothing to say uses — today, no caller
+    /// in this crate; `commands::test` overrides every method instead. The
+    /// point of this test is that none of the following panics: every
+    /// default body really is empty, for a future caller (this crate as a
+    /// library, say) that never implements `Progress` at all.
+    #[test]
+    fn silent_progress_does_nothing_for_every_event() {
+        let mut progress = Silent;
+        progress.case_started("c");
+        progress.case_status("c", Status::Rendering);
+        progress.case_status(
+            "c",
+            Status::Command {
+                step: CommandStep::Before,
+                command: "true",
+            },
+        );
+        progress.case_status("c", Status::Snapshot);
+        progress.command_finished("c", CommandStep::Before, "true", true);
+        progress.command_output("c", Stream::Stdout, b"noise");
+        progress.case_finished(&CaseOutcome {
+            name: "c".to_string(),
+            path: "tests/c.toml".to_string(),
+            failures: Vec::new(),
+            snapshot: SnapshotOutcome::None,
+            files: 1,
+            commands_run: 0,
+        });
+    }
 }
