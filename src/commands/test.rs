@@ -301,7 +301,9 @@ impl Progress for TestProgress {
 fn test_commands_enabled(skip: bool) -> Result<bool, OpError> {
     let preferences = match LibGit2::discover(&super::current_dir()?) {
         Ok(repo) => Preferences::load(&repo)?,
-        Err(GitError::NotARepository { .. }) => Preferences::default(),
+        Err(GitError::NotARepository { .. } | GitError::JujutsuNotColocated { .. }) => {
+            Preferences::default()
+        }
         Err(other) => return Err(other.into()),
     };
     Ok(preferences
