@@ -769,7 +769,7 @@ mod tests {
     /// every case file still said otherwise, and a suite that does not test
     /// what it says it tests is worse than no suite.
     #[test]
-    fn test_refuses_answer_flags_because_the_cases_own_the_answers() {
+    fn refuses_answer_flags_because_the_cases_own_the_answers() {
         assert!(Cli::try_parse_from(["git-tpl", "test", "--answer", "a=b"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "test", "--defaults"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "test", "--answers-from", "a.toml"]).is_err());
@@ -781,7 +781,7 @@ mod tests {
     /// to the case `minimal` against the default template, not try to test
     /// `./minimal`.
     #[test]
-    fn test_case_names_are_never_confused_with_the_template_path() {
+    fn case_names_are_never_confused_with_the_template_path() {
         let cli = Cli::try_parse_from(["git-tpl", "test"]).unwrap();
         let Command::Test(args) = cli.command else {
             panic!("expected test")
@@ -809,7 +809,7 @@ mod tests {
     /// Refusing them outright is better than silently ignoring an old
     /// invocation.
     #[test]
-    fn test_refuses_the_removed_dirty_and_root_flags() {
+    fn refuses_the_removed_dirty_and_root_flags() {
         assert!(Cli::try_parse_from(["git-tpl", "test", "--dirty"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "test", "--root", "sub"]).is_err());
     }
@@ -882,7 +882,7 @@ mod tests {
     /// `--skip-commands` can only disable `[commands]`; it takes no value and
     /// is accepted on its own.
     #[test]
-    fn test_accepts_skip_commands() {
+    fn accepts_skip_commands() {
         let cli = Cli::try_parse_from(["git-tpl", "test", "--skip-commands"]).unwrap();
         let Command::Test(args) = cli.command else {
             panic!("expected test")

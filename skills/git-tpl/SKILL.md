@@ -202,10 +202,10 @@ there is no fix to send; edit the template's `.jinja` source by hand instead.
 |---|---|---|
 | `questions` | `git tpl --json questions <template>` | `questions[]{name,default,defaultIsExpression,when,choices,defaultWhenSkipped}` |
 | `init` | `git tpl init <template> [<dir>] [--init] [--answer k=v]... [--answers-from f]... [--defaults] [--dry-run]` | `id`,`ref`,`revision`,`commit`,`changes[]`,`merge{result,...}` |
-| `status` | `git tpl status` | `templateMoved`,`merged`,`availableRevision`,`availableCommit`,`renderedRevision`,`worktreeClean`,`remote{ahead,behind}` |
+| `status` | `git tpl status` | `templateMoved`,`merged`,`availableReferenceDescription`,`availableCommit`,`renderedReference`,`worktreeClean`,`remote{ahead,behind}` |
 | `update` | `git tpl update [--answer k=v]... [--defaults] [--dry-run] [--push]` | `result`(`upToDate`\|`updated`),`previousRevision`,`revision`,`changes[]`,`migrations[]`,`movedCommit` |
 | `diff` | `git tpl diff [--stat] [--name-only] [--exit-code] [-- <path>...]` | `conflicts[]`,`changes[]{path,kind,insertions,deletions}` |
-| `merge` | `git tpl merge [--no-commit] [-m <msg>]` / `git tpl merge --abort` | `result`(`upToDate`\|`fastForward`\|`merged`\|`staged`\|`conflicted`),`commit`,`conflicts[]` |
+| `merge` | `git tpl merge [--no-commit] [-m <msg>]` / `git tpl merge --abort` | `result`(`upToDate`\|`fastForward`\|`merged`\|`staged`\|`conflicted`\|`aborted`),`commit`,`conflicts[]` |
 | `show` | `git tpl show <path>` | no envelope — stdout **is** the file's bytes |
 | `backport` | `git tpl backport [<pathspec>...] [--exclude g]... [-o file] [--unsubstitute]` | `result`(`patched`\|`nothingToBackport`),`patch`,`unsubstituted[]` |
 | `fetch` | `git tpl fetch [--remote name] [--dry-run]` | `state`(`absent`\|`synced`\|`diverged`\|`behind`\|`ahead`),`relation{ahead,behind}` |

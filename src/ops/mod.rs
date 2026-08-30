@@ -1698,8 +1698,8 @@ pub struct Status {
     /// What the last rendering recorded.
     pub recorded: Option<Recorded>,
     /// What the configured `ref` resolves to now.
-    pub available_revision_description: Option<String>,
-    /// The commit `available_revision_description` describes, for a caller
+    pub available_reference_description: Option<String>,
+    /// The commit `available_reference_description` describes, for a caller
     /// that wants the raw id rather than parsing the prose.
     pub available_commit: Option<Oid>,
     /// Whether the template has moved since the last rendering.
@@ -1755,7 +1755,7 @@ pub fn status(
     })
     .ok();
 
-    let available_revision_description = resolved
+    let available_reference_description = resolved
         .as_ref()
         .map(|r| describe_revision(&r.reference, r.revision));
     let available_commit = resolved.as_ref().map(|r| r.revision);
@@ -1805,7 +1805,7 @@ pub fn status(
         ref_name,
         tip,
         recorded,
-        available_revision_description,
+        available_reference_description,
         available_commit,
         template_moved,
         merged,
@@ -2457,7 +2457,7 @@ mod tests {
             ref_name: "refs/tpl/tpl".into(),
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
-            available_revision_description: None,
+            available_reference_description: None,
             available_commit: None,
             template_moved: false,
             merged: true,
@@ -2478,7 +2478,7 @@ mod tests {
             ref_name: "refs/tpl/tpl".into(),
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
-            available_revision_description: None,
+            available_reference_description: None,
             available_commit: None,
             template_moved: false,
             merged: true,
