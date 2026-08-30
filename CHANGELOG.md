@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0](https://github.com/noirbizarre/git-tpl/compare/0.10.0..0.11.0) - 2026-08-30
+
+### 💫 Features
+
+- **status** Add availableCommit alongside availableRevision - ([b8dab25](https://github.com/noirbizarre/git-tpl/commit/b8dab2518746970fd44bd0f99ca0b36aa649446e))
+- **testing**  🚨 **breaking** Show live progress and colour throughout `git tpl test` ([#138](https://github.com/noirbizarre/git-tpl/issues/138)) - ([0de4b7e](https://github.com/noirbizarre/git-tpl/commit/0de4b7e3be211b38d2efcb4a7ee3d93873c1e5b5))
+- **testing** Expose the resolved template's root to a case's commands ([#140](https://github.com/noirbizarre/git-tpl/issues/140)) - ([59dc1dc](https://github.com/noirbizarre/git-tpl/commit/59dc1dceb2158e3d046be1cefe12eaebc7a35a7d))
+- **testing**  🚨 **breaking** Test the working tree by default, refuse a remote source ([#137](https://github.com/noirbizarre/git-tpl/issues/137)) - ([0c9416b](https://github.com/noirbizarre/git-tpl/commit/0c9416b799122ef14437d196ffe2efadb656da1b))
+- **testing** Scope environment variables to a case's commands ([#133](https://github.com/noirbizarre/git-tpl/issues/133)) - ([6d6f026](https://github.com/noirbizarre/git-tpl/commit/6d6f026a0d89a78b4dc494cd74676ed495f1dadf))
+
+### 🐛 Bug Fixes
+
+- **data** Describe the revision, not just the commit, in "no such file" errors - ([b6a6781](https://github.com/noirbizarre/git-tpl/commit/b6a6781303bd78426fe7fa6d7752700955478cd2))
+- **dist** Pass the completion shell as a positional argument ([#128](https://github.com/noirbizarre/git-tpl/issues/128)) - ([3b31c75](https://github.com/noirbizarre/git-tpl/commit/3b31c7537f505341f938715e82dbc393bcda153b))
+- **report**  🚨 **breaking** Use a consistent object shape for the JSON revision field - ([36eb506](https://github.com/noirbizarre/git-tpl/commit/36eb506db95867dc582b73f90c731ada1749ece2))
+- **testing**  🚨 **breaking** Validate a test case's [answers] strictly, unconditionally ([#136](https://github.com/noirbizarre/git-tpl/issues/136)) - ([aa15446](https://github.com/noirbizarre/git-tpl/commit/aa154466ffaf09aa96f725c7998328a2fe27fed1))
+
+### 🔨 Refactor
+
+- **testing** Rename TestError to TestingError - ([09f2649](https://github.com/noirbizarre/git-tpl/commit/09f26499a60191d2f8c5200e4ea3792dc7ea254c))
+
+### 📚 Documentation
+
+- **refs** Explain why TemplateIdError breaks the file-name convention - ([28ccd0f](https://github.com/noirbizarre/git-tpl/commit/28ccd0f64022601a10389de47763add0f06aa690))
+- **setup** Match the update invariant's wording to AGENTS.md - ([fe2948f](https://github.com/noirbizarre/git-tpl/commit/fe2948ffb4ed5b317b264349a34912316d39eb94))
+- **template** Document yaml as a supported data source format - ([6aa19d1](https://github.com/noirbizarre/git-tpl/commit/6aa19d160e943d3f6892a737807aa5a1613d7255))
+- Document tpl::data::needs_project for lint and context - ([b9fe17f](https://github.com/noirbizarre/git-tpl/commit/b9fe17ffcff3d0a8c30633b1175706eff17124a5))
+- Mark the recorded-answers precedence step update-only - ([56b8566](https://github.com/noirbizarre/git-tpl/commit/56b8566a263dbae20361e79b1969527bf7678d44))
+- Decline `git tpl detach`, document the manual path ([#139](https://github.com/noirbizarre/git-tpl/issues/139)) - ([33ff72f](https://github.com/noirbizarre/git-tpl/commit/33ff72fb15d6c36fa6cd3678ad516e7c170ef461))
+
 ## [0.10.0](https://github.com/noirbizarre/git-tpl/compare/0.9.0..0.10.0) - 2026-08-26
 
 ### 💫 Features
