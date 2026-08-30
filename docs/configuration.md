@@ -315,7 +315,7 @@ what a URL prefix abbreviates, and which templates you have already agreed to le
 
 ## The environment
 
-git-tpl reads six environment variables and writes none.
+git-tpl reads seven environment variables and writes none.
 Everything else it knows comes from a file you can point at.
 
 | Variable | Read for |
@@ -324,7 +324,7 @@ Everything else it knows comes from a file you can point at.
 | `HOME` | The fallback for the above: `$HOME/.config`. Also where default SSH keys (`~/.ssh/id_ed25519` and the rest) are looked up when a git remote needs authenticating. |
 | `USERPROFILE` | The Windows fallback for `HOME`, and the one libgit2 itself uses. Git for Windows usually exports `HOME`, but nothing guarantees it. |
 | `NO_COLOR` | [no-color.org](https://no-color.org). Presence is the signal, whatever the value. |
-| `CLICOLOR_FORCE` | [force-color.org](https://force-color.org). Any value but `0` forces colour. |
+| `FORCE_COLOR` / `CLICOLOR_FORCE` | [force-color.org](https://force-color.org) and [bixense.com/clicolors](https://bixense.com/clicolors/) respectively — treated as aliases for the same signal, as the (now-deprecated) clicolors standard itself recommends. Either, with any value but `0`, forces colour. |
 | `TERM` | `dumb` means no colour. |
 
 Colour precedence, highest first — `--color` decides outright when it is not `auto`, and only then does the
@@ -332,15 +332,15 @@ environment get a say:
 
 ```
 1.  --color always | never
-2.  CLICOLOR_FORCE       set and not `0` → colour, even when not a terminal
-3.  NO_COLOR             set at all → no colour
-4.  TERM=dumb            → no colour
+2.  FORCE_COLOR / CLICOLOR_FORCE   set and not `0` → colour, even when not a terminal
+3.  NO_COLOR                      set at all → no colour
+4.  TERM=dumb                     → no colour
 5.  is stderr a terminal?
 ```
 
-`CLICOLOR_FORCE` outranks `NO_COLOR` and outranks not being a terminal, which is deliberate: that is what CI
-systems set to get coloured logs, and a build that asked for colour explicitly has said something a heuristic has
-not.
+`FORCE_COLOR`/`CLICOLOR_FORCE` outrank `NO_COLOR` and outrank not being a terminal, which is deliberate: that is
+what CI systems set to get coloured logs, and a build that asked for colour explicitly has said something a
+heuristic has not.
 
 None of these reach a template.
 A rendered tree cannot depend on where it was rendered — that is [invariant 2](concepts/determinism.md).

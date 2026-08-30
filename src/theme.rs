@@ -78,6 +78,7 @@ impl Theme {
             ColorChoice::Auto => {
                 if decide(
                     std::env::var("NO_COLOR").ok().as_deref(),
+                    std::env::var("FORCE_COLOR").ok().as_deref(),
                     std::env::var("CLICOLOR_FORCE").ok().as_deref(),
                     std::env::var("TERM").ok().as_deref(),
                     console::user_attended_stderr(),
@@ -104,12 +105,21 @@ impl Theme {
 /// impossible to assert cleanly.
 pub fn decide(
     no_color: Option<&str>,
+    force_color: Option<&str>,
     clicolor_force: Option<&str>,
     term: Option<&str>,
     is_terminal: bool,
 ) -> bool {
     // https://force-color.org — an explicit request wins over everything,
     // including not being a terminal, because that is what CI systems set.
+    // Checked ahead of `CLICOLOR_FORCE`: the clicolors standard itself
+    // (https://bixense.com/clicolors/, now deprecated in `FORCE_COLOR`'s
+    // favour) says software supporting it "should treat FORCE_COLOR as an
+    // alias for CLICOLOR_FORCE, enabling colour whenever either is set" — so
+    // both get the same "present and not `0`" rule, not two different ones.
+    if force_color.is_some_and(|v| v != "0") {
+        return true;
+    }
     if clicolor_force.is_some_and(|v| v != "0") {
         return true;
     }
@@ -487,24 +497,34 @@ mod tests {
 
     #[rstest]
     // An explicit request wins over not being a terminal — that is exactly the
-    // case CI systems set it for.
-    #[case(None, Some("1"), None, false, true)]
+    // case CI systems set it for. Either variable, since they are aliases.
+    #[case(None, None, Some("1"), None, false, true)]
+    #[case(None, Some("1"), None, None, false, true)]
+    // `0` is a no-op for either variable, not a request to disable colour —
+    // there is nothing left to force it on here, so it falls through to
+    // "no terminal" and stays plain.
+    #[case(None, Some("0"), None, None, false, false)]
     // NO_COLOR wins over being a terminal, whatever its value.
-    #[case(Some(""), None, None, true, false)]
-    #[case(Some("1"), None, None, true, false)]
-    // ...but not over an explicit force.
-    #[case(Some("1"), Some("1"), None, false, true)]
-    #[case(None, None, Some("dumb"), true, false)]
-    #[case(None, None, Some("xterm"), true, true)]
-    #[case(None, None, Some("xterm"), false, false)]
+    #[case(Some(""), None, None, None, true, false)]
+    #[case(Some("1"), None, None, None, true, false)]
+    // ...but not over an explicit force, from either variable.
+    #[case(Some("1"), None, Some("1"), None, false, true)]
+    #[case(Some("1"), Some("1"), None, None, false, true)]
+    #[case(None, None, None, Some("dumb"), true, false)]
+    #[case(None, None, None, Some("xterm"), true, true)]
+    #[case(None, None, None, Some("xterm"), false, false)]
     fn colour_precedence_is_explicit_request_then_refusal_then_terminal(
         #[case] no_color: Option<&str>,
-        #[case] force: Option<&str>,
+        #[case] force_color: Option<&str>,
+        #[case] clicolor_force: Option<&str>,
         #[case] term: Option<&str>,
         #[case] is_terminal: bool,
         #[case] expected: bool,
     ) {
-        assert_eq!(decide(no_color, force, term, is_terminal), expected);
+        assert_eq!(
+            decide(no_color, force_color, clicolor_force, term, is_terminal),
+            expected
+        );
     }
 
     #[test]
