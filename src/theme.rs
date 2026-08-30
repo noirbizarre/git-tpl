@@ -48,16 +48,25 @@ impl Theme {
     /// Colour, using Git's own vocabulary — green added, red deleted — so the
     /// output reads like the Git output it sits beside.
     pub fn colored() -> Self {
+        // Forced regardless of `console`'s own terminal auto-detection: an
+        // explicit "colourised" theme must not silently produce no escape
+        // codes just because stderr is a pipe. `console::Style` otherwise
+        // defers to a global, isatty-gated flag — which is exactly backwards
+        // for `--color always`, a CI log, or any of this suite's
+        // `tpl_colored` tests, none of which are ever a real terminal.
+        fn forced(style: Style) -> Style {
+            style.force_styling(true)
+        }
         Self {
             colored: true,
-            heading: Style::new().cyan().bold(),
-            muted: Style::new().dim(),
-            added: Style::new().green(),
-            modified: Style::new().yellow(),
-            deleted: Style::new().red(),
-            warning: Style::new().yellow(),
-            command: Style::new().cyan(),
-            bold: Style::new().white().bold(),
+            heading: forced(Style::new().cyan().bold()),
+            muted: forced(Style::new().dim()),
+            added: forced(Style::new().green()),
+            modified: forced(Style::new().yellow()),
+            deleted: forced(Style::new().red()),
+            warning: forced(Style::new().yellow()),
+            command: forced(Style::new().cyan()),
+            bold: forced(Style::new().white().bold()),
         }
     }
 
@@ -293,6 +302,25 @@ pub fn hunks(theme: &Theme, selection: &Selection<'_>) -> String {
     out
 }
 
+/// One line of a unified diff — from `git tpl test`'s recorded snapshots — in
+/// Git's own vocabulary: green added, red deleted, the same vocabulary
+/// [`hunks`] uses for `backport`'s diff. The file header (`---`/`+++`) and the
+/// `@@ ... @@` hunk marker stay muted, like everything else in this list —
+/// only the change itself should stand out.
+///
+/// Takes a flat line rather than a [`tpl::ops::Hunk`] like [`hunks`] does:
+/// `ops::testing::patch` produces a plain `similar` unified-diff string, not
+/// the structured hunks a `backport` selection already has split out.
+pub fn patch_line(theme: &Theme, line: &str) -> String {
+    if line.starts_with('+') && !line.starts_with("+++") {
+        theme.added.apply_to(line).to_string()
+    } else if line.starts_with('-') && !line.starts_with("---") {
+        theme.deleted.apply_to(line).to_string()
+    } else {
+        muted(theme, line)
+    }
+}
+
 /// A dimmed note.
 pub fn muted(theme: &Theme, text: &str) -> String {
     theme.muted.apply_to(text).to_string()
@@ -485,6 +513,51 @@ mod tests {
         let line = change(&theme, tpl::git::ChangeKind::Added, "Cargo.toml");
         assert_eq!(line, "  added     Cargo.toml");
         assert!(!line.contains('\x1b'));
+    }
+
+    /// Guards the fix for `Theme::colored()` never forcing styling: this test
+    /// runs in-process, with no control over whether the test binary's own
+    /// stdout/stderr happen to be a terminal, so before the fix this assertion
+    /// was true or false depending on how `cargo test` was invoked rather than
+    /// on the theme actually being "colourised".
+    #[test]
+    fn a_colored_theme_adds_escape_sequences_without_a_terminal() {
+        assert!(muted(&Theme::colored(), "x").contains('\x1b'));
+    }
+
+    /// `+`/`-` stand out; the file header they sit beside does not, because it
+    /// is not the change itself.
+    #[test]
+    fn patch_line_colours_additions_and_deletions_but_not_the_header() {
+        let theme = Theme::colored();
+        assert_eq!(
+            patch_line(&theme, "+added"),
+            theme.added.apply_to("+added").to_string()
+        );
+        assert_eq!(
+            patch_line(&theme, "-removed"),
+            theme.deleted.apply_to("-removed").to_string()
+        );
+        assert_eq!(
+            patch_line(&theme, "+++ rendered"),
+            muted(&theme, "+++ rendered")
+        );
+        assert_eq!(
+            patch_line(&theme, "--- snapshot"),
+            muted(&theme, "--- snapshot")
+        );
+        assert_eq!(
+            patch_line(&theme, "@@ -1,2 +1,3 @@"),
+            muted(&theme, "@@ -1,2 +1,3 @@")
+        );
+    }
+
+    #[test]
+    fn a_plain_theme_patch_line_adds_no_escape_sequences() {
+        let theme = Theme::plain();
+        assert_eq!(patch_line(&theme, "+added"), "+added");
+        assert_eq!(patch_line(&theme, "-removed"), "-removed");
+        assert!(!patch_line(&theme, "+added").contains('\x1b'));
     }
 
     /// The labels are padded so that paths line up; a change to one label's
