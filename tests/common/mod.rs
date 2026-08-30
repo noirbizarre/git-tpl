@@ -449,6 +449,7 @@ fn run_tpl(cwd: &Path, config_home: &Path, args: &[&str], color: &str) -> Output
     // A template repository is resolved relative to the project, and a stray
     // ambient config would change what the tests exercise.
     command.env_remove("NO_COLOR");
+    command.env_remove("FORCE_COLOR");
     command.env_remove("CLICOLOR_FORCE");
     // The user configuration is read from `$XDG_CONFIG_HOME/git-tpl/`, so
     // without this the suite would read whatever the developer happens to have

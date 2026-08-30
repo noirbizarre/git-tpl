@@ -186,12 +186,13 @@ plain output from a tool that only checks these two can still ask for it.
 
 A CI job wants colour for the same reason, but has to ask for it explicitly: a runner's shell is not a terminal,
 so `--color auto` (the default) never colourises there on its own — the same reason a workflow already sets
-`CARGO_TERM_COLOR=always` to get colour out of `cargo` itself. Set `CLICOLOR_FORCE=1` (or pass `--color always`)
-in the job's own environment:
+`CARGO_TERM_COLOR=always` to get colour out of `cargo` itself. Set `FORCE_COLOR=1` or `CLICOLOR_FORCE=1` (or pass
+`--color always`) in the job's own environment — either variable works, they are treated as aliases for the same
+signal:
 
 ```yaml
 env:
-  CLICOLOR_FORCE: "1"
+  FORCE_COLOR: "1"
 ```
 
 One variable does double duty: it colourises `git tpl test`'s own progress output below, *and* is what causes
