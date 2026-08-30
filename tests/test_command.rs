@@ -7,7 +7,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{Repo, Template, tpl, tpl_outside};
+use common::{Repo, Template, tpl, tpl_colored, tpl_outside};
 
 /// A template with a `[answers]`-driven conditional, plus whatever cases the
 /// test needs.
@@ -53,6 +53,14 @@ fn run(template: &Template, args: &[&str]) -> common::Output {
     let mut all = vec!["test"];
     all.extend_from_slice(args);
     tpl(&template.repo, &all)
+}
+
+/// The same, with colour forced on — for asserting on the escape codes
+/// `tpl`'s `--color never` deliberately never produces.
+fn run_colored(template: &Template, args: &[&str]) -> common::Output {
+    let mut all = vec!["test"];
+    all.extend_from_slice(args);
+    tpl_colored(&template.repo, &all)
 }
 
 // --- discovery --------------------------------------------------------------
@@ -1613,6 +1621,50 @@ fn the_human_output_of_a_snapshot_difference_says_how_to_re_record_it() {
     // With -v: the hunks too. A large rendering would otherwise bury the list
     // of what changed under the change itself.
     run(&built, &["-v"]).code(1).says("+new = 1");
+}
+
+/// The diff itself must read like a diff: a change with both an addition and
+/// a deletion should show green and red, not one dim block with no `+`/`-`
+/// distinction — that is indistinguishable from a coloured diff that simply
+/// never coloured anything.
+#[test]
+fn the_colourised_human_output_of_a_snapshot_difference_colours_additions_and_deletions() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "snapshot = true\n[answers]\nproject_name = \"thing\"\n",
+        )],
+    );
+    // Recorded with a second line already, so changing *that* line — rather
+    // than only appending one — produces both a deletion and an addition in
+    // the same diff, proving the two get different colours, not just that
+    // *something* got coloured.
+    built.repo.write(
+        "template/pyproject.toml.jinja",
+        "name = \"{{ project_name }}\"\nnew = 1\n",
+    );
+    built.repo.commit_all("test: a second line to later change");
+    run(&built, &["--write"]).success();
+    built.repo.commit_all("test: record");
+
+    built.repo.write(
+        "template/pyproject.toml.jinja",
+        "name = \"{{ project_name }}\"\nnew = 2\n",
+    );
+    built.repo.commit_all("feat: change the template");
+
+    // `\x1b[32m`/`\x1b[31m`: `console::Color::Green`/`Red`, `ansi_num() + 30`.
+    run_colored(&built, &["-v"])
+        .code(1)
+        .says("\x1b[32m+new = 2")
+        .says("\x1b[31m-new = 1")
+        // The file header sits beside the change but is not the change
+        // itself, so it stays in the dim `muted` style rather than borrowing
+        // green or red.
+        .silent_about("\x1b[32m+++")
+        .silent_about("\x1b[31m---");
 }
 
 #[test]

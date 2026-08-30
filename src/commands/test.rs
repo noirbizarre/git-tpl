@@ -18,7 +18,7 @@ use tpl::ops::{self, OpError, Target};
 
 use super::{Standalone, report_ignored_paths};
 use crate::cli::{GlobalArgs, TestArgs};
-use crate::theme::{Theme, bold, field, heading, muted};
+use crate::theme::{Theme, bold, field, heading, muted, patch_line};
 
 pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
@@ -495,7 +495,7 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
                     && let Some(patch) = &change.patch
                 {
                     for line in patch.lines() {
-                        ctx.out.say(muted(theme, &format!("        {line}")));
+                        ctx.out.say(format!("        {}", patch_line(theme, line)));
                     }
                 }
             }
@@ -687,27 +687,6 @@ mod tests {
         }
     }
 
-    /// `Theme::colored()`, with every style forced on regardless of what
-    /// `console`'s own terminal auto-detection decides — which, in a test
-    /// process, is "no" every time, since it is neither a real terminal nor
-    /// told `--color=always`. Exists only so a test can see the very escape
-    /// codes a real colourised run would produce.
-    fn forced() -> Theme {
-        fn force(style: console::Style) -> console::Style {
-            style.force_styling(true)
-        }
-        let mut theme = Theme::colored();
-        theme.heading = force(theme.heading);
-        theme.muted = force(theme.muted);
-        theme.added = force(theme.added);
-        theme.modified = force(theme.modified);
-        theme.deleted = force(theme.deleted);
-        theme.warning = force(theme.warning);
-        theme.command = force(theme.command);
-        theme.bold = force(theme.bold);
-        theme
-    }
-
     impl std::fmt::Debug for TestProgress {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.write_str(match self {
@@ -749,7 +728,7 @@ mod tests {
 
     #[test]
     fn command_line_colours_the_step_differently_once_it_has_failed() {
-        let theme = forced();
+        let theme = Theme::colored();
         let running = command_line(&theme, CommandStep::After, "true", true);
         let failed = command_line(&theme, CommandStep::After, "true", false);
         assert_ne!(running, failed, "{running:?} / {failed:?}");
@@ -769,7 +748,7 @@ mod tests {
 
     #[test]
     fn counted_is_styled_only_when_positive() {
-        let theme = forced();
+        let theme = Theme::colored();
         assert_eq!(counted(&theme.added, 0, "passed"), "0 passed");
         let styled = counted(&theme.added, 1, "passed");
         assert_ne!(styled, "1 passed", "{styled:?}");
