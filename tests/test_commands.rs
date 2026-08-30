@@ -295,3 +295,85 @@ fn a_list_env_override_wins_over_commands_env_for_the_same_key() {
     let json = output.json();
     assert_eq!(json["cases"][0]["passed"], true, "{json}");
 }
+
+// --- `TEMPLATE_ROOT` (issue #134) -------------------------------------------
+
+#[test]
+fn the_template_root_variable_is_visible_to_every_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             before   = [\"printenv TEMPLATE_ROOT\"]\n\
+             rendered = [\"printenv TEMPLATE_ROOT\"]\n\
+             after    = [\"printenv TEMPLATE_ROOT\"]\n\
+             finally  = [\"printenv TEMPLATE_ROOT\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+    assert_eq!(json["cases"][0]["commandsRun"], 4);
+}
+
+/// The manifest is never materialised into a case's sandbox, so a script
+/// that can see it through `$TEMPLATE_ROOT` is proof the variable names the
+/// real template checkout — not the throwaway directory the command is
+/// actually running in.
+#[test]
+fn the_template_root_variable_points_at_the_real_checkout_not_the_sandbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(
+        dir.path(),
+        "name = \"roottest\"\n",
+        &[(
+            "check-root.sh",
+            "#!/bin/sh\n\
+             [ \"$PWD\" != \"$TEMPLATE_ROOT\" ] || exit 1\n\
+             [ -f \"$TEMPLATE_ROOT/template.toml\" ] || exit 1\n",
+        )],
+    );
+    built.repo.make_executable("template/check-root.sh");
+    built.repo.write(
+        "tests/c.toml",
+        "[answers]\n\n[commands]\nrendered = [\"./check-root.sh\"]\n",
+    );
+    built.repo.commit_all("test: template root variable");
+
+    let output = run(&built, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// `--dirty` and a local `--ref` open the same repository in place (`test`
+/// never resolves a remote — ADR-030), so `TEMPLATE_ROOT` must be the same
+/// real checkout path either way, not something recomputed per mode.
+#[test]
+fn the_template_root_variable_is_the_same_for_a_local_ref_as_for_dirty() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(
+        dir.path(),
+        "name = \"roottest\"\n",
+        &[(
+            "check-root.sh",
+            "#!/bin/sh\n\
+             [ \"$PWD\" != \"$TEMPLATE_ROOT\" ] || exit 1\n\
+             [ -f \"$TEMPLATE_ROOT/template.toml\" ] || exit 1\n",
+        )],
+    );
+    built.repo.make_executable("template/check-root.sh");
+    built.repo.write(
+        "tests/c.toml",
+        "[answers]\n\n[commands]\nrendered = [\"./check-root.sh\"]\n",
+    );
+    built.repo.commit_all("test: template root variable");
+    built.repo.git(&["tag", "v1"]);
+
+    let output = run(&built, &["--ref", "v1"]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}

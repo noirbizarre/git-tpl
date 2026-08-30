@@ -35,6 +35,14 @@ use crate::userconfig::UserConfig;
 /// The directory cases are read from when `--tests` does not say otherwise.
 pub const DEFAULT_TESTS_DIR: &str = "tests";
 
+/// The environment variable every `[commands]` entry sees, set to the
+/// resolved template's root on disk — the working tree for `--dirty`, the
+/// same working tree for a local `--ref` (`test` never resolves a remote;
+/// see ADR-030). Distinct from `Resolved::root`, which names the manifest's
+/// declared render subdirectory, not a filesystem path. See "`TEMPLATE_ROOT`
+/// exposes the resolved template's root" in ADR-027 (issue #134).
+pub const TEMPLATE_ROOT_ENV: &str = "TEMPLATE_ROOT";
+
 /// The subdirectory of the tests directory holding recorded snapshots.
 pub const SNAPSHOTS_DIR: &str = "__snapshots__";
 
@@ -1189,6 +1197,12 @@ fn run_case(
     })?;
     let cwd = sandbox.path();
 
+    // Resolved once per case, not per command: every list below sees the
+    // same value, and `--dirty`/a local `--ref` share the same working
+    // directory here (`test` never resolves a remote — ADR-030), so there is
+    // exactly one answer regardless of which one is running.
+    let root = template.repo.workdir()?;
+
     // Rust has no try/finally. This closure is the substitute: everything
     // that can fail with a genuine `?` — a materialised write, a snapshot
     // read or write — runs inside it, so its *value* is captured here rather
@@ -1205,6 +1219,7 @@ fn run_case(
             CommandStep::Before,
             &case.commands.before.commands,
             cwd,
+            &root,
             &case.commands.before.env,
             true,
             &mut failures,
@@ -1292,6 +1307,7 @@ fn run_case(
                             CommandStep::Rendered,
                             &case.commands.rendered.commands,
                             cwd,
+                            &root,
                             &case.commands.rendered.env,
                             true,
                             &mut failures,
@@ -1318,6 +1334,7 @@ fn run_case(
                             CommandStep::After,
                             &case.commands.after.commands,
                             cwd,
+                            &root,
                             &case.commands.after.env,
                             true,
                             &mut failures,
@@ -1341,6 +1358,7 @@ fn run_case(
         CommandStep::Finally,
         &case.commands.finally.commands,
         cwd,
+        &root,
         &case.commands.finally.env,
         false,
         &mut finally_failures,
@@ -1453,12 +1471,16 @@ fn run_case_plain(
 /// cleanup, and a step left undone because an earlier one failed is a worse
 /// outcome than one more line in the report.
 ///
+/// `root` is the resolved template's on-disk location, computed once by the
+/// caller and passed unchanged into every list — see [`TEMPLATE_ROOT_ENV`].
+///
 /// Returns how many commands were actually attempted, so a caller can add it
 /// to [`CaseOutcome::commands_run`] regardless of how the list ended.
 fn execute_commands(
     step: CommandStep,
     commands: &[String],
     cwd: &Path,
+    root: &Path,
     env: &BTreeMap<String, String>,
     stop_on_failure: bool,
     failures: &mut Vec<Failure>,
@@ -1466,7 +1488,7 @@ fn execute_commands(
     let mut run = 0;
     for command in commands {
         run += 1;
-        if let Err((code, stdout, stderr)) = run_one(command, cwd, env) {
+        if let Err((code, stdout, stderr)) = run_one(command, cwd, root, env) {
             failures.push(Failure::CommandFailed {
                 step,
                 command: command.clone(),
@@ -1493,9 +1515,16 @@ fn execute_commands(
 /// `env` is merged on top of the inherited environment — `Command::envs`,
 /// never `.env_clear()` — so a case that sets none behaves exactly as before
 /// `env` existed. See "`env` scopes a command's environment" in ADR-027.
+///
+/// `root` is set as [`TEMPLATE_ROOT_ENV`] before `env` is applied, so a case
+/// that deliberately sets that same key in its own `env`/`commands.env`
+/// still wins — the same override precedent `env` itself already has over
+/// the inherited environment. See "`TEMPLATE_ROOT` exposes the resolved
+/// template's root" in ADR-027.
 fn run_one(
     command: &str,
     cwd: &Path,
+    root: &Path,
     env: &BTreeMap<String, String>,
 ) -> Result<(), (Option<i32>, String, String)> {
     let argv = match shlex::split(command) {
@@ -1514,6 +1543,7 @@ fn run_one(
     match std::process::Command::new(&argv[0])
         .args(&argv[1..])
         .current_dir(cwd)
+        .env(TEMPLATE_ROOT_ENV, root)
         .envs(env)
         .output()
     {

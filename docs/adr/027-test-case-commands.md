@@ -139,6 +139,32 @@ It is additive rather than a revision of the decision above, so it amends this A
 superseding one: an old git-tpl reading a case with `commands.env`, or a list written as a table, fails loudly at
 the existing vocabulary or shape check, not silently.
 
+### `TEMPLATE_ROOT` exposes the resolved template's root (added, issue #134)
+
+A case's sandbox is deliberately not the template repository — "The sandbox is not a project" above — but until
+now that also meant a command had no way to reach back into the repository it was written in. Reproducing more
+than a couple of lines meant synthesizing a script's content on every run via `before` (a `python3 -c '...'`
+one-liner, say), because nothing named where the real checkout was; several cases sharing the same setup or
+verification logic ended up repeating that dance once per case instead of writing one ordinary, reviewable script
+file and pointing every case at it.
+
+`TEMPLATE_ROOT` is set on every command in every list of every case to the resolved template's root on disk — the
+working tree for `--dirty`, and the same working tree for a local `--ref`, since this command never resolves a
+remote (ADR-030) and so never produces a separate checkout to point at instead. A case can now write
+`"$TEMPLATE_ROOT/tests/scripts/check.sh"` directly, committed and reviewed like any other file in the template.
+
+Not `GIT_TPL_ROOT`, the name first proposed: this ADR's own case schema already uses `root` for the manifest's
+declared render subdirectory, a different concept entirely, and reusing the word for a filesystem path would
+invite exactly the confusion "one name per concept" exists to prevent.
+
+None of the three exclusions this ADR opened with apply to it, for the same reasons `env` does not: it executes
+nothing itself, so invariant 5 is untouched; it changes what a process is spawned *with*, never what its own argv
+line means, so the command format is unchanged; and it is scoped to the one process `Command` this ADR already
+permits, not a new surface. It is additive for the same reason `env` is, so it amends this ADR in place rather than
+superseding it. Like `commands.env`, it is set before a case's own `env`/`commands.env` is applied, so a case that
+deliberately sets the same key still wins — the same override a later, more specific value already has everywhere
+else in this ADR.
+
 ## Consequences
 
 **What reopens.** A test case's *harness* — not a template's render — may spawn a process. This is a new
