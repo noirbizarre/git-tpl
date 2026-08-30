@@ -549,11 +549,11 @@ fn json(report: &Report) -> serde_json::Value {
             "name": report.template.manifest.name,
             "description": report.template.manifest.description,
         },
-        "revision": {
-            "reference": report.template.reference,
-            "commit": report.template.revision.to_hex(),
-            "dirty": report.template.dirty,
-        },
+        "revision": crate::report::revision(
+            Some(&report.template.reference),
+            Some(report.template.revision),
+            Some(report.template.dirty),
+        ),
         "tests": report.tests_dir,
         "summary": {
             "total": report.cases.len(),

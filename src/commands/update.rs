@@ -65,6 +65,9 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let payload = match outcome {
         UpdateOutcome::UpToDate {
             revision_description,
+            reference,
+            revision,
+            dirty,
             ignored_answers,
             ignored,
         } => {
@@ -83,7 +86,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "id": id.as_str(),
                 "ref": ref_name,
                 "template": config.template.source,
-                "revision": revision_description,
+                "revision": crate::report::revision(Some(&reference), Some(revision), Some(dirty)),
                 "ignoredAnswers": ignored_answers,
             })
         }
@@ -93,7 +96,13 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             commit,
             changes,
             previous_revision_description,
+            previous_reference,
+            previous_revision,
+            previous_dirty,
             revision_description,
+            reference,
+            revision,
+            dirty,
             answers_changed,
             started_new_history,
             migrations,
@@ -204,8 +213,12 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "ref": id.ref_name(),
                 "template": config.template.source,
                 "commit": commit.to_hex(),
-                "previousRevision": previous_revision_description,
-                "revision": revision_description,
+                // `null` on the first rendering, same as the prose's `previous_revision_description`
+                // being absent — there is nothing to build the object from.
+                "previousRevision": previous_revision_description.as_ref().map(|_| {
+                    crate::report::revision(previous_reference.as_deref(), previous_revision, previous_dirty)
+                }),
+                "revision": crate::report::revision(Some(&reference), Some(revision), Some(dirty)),
                 "changes": crate::report::changes(&changes),
                 "answersChanged": answers_changed,
                 "startedNewHistory": started_new_history,
@@ -282,7 +295,11 @@ fn dry_run(
             "id": id.as_str(),
             "ref": ref_name,
             "template": config.template.source,
-            "revision": revision_description,
+            "revision": crate::report::revision(
+                Some(&rendered.template.reference),
+                Some(rendered.template.revision),
+                Some(rendered.template.dirty),
+            ),
             "changes": [],
             "ignoredAnswers": rendered.ignored_answers,
         }));
@@ -311,7 +328,11 @@ fn dry_run(
         "id": id.as_str(),
         "ref": ref_name,
         "template": config.template.source,
-        "revision": revision_description,
+        "revision": crate::report::revision(
+            Some(&rendered.template.reference),
+            Some(rendered.template.revision),
+            Some(rendered.template.dirty),
+        ),
         "changes": crate::report::changes(&changes),
         "ignoredAnswers": rendered.ignored_answers,
     }))

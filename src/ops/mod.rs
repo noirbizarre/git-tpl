@@ -983,6 +983,14 @@ pub struct InitOutcome {
     pub config_committed: bool,
     /// The revision that was rendered, ready to print.
     pub revision_description: String,
+    /// The reference asked for, paired with `revision`/`dirty` for a
+    /// caller building its own `--json` `revision` object rather than
+    /// parsing `revision_description`'s prose.
+    pub reference: String,
+    /// The commit `reference` resolved to.
+    pub revision: Oid,
+    /// Whether an uncommitted working tree was rendered.
+    pub dirty: bool,
     /// Supplied answers that name no question in this template.
     pub ignored_answers: Vec<String>,
     /// Template files a `.gitignore` removed from the rendering.
@@ -1166,6 +1174,9 @@ pub fn init(
             &rendered.template.reference,
             rendered.template.revision,
         ),
+        reference: rendered.template.reference.clone(),
+        revision: rendered.template.revision,
+        dirty: rendered.template.dirty,
         ignored_answers: rendered.ignored_answers,
         ignored: rendered.template.ignored,
         note,
@@ -1388,6 +1399,14 @@ pub enum UpdateOutcome {
     UpToDate {
         /// The revision that was rendered, ready to print.
         revision_description: String,
+        /// The reference asked for, paired with `revision`/`dirty` for a
+        /// caller building its own `--json` `revision` object rather than
+        /// parsing `revision_description`'s prose.
+        reference: String,
+        /// The commit `reference` resolved to.
+        revision: Oid,
+        /// Whether an uncommitted working tree was rendered.
+        dirty: bool,
         /// Supplied answers that name no question in this template. Carried
         /// even here: a typo'd key is worth reporting whether or not the
         /// rendering changed.
@@ -1409,8 +1428,25 @@ pub enum UpdateOutcome {
         changes: Vec<Change>,
         /// The revision previously rendered, if there was one, ready to print.
         previous_revision_description: Option<String>,
+        /// The reference previously recorded, if there was one. Independently
+        /// optional from `previous_revision`: a hand-edited commit on the ref,
+        /// or an older provenance trailer, can carry one without the other.
+        previous_reference: Option<String>,
+        /// The commit previously rendered, if there was one.
+        previous_revision: Option<Oid>,
+        /// Whether the previous rendering was of an uncommitted working tree,
+        /// if there was a previous rendering.
+        previous_dirty: Option<bool>,
         /// The revision now rendered, ready to print.
         revision_description: String,
+        /// The reference asked for, paired with `revision`/`dirty` for a
+        /// caller building its own `--json` `revision` object rather than
+        /// parsing `revision_description`'s prose.
+        reference: String,
+        /// The commit `reference` resolved to.
+        revision: Oid,
+        /// Whether an uncommitted working tree was rendered.
+        dirty: bool,
         /// Whether the recorded answers were rewritten — which happens when a
         /// template adds a question. Worth telling the user, since it is the
         /// one file `update` does modify.
@@ -1523,7 +1559,10 @@ pub fn update(
     // migrations are skipped rather than firing every migration the template
     // has ever had.
     let mut migrations: Vec<AppliedMigration> = Vec::new();
-    if let (Some(_), Some(old_commit)) = (&previous, recorded_previous.and_then(|r| r.revision)) {
+    if let (Some(_), Some(old_commit)) = (
+        &previous,
+        recorded_previous.as_ref().and_then(|r| r.revision),
+    ) {
         let old_tree = rendered.template.repo.commit_tree(old_commit)?;
         let new_tree = rendered.template.tree;
         if old_tree != new_tree {
@@ -1570,6 +1609,9 @@ pub fn update(
                 &rendered.template.reference,
                 rendered.template.revision,
             ),
+            reference: rendered.template.reference.clone(),
+            revision: rendered.template.revision,
+            dirty: rendered.template.dirty,
             ignored_answers: rendered.ignored_answers,
             ignored: rendered.template.ignored,
         });
@@ -1624,10 +1666,16 @@ pub fn update(
         commit,
         changes,
         previous_revision_description,
+        previous_reference: recorded_previous.as_ref().and_then(|r| r.reference.clone()),
+        previous_revision: recorded_previous.as_ref().and_then(|r| r.revision),
+        previous_dirty: recorded_previous.as_ref().map(|r| r.dirty),
         revision_description: describe_revision(
             &rendered.template.reference,
             rendered.template.revision,
         ),
+        reference: rendered.template.reference.clone(),
+        revision: rendered.template.revision,
+        dirty: rendered.template.dirty,
         answers_changed,
         started_new_history,
         migrations,

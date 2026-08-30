@@ -230,6 +230,20 @@ pub struct Backport {
     pub unsubstituted: Vec<Unsubstitution>,
     /// The template revision the patch applies to, as `<ref> (<short>)`.
     pub revision_description: String,
+    /// The reference the patch applies to, paired with `revision`/`dirty`
+    /// for a caller building its own `--json` `revision` object rather than
+    /// parsing `revision_description`'s prose. `revision` and `dirty` fall
+    /// back to the fresh render's own values whenever the recorded
+    /// provenance is incomplete, the same way `revision_description` does,
+    /// so only `reference` can be absent — the one case the prose also
+    /// declines to guess: a recorded commit with no recorded reference to
+    /// pair it with.
+    pub reference: Option<String>,
+    /// The commit the patch applies to. See `reference`.
+    pub revision: Oid,
+    /// Whether the rendering the patch applies to was of an uncommitted
+    /// working tree. See `reference`.
+    pub dirty: bool,
     /// The template source, as configured.
     pub source: String,
     /// The command that would apply this patch, ready to paste.
@@ -573,6 +587,30 @@ pub fn backport(
         (None, None) => describe_revision(&rendered.template.reference, rendered.template.revision),
     };
 
+    // The `--json` `revision` object's fields, following the exact same
+    // fallback arm for arm as `revision_description` above: a caller must
+    // never see a `null` where the prose found something to say. Only
+    // `(None, Some(revision))` deliberately leaves `reference` absent even in
+    // the object — guessing at the currently-resolved reference for a commit
+    // recorded against a different one would be reporting something nobody
+    // asked about.
+    let (object_reference, object_revision) = match (&reference, revision) {
+        (Some(reference), Some(revision)) => (Some(reference.clone()), revision),
+        (Some(reference), None) => (Some(reference.clone()), rendered.template.revision),
+        (None, Some(revision)) => (None, revision),
+        (None, None) => (
+            Some(rendered.template.reference.clone()),
+            rendered.template.revision,
+        ),
+    };
+    // `recorded.dirty` is never itself optional — only whether there was a
+    // `Recorded` at all is. No recorded provenance at all is the one case the
+    // match above falls back to the fresh render for, so `dirty` falls back
+    // the same way here.
+    let object_dirty = recorded
+        .as_ref()
+        .map_or(rendered.template.dirty, |r| r.dirty);
+
     let apply_command = apply_command(&config.template.source, project_root);
 
     let patch = if files.is_empty() {
@@ -587,6 +625,9 @@ pub fn backport(
         skipped,
         unsubstituted,
         revision_description,
+        reference: object_reference,
+        revision: object_revision,
+        dirty: object_dirty,
         source: config.template.source.clone(),
         apply_command,
     })

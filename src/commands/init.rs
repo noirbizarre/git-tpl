@@ -240,7 +240,11 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 // it is what was recorded, and a `mine:` shortcut means
                 // nothing on anybody else's machine.
                 "template": template,
-                "revision": outcome.revision_description,
+                "revision": crate::report::revision(
+                    Some(&outcome.reference),
+                    Some(outcome.revision),
+                    Some(outcome.dirty),
+                ),
                 "commit": outcome.commit.to_hex(),
                 "changes": crate::report::changes(&outcome.changes),
                 // `null` under `--no-merge`, which is a different thing from
@@ -429,7 +433,11 @@ fn dry_run(
     Ok(serde_json::json!({
         "dryRun": true,
         "template": source,
-        "revision": revision_description,
+        "revision": crate::report::revision(
+            Some(&template.reference),
+            Some(template.revision),
+            Some(template.dirty),
+        ),
         "questions": nodes,
         // `null`, not `[]`: without `--defaults` the list was never computed,
         // and an empty array would claim it renders nothing.

@@ -1,6 +1,5 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 29
 expression: transcript
 ---
 exit: 0
@@ -11,8 +10,16 @@ exit: 0
   "ref": "refs/tpl/template",
   "template": "[tmp]/template",
   "commit": "[sha]",
-  "previousRevision": "main ([short])",
-  "revision": "main ([short])",
+  "previousRevision": {
+    "reference": "main",
+    "commit": "[sha]",
+    "dirty": false
+  },
+  "revision": {
+    "reference": "main",
+    "commit": "[sha]",
+    "dirty": false
+  },
   "changes": [
     {
       "path": ".github/workflows/release.yml",
