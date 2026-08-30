@@ -89,6 +89,7 @@ git tpl --json status
   "renderedCommit": "8b3e7d1f7eee32eed1f846ccc477af18b4e605d6",
   "dirty": false,
   "availableRevision": "v1.4.0 (4f2c1a9)",
+  "availableCommit": "4f2c1a9d5e6b7c8f9a0b1c2d3e4f5a6b7c8d9e0f",
   "templateMoved": true,
   "merged": true,
   "renderingCount": 2,
@@ -104,6 +105,8 @@ git tpl --json status
 
 `remote` is `null` when no remote copy exists.
 `dirty` records whether the rendering on the ref was produced from a template working tree rather than a commit.
+`availableCommit` is `null` exactly when `availableRevision` is — no template resolves, typically because fetching
+it failed.
 Human output goes to stderr, so `--json` leaves stdout machine-readable.
 
 ## Detaching

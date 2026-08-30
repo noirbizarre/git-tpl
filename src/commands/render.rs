@@ -77,11 +77,11 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     "name": rendered.template.manifest.name,
                     "description": rendered.template.manifest.description,
                 },
-                "revision": {
-                    "reference": rendered.template.reference,
-                    "commit": rendered.template.revision.to_hex(),
-                    "dirty": rendered.template.dirty,
-                },
+                "revision": crate::report::revision(
+                    Some(&rendered.template.reference),
+                    Some(rendered.template.revision),
+                    Some(rendered.template.dirty),
+                ),
                 "output": args.output,
                 "files": rendered.files.iter().map(|f| serde_json::json!({
                     "path": f.path,

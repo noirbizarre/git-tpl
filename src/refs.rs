@@ -16,6 +16,11 @@ use thiserror::Error;
 pub const REF_PREFIX: &str = "refs/tpl/";
 
 /// Errors from constructing a [`TemplateId`].
+///
+/// Named after [`TemplateId`], the one domain type this module exports, not
+/// after the file (`refs.rs`) the way every other error enum in the crate
+/// is — a deliberate, permanent exception: `RefsError` would read as a fact
+/// about the module rather than the value that failed to construct.
 #[derive(Debug, Error, Diagnostic)]
 pub enum TemplateIdError {
     /// The source normalised to nothing usable.

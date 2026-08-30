@@ -215,6 +215,16 @@ A warning rather than an error, and reported regardless of whether a `when` is p
 is invisible either way, and adding a `when` to an already-declared name later would reopen the hole with no new
 warning to catch it.
 
+## No local data sources
+
+A `local` data source is resolved relative to the project root, and `lint` has no project — it checks a template
+in isolation.
+It fails with `tpl::data::needs_project` rather than being resolved against the working directory — that would
+make the same template, the same answers and the same revision check differently depending on where the command
+was run.
+
+Use a `template` source for data that belongs to the template.
+
 ## Options
 
 | Flag | Effect |

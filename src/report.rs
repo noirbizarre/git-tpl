@@ -75,6 +75,29 @@ pub fn migrations(migrations: &[tpl::ops::AppliedMigration]) -> Value {
     )
 }
 
+/// The `revision` / `previousRevision` object, as `render`, `init`, `update`
+/// and `backport` all report it.
+///
+/// `reference`/`commit` are independently optional: a `backport`'s recorded
+/// provenance can have one without the other (a hand-edited commit on the
+/// ref, or an older trailer format), and the object shape lets a caller see
+/// exactly which half is missing — a formatted `"name (short-sha)"` string
+/// silently hid this, and used to differ in shape between `render` and every
+/// other command besides.
+///
+/// Renaming a key here is a breaking change.
+pub fn revision(
+    reference: Option<&str>,
+    revision: Option<tpl::git::Oid>,
+    dirty: Option<bool>,
+) -> Value {
+    json!({
+        "reference": reference,
+        "commit": revision.map(|r| r.to_hex()),
+        "dirty": dirty,
+    })
+}
+
 /// The `merge` object, as `init` and `merge` report it.
 ///
 /// Tagged with `result`, so a caller switches on one field rather than probing

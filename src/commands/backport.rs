@@ -256,7 +256,11 @@ fn json(args: &BackportArgs, result: &Backport) -> serde_json::Value {
     serde_json::json!({
         "result": if result.files.is_empty() { "nothingToBackport" } else { "patched" },
         "template": result.source,
-        "revision": result.revision_description,
+        "revision": crate::report::revision(
+            result.reference.as_deref(),
+            Some(result.revision),
+            Some(result.dirty),
+        ),
         // The patch travels *in* the payload rather than on stdout beside it:
         // `--json` means stdout is one JSON object, and a command that
         // sometimes emits two things on stdout is not machine-readable.

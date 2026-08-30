@@ -175,7 +175,8 @@ leave in the worktree.
 { "ok": true,
   "id": "rust", "ref": "refs/tpl/rust",
   "template": "https://github.com/noirbizarre/rust.tpl",
-  "revision": "main (76ec0ea)", "commit": "a17b0b2…",
+  "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
+  "commit": "f4c9e21…",
   "changes": [{ "path": "Cargo.toml", "kind": "added" }],
   "merge": { "result": "merged", "commit": "…" },
   "configPath": ".config/git.tpl.toml", "configCommitted": true,
@@ -184,6 +185,9 @@ leave in the worktree.
   "remotes": [{ "name": "origin", "url": "git@github.com:acme/demo.git",
                 "status": "added", "existing": null }] }
 ```
+
+`revision` describes the template — the same shape [`render`](#render) reports. `commit` is the different, project-side
+commit `init` created on the rendered ref; the two are never the same repository's history.
 
 `template` is the expanded URL, never the `mine:` shortcut that may have been typed: it is what was recorded in
 the project, and a shortcut means nothing on anyone else's machine.
@@ -216,7 +220,7 @@ commit or merge to report:
 ```json
 { "ok": true, "dryRun": true,
   "template": "https://github.com/noirbizarre/rust.tpl",
-  "revision": "main (76ec0ea)",
+  "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
   "questions": [{ "name": "crate", "kind": "question", "supplied": false },
                 { "name": "lib_name", "kind": "computed", "supplied": false }],
   "files": ["Cargo.toml"],
@@ -235,14 +239,16 @@ An empty array would claim the template renders nothing.
 { "ok": true, "result": "upToDate",
   "id": "rust", "ref": "refs/tpl/rust",
   "template": "https://github.com/noirbizarre/rust.tpl",
-  "revision": "main (76ec0ea)", "ignoredAnswers": [] }
+  "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
+  "ignoredAnswers": [] }
 ```
 
 ```json
 { "ok": true, "result": "updated",
   "id": "rust", "ref": "refs/tpl/rust", "template": "…",
-  "commit": "a17b0b2…",
-  "previousRevision": "main (a1b2c3d)", "revision": "main (76ec0ea)",
+  "commit": "f4c9e21…",
+  "previousRevision": { "reference": "main", "commit": "a1b2c3d…", "dirty": false },
+  "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
   "changes": [{ "path": "Cargo.toml", "kind": "modified" }],
   "answersChanged": false, "startedNewHistory": false,
   "migrations": [{ "path": "migrations/2026-08-config-move.toml",
@@ -276,6 +282,8 @@ Not an error, but a `git tpl merge` from here has no merge base and can conflict
 the ref exists on a remote.
 
 `previousRevision` is `null` on the first rendering.
+When present, its `reference` and `commit` are independently `null` if the recorded provenance the previous
+rendering left could not supply one — an older trailer format, or a hand-edited commit on the ref.
 `pushed` names the remote when [`tpl.autoPush`](../usage/push.md) pushed automatically, `null` otherwise — the
 push still happens under `--json`, only its prose is silenced.
 
@@ -299,7 +307,8 @@ A conflicted merge is a success, not a failure: the index is left as Git leaves 
 
 ```json
 { "ok": true, "result": "patched",
-  "template": "../my-template", "revision": "main (937573e)",
+  "template": "../my-template",
+  "revision": { "reference": "main", "commit": "937573e…", "dirty": false },
   "patch": "From 0000000…\nSubject: [PATCH] tpl: backport from my-service\n…",
   "output": null,
   "applyCommand": "git tpl backport | git -C ../my-template am",
@@ -309,6 +318,11 @@ A conflicted merge is a success, not a failure: the index is left as Git leaves 
 ```
 
 `result` is `patched` or `nothingToBackport`.
+
+`revision.reference` is `null` when a commit was recorded but no reference was — a hand-edited commit on the ref, or
+an older trailer format — and `backport` declines to guess which reference it might have come from.
+`revision.commit`/`revision.dirty` are never `null`: when neither was recorded, they fall back to what the fresh
+render underneath the patch actually resolved.
 
 `patch` carries the mailbox itself, rather than it going to stdout beside the payload: under `--json`, stdout is
 one JSON object, always.

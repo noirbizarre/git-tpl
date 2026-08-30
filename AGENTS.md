@@ -126,7 +126,9 @@ next person an afternoon.
 
 `revision` never names a `String`. A field holding the printable form of the pair is `*_description`, and is
 produced by `ops::describe_revision` — never by a `format!` at the call site, or the two ends of a `A → B` line come
-to disagree. The config key and CLI flag stay `ref`, because that is what a user writes.
+to disagree. The config key and CLI flag stay `ref`, because that is what a user writes. The `--json` `revision`
+field (`src/report.rs::revision`) is the object `{reference, commit, dirty}`, not a bare `String` — the same rule,
+applied to a Rust field, would forbid the string form this object replaces.
 
 **Errors are typed and actionable.** `thiserror` for the library, `miette` at the binary edge. A diagnostic must
 carry the two things the user does not already know: what specifically failed, and what to do. Compare:

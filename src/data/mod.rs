@@ -496,6 +496,10 @@ pub struct TemplateTree<'a> {
     pub tree: Oid,
     /// The commit that tree came from, for provenance.
     pub revision: Oid,
+    /// The reference `revision` resolved from, paired with it so an error
+    /// message can describe the revision (`ops::describe_revision`) instead
+    /// of naming a bare, un-placed commit.
+    pub reference: String,
 }
 
 /// A data repository cloned for this run.
@@ -828,9 +832,9 @@ impl<'a> Loader<'a> {
             .map_err(|e| fail(e.to_string()))?
             .ok_or_else(|| {
                 fail(format!(
-                    "no such file in {} at revision {}",
+                    "no such file in {} at {}",
                     location.repo,
-                    revision.short()
+                    crate::ops::describe_revision(&location.reference, revision)
                 ))
             })?;
 
@@ -941,8 +945,8 @@ impl<'a> Loader<'a> {
                 location: path.to_string(),
                 kind: SourceKind::TemplateFile,
                 reason: format!(
-                    "no such file in the template repository at revision {}",
-                    self.template.revision.short()
+                    "no such file in the template repository at {}",
+                    crate::ops::describe_revision(&self.template.reference, self.template.revision)
                 ),
             })
     }

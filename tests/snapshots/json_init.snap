@@ -8,7 +8,11 @@ exit: 0
   "id": "template",
   "ref": "refs/tpl/template",
   "template": "[tmp]/template",
-  "revision": "main ([short])",
+  "revision": {
+    "reference": "main",
+    "commit": "[sha]",
+    "dirty": false
+  },
   "commit": "[sha]",
   "changes": [
     {

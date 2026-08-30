@@ -40,6 +40,16 @@ Without `--eval`, the whole context, split the way the renderer sees it:
 `flat` mirrors the renderer exactly.
 A dump that disagreed with it would be worse than none, because it would be believed.
 
+## No local data sources
+
+A `local` data source is resolved relative to the project root, and `context` has no project — like `render`, it
+builds the context in isolation.
+It fails with `tpl::data::needs_project` rather than being resolved against the working directory — that would
+make the same template, the same answers and the same revision report a different context depending on where the
+command was run.
+
+Use a `template` source for data that belongs to the template.
+
 ## Options
 
 Takes the same answer flags as [`render`](render.md) — `--answer`, `--answers-from`, `--defaults`,

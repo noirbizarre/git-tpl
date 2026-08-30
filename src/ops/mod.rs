@@ -106,7 +106,7 @@ pub enum OpError {
     /// cases must all be reported, and an error would report one.
     #[error(transparent)]
     #[diagnostic(transparent)]
-    Test(#[from] testing::TestError),
+    Test(#[from] testing::TestingError),
 
     /// A backport could not be produced.
     ///
@@ -717,6 +717,7 @@ pub fn render_resolved(
             repo: template.repo.as_ref(),
             tree: template.tree,
             revision: template.revision,
+            reference: template.reference.clone(),
         },
         project.map(|(_, root)| root.to_path_buf()),
     )
@@ -982,6 +983,14 @@ pub struct InitOutcome {
     pub config_committed: bool,
     /// The revision that was rendered, ready to print.
     pub revision_description: String,
+    /// The reference asked for, paired with `revision`/`dirty` for a
+    /// caller building its own `--json` `revision` object rather than
+    /// parsing `revision_description`'s prose.
+    pub reference: String,
+    /// The commit `reference` resolved to.
+    pub revision: Oid,
+    /// Whether an uncommitted working tree was rendered.
+    pub dirty: bool,
     /// Supplied answers that name no question in this template.
     pub ignored_answers: Vec<String>,
     /// Template files a `.gitignore` removed from the rendering.
@@ -1165,6 +1174,9 @@ pub fn init(
             &rendered.template.reference,
             rendered.template.revision,
         ),
+        reference: rendered.template.reference.clone(),
+        revision: rendered.template.revision,
+        dirty: rendered.template.dirty,
         ignored_answers: rendered.ignored_answers,
         ignored: rendered.template.ignored,
         note,
@@ -1387,6 +1399,14 @@ pub enum UpdateOutcome {
     UpToDate {
         /// The revision that was rendered, ready to print.
         revision_description: String,
+        /// The reference asked for, paired with `revision`/`dirty` for a
+        /// caller building its own `--json` `revision` object rather than
+        /// parsing `revision_description`'s prose.
+        reference: String,
+        /// The commit `reference` resolved to.
+        revision: Oid,
+        /// Whether an uncommitted working tree was rendered.
+        dirty: bool,
         /// Supplied answers that name no question in this template. Carried
         /// even here: a typo'd key is worth reporting whether or not the
         /// rendering changed.
@@ -1408,8 +1428,25 @@ pub enum UpdateOutcome {
         changes: Vec<Change>,
         /// The revision previously rendered, if there was one, ready to print.
         previous_revision_description: Option<String>,
+        /// The reference previously recorded, if there was one. Independently
+        /// optional from `previous_revision`: a hand-edited commit on the ref,
+        /// or an older provenance trailer, can carry one without the other.
+        previous_reference: Option<String>,
+        /// The commit previously rendered, if there was one.
+        previous_revision: Option<Oid>,
+        /// Whether the previous rendering was of an uncommitted working tree,
+        /// if there was a previous rendering.
+        previous_dirty: Option<bool>,
         /// The revision now rendered, ready to print.
         revision_description: String,
+        /// The reference asked for, paired with `revision`/`dirty` for a
+        /// caller building its own `--json` `revision` object rather than
+        /// parsing `revision_description`'s prose.
+        reference: String,
+        /// The commit `reference` resolved to.
+        revision: Oid,
+        /// Whether an uncommitted working tree was rendered.
+        dirty: bool,
         /// Whether the recorded answers were rewritten — which happens when a
         /// template adds a question. Worth telling the user, since it is the
         /// one file `update` does modify.
@@ -1522,7 +1559,10 @@ pub fn update(
     // migrations are skipped rather than firing every migration the template
     // has ever had.
     let mut migrations: Vec<AppliedMigration> = Vec::new();
-    if let (Some(_), Some(old_commit)) = (&previous, recorded_previous.and_then(|r| r.revision)) {
+    if let (Some(_), Some(old_commit)) = (
+        &previous,
+        recorded_previous.as_ref().and_then(|r| r.revision),
+    ) {
         let old_tree = rendered.template.repo.commit_tree(old_commit)?;
         let new_tree = rendered.template.tree;
         if old_tree != new_tree {
@@ -1569,6 +1609,9 @@ pub fn update(
                 &rendered.template.reference,
                 rendered.template.revision,
             ),
+            reference: rendered.template.reference.clone(),
+            revision: rendered.template.revision,
+            dirty: rendered.template.dirty,
             ignored_answers: rendered.ignored_answers,
             ignored: rendered.template.ignored,
         });
@@ -1623,10 +1666,16 @@ pub fn update(
         commit,
         changes,
         previous_revision_description,
+        previous_reference: recorded_previous.as_ref().and_then(|r| r.reference.clone()),
+        previous_revision: recorded_previous.as_ref().and_then(|r| r.revision),
+        previous_dirty: recorded_previous.as_ref().map(|r| r.dirty),
         revision_description: describe_revision(
             &rendered.template.reference,
             rendered.template.revision,
         ),
+        reference: rendered.template.reference.clone(),
+        revision: rendered.template.revision,
+        dirty: rendered.template.dirty,
         answers_changed,
         started_new_history,
         migrations,
@@ -1650,6 +1699,9 @@ pub struct Status {
     pub recorded: Option<Recorded>,
     /// What the configured `ref` resolves to now.
     pub available_revision_description: Option<String>,
+    /// The commit `available_revision_description` describes, for a caller
+    /// that wants the raw id rather than parsing the prose.
+    pub available_commit: Option<Oid>,
     /// Whether the template has moved since the last rendering.
     pub template_moved: bool,
     /// Whether the ref's tip is an ancestor of `HEAD`.
@@ -1706,6 +1758,7 @@ pub fn status(
     let available_revision_description = resolved
         .as_ref()
         .map(|r| describe_revision(&r.reference, r.revision));
+    let available_commit = resolved.as_ref().map(|r| r.revision);
 
     let template_moved = match (&resolved, &recorded) {
         // A `--dirty` resolution reports the *base* commit, so comparing
@@ -1753,6 +1806,7 @@ pub fn status(
         tip,
         recorded,
         available_revision_description,
+        available_commit,
         template_moved,
         merged,
         remote,
@@ -2404,6 +2458,7 @@ mod tests {
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
             available_revision_description: None,
+            available_commit: None,
             template_moved: false,
             merged: true,
             remote: None,
@@ -2424,6 +2479,7 @@ mod tests {
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
             available_revision_description: None,
+            available_commit: None,
             template_moved: false,
             merged: true,
             remote: None,

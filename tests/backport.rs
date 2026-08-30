@@ -593,26 +593,30 @@ fn a_revision_without_a_recorded_commit_is_still_described_by_its_sha() {
     world.project.write("ci.yml", "name: CI\non: [push]\n");
 
     let output = tpl(&world.project, &["--json", "backport"]).success();
-    let revision = output.json()["revision"]
+    let json = output.json();
+    // Neither half of the `revision` object is null: the recorded provenance
+    // named nothing at all, so both fall back to what the fresh render
+    // underneath the patch actually resolved.
+    let reference = json["revision"]["reference"]
         .as_str()
-        .expect("a revision description")
+        .expect("a reference, not null")
         .to_string();
-
-    // `describe_revision`'s shape — `<reference> (<short sha>)` — rather than a
-    // bare name, and never the literal `<worktree>` placeholder.
-    assert!(
-        revision.ends_with(')') && revision.contains(" ("),
-        "a described revision, not a bare name: {revision}"
+    assert_ne!(
+        reference, "<worktree>",
+        "the placeholder should not reach the output"
     );
-    assert!(
-        !revision.contains("<worktree>"),
-        "the placeholder should not reach the output: {revision}"
-    );
+    let commit = json["revision"]["commit"]
+        .as_str()
+        .expect("a commit, not null")
+        .to_string();
+    let short = &commit[..7];
 
-    // And the same string reaches the patch, which is where a reviewer reads
-    // it. The two must not drift apart.
+    // And the same reference and short commit reach the patch's own
+    // described revision, which is where a reviewer reads it. The two must
+    // not drift apart.
     let patch = tpl(&world.project, &["backport"]).success().stdout;
-    assert!(patch.contains(&revision), "{patch}");
+    assert!(patch.contains(&reference), "{patch}");
+    assert!(patch.contains(short), "{patch}");
 }
 
 #[test]

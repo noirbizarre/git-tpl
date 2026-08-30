@@ -1034,6 +1034,9 @@ mod tests {
                 repo: &repo,
                 tree,
                 revision: tree,
+                // No data sources in these cases, so the loader is never
+                // reached — this name is never read.
+                reference: "test".to_string(),
             },
             Some(dir.path().to_path_buf()),
         );
@@ -1079,6 +1082,9 @@ mod tests {
                 repo: &repo,
                 tree,
                 revision: tree,
+                // No data sources in these cases, so the loader is never
+                // reached — this name is never read.
+                reference: "test".to_string(),
             },
             Some(dir.path().to_path_buf()),
         );
