@@ -269,6 +269,7 @@ All keys are under `tpl.`.
 | `tpl.remote` | string | `origin` | Remote used by `git tpl fetch` and `git tpl push`. |
 | `tpl.autoPush` | bool | `false` | Push the rendered ref after a successful `update`. |
 | `tpl.interactive` | bool | `true` | Prompt for unanswered questions. `false` behaves as `--defaults`. |
+| `tpl.testCommands` | bool | `true` | Run a `git tpl test` case's `[commands]`. `false` implies `--skip-commands`. |
 
 ```sh
 git config tpl.remote upstream
