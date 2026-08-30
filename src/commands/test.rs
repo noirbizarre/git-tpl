@@ -3,21 +3,30 @@
 //! Runs the cases a template carries. No project, no ref, and — beyond
 //! `--write` recording a snapshot — nothing written anywhere.
 
+use std::io::Write as _;
+use std::time::Duration;
+
+use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
+
 use tpl::git::GitError;
 use tpl::git::libgit2::LibGit2;
 use tpl::gitconfig::{Overrides, Preferences};
-use tpl::ops::testing::{CaseOutcome, Failure, Report, SnapshotOutcome};
+use tpl::ops::testing::{CaseOutcome, Failure, Progress, Report, SnapshotOutcome, Status, Stream};
 use tpl::ops::{self, OpError, Target};
 
 use super::{Standalone, report_ignored_paths};
 use crate::cli::{GlobalArgs, TestArgs};
-use crate::theme::{field, heading, muted, warning};
+use crate::theme::{Theme, field, heading, muted, warning};
 
 pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
     let source = ctx.user.expand(&args.template).into_owned();
     let run_commands = test_commands_enabled(args.skip_commands)?;
 
+    // Chosen once, up front: `--quiet`/`--json` get nothing, `-v` gets a
+    // scrolling log with live command output, a real terminal otherwise gets
+    // a spinner, and anything else (piped, in a CI log) gets plain lines.
+    let mut progress = TestProgress::new(&ctx, global.verbose > 0);
     let report = ops::testing::run(
         Target {
             source: &source,
@@ -33,7 +42,16 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         args.write,
         run_commands,
         &ctx.user,
+        // Told to `[commands]` children so a colour-aware tool does not
+        // silently mute itself just because its stdout/stderr are pipes —
+        // never on `--color=never`/`NO_COLOR`, since that already decided
+        // `is_colored()` to be false.
+        ctx.out.theme.is_colored(),
+        &mut progress,
     )?;
+    // Clears any spinner before the final report prints, so its last
+    // message does not linger above it.
+    progress.finish();
 
     report_ignored_paths(&ctx.out, &report.template.ignored);
 
@@ -50,6 +68,118 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     } else {
         crate::exit::SUCCESS
     })
+}
+
+/// How `git tpl test` reports what is happening while it happens.
+///
+/// [`tpl::ops::testing::Progress`] knows nothing about a terminal — that is
+/// the whole point of the trait, see its own doc — so this is the one
+/// implementation, chosen once per invocation in [`TestProgress::new`]
+/// depending on `--quiet`/`--json`, `-v`, and whether stderr is a real
+/// terminal.
+enum TestProgress {
+    /// `--quiet` or `--json`: nothing to show.
+    Silent,
+    /// The default, on a real terminal: one line, updated in place.
+    Spinner(ProgressBar),
+    /// Piped, or `-v`: one printed line per event.
+    Line {
+        /// Cloned rather than borrowed: `Standalone` outlives this value, but
+        /// borrowing it would tie `TestProgress` to a lifetime for no benefit
+        /// — a `Theme` is cheap to clone and never changes mid-run.
+        theme: Theme,
+        /// Whether a running command's own stdout/stderr is also forwarded,
+        /// live, as it is produced. `false` for the plain-lines fallback: a
+        /// non-tty, non-verbose run shows *which* command runs, not what it
+        /// prints — that is what `-v` adds.
+        verbose: bool,
+    },
+}
+
+impl TestProgress {
+    fn new(ctx: &Standalone, verbose: bool) -> Self {
+        if !ctx.out.speaks() {
+            return Self::Silent;
+        }
+        if verbose {
+            return Self::Line {
+                theme: ctx.out.theme.clone(),
+                verbose: true,
+            };
+        }
+        if console::user_attended_stderr() {
+            let bar = ProgressBar::new_spinner();
+            bar.set_draw_target(ProgressDrawTarget::stderr());
+            bar.enable_steady_tick(Duration::from_millis(100));
+            // A literal template, checked once here rather than at every
+            // tick: `unwrap` is the right tool for a string that cannot come
+            // from anywhere but this line.
+            bar.set_style(ProgressStyle::with_template("{spinner} {msg}").unwrap());
+            return Self::Spinner(bar);
+        }
+        Self::Line {
+            theme: ctx.out.theme.clone(),
+            verbose: false,
+        }
+    }
+
+    /// Clear the spinner, if any, so its last message does not linger above
+    /// the final report. A no-op for every other variant, which never drew
+    /// anything that needs clearing.
+    fn finish(&self) {
+        if let Self::Spinner(bar) = self {
+            bar.finish_and_clear();
+        }
+    }
+}
+
+/// What a phase looks like on one line, shared by the spinner and the plain
+/// renderer so the two describe a case identically.
+fn status_text(status: &Status<'_>) -> String {
+    match status {
+        Status::Rendering => "rendering".to_string(),
+        Status::Command { step, command } => format!("[{}] $ {command}", step.as_str()),
+        Status::Snapshot => "checking snapshot".to_string(),
+    }
+}
+
+impl Progress for TestProgress {
+    fn case_started(&mut self, name: &str) {
+        match self {
+            Self::Silent => {}
+            Self::Spinner(bar) => bar.set_message(format!("{name} …")),
+            Self::Line { theme, .. } => eprintln!("{}", muted(theme, &format!("{name} …"))),
+        }
+    }
+
+    fn case_status(&mut self, name: &str, status: Status<'_>) {
+        let text = status_text(&status);
+        match self {
+            Self::Silent => {}
+            Self::Spinner(bar) => bar.set_message(format!("{name} — {text}")),
+            Self::Line { theme, .. } => {
+                eprintln!("{}", muted(theme, &format!("  {name} — {text}")));
+            }
+        }
+    }
+
+    fn command_output(&mut self, _name: &str, _stream: Stream, chunk: &[u8]) {
+        // Raw, not reformatted: a chunk may cut a line or a multi-byte
+        // sequence mid-way, and writing it straight through is what keeps an
+        // embedded ANSI escape intact. Only under `-v` — the spinner and the
+        // plain fallback both already say *which* command is running; this
+        // is what it printed while doing so.
+        if let Self::Line { verbose: true, .. } = self {
+            let _ = std::io::stderr().write_all(chunk);
+        }
+    }
+
+    fn case_finished(&mut self, _outcome: &CaseOutcome) {
+        // Nothing to do: the next `case_started`/`case_status` overwrites the
+        // spinner's message, [`TestProgress::finish`] clears it once the
+        // whole run ends, and the `Line` variants already printed everything
+        // they will for this case.
+    }
 }
 
 /// Whether this run's `[commands]` execute at all. See ADR-027.
@@ -289,11 +419,18 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
                 Some(code) => say(format!("[{}] `{command}` exited {code}", step.as_str())),
                 None => say(format!("[{}] `{command}` could not be run", step.as_str())),
             }
-            // stderr first: it is where a failing command explains itself.
-            // stdout only when there is nothing on stderr to show instead.
-            let output = if stderr.is_empty() { stdout } else { stderr };
-            for line in output.lines() {
-                ctx.out.say(muted(theme, &format!("      {line}")));
+            // Under `-v` this was already shown live, byte for byte, as the
+            // command produced it — repeating the captured (lossily
+            // converted, tail-capped) copy here would only be a worse
+            // version of what the user already watched happen.
+            if ctx.out.global.verbose == 0 {
+                // stderr first: it is where a failing command explains
+                // itself. stdout only when there is nothing on stderr to
+                // show instead.
+                let output = if stderr.is_empty() { stdout } else { stderr };
+                for line in output.lines() {
+                    ctx.out.say(muted(theme, &format!("      {line}")));
+                }
             }
         }
     }

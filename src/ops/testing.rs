@@ -15,6 +15,7 @@
 //! area would drop itself out of the coverage guard.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read;
 use std::path::Path;
 
 use miette::Diagnostic;
@@ -445,6 +446,61 @@ impl CommandStep {
         }
     }
 }
+
+/// Which stream a live chunk of a running command's output came from.
+#[derive(Debug, Clone, Copy)]
+pub enum Stream {
+    /// The command's own stdout.
+    Stdout,
+    /// The command's own stderr.
+    Stderr,
+}
+
+/// What phase a case is in, for a caller reporting progress live.
+pub enum Status<'a> {
+    /// Rendering, before anything in `[commands]` (if any) has been checked.
+    Rendering,
+    /// One `[commands]` entry is about to run.
+    Command {
+        /// Which list it came from.
+        step: CommandStep,
+        /// The command line itself, unparsed.
+        command: &'a str,
+    },
+    /// Comparing (or writing) the case's recorded snapshot.
+    Snapshot,
+}
+
+/// What the harness may report about a running case, live — never anything
+/// that affects the run itself, only what a caller may want to show on a
+/// terminal while it happens.
+///
+/// `testing.rs` must not know a terminal exists (nothing below `ops` does —
+/// see the layering doc at the top of `src/lib.rs`), so this is an observer a
+/// caller implements, the same pattern [`crate::eval::Prompter`] and
+/// [`crate::data::TrustGate`] already use. `commands::test` is the only
+/// implementation today; every method defaults to nothing, so a caller with
+/// nothing to say — every integration test, any future library consumer —
+/// pays nothing for it.
+pub trait Progress {
+    /// A case is about to run.
+    fn case_started(&mut self, _name: &str) {}
+    /// The case entered a new phase.
+    fn case_status(&mut self, _name: &str, _status: Status<'_>) {}
+    /// A chunk of a running command's own stdout/stderr, as it is produced.
+    ///
+    /// Raw bytes, not lossily converted: a caller forwarding them to a
+    /// terminal must see exactly what the command wrote, ANSI escapes
+    /// included, not the `String::from_utf8_lossy` the final report already
+    /// builds for its own display.
+    fn command_output(&mut self, _name: &str, _stream: Stream, _chunk: &[u8]) {}
+    /// The case is done.
+    fn case_finished(&mut self, _outcome: &CaseOutcome) {}
+}
+
+/// Says nothing. The default for a caller with no terminal to update.
+pub struct Silent;
+impl Progress for Silent {}
 
 impl Case {
     /// Parse a case file.
@@ -988,6 +1044,7 @@ impl Report {
 ///
 /// The template is resolved **once**, so a report saying "12 cases at abc1234"
 /// is telling the truth even if `HEAD` moved mid-run.
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     target: Target<'_>,
     tests_dir: Option<&str>,
@@ -995,6 +1052,13 @@ pub fn run(
     write: bool,
     run_commands: bool,
     user: &UserConfig,
+    // Whether a `[commands]` child should be told, via `CLICOLOR_FORCE`/
+    // `FORCE_COLOR`, that it may colourise even though its stdout/stderr are
+    // pipes rather than a terminal. Sourced from the caller's own colour
+    // decision (`Theme::is_colored`), never decided here: `ops` has no
+    // terminal to ask.
+    color: bool,
+    progress: &mut dyn Progress,
 ) -> Result<Report, OpError> {
     // Checked before anything is resolved, and unconditionally — not only for
     // `--write` — so a remote `TEMPLATE` fails the same way whether or not
@@ -1048,7 +1112,8 @@ pub fn run(
     let mut outcomes = Vec::with_capacity(cases.len());
     for case in &cases {
         let decisions = if case.trust { &trusted } else { &untrusted };
-        outcomes.push(run_case(
+        progress.case_started(&case.name);
+        let outcome = run_case(
             &template,
             target.source,
             tests_dir,
@@ -1057,7 +1122,11 @@ pub fn run(
             run_commands,
             user,
             decisions,
-        )?);
+            color,
+            progress,
+        )?;
+        progress.case_finished(&outcome);
+        outcomes.push(outcome);
     }
 
     Ok(Report {
@@ -1182,13 +1251,17 @@ fn run_case(
     run_commands: bool,
     user: &UserConfig,
     decisions: &BTreeMap<String, Decision>,
+    color: bool,
+    progress: &mut dyn Progress,
 ) -> Result<CaseOutcome, OpError> {
     // No `[commands]`, or commands disabled for this run: the exact
     // pre-existing behaviour, unchanged, with no sandbox created at all. This
     // is every case file written before ADR-027 and must keep working
     // identically.
     if !run_commands || case.commands.is_empty() {
-        return run_case_plain(template, source, tests_dir, case, write, user, decisions);
+        return run_case_plain(
+            template, source, tests_dir, case, write, user, decisions, progress,
+        );
     }
 
     let sandbox = tempfile::tempdir().map_err(|error| TestError::SandboxFailed {
@@ -1223,6 +1296,9 @@ fn run_case(
             &case.commands.before.env,
             true,
             &mut failures,
+            &case.name,
+            color,
+            progress,
         );
         let before_failed = failures.iter().any(|failure| {
             matches!(
@@ -1244,6 +1320,7 @@ fn run_case(
             // leaves unanswered with no default fails as
             // `tpl::eval::unanswered`, which is a true statement about the
             // template.
+            progress.case_status(&case.name, Status::Rendering);
             let rendered = render_resolved(
                 template,
                 source,
@@ -1311,6 +1388,9 @@ fn run_case(
                             &case.commands.rendered.env,
                             true,
                             &mut failures,
+                            &case.name,
+                            color,
+                            progress,
                         );
 
                         if let Some(expected) = &case.expect.error {
@@ -1319,6 +1399,9 @@ fn run_case(
                             });
                         } else {
                             check(&case.expect, &rendered_files, &mut failures);
+                        }
+                        if case.snapshot {
+                            progress.case_status(&case.name, Status::Snapshot);
                         }
                         snapshot = snapshot_step(
                             template,
@@ -1338,6 +1421,9 @@ fn run_case(
                             &case.commands.after.env,
                             true,
                             &mut failures,
+                            &case.name,
+                            color,
+                            progress,
                         );
                     }
                 }
@@ -1362,6 +1448,9 @@ fn run_case(
         &case.commands.finally.env,
         false,
         &mut finally_failures,
+        &case.name,
+        color,
+        progress,
     );
     // `sandbox` is dropped when it goes out of scope below, deleting the
     // temporary directory.
@@ -1394,11 +1483,13 @@ fn run_case_plain(
     write: bool,
     user: &UserConfig,
     decisions: &BTreeMap<String, Decision>,
+    progress: &mut dyn Progress,
 ) -> Result<CaseOutcome, OpError> {
     // Always defaults, never a prompt: there is nobody to ask in CI, and a
     // prompt in a test runner is a hang. A question the case leaves unanswered
     // with no default fails as `tpl::eval::unanswered`, which is a true
     // statement about the template.
+    progress.case_status(&case.name, Status::Rendering);
     let rendered = render_resolved(
         template,
         source,
@@ -1445,6 +1536,9 @@ fn run_case_plain(
                     check(&case.expect, &rendered, &mut failures);
                 }
 
+                if case.snapshot {
+                    progress.case_status(&case.name, Status::Snapshot);
+                }
                 snapshot =
                     snapshot_step(template, tests_dir, case, &rendered, write, &mut failures)?;
             }
@@ -1476,6 +1570,7 @@ fn run_case_plain(
 ///
 /// Returns how many commands were actually attempted, so a caller can add it
 /// to [`CaseOutcome::commands_run`] regardless of how the list ended.
+#[allow(clippy::too_many_arguments)]
 fn execute_commands(
     step: CommandStep,
     commands: &[String],
@@ -1484,11 +1579,16 @@ fn execute_commands(
     env: &BTreeMap<String, String>,
     stop_on_failure: bool,
     failures: &mut Vec<Failure>,
+    name: &str,
+    color: bool,
+    progress: &mut dyn Progress,
 ) -> usize {
     let mut run = 0;
     for command in commands {
         run += 1;
-        if let Err((code, stdout, stderr)) = run_one(command, cwd, root, env) {
+        progress.case_status(name, Status::Command { step, command });
+        if let Err((code, stdout, stderr)) = run_one(command, cwd, root, env, color, name, progress)
+        {
             failures.push(Failure::CommandFailed {
                 step,
                 command: command.clone(),
@@ -1521,11 +1621,20 @@ fn execute_commands(
 /// still wins — the same override precedent `env` itself already has over
 /// the inherited environment. See "`TEMPLATE_ROOT` exposes the resolved
 /// template's root" in ADR-027.
+///
+/// Spawned rather than `.output()`'d, so `progress.command_output` can be
+/// called with each chunk as it is produced — but the full stdout/stderr is
+/// still collected exactly as before, and `cap_output` still tail-caps it,
+/// so a failure carries the identical data it always has.
+#[allow(clippy::too_many_arguments)]
 fn run_one(
     command: &str,
     cwd: &Path,
     root: &Path,
     env: &BTreeMap<String, String>,
+    color: bool,
+    name: &str,
+    progress: &mut dyn Progress,
 ) -> Result<(), (Option<i32>, String, String)> {
     let argv = match shlex::split(command) {
         Some(argv) if !argv.is_empty() => argv,
@@ -1540,28 +1649,115 @@ fn run_one(
         }
     };
 
-    match std::process::Command::new(&argv[0])
-        .args(&argv[1..])
+    let mut cmd = std::process::Command::new(&argv[0]);
+    cmd.args(&argv[1..])
         .current_dir(cwd)
         .env(TEMPLATE_ROOT_ENV, root)
-        .envs(env)
-        .output()
-    {
-        Ok(output) if output.status.success() => Ok(()),
-        Ok(output) => Err((
-            output.status.code(),
-            cap_output(&output.stdout),
-            cap_output(&output.stderr),
-        )),
+        // Never inherited: a command reading from a terminal that is not
+        // there — because this one is piped for capture — would otherwise
+        // hang the whole run instead of failing. The same guarantee
+        // `Command::output()` already gave us.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if color {
+        // A child talking to a pipe rather than a terminal otherwise assumes
+        // nobody can see colour and silently prints in black and white —
+        // exactly backwards when that output is about to be shown on a real
+        // terminal, live under `-v` or in a failure report either way.
+        // `env` below is applied after, so a case's own declaration still
+        // wins for either key.
+        cmd.env("CLICOLOR_FORCE", "1").env("FORCE_COLOR", "1");
+    }
+    cmd.envs(env);
+
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
         // No such program, not executable, or `cwd` could not be entered.
         // `code: None` for the same reason a signal-killed process gets one:
         // there is nothing to report but the operating system's own words.
-        Err(error) => Err((
-            None,
-            String::new(),
-            format!("could not run `{command}`: {error}"),
-        )),
+        Err(error) => {
+            return Err((
+                None,
+                String::new(),
+                format!("could not run `{command}`: {error}"),
+            ));
+        }
+    };
+
+    // Read both pipes concurrently: a command with a chatty stdout and a
+    // quiet stderr (or the reverse) would otherwise fill one pipe's buffer
+    // while nobody drains it, deadlocking the child against its own output.
+    // Only this thread ever touches `progress` — the reader threads below
+    // send bytes, never the trait object — so `Progress` need not be `Send`.
+    let stdout_pipe = child.stdout.take().expect("stdout was piped above");
+    let stderr_pipe = child.stderr.take().expect("stderr was piped above");
+    let (tx, rx) = std::sync::mpsc::channel::<(Stream, Vec<u8>)>();
+    let stdout_thread = spawn_reader(stdout_pipe, Stream::Stdout, tx.clone());
+    let stderr_thread = spawn_reader(stderr_pipe, Stream::Stderr, tx.clone());
+    // Our own clones: without dropping them, `rx`'s loop below would never
+    // see the channel close, since a sender is still alive even after both
+    // reader threads finish.
+    drop(tx);
+
+    let mut stdout_buf = Vec::new();
+    let mut stderr_buf = Vec::new();
+    for (stream, chunk) in rx {
+        progress.command_output(name, stream, &chunk);
+        match stream {
+            Stream::Stdout => stdout_buf.extend_from_slice(&chunk),
+            Stream::Stderr => stderr_buf.extend_from_slice(&chunk),
+        }
     }
+    // Already finished, by construction: a reader thread only exits its loop
+    // once its pipe is at EOF or erroring, which is also what closes `rx`.
+    let _ = stdout_thread.join();
+    let _ = stderr_thread.join();
+
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(error) => {
+            return Err((
+                None,
+                cap_output(&stdout_buf),
+                format!("could not wait for `{command}`: {error}"),
+            ));
+        }
+    };
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err((
+            status.code(),
+            cap_output(&stdout_buf),
+            cap_output(&stderr_buf),
+        ))
+    }
+}
+
+/// Read `pipe` to EOF on its own thread, forwarding each chunk as it arrives.
+///
+/// Generic over `ChildStdout`/`ChildStderr`, which are distinct types, so
+/// [`run_one`] needs only one reading loop rather than two copies of it.
+fn spawn_reader<R: Read + Send + 'static>(
+    mut pipe: R,
+    stream: Stream,
+    tx: std::sync::mpsc::Sender<(Stream, Vec<u8>)>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        loop {
+            match pipe.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send((stream, buf[..n].to_vec())).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    })
 }
 
 /// Keep the last [`COMMAND_OUTPUT_LIMIT_BYTES`] of a stream, not the first.
