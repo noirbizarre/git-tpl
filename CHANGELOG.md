@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1](https://github.com/noirbizarre/git-tpl/compare/0.12.0..0.12.1) - 2026-08-30
+
+### 🐛 Bug Fixes
+
+- **theme** Honour FORCE_COLOR, not just CLICOLOR_FORCE ([#149](https://github.com/noirbizarre/git-tpl/issues/149)) - ([4e35e68](https://github.com/noirbizarre/git-tpl/commit/4e35e682aafcd9cd51c53f7c66c709cea75d9ca9))
+
 ## [0.12.0](https://github.com/noirbizarre/git-tpl/compare/0.11.0..0.12.0) - 2026-08-30
 
 ### 🐛 Bug Fixes
