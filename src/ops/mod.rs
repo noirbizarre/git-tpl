@@ -106,7 +106,7 @@ pub enum OpError {
     /// cases must all be reported, and an error would report one.
     #[error(transparent)]
     #[diagnostic(transparent)]
-    Test(#[from] testing::TestError),
+    Test(#[from] testing::TestingError),
 
     /// A backport could not be produced.
     ///

@@ -12,7 +12,10 @@
 //! The area of every diagnostic here is `testing` rather than `test`, because
 //! `tests/diagnostics.rs` deliberately ignores codes whose area is `test` —
 //! `src/report.rs` uses `tpl::test::*` as fixtures, and a runner claiming that
-//! area would drop itself out of the coverage guard.
+//! area would drop itself out of the coverage guard. [`TestingError`] follows
+//! the same `testing`, not `test`, and so also matches the crate's usual
+//! `<file-name>Error` convention (every other error enum is named after its
+//! declaring file) — it was once `TestError`, named after the command instead.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -79,7 +82,7 @@ const COMMAND_OUTPUT_LIMIT_BYTES: usize = 64 * 1024;
 /// the same reason a lint finding is not an error: twelve failing cases must
 /// all be reported, and an error that aborts at the first would report one.
 #[derive(Debug, Error, Diagnostic)]
-pub enum TestError {
+pub enum TestingError {
     /// The tests directory does not exist at the resolved revision.
     #[error("`{dir}` does not exist in the template at {revision_description}")]
     #[diagnostic(
@@ -345,8 +348,8 @@ impl Commands {
 
     fn parse(
         table: &BTreeMap<String, Value>,
-        shape: &impl Fn(String) -> TestError,
-    ) -> Result<Self, TestError> {
+        shape: &impl Fn(String) -> TestingError,
+    ) -> Result<Self, TestingError> {
         for key in table.keys() {
             if !matches!(
                 key.as_str(),
@@ -385,8 +388,8 @@ impl CommandList {
         value: Option<&Value>,
         key: &str,
         inherited: &BTreeMap<String, String>,
-        shape: &impl Fn(String) -> TestError,
-    ) -> Result<Self, TestError> {
+        shape: &impl Fn(String) -> TestingError,
+    ) -> Result<Self, TestingError> {
         match value {
             None | Some(Value::Array(_)) => Ok(CommandList {
                 commands: string_array(value, key, shape)?,
@@ -511,15 +514,15 @@ impl Progress for Silent {}
 
 impl Case {
     /// Parse a case file.
-    pub fn parse(name: &str, path: &str, bytes: &[u8]) -> Result<Self, TestError> {
+    pub fn parse(name: &str, path: &str, bytes: &[u8]) -> Result<Self, TestingError> {
         let format = Format::infer(path);
-        let value = parse_value(format, bytes).map_err(|reason| TestError::CaseParse {
+        let value = parse_value(format, bytes).map_err(|reason| TestingError::CaseParse {
             path: path.to_string(),
             format: format!("{format:?}").to_lowercase(),
             reason,
         })?;
 
-        let shape = |reason: String| TestError::CaseShape {
+        let shape = |reason: String| TestingError::CaseShape {
             path: path.to_string(),
             reason,
         };
@@ -647,8 +650,8 @@ impl Case {
 impl Expect {
     fn parse(
         table: &BTreeMap<String, Value>,
-        shape: &impl Fn(String) -> TestError,
-    ) -> Result<Self, TestError> {
+        shape: &impl Fn(String) -> TestingError,
+    ) -> Result<Self, TestingError> {
         for key in table.keys() {
             if !matches!(
                 key.as_str(),
@@ -727,8 +730,8 @@ fn substring_map(
     table: &BTreeMap<String, Value>,
     key: &str,
     noun: &str,
-    shape: &impl Fn(String) -> TestError,
-) -> Result<BTreeMap<String, Vec<String>>, TestError> {
+    shape: &impl Fn(String) -> TestingError,
+) -> Result<BTreeMap<String, Vec<String>>, TestingError> {
     match table.get(key) {
         None => Ok(BTreeMap::new()),
         Some(Value::Table(entries)) => {
@@ -755,8 +758,8 @@ fn substring_map(
 fn string_array(
     value: Option<&Value>,
     what: &str,
-    shape: &impl Fn(String) -> TestError,
-) -> Result<Vec<String>, TestError> {
+    shape: &impl Fn(String) -> TestingError,
+) -> Result<Vec<String>, TestingError> {
     match value {
         None => Ok(Vec::new()),
         Some(Value::Array(items)) => items
@@ -785,8 +788,8 @@ fn string_array(
 fn string_map(
     value: Option<&Value>,
     what: &str,
-    shape: &impl Fn(String) -> TestError,
-) -> Result<BTreeMap<String, String>, TestError> {
+    shape: &impl Fn(String) -> TestingError,
+) -> Result<BTreeMap<String, String>, TestingError> {
     match value {
         None => Ok(BTreeMap::new()),
         Some(Value::Table(entries)) => entries
@@ -1072,7 +1075,7 @@ pub fn run(
     // `--ref` or `--write` is also given, rather than reaching a temporary
     // clone under some flag combinations and not others.
     if resolve::local_path(target.source).is_none() {
-        return Err(TestError::RemoteNotSupported {
+        return Err(TestingError::RemoteNotSupported {
             origin: target.source.to_string(),
         }
         .into());
@@ -1156,7 +1159,7 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
     // directory is outside the render root, exactly like the manifest and the
     // partials.
     let Some(dir) = template.repo.subtree(template.tree, tests_dir)? else {
-        return Err(TestError::NoTests {
+        return Err(TestingError::NoTests {
             dir: tests_dir.to_string(),
             revision_description: super::describe_revision(&template.reference, template.revision),
         }
@@ -1196,7 +1199,7 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
         // directory. Preferring either silently would be a case that never
         // runs.
         if let Some(previous) = seen.get(name) {
-            return Err(TestError::CaseShape {
+            return Err(TestingError::CaseShape {
                 path: path.clone(),
                 reason: format!(
                     "`{previous}` is also the case `{name}`. \
@@ -1212,7 +1215,7 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
     }
 
     if cases.is_empty() {
-        return Err(TestError::NoTests {
+        return Err(TestingError::NoTests {
             dir: tests_dir.to_string(),
             revision_description: super::describe_revision(&template.reference, template.revision),
         }
@@ -1231,7 +1234,7 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
     let known: Vec<&str> = cases.iter().map(|case| case.name.as_str()).collect();
     for wanted in filter {
         if !known.contains(&wanted.as_str()) {
-            return Err(TestError::NoSuchCase {
+            return Err(TestingError::NoSuchCase {
                 filter: wanted.clone(),
                 suggestion: closest(wanted, known.iter().copied())
                     .map(|near| format!("Did you mean `{near}`?\n"))
@@ -1271,7 +1274,7 @@ fn run_case(
         );
     }
 
-    let sandbox = tempfile::tempdir().map_err(|error| TestError::SandboxFailed {
+    let sandbox = tempfile::tempdir().map_err(|error| TestingError::SandboxFailed {
         case: case.name.clone(),
         reason: error.to_string(),
     })?;
@@ -1379,7 +1382,7 @@ fn run_case(
                             rendered_files.iter().map(|file| {
                                 (file.path.as_str(), file.content.as_slice(), file.executable)
                             }),
-                            &|path, verb, io_error| TestError::SandboxWrite {
+                            &|path, verb, io_error| TestingError::SandboxWrite {
                                 case: case_name.clone(),
                                 path: path.display().to_string(),
                                 reason: format!("could not {verb} it: {io_error}"),
@@ -1989,7 +1992,7 @@ fn read_snapshot(
 ) -> Result<Option<BTreeMap<String, SnapshotEntry>>, OpError> {
     let dir = snapshot_path(tests_dir, &case.name);
 
-    let unreadable = |reason: String| TestError::SnapshotRead {
+    let unreadable = |reason: String| TestingError::SnapshotRead {
         case: case.name.clone(),
         path: dir.clone(),
         reason,
@@ -2093,8 +2096,8 @@ struct RecordedFile {
 
 fn parse_manifest(
     bytes: &[u8],
-    unreadable: &impl Fn(String) -> TestError,
-) -> Result<BTreeMap<String, RecordedFile>, TestError> {
+    unreadable: &impl Fn(String) -> TestingError,
+) -> Result<BTreeMap<String, RecordedFile>, TestingError> {
     let text = std::str::from_utf8(bytes).map_err(|_| unreadable("it is not UTF-8".to_string()))?;
 
     let mut out = BTreeMap::new();
@@ -2249,7 +2252,7 @@ fn write_snapshot(
     let workdir = template.repo.workdir()?;
     let dir = workdir.join(snapshot_path(tests_dir, &case.name));
 
-    let failed = |path: &Path, verb: &str, error: &std::io::Error| TestError::SnapshotWrite {
+    let failed = |path: &Path, verb: &str, error: &std::io::Error| TestingError::SnapshotWrite {
         case: case.name.clone(),
         path: path.display().to_string(),
         reason: format!("could not {verb} it: {error}"),
@@ -2278,13 +2281,13 @@ mod tests {
 
     use super::*;
 
-    fn case(body: &str) -> Result<Case, TestError> {
+    fn case(body: &str) -> Result<Case, TestingError> {
         Case::parse("c", "tests/c.toml", body.as_bytes())
     }
 
-    fn shape_reason(result: Result<Case, TestError>) -> String {
+    fn shape_reason(result: Result<Case, TestingError>) -> String {
         match result {
-            Err(TestError::CaseShape { reason, .. }) => reason,
+            Err(TestingError::CaseShape { reason, .. }) => reason,
             other => panic!("expected a shape error, got {other:?}"),
         }
     }
@@ -2370,7 +2373,7 @@ mod tests {
     #[test]
     fn a_case_that_is_not_a_table_is_refused() {
         let result = Case::parse("c", "tests/c.json", b"[1, 2]");
-        std::assert_matches!(result, Err(TestError::CaseShape { .. }));
+        std::assert_matches!(result, Err(TestingError::CaseShape { .. }));
     }
 
     /// Each of these is a section written with the wrong type. The message has
@@ -2407,22 +2410,24 @@ mod tests {
     #[test]
     fn a_case_that_does_not_parse_names_the_format() {
         match Case::parse("c", "tests/c.json", b"{not json") {
-            Err(TestError::CaseParse { format, .. }) => assert_eq!(format, "json"),
+            Err(TestingError::CaseParse { format, .. }) => assert_eq!(format, "json"),
             other => panic!("expected a parse error, got {other:?}"),
         }
     }
 
-    fn read_manifest(body: &str) -> Result<BTreeMap<String, RecordedFile>, TestError> {
-        parse_manifest(body.as_bytes(), &|reason| TestError::SnapshotRead {
+    fn read_manifest(body: &str) -> Result<BTreeMap<String, RecordedFile>, TestingError> {
+        parse_manifest(body.as_bytes(), &|reason| TestingError::SnapshotRead {
             case: "c".into(),
             path: "p".into(),
             reason,
         })
     }
 
-    fn snapshot_read_reason(result: Result<BTreeMap<String, RecordedFile>, TestError>) -> String {
+    fn snapshot_read_reason(
+        result: Result<BTreeMap<String, RecordedFile>, TestingError>,
+    ) -> String {
         match result {
-            Err(TestError::SnapshotRead { reason, .. }) => reason,
+            Err(TestingError::SnapshotRead { reason, .. }) => reason,
             Ok(_) => panic!("expected the manifest to be refused"),
             Err(other) => panic!("expected a snapshot read error, got {other:?}"),
         }
@@ -2479,7 +2484,7 @@ mod tests {
         );
 
         let rendered = render_manifest("c", &files);
-        let parsed = parse_manifest(rendered.as_bytes(), &|reason| TestError::SnapshotRead {
+        let parsed = parse_manifest(rendered.as_bytes(), &|reason| TestingError::SnapshotRead {
             case: "c".into(),
             path: "p".into(),
             reason,
