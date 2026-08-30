@@ -239,7 +239,19 @@ impl Progress for TestProgress {
                     phase_line(theme, &status)
                 ));
             }
-            Self::Line { theme, .. } => {
+            Self::Line { theme, verbose } => {
+                // A command's "about to run" announcement only earns its
+                // keep when something follows it that needs attributing to
+                // a command — `-v`'s live raw output. Without `-v`,
+                // `command_finished` reports the same command a moment
+                // later with its verdict, so printing here too would say
+                // the same thing twice for every command that succeeds
+                // (`ok` is always `true` here, since nothing has failed
+                // yet, so the two lines would be byte-for-byte identical)
+                // — every CI log line doubled.
+                if matches!(status, Status::Command { .. }) && !*verbose {
+                    return;
+                }
                 eprintln!("  {} {}", bold(theme, name), phase_line(theme, &status));
             }
         }
