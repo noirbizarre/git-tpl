@@ -69,6 +69,14 @@ buying nothing. What the surveyed templates actually wanted — a way to *tell* 
 declared `origin` — is [ADR-019](../adr/019-templates-address-never-act.md): a template may address the user and
 declare Git remotes, and still runs nothing.
 
+**A dedicated `git tpl detach` command**, raised in [issue #21](https://github.com/noirbizarre/git-tpl/issues/21).
+`init`'s effect on the branch is a merge ([ADR-009](../adr/009-init-merges-unrelated-histories.md)); once merged,
+rendered files are ordinary content indistinguishable from hand-written ones, so there is nothing for a detach to
+"undo" — the only honest meaning left is "stop future renderings." That is already what removing
+`.config/git.tpl.toml` does: every project-bound command loads it and refuses cleanly (`tpl::config::missing`)
+when it is absent. `refs/tpl/<id>` is left as it was, on purpose — it is never pushed by a bare `git push`, and it
+is the merge base a future re-attach would want. See [Detaching](../usage/status.md#detaching).
+
 **A matrix language for test cases.** Three files beat a combinatorial block whose expansion nobody can predict. If
 a template needs twelve cases, twelve files say so honestly.
 
