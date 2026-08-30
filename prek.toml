@@ -102,3 +102,14 @@ language = "system"
 entry = "bash -c '! grep -rnP --include=*.rs \"(?<![A-Za-z0-9_])ureq::\" src | grep -v \"^src/data/\"'"
 files = "\\.rs$"
 pass_filenames = false
+
+# .pre-commit-hooks.yaml is a public contract once tagged (consumers pin it
+# with `rev:`) — validated here so a mistake is caught before a release tags
+# it, not by the first consumer to run it.
+[[repos.hooks]]
+id = "validate-pre-commit-hooks-manifest"
+name = "validate .pre-commit-hooks.yaml"
+language = "system"
+entry = "prek validate-manifest .pre-commit-hooks.yaml"
+files = "^\\.pre-commit-hooks\\.yaml$"
+pass_filenames = false
