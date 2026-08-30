@@ -12,7 +12,8 @@ use tpl::git::GitError;
 use tpl::git::libgit2::LibGit2;
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::testing::{
-    CaseOutcome, CommandStep, Failure, Progress, Report, SnapshotOutcome, Status, Stream,
+    CaseOutcome, CommandStep, Failure, Progress, Report, SnapshotChange, SnapshotOutcome, Status,
+    Stream,
 };
 use tpl::ops::{self, OpError, Target};
 
@@ -347,7 +348,7 @@ fn print_text(ctx: &Standalone, report: &Report, write: bool) {
             .map(|case| case.name.len())
             .max()
             .unwrap_or(0);
-        print_case(ctx, case, width);
+        print_case(ctx, case, width, write);
     }
 
     ctx.out.blank();
@@ -357,22 +358,76 @@ fn print_text(ctx: &Standalone, report: &Report, write: bool) {
         counted(&theme.deleted, report.failed(), "failed"),
     ));
     if write {
-        ctx.out.say(muted(
-            theme,
-            &format!(
-                "{} snapshot(s) recorded, {} unchanged",
-                report.snapshots_written(),
+        // Written vs updated vs unchanged, not the "recorded" total ADR-016
+        // used to report as one number: a reviewer cares differently about a
+        // brand-new snapshot than a changed one, and `-v` below needs the
+        // three buckets kept apart to name which case is in which. See
+        // ADR-032.
+        let written = report
+            .cases
+            .iter()
+            .filter(|case| case.snapshot == SnapshotOutcome::Written)
+            .count();
+        let updated = report
+            .cases
+            .iter()
+            .filter(|case| case.snapshot == SnapshotOutcome::Updated)
+            .count();
+        let unchanged = report
+            .cases
+            .iter()
+            .filter(|case| case.snapshot == SnapshotOutcome::Unchanged)
+            .count();
+        let skipped = report
+            .cases
+            .iter()
+            .filter(|case| case.snapshot == SnapshotOutcome::Skipped)
+            .count();
+
+        // Coloured the same way the passed/failed line above it is: `added`
+        // for a brand-new snapshot, `modified` for a changed one — the same
+        // colour `ChangeKind::Modified` already gets everywhere else —
+        // neither alarming for `unchanged`, so it stays `muted`.
+        ctx.out.say(format!(
+            "{}, {}, {}",
+            counted(&theme.added, written, "written"),
+            counted(&theme.modified, updated, "updated"),
+            counted(&theme.muted, unchanged, "unchanged"),
+        ));
+        if skipped > 0 {
+            ctx.out.say(muted(
+                theme,
+                &format!("{skipped} skipped (no `snapshot = true`)"),
+            ));
+        }
+
+        if ctx.out.global.verbose > 0 {
+            let names = |outcome: SnapshotOutcome| -> String {
                 report
                     .cases
                     .iter()
-                    .filter(|case| case.snapshot == SnapshotOutcome::Unchanged)
-                    .count()
-            ),
-        ));
+                    .filter(|case| case.snapshot == outcome)
+                    .map(|case| case.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            if updated > 0 {
+                ctx.out.say(muted(
+                    theme,
+                    &format!("  updated: {}", names(SnapshotOutcome::Updated)),
+                ));
+            }
+            if written > 0 {
+                ctx.out.say(muted(
+                    theme,
+                    &format!("  written: {}", names(SnapshotOutcome::Written)),
+                ));
+            }
+        }
     }
 }
 
-fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize) {
+fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize, write: bool) {
     let theme = &ctx.out.theme;
 
     // Padded to a common width so the case names line up: a column a reader
@@ -389,6 +444,21 @@ fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize) {
         return;
     }
 
+    // `--write` never rendered this case at all (ADR-032): reported on its
+    // own, before the `files`/`commands` detail below, which would otherwise
+    // read as "0 files" — a real, if misleading, number for a case that was
+    // never touched rather than one that rendered nothing.
+    if case.snapshot == SnapshotOutcome::Skipped {
+        ctx.out.say(muted(
+            theme,
+            &format!(
+                "  {status}  {:width$}   skipped (no `snapshot = true`)",
+                case.name
+            ),
+        ));
+        return;
+    }
+
     let mut detail = vec![format!(
         "{} file{}",
         case.files,
@@ -402,7 +472,7 @@ fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize) {
         ));
     }
     match case.snapshot {
-        SnapshotOutcome::None => {}
+        SnapshotOutcome::None | SnapshotOutcome::Skipped => {}
         SnapshotOutcome::Compared => detail.push("snapshot ok".into()),
         SnapshotOutcome::Written => detail.push("snapshot written".into()),
         SnapshotOutcome::Updated => detail.push("snapshot updated".into()),
@@ -412,6 +482,24 @@ fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize) {
         theme,
         &format!("  {status}  {:width$}   {}", case.name, detail.join(", ")),
     ));
+
+    // In place of the live `[commands]` output `--write` no longer produces
+    // (ADR-032): the same unified diff, coloured the same way, that a normal
+    // run's `Failure::SnapshotDiff` already shows under `-v`.
+    if write && ctx.out.global.verbose > 0 && case.snapshot == SnapshotOutcome::Updated {
+        for change in &case.snapshot_changes {
+            let note = if change.mode_only { " (mode)" } else { "" };
+            ctx.out.say(muted(
+                theme,
+                &format!("      {} {}{note}", change.kind.label(), change.path),
+            ));
+            if let Some(patch) = &change.patch {
+                for line in patch.lines() {
+                    ctx.out.say(format!("        {}", patch_line(theme, line)));
+                }
+            }
+        }
+    }
 }
 
 fn print_failure(ctx: &Standalone, failure: &Failure) {
@@ -572,9 +660,27 @@ fn json(report: &Report) -> serde_json::Value {
             "passed": case.passed(),
             "files": case.files,
             "snapshot": case.snapshot.as_str(),
+            // Non-empty only when `snapshot` is `"updated"` — the same shape
+            // `Failure::SnapshotDiff.changes` already uses, so a `--json
+            // --write` caller can read the diff without a terminal to
+            // colourise it for. See ADR-032.
+            "snapshotChanges": case.snapshot_changes.iter().map(snapshot_change_json).collect::<Vec<_>>(),
             "commandsRun": case.commands_run,
             "failures": case.failures.iter().map(failure_json).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
+    })
+}
+
+/// One snapshot change, as JSON — shared by `Failure::SnapshotDiff` (a
+/// compare-mode run) and a case's own `snapshotChanges` (a `--write` run
+/// that updated one). Both name the same fact about the same pair of trees;
+/// duplicating the shape would only let the two drift.
+fn snapshot_change_json(change: &SnapshotChange) -> serde_json::Value {
+    serde_json::json!({
+        "path": change.path,
+        "kind": change.kind.as_str(),
+        "modeOnly": change.mode_only,
+        "patch": change.patch,
     })
 }
 
@@ -624,12 +730,7 @@ fn failure_json(failure: &Failure) -> serde_json::Value {
         }),
         Failure::SnapshotDiff { changes } => serde_json::json!({
             "kind": "snapshotDiff",
-            "changes": changes.iter().map(|change| serde_json::json!({
-                "path": change.path,
-                "kind": change.kind.as_str(),
-                "modeOnly": change.mode_only,
-                "patch": change.patch,
-            })).collect::<Vec<_>>(),
+            "changes": changes.iter().map(snapshot_change_json).collect::<Vec<_>>(),
         }),
         Failure::SnapshotMissing => serde_json::json!({
             "kind": "snapshotMissing",
@@ -676,6 +777,7 @@ mod tests {
             snapshot: SnapshotOutcome::None,
             files: 1,
             commands_run: 0,
+            snapshot_changes: Vec::new(),
         }
     }
 

@@ -936,14 +936,19 @@ pub struct SnapshotChange {
 /// What the snapshot step did for a case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotOutcome {
-    /// The case did not ask for a snapshot (`snapshot` is `false` or absent),
-    /// or asked for one that was never recorded.
+    /// The case did not ask for a snapshot (`snapshot` is `false` or absent)
+    /// on a plain run, or asked for one but its render failed before there
+    /// was anything to record or compare.
     ///
     /// Not a failure on its own — snapshots are opt-in per case, so a
     /// template with three cases and one `snapshot = true` is a normal state
-    /// — but the second case (asked for one, none recorded, not `--write`)
-    /// also carries a [`Failure::SnapshotMissing`] alongside this outcome.
+    /// — but the "asked for one, none recorded, not `--write`" case also
+    /// carries a [`Failure::SnapshotMissing`] alongside this outcome.
     None,
+    /// `--write` did nothing for this case: it does not declare
+    /// `snapshot = true`, so it was never rendered, never checked, and never
+    /// counted as run. See ADR-032.
+    Skipped,
     /// Compared against a recorded snapshot.
     Compared,
     /// `--write` created it.
@@ -959,6 +964,7 @@ impl SnapshotOutcome {
     pub fn as_str(self) -> &'static str {
         match self {
             SnapshotOutcome::None => "none",
+            SnapshotOutcome::Skipped => "skipped",
             SnapshotOutcome::Compared => "compared",
             SnapshotOutcome::Written => "written",
             SnapshotOutcome::Updated => "updated",
@@ -982,9 +988,17 @@ pub struct CaseOutcome {
     /// failure and got one.
     pub files: usize,
     /// How many `[commands]` entries actually ran, across all four lists.
-    /// Zero for a case with no `[commands]`, and zero when commands were
-    /// disabled for the run.
+    /// Zero for a case with no `[commands]`, zero when commands were
+    /// disabled for the run, and always zero under `--write` (ADR-032: a
+    /// case's `[commands]` never run while `--write` is recording it).
     pub commands_run: usize,
+    /// What `--write` changed against a previously recorded snapshot,
+    /// non-empty only when `snapshot` is [`SnapshotOutcome::Updated`].
+    ///
+    /// This is the data a verbose `--write` prints in place of the live
+    /// `[commands]` output it no longer produces, since nothing runs to
+    /// stream. See ADR-032.
+    pub snapshot_changes: Vec<SnapshotChange>,
 }
 
 impl CaseOutcome {
@@ -1251,6 +1265,18 @@ fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<V
         .collect())
 }
 
+/// `(failures, snapshot outcome, snapshot changes, files rendered, commands
+/// run)` — everything [`run_case`]'s sandboxed branch has to carry out of its
+/// try/finally closure. Named so the closure's own type annotation reads as
+/// one thing rather than a five-tuple clippy would otherwise flag.
+type CaseRunOutcome = (
+    Vec<Failure>,
+    SnapshotOutcome,
+    Vec<SnapshotChange>,
+    usize,
+    usize,
+);
+
 #[allow(clippy::too_many_arguments)]
 fn run_case(
     template: &Resolved,
@@ -1264,11 +1290,29 @@ fn run_case(
     color: bool,
     progress: &mut dyn Progress,
 ) -> Result<CaseOutcome, OpError> {
-    // No `[commands]`, or commands disabled for this run: the exact
-    // pre-existing behaviour, unchanged, with no sandbox created at all. This
-    // is every case file written before ADR-027 and must keep working
-    // identically.
-    if !run_commands || case.commands.is_empty() {
+    // `--write` has nothing to do for a case that never opted into a
+    // snapshot: not rendered, not checked, not counted as run — `--write`'s
+    // only job is writing snapshots, and this case has none to write. See
+    // ADR-032.
+    if write && !case.snapshot {
+        return Ok(CaseOutcome {
+            name: case.name.clone(),
+            path: case.path.clone(),
+            failures: Vec::new(),
+            snapshot: SnapshotOutcome::Skipped,
+            files: 0,
+            commands_run: 0,
+            snapshot_changes: Vec::new(),
+        });
+    }
+
+    // No `[commands]`, commands disabled for this run, or `--write`: the
+    // exact pre-existing behaviour, unchanged, with no sandbox created at
+    // all. `--write` never runs a case's `[commands]` (ADR-032); by
+    // construction whenever `write` is true here, `case.snapshot` is true
+    // (the check above already returned for the case where it is not), so
+    // only its rendering needs to happen — never a sandbox.
+    if write || !run_commands || case.commands.is_empty() {
         return run_case_plain(
             template, source, tests_dir, case, write, user, decisions, progress,
         );
@@ -1291,9 +1335,10 @@ fn run_case(
     // read or write — runs inside it, so its *value* is captured here rather
     // than unwinding straight past the `finally` list below, which still has
     // to run against whatever state the sandbox is in.
-    let outcome: Result<(Vec<Failure>, SnapshotOutcome, usize, usize), OpError> = (|| {
+    let outcome: Result<CaseRunOutcome, OpError> = (|| {
         let mut failures = Vec::new();
         let mut snapshot = SnapshotOutcome::None;
+        let mut snapshot_changes = Vec::new();
         let mut files = 0;
 
         // `before`, into an empty sandbox: nothing has been rendered or
@@ -1413,7 +1458,13 @@ fn run_case(
                         if case.snapshot {
                             progress.case_status(&case.name, Status::Snapshot);
                         }
-                        snapshot = snapshot_step(
+                        // Always `write == false` here: the dispatcher above
+                        // sends every `--write` run through `run_case_plain`
+                        // instead (ADR-032), so this branch only ever
+                        // compares. `snapshot_step` still returns the tuple
+                        // shape unconditionally, so nothing here needs to
+                        // know that.
+                        (snapshot, snapshot_changes) = snapshot_step(
                             template,
                             tests_dir,
                             case,
@@ -1440,7 +1491,7 @@ fn run_case(
             }
         }
 
-        Ok((failures, snapshot, files, commands_run))
+        Ok((failures, snapshot, snapshot_changes, files, commands_run))
     })();
 
     // `finally` always runs, against whatever the sandbox holds, and every
@@ -1465,7 +1516,7 @@ fn run_case(
     // `sandbox` is dropped when it goes out of scope below, deleting the
     // temporary directory.
 
-    let (mut failures, snapshot, files, mut commands_run) = outcome?;
+    let (mut failures, snapshot, snapshot_changes, files, mut commands_run) = outcome?;
     failures.extend(finally_failures);
     commands_run += finally_ran;
 
@@ -1476,6 +1527,7 @@ fn run_case(
         snapshot,
         files,
         commands_run,
+        snapshot_changes,
     })
 }
 
@@ -1484,6 +1536,12 @@ fn run_case(
 /// function so a case with no `[commands]` — the overwhelming majority —
 /// takes a path that is byte-for-byte what it always has been, with no
 /// temporary directory created for nothing.
+///
+/// Since ADR-032, this is also the *only* path a `--write` run ever takes,
+/// for every case it does not skip outright: `[commands]` never run under
+/// `--write`, and this function never touches them, so routing every write
+/// through here rather than the sandboxed path above is what keeps them from
+/// running at all.
 #[allow(clippy::too_many_arguments)]
 fn run_case_plain(
     template: &Resolved,
@@ -1514,6 +1572,7 @@ fn run_case_plain(
 
     let mut failures = Vec::new();
     let mut snapshot = SnapshotOutcome::None;
+    let mut snapshot_changes = Vec::new();
     let mut files = 0;
 
     match rendered {
@@ -1542,14 +1601,20 @@ fn run_case_plain(
                     failures.push(Failure::ExpectedError {
                         code: expected.clone(),
                     });
-                } else {
+                } else if !write {
+                    // `--write` records what a case's rendering *is*; it
+                    // does not also prove it. Checking `expect` here would
+                    // make every recording pay the same cost as a full run,
+                    // exactly what made `--write` slow enough that reaching
+                    // for it separately stopped being worth it. A plain
+                    // `git tpl test` afterward still runs this. See ADR-032.
                     check(&case.expect, &rendered, &mut failures);
                 }
 
                 if case.snapshot {
                     progress.case_status(&case.name, Status::Snapshot);
                 }
-                snapshot =
+                (snapshot, snapshot_changes) =
                     snapshot_step(template, tests_dir, case, &rendered, write, &mut failures)?;
             }
         }
@@ -1561,6 +1626,7 @@ fn run_case_plain(
         failures,
         snapshot,
         files,
+        snapshot_changes,
         commands_run: 0,
     })
 }
@@ -1904,6 +1970,13 @@ fn is_binary(bytes: &[u8]) -> bool {
 }
 
 /// Compare, and record if asked.
+///
+/// The second half of the return value is the diff `--write` found against a
+/// previously recorded snapshot — empty unless the outcome is
+/// [`SnapshotOutcome::Updated`] — so a caller can show it in place of the
+/// live `[commands]` output `--write` no longer produces (ADR-032). The
+/// compare-mode diff (`write == false`) is not duplicated here: it is already
+/// carried by the [`Failure::SnapshotDiff`] pushed below.
 fn snapshot_step(
     template: &Resolved,
     tests_dir: &str,
@@ -1911,7 +1984,7 @@ fn snapshot_step(
     rendered: &[Rendered],
     write: bool,
     failures: &mut Vec<Failure>,
-) -> Result<SnapshotOutcome, OpError> {
+) -> Result<(SnapshotOutcome, Vec<SnapshotChange>), OpError> {
     // Snapshots are opt-in per case, and now explicitly so: a case that never
     // wrote `snapshot = true` is never written to and never compared, no
     // matter what `--write` does or what happens to be sitting on disk. This
@@ -1919,8 +1992,11 @@ fn snapshot_step(
     // from a directory's existence — reading the recorded snapshot is skipped
     // entirely, so a case that doesn't want one never even touches disk for
     // it.
+    //
+    // Note this is not reached at all for a case `--write` skips outright
+    // (ADR-032): that decision is made by the caller, before rendering.
     if !case.snapshot {
-        return Ok(SnapshotOutcome::None);
+        return Ok((SnapshotOutcome::None, Vec::new()));
     }
 
     let recorded = read_snapshot(template, tests_dir, case)?;
@@ -1945,29 +2021,34 @@ fn snapshot_step(
             // report false confidence, exactly what the explicit flag exists
             // to prevent.
             failures.push(Failure::SnapshotMissing);
-            return Ok(SnapshotOutcome::None);
+            return Ok((SnapshotOutcome::None, Vec::new()));
         };
         let changes = compare(&recorded, &current);
         if !changes.is_empty() {
             failures.push(Failure::SnapshotDiff { changes });
         }
-        return Ok(SnapshotOutcome::Compared);
+        return Ok((SnapshotOutcome::Compared, Vec::new()));
     }
 
     // Compared *before* writing, so `--write` on a green suite says "unchanged"
     // rather than claiming to have rewritten twelve files that a reviewer would
-    // then have to check.
-    let outcome = match &recorded {
-        None => SnapshotOutcome::Written,
-        Some(recorded) if compare(recorded, &current).is_empty() => SnapshotOutcome::Unchanged,
-        Some(_) => SnapshotOutcome::Updated,
+    // then have to check. Also the source of what a verbose `--write` shows in
+    // place of the live command output it no longer produces (ADR-032).
+    let changes = recorded
+        .as_ref()
+        .map(|recorded| compare(recorded, &current));
+    let outcome = match (&recorded, changes.as_ref()) {
+        (None, _) => SnapshotOutcome::Written,
+        (Some(_), Some(changes)) if changes.is_empty() => SnapshotOutcome::Unchanged,
+        (Some(_), Some(_)) => SnapshotOutcome::Updated,
+        (Some(_), None) => unreachable!("changes is computed above whenever recorded is Some"),
     };
 
     if outcome != SnapshotOutcome::Unchanged {
         write_snapshot(template, tests_dir, case, &current)?;
     }
 
-    Ok(outcome)
+    Ok((outcome, changes.unwrap_or_default()))
 }
 
 /// Read a recorded snapshot out of the resolved tree.
@@ -2593,6 +2674,7 @@ mod tests {
             snapshot: SnapshotOutcome::None,
             files: 1,
             commands_run: 0,
+            snapshot_changes: Vec::new(),
         });
     }
 }
