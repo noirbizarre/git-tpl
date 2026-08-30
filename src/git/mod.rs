@@ -289,6 +289,28 @@ pub enum GitError {
         path: PathBuf,
     },
 
+    /// The path is a Jujutsu workspace, but not a colocated one.
+    ///
+    /// A non-colocated `jj git init` never creates a `.git` — the backing
+    /// store at `.jj/repo/store/git` is bare and not discoverable the way
+    /// Git itself discovers a repository. Reported separately from
+    /// `NotARepository` because the remedy is different: `git init` here
+    /// would create a second, unrelated repository that jj does not track,
+    /// orphaning the workspace from its own history instead of fixing
+    /// anything.
+    #[error("`{}` is a Jujutsu workspace, but not a colocated one", path.display())]
+    #[diagnostic(
+        code(tpl::git::jj_not_colocated),
+        help(
+            "git-tpl needs a `.git` directory; colocate this workspace with \
+             `jj git init --colocate`, or run from one already colocated"
+        )
+    )]
+    JujutsuNotColocated {
+        /// The path that was searched from.
+        path: PathBuf,
+    },
+
     /// A revision could not be resolved.
     #[error("could not resolve `{reference}` in `{origin}`")]
     #[diagnostic(

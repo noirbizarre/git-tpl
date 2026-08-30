@@ -113,6 +113,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::git::clone",
     "tpl::git::dirty_worktree",
     "tpl::git::diverged",
+    "tpl::git::jj_not_colocated",
     "tpl::git::network",
     "tpl::git::no_identity",
     "tpl::git::no_such_revision",

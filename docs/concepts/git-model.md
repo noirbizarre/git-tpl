@@ -70,6 +70,36 @@ You are never locked into them.
 It lives under `refs/tpl/` rather than `refs/heads/` on purpose: it is not a branch you check out, it should not
 appear in `git branch`, and it should not be pushed by a bare `git push`.
 
+## Jujutsu
+
+"Every Git command works on it" is a claim [Jujutsu](https://jj-vcs.dev) (`jj`) tests directly, because a
+**colocated** `jj git init` workspace (the default since jj 0.44) is a real `.git` directory with jj layered on
+top.
+
+Colocated works: git-tpl writes `refs/tpl/<id>` and asks for a `git merge`, both of which are exactly what they are
+in any other Git repository, and jj re-imports the result on its own.
+
+**Non-colocated** (`jj git init --no-colocate`) does not: there is no `.git` anywhere to discover, only a bare
+backing store nested inside `.jj/`. git-tpl reports this specifically —
+[`tpl::git::jj_not_colocated`](../reference/diagnostics.md#git) — rather than the generic "not a repository", and
+points at `jj git init --colocate` as the fix.
+
+A colocated workspace has sharp edges worth knowing, because they belong to jj's model, not git-tpl's:
+
+1. `refs/tpl/<id>` is invisible to `jj log` and to any revset until it is merged into a ref jj imports
+   (`refs/heads`, `refs/tags`, `refs/remotes`). There is no `jj`-native way to inspect it beforehand — use
+   `git show`/`git log` on the ref directly, as above.
+2. **Data-losing:** jj does not understand `MERGE_HEAD`. Running `jj commit` or `jj squash` while a merge is in
+   progress silently drops the second parent — the merge base the *next* `git tpl update` depends on. Finish a
+   merge with `git commit`, never with a jj command, until it is done.
+3. jj snapshots conflict markers as an ordinary file modification, not a jj conflict, so `jj resolve` does not
+   apply to them. Resolve with `git mergetool` or by hand, exactly as [`git tpl merge`](../usage/merge.md#conflicts)
+   already describes for plain Git.
+4. `git tpl init`'s attachment commit is written through the Git index (`.config/git.tpl.toml`). jj ignores the
+   index but imports the resulting `HEAD` regardless, so it works — it just shows up unusually in `jj op log`.
+5. git-tpl reads identity from Git configuration (`user.name`/`user.email`), not `jj config`. A jj-only user with
+   neither set in Git config gets `tpl::git::no_identity`.
+
 ## Append-only
 
 `git tpl update` always creates a *new* commit whose parent is the current tip of `refs/tpl/<id>`.

@@ -68,8 +68,21 @@ impl LibGit2 {
             RepositoryOpenFlags::empty(),
             std::iter::empty::<&std::ffi::OsStr>(),
         )
-        .map_err(|_| GitError::NotARepository {
-            path: path.to_path_buf(),
+        .map_err(|_| {
+            // A `.jj` upward from here without a discoverable `.git` means
+            // this is a non-colocated Jujutsu workspace: its backing store
+            // at `.jj/repo/store/git` is bare and invisible to Git's own
+            // discovery. `git init` would not fix it — it would create a
+            // second, unrelated repository — so the diagnosis has to differ.
+            if has_ancestor(path, ".jj") {
+                GitError::JujutsuNotColocated {
+                    path: path.to_path_buf(),
+                }
+            } else {
+                GitError::NotARepository {
+                    path: path.to_path_buf(),
+                }
+            }
         })?;
         Ok(Self { repo })
     }
@@ -1192,6 +1205,16 @@ fn backend(context: &str, error: &git2::Error) -> GitError {
         context: format!("could not {context}"),
         reason: error.message().to_string(),
     }
+}
+
+/// Whether `path` or one of its ancestors contains an entry named `name`.
+///
+/// Mirrors the upward search `open_ext` already performs for `.git`, so a
+/// `.jj` one directory up is detected exactly where a `.git` one directory up
+/// would have been. Plain `std::path` walking — no `git2` involved, and used
+/// only to choose which [`GitError`] a failed [`LibGit2::discover`] reports.
+fn has_ancestor(path: &Path, name: &str) -> bool {
+    std::iter::successors(Some(path), |p| p.parent()).any(|dir| dir.join(name).exists())
 }
 
 /// How far a clone got before it failed.

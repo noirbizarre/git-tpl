@@ -208,5 +208,6 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::git::remote_exists` | A remote of that name already exists. git-tpl never repoints one. |
 | `tpl::git::dirty_worktree` | The operation merges, and the worktree has uncommitted changes. |
 | `tpl::git::diverged` | The remote template ref has diverged. Nothing is force-pushed. |
+| `tpl::git::jj_not_colocated` | The path is a Jujutsu workspace without a colocated `.git`. |
 | `tpl::git::no_identity` | Git has no `user.name` or `user.email` configured. |
 | `tpl::git::backend` | Anything else libgit2 reported. |
