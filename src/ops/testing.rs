@@ -7,7 +7,7 @@
 //! closed to `files`, `absent`, `contains`, `lacks`, `error` and a snapshot. A
 //! case's `[commands]` are the one place invariant 5 has a narrow, deliberate
 //! exception — the harness spawns the process, never a `render`, `init` or an
-//! `update`. See ADR-016, ADR-027 and ADR-028.
+//! `update`. See ADR-016, ADR-027, ADR-028 and ADR-030.
 //!
 //! The area of every diagnostic here is `testing` rather than `test`, because
 //! `tests/diagnostics.rs` deliberately ignores codes whose area is `test` —
@@ -134,17 +134,25 @@ pub enum TestError {
         reason: String,
     },
 
-    /// `--write` was used on a template with no working tree.
-    #[error("`--write` needs a local template checkout")]
+    /// The template is not a local checkout.
+    ///
+    /// `test` never resolves a remote source — with or without `--ref` —
+    /// unlike every other command: there is no committed-revision story for
+    /// it the way there is for `render`, only a working tree, and a clone has
+    /// none to read. Checked once, up front, so `--write`, `--ref` and the
+    /// implicit dirty read all fail identically instead of three rules that
+    /// could disagree.
+    #[error("`test` only runs against a local checkout")]
     #[diagnostic(
-        code(tpl::testing::write_needs_local),
+        code(tpl::testing::remote_not_supported),
         help(
-            "a snapshot is written to the working tree, and `{origin}` has none.\n\
-             Clone it and run `git tpl test --write` there."
+            "`{origin}` is remote, and `test` reads the working tree directly \
+             rather than resolving a ref against a clone.\n\
+             Clone it locally and run `git tpl test` there instead."
         )
     )]
-    WriteNeedsLocal {
-        /// The source that has no working tree.
+    RemoteNotSupported {
+        /// The source that is not a local checkout.
         origin: String,
     },
 
@@ -971,8 +979,7 @@ impl Report {
 /// Run a template's test cases.
 ///
 /// The template is resolved **once**, so a report saying "12 cases at abc1234"
-/// is telling the truth even if the branch moved mid-run — and a remote
-/// template is cloned once rather than once per case.
+/// is telling the truth even if `HEAD` moved mid-run.
 pub fn run(
     target: Target<'_>,
     tests_dir: Option<&str>,
@@ -981,12 +988,12 @@ pub fn run(
     run_commands: bool,
     user: &UserConfig,
 ) -> Result<Report, OpError> {
-    // Before anything is resolved or rendered: `--write` on a source with no
-    // working tree cannot succeed, and finding that out after twelve renders
-    // wastes the user's time. The same locality rule `--dirty` uses, so the two
-    // flags cannot disagree about what "local" means.
-    if write && resolve::local_path(target.source).is_none() {
-        return Err(TestError::WriteNeedsLocal {
+    // Checked before anything is resolved, and unconditionally — not only for
+    // `--write` — so a remote `TEMPLATE` fails the same way whether or not
+    // `--ref` or `--write` is also given, rather than reaching a temporary
+    // clone under some flag combinations and not others.
+    if resolve::local_path(target.source).is_none() {
+        return Err(TestError::RemoteNotSupported {
             origin: target.source.to_string(),
         }
         .into());
@@ -1056,10 +1063,10 @@ pub fn run(
 /// Read the cases out of the resolved tree.
 ///
 /// From the tree and not the filesystem, so `--ref v1` runs *that tag's* cases
-/// and `--dirty` runs the uncommitted ones — the same meaning those flags have
-/// everywhere else. `--dirty` needs no special case here because
-/// `tree_from_workdir` has already built a synthetic tree of the working
-/// directory.
+/// and the implicit no-`--ref` default runs the uncommitted ones — the same
+/// meaning a resolved "dirty" tree has everywhere else in the tool. No special
+/// case is needed here: `tree_from_workdir` has already built a synthetic tree
+/// of the working directory before `discover` ever runs.
 fn discover(template: &Resolved, tests_dir: &str, filter: &[String]) -> Result<Vec<Case>, OpError> {
     // `Resolved.tree` is the repository root, not `root_tree`: the tests
     // directory is outside the render root, exactly like the manifest and the
@@ -1732,15 +1739,15 @@ fn snapshot_step(
 /// that tag's snapshots. Reading them off the filesystem would make `--ref` a
 /// lie.
 ///
-/// `--dirty` is the one exception, and reads the snapshot's own directory
-/// straight off disk rather than through `template.tree` — the
-/// whole-repository dirty tree, already filtered by `.gitignore`. A snapshot
-/// is data `--write` puts on disk directly, bypassing Git on purpose; letting
-/// an ordinary rule matching its own filename, a bare `MANIFEST` say, make
-/// that file disappear on read-back would disagree with what `--write` just
-/// produced (#116). There is no `--ref` to be a lie about here: `--dirty`
-/// already means "read the workdir", for the snapshot exactly as for
-/// everything else it reads.
+/// The implicit no-`--ref` default is the one exception, and reads the
+/// snapshot's own directory straight off disk rather than through
+/// `template.tree` — the whole-repository dirty tree, already filtered by
+/// `.gitignore`. A snapshot is data `--write` puts on disk directly, bypassing
+/// Git on purpose; letting an ordinary rule matching its own filename, a bare
+/// `MANIFEST` say, make that file disappear on read-back would disagree with
+/// what `--write` just produced (#116). There is no `--ref` to be a lie about
+/// here: no `--ref` already means "read the workdir", for the snapshot
+/// exactly as for everything else it reads.
 fn read_snapshot(
     template: &Resolved,
     tests_dir: &str,

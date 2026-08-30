@@ -3,13 +3,18 @@
 Run the test cases a template carries.
 
 ```sh
-git tpl test ./my-template
+git tpl test
 ```
 
 A template above a few files has conditionals, and without a suite the first person to find a broken one is the
 person generating a project from it.
 A case says *given these answers, this is what comes out* — and it says it in the template repository, next to
 the thing it describes.
+
+`test` takes an optional `--template PATH`, defaulting to the current directory, but only ever a local checkout —
+never a remote source, with or without `--ref`. There is also no `--root` to override the manifest's declared
+render subdirectory. `--template` is a flag rather than a positional so a bare case name is never mistaken for a
+template path — see [ADR-030](../adr/030-test-never-resolves-a-remote-template.md).
 
 ## A case
 
@@ -68,10 +73,9 @@ question, so an unrecognised key here is always the case's own mistake. See
 | Flag | Effect |
 |---|---|
 | `[CASE]...` | Run only the named cases. A name, not a path: `tests/minimal.toml` is `minimal`. |
+| `--template` | The local checkout to test; defaults to the current directory. Never a remote source. |
 | `--tests` | Read cases from this directory instead of `tests`. |
-| `--ref` | Branch, tag or commit to test. |
-| `--root` | Test this subdirectory instead of the manifest's. |
-| `--dirty` | Test the working tree. Local templates only. |
+| `--ref` | Branch, tag or commit to test; without it, the working tree. |
 | `--write` | Record each case's rendering as its snapshot. |
 | `--skip-commands` | Skip every case's `[commands]` for this run. |
 
@@ -206,7 +210,7 @@ snapshot = true
 ```
 
 ```sh
-git tpl test ./my-template --write
+git tpl test --write
 ```
 
 records each case's rendering under `tests/__snapshots__/<case>/`, and every later run compares against it.
@@ -247,37 +251,33 @@ Four things worth knowing:
 - **`--write` does not stage or commit anything, and does not bless a broken case.** The `expect` assertions
   still run and still fail. You review the diff and commit it.
 
-`--write` needs a local checkout, because the snapshot is written to a working tree.
-On a template with none, it fails with `tpl::testing::write_needs_local`.
+`--write` writes into the checked-out template's working tree — there is nowhere else for a snapshot to go.
 
 ## Cases come from the revision, not from disk
 
 | Given | Cases and snapshots come from |
 |---|---|
-| neither `--ref` nor `--dirty` | The local checkout's checked-out branch, at its `HEAD` — or, for a remote source, the remote's default branch. |
+| no `--ref` | The working tree, uncommitted changes included. |
 | `--ref X` | Commit, branch or tag `X`, committed. |
-| `--dirty` | The working tree, uncommitted changes included. Local templates only. |
 
-`git tpl test ./tpl --ref v1.2.0` runs *that tag's* cases against that tag's template, and compares against that
-tag's snapshots.
-`--dirty` runs the uncommitted ones.
-Reading cases off the filesystem instead would make `--ref` mean something different here from everywhere else.
-
-`--ref` and `--dirty` are mutually exclusive: a working tree and a named revision cannot both be "the" version
-under test, and asking for both is refused at the parser rather than silently picking one.
-
-The one exception is `--write`, which writes to the working tree — there is nowhere else to put a file somebody
-has to review.
+`git tpl test --ref v1.2.0` runs *that tag's* cases against that tag's template, and compares against that tag's
+snapshots.
+Without `--ref`, `test` reads the working tree instead: the point of testing is catching a broken conditional
+before it is committed, not after.
+Reading cases off the filesystem is not a special case, though it may look like one: the resolver builds a
+synthetic tree of the working directory the same way it always has for a `--dirty` render on any other command, so
+an edited-but-uncommitted case is picked up by the same code path, with the same `.gitignore` handling the
+rendering got. See [ADR-030](../adr/030-test-never-resolves-a-remote-template.md).
 
 A snapshot is not subject to the project's `.gitignore` either, deliberately: it is data `--write` recorded, not a
 project file a render produced.
 An ordinary rule matching a snapshot's own filename — a bare `MANIFEST`, say, the Python `setup.py sdist`
-convention — does not stop `--dirty` from reading it back.
+convention — does not stop it from being read back.
 
 ## In CI
 
 ```sh
-git tpl test .
+git tpl test
 ```
 
 Exit `0` if every case passed, `1` if any did not, and `1` with a [diagnostic code](../reference/diagnostics.md)

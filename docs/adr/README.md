@@ -38,3 +38,4 @@ explains the code that existed.
 | [027](027-test-case-commands.md) | A test case may declare commands, run by the harness alone |
 | [028](028-test-case-trust.md) | A test case declares its own trust in remote data sources |
 | [029](029-test-case-answers-are-strict.md) | A test case's `[answers]` is always validated strictly |
+| [030](030-test-never-resolves-a-remote-template.md) | `test` never resolves a remote template, dirty by default |

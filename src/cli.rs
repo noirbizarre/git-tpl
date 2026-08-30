@@ -339,33 +339,47 @@ pub struct LintArgs {
 /// and that is the point of it — a `--answer` on the command line would change
 /// what every case asserts without changing what any case says. See the
 /// argument tests at the bottom of this file.
+///
+/// Deliberately carries no `--root`: that overrides the manifest's declared
+/// render subdirectory, the same meaning it has everywhere else, and a case
+/// exercises the template's own declared root — a hypothetical alternate one
+/// is what `render --root` is for, not a reason to complicate what a case
+/// asserts. And deliberately carries no `--dirty`: with no `--ref`, reading
+/// the working tree — not the last commit — is the only sensible default
+/// here, since the whole point of testing is catching a broken conditional
+/// before it is committed. `--ref` remains, to pin a run to an old tag or a
+/// specific commit instead.
+///
+/// `--template` remains too, but local checkouts only: `test` never resolves
+/// a remote source, with or without `--ref` — there is no committed-revision
+/// story for it the way there is for `render`, only a working tree, and a
+/// clone has none. It is a flag rather than the positional every other
+/// command uses, deliberately: `test` already has one positional list —
+/// `CASE` — and a bare `git tpl test minimal` has to mean "filter to the
+/// case named `minimal`" unambiguously, not "test the template at
+/// `./minimal`". See ADR-030.
 #[derive(Debug, clap::Args)]
 pub struct TestArgs {
-    /// The template to test; defaults to the current directory
-    #[arg(value_name = "TEMPLATE", default_value = ".")]
-    pub template: String,
-
     /// Run only the cases with these names
     ///
     /// A name, not a path: `tests/minimal.toml` is the case `minimal`.
     #[arg(value_name = "CASE")]
     pub cases: Vec<String>,
 
+    /// The local checkout to test
+    ///
+    /// Never a remote source: `test` reads a working tree directly, and a
+    /// clone has none to read.
+    #[arg(long, value_name = "PATH", default_value = ".")]
+    pub template: String,
+
     /// Read cases from this directory instead of `tests`
     #[arg(long, value_name = "DIR")]
     pub tests: Option<String>,
 
-    /// The branch, tag or commit to test
-    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
+    /// The branch, tag or commit to test; without it, the working tree
+    #[arg(long, value_name = "REF")]
     pub r#ref: Option<String>,
-
-    /// Test this subdirectory instead of the manifest's root
-    #[arg(long, value_name = "PATH")]
-    pub root: Option<String>,
-
-    /// Test the template's working tree rather than its HEAD
-    #[arg(long)]
-    pub dirty: bool,
 
     /// Record each case's rendering as its snapshot
     #[arg(long)]
@@ -761,10 +775,13 @@ mod tests {
         assert!(Cli::try_parse_from(["git-tpl", "test", "--answers-from", "a.toml"]).is_err());
     }
 
-    /// The template argument is optional, and the positionals after it are
-    /// case names rather than a second template.
+    /// `--template` is a flag, not a positional — unlike every other command —
+    /// specifically so a bare case name is never ambiguous with a template
+    /// path. This is the regression case: `git tpl test minimal` must filter
+    /// to the case `minimal` against the default template, not try to test
+    /// `./minimal`.
     #[test]
-    fn test_defaults_to_the_current_directory_and_takes_case_names() {
+    fn test_case_names_are_never_confused_with_the_template_path() {
         let cli = Cli::try_parse_from(["git-tpl", "test"]).unwrap();
         let Command::Test(args) = cli.command else {
             panic!("expected test")
@@ -772,12 +789,29 @@ mod tests {
         assert_eq!(args.template, ".");
         assert!(args.cases.is_empty());
 
-        let cli = Cli::try_parse_from(["git-tpl", "test", "./tpl", "minimal", "with-ci"]).unwrap();
+        let cli = Cli::try_parse_from(["git-tpl", "test", "minimal", "with-ci"]).unwrap();
         let Command::Test(args) = cli.command else {
             panic!("expected test")
         };
-        assert_eq!(args.template, "./tpl");
+        assert_eq!(args.template, "."); // unchanged: no `--template` given
         assert_eq!(args.cases, ["minimal", "with-ci"]);
+
+        let cli =
+            Cli::try_parse_from(["git-tpl", "test", "--template", "../tpl", "minimal"]).unwrap();
+        let Command::Test(args) = cli.command else {
+            panic!("expected test")
+        };
+        assert_eq!(args.template, "../tpl");
+        assert_eq!(args.cases, ["minimal"]);
+    }
+
+    /// `--dirty` and `--root` used to exist on `test`; both are gone (ADR-030).
+    /// Refusing them outright is better than silently ignoring an old
+    /// invocation.
+    #[test]
+    fn test_refuses_the_removed_dirty_and_root_flags() {
+        assert!(Cli::try_parse_from(["git-tpl", "test", "--dirty"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "test", "--root", "sub"]).is_err());
     }
 
     /// `show` reads one path. A second one is a typo — most likely a `--`
@@ -823,6 +857,9 @@ mod tests {
     /// Combined, `--dirty` used to win silently and `--ref` had no effect at
     /// all — refusing the combination is better than a flag that is accepted
     /// and then ignored.
+    ///
+    /// `test` is not in this list: it dropped `--dirty` entirely (ADR-030), so
+    /// there is nothing left on it for `--ref` to conflict with.
     #[test]
     fn ref_and_dirty_are_mutually_exclusive_everywhere_both_exist() {
         assert!(Cli::try_parse_from(["git-tpl", "init", "t", "--ref", "main", "--dirty"]).is_err());
@@ -834,7 +871,6 @@ mod tests {
             .is_err()
         );
         assert!(Cli::try_parse_from(["git-tpl", "lint", "t", "--ref", "main", "--dirty"]).is_err());
-        assert!(Cli::try_parse_from(["git-tpl", "test", "t", "--ref", "main", "--dirty"]).is_err());
         assert!(
             Cli::try_parse_from(["git-tpl", "questions", "t", "--ref", "main", "--dirty"]).is_err()
         );

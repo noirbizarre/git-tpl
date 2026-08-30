@@ -12,7 +12,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{Repo, Template, tpl_outside};
+use common::{Repo, Template, tpl, tpl_outside};
 
 /// A template with one file, `marker.txt`, so a case's `commands.rendered`/
 /// `commands.after` have something in the sandbox that came from the render
@@ -28,20 +28,12 @@ fn template(parent: &Path, cases: &[(&str, &str)]) -> Template {
     built
 }
 
-/// Run `git tpl test` from outside any repository, against a template path.
+/// Run `git tpl test` from inside the template's own repository. `--template`
+/// defaults to `.`, so none of these cases need to pass it explicitly.
 fn run(template: &Template, args: &[&str]) -> common::Output {
-    let mut all = vec!["--json", "test", "__TEMPLATE__"];
+    let mut all = vec!["--json", "test"];
     all.extend_from_slice(args);
-    let source = template.source();
-    let all: Vec<&str> = all
-        .into_iter()
-        .map(|arg| if arg == "__TEMPLATE__" { &*source } else { arg })
-        .collect();
-    tpl_outside(
-        template.repo.path.parent().expect("parent"),
-        template.repo.config_home(),
-        &all,
-    )
+    tpl(&template.repo, &all)
 }
 
 #[test]
@@ -180,7 +172,7 @@ fn tpl_test_commands_false_disables_them_without_a_flag() {
     let output = tpl_outside(
         &workspace.path,
         workspace.config_home(),
-        &["--json", "test", &source],
+        &["--json", "test", "--template", &source],
     )
     .success();
     let json = output.json();
@@ -199,13 +191,7 @@ fn the_human_output_reports_how_many_commands_ran() {
         )],
     );
 
-    tpl_outside(
-        template.repo.path.parent().expect("parent"),
-        template.repo.config_home(),
-        &["test", &template.source()],
-    )
-    .success()
-    .says("1 command");
+    tpl(&template.repo, &["test"]).success().says("1 command");
 }
 
 #[test]
@@ -219,14 +205,10 @@ fn a_failing_command_names_the_step_and_the_command() {
         )],
     );
 
-    tpl_outside(
-        template.repo.path.parent().expect("parent"),
-        template.repo.config_home(),
-        &["test", &template.source()],
-    )
-    .code(1)
-    .says("[before]")
-    .says("ls does-not-exist");
+    tpl(&template.repo, &["test"])
+        .code(1)
+        .says("[before]")
+        .says("ls does-not-exist");
 }
 
 // --- `commands.env` (issue #130) --------------------------------------------

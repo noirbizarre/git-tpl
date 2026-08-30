@@ -7,7 +7,7 @@ mod common;
 
 use std::path::Path;
 
-use common::{Repo, Template, tpl_outside};
+use common::{Repo, Template, tpl, tpl_outside};
 
 /// A template with a `[answers]`-driven conditional, plus whatever cases the
 /// test needs.
@@ -47,20 +47,12 @@ default = false
     built
 }
 
-/// Run `git tpl test` from outside any repository, against a template path.
+/// Run `git tpl test` from inside the template's own repository. `--template`
+/// defaults to `.`, so none of these cases need to pass it explicitly.
 fn run(template: &Template, args: &[&str]) -> common::Output {
-    let mut all = vec!["test", "__TEMPLATE__"];
+    let mut all = vec!["test"];
     all.extend_from_slice(args);
-    let source = template.source();
-    let all: Vec<&str> = all
-        .into_iter()
-        .map(|arg| if arg == "__TEMPLATE__" { &*source } else { arg })
-        .collect();
-    tpl_outside(
-        template.repo.path.parent().expect("parent"),
-        template.repo.config_home(),
-        &all,
-    )
+    tpl(&template.repo, &all)
 }
 
 // --- discovery --------------------------------------------------------------
@@ -115,6 +107,8 @@ fn cases_are_read_in_toml_json_and_yaml() {
     assert_eq!(output.json()["summary"]["passed"], 3);
 }
 
+/// Also the regression case for keeping `--template` a flag rather than a
+/// positional: a bare case name here must never be read as a template path.
 #[test]
 fn a_positional_filter_runs_only_the_named_case() {
     let dir = tempfile::tempdir().unwrap();
@@ -222,10 +216,10 @@ fn a_tests_flag_reads_cases_from_another_directory() {
     assert_eq!(output.json()["cases"][0]["path"], "cases/only.toml");
 }
 
-// --- reading from the revision ----------------------------------------------
+// --- dirty by default, `--ref` pins a committed revision --------------------
 
 #[test]
-fn cases_are_read_from_the_resolved_revision_not_the_working_tree() {
+fn an_uncommitted_case_change_is_read_by_default() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(
         dir.path(),
@@ -235,33 +229,14 @@ fn cases_are_read_from_the_resolved_revision_not_the_working_tree() {
         )],
     );
 
-    // Broken on disk, but not committed. `--ref`-less means HEAD, and HEAD is
-    // still correct.
+    // Broken on disk, but not committed. With no `--ref`, the working tree is
+    // read (ADR-030), so the broken case is what runs.
     template.repo.write(
         "tests/minimal.toml",
         "[answers]\nproject_name = \"a\"\n\n[expect]\nfiles = [\"nope\"]\n",
     );
 
-    run(&template, &["--json"]).success();
-}
-
-#[test]
-fn dirty_reads_the_uncommitted_cases() {
-    let dir = tempfile::tempdir().unwrap();
-    let template = template(
-        dir.path(),
-        &[(
-            "tests/minimal.toml",
-            "[answers]\nproject_name = \"a\"\n\n[expect]\nfiles = [\"pyproject.toml\"]\n",
-        )],
-    );
-
-    template.repo.write(
-        "tests/minimal.toml",
-        "[answers]\nproject_name = \"a\"\n\n[expect]\nfiles = [\"nope\"]\n",
-    );
-
-    let output = run(&template, &["--json", "--dirty"]).code(1);
+    let output = run(&template, &["--json"]).code(1);
     assert_eq!(
         output.json()["cases"][0]["failures"][0]["kind"],
         "missingFile"
@@ -289,6 +264,72 @@ fn a_ref_flag_runs_the_cases_recorded_at_that_tag() {
 
     run(&template, &["--json", "--ref", "v1"]).success();
     run(&template, &["--json"]).code(1);
+}
+
+// --- `TEMPLATE` names a checkout ---------------------------------------------
+
+/// The point of keeping `--template` at all (ADR-030): a script that has not
+/// `cd`ed into the template can still name it, without needing a remote
+/// source or a manifest-root override.
+#[test]
+fn a_template_named_by_a_relative_path_is_testable_without_cding_into_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "[answers]\nproject_name = \"a\"\n\n[expect]\nfiles = [\"pyproject.toml\"]\n",
+        )],
+    );
+
+    // `Repo::init_in` always names the template's directory "template".
+    let output = tpl_outside(
+        dir.path(),
+        template.repo.config_home(),
+        &["--json", "test", "--template", "template"],
+    )
+    .success();
+    assert_eq!(output.json()["summary"]["passed"], 1);
+}
+
+/// Unlike every other command, `test` never resolves a remote source — there
+/// is no committed-revision story for it the way there is for `render`, and
+/// refusing it is unconditional: naming `--ref` does not make a remote
+/// `--template` acceptable, because there is still no working tree to read.
+#[test]
+fn a_remote_source_is_refused_even_with_a_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[("tests/c.toml", "[answers]\nproject_name = \"a\"\n")],
+    );
+    template.repo.git(&["tag", "v1"]);
+
+    let bare = dir.path().join("bare.git");
+    Repo::at(template.repo.path.clone()).git(&[
+        "clone",
+        "--bare",
+        "-q",
+        &template.source(),
+        bare.to_str().unwrap(),
+    ]);
+    let url = common::file_url(&bare);
+
+    let output = tpl_outside(
+        dir.path(),
+        template.repo.config_home(),
+        &["--json", "test", "--template", &url],
+    )
+    .failure();
+    assert_eq!(output.error_code(), "tpl::testing::remote_not_supported");
+
+    let output = tpl_outside(
+        dir.path(),
+        template.repo.config_home(),
+        &["--json", "test", "--template", &url, "--ref", "v1"],
+    )
+    .failure();
+    assert_eq!(output.error_code(), "tpl::testing::remote_not_supported");
 }
 
 // --- assertions -------------------------------------------------------------
@@ -651,11 +692,12 @@ fn a_recorded_snapshot_is_compared_on_the_next_run() {
     assert_eq!(output.json()["summary"]["snapshotsCompared"], 1);
 }
 
-/// #51. `--write` records a snapshot through the filesystem; `--dirty` reads it
-/// back through the working-tree walk. The two halves have to agree, and they
-/// did not: a global `core.excludesFile` hiding `mise.toml` made the walk drop
-/// `files/mise.toml` while leaving the `MANIFEST` that lists it, so recording a
-/// snapshot made every subsequent `--dirty` run fail with `snapshot_read`.
+/// #51. `--write` records a snapshot through the filesystem; the dirty
+/// read-back reads it through the working-tree walk. The two halves have to
+/// agree, and they did not: a global `core.excludesFile` hiding `mise.toml`
+/// made the walk drop `files/mise.toml` while leaving the `MANIFEST` that
+/// lists it, so recording a snapshot made every subsequent run fail with
+/// `snapshot_read`.
 ///
 /// The negation is not contrived. A template that renders a `mise.toml` ships
 /// `!mise.toml` in its `.gitignore`, and the *rendered* `.gitignore` then
@@ -682,7 +724,7 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
     // never touches the developer's own ignore rules.
     common::global_gitignore(template.repo.config_home(), "mise.toml\nmise.lock\n");
 
-    run(&template, &["--dirty", "--write"]).success();
+    run(&template, &["--write"]).success();
     assert!(
         template
             .repo
@@ -694,7 +736,7 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
 
     // The read-back. Before the fix this was `tpl::testing::snapshot_read`:
     // "`MANIFEST` lists `mise.toml`, which is not under `files/`".
-    let output = run(&template, &["--dirty", "--json"]).success();
+    let output = run(&template, &["--json"]).success();
     assert_eq!(output.json()["cases"][0]["snapshot"], "compared");
 }
 
@@ -702,7 +744,7 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
 /// rule — a bare `MANIFEST`, as Python's `setup.py sdist` convention writes —
 /// matching the snapshot's own manifest file at any depth. `--write` put the
 /// file on disk regardless, since it never goes through Git at all; before
-/// the fix, `--dirty` read-back dropped it from the synthetic tree anyway and
+/// the fix, the dirty read-back dropped it from the synthetic tree anyway and
 /// reported `tpl::testing::snapshot_read`: "there is no `MANIFEST`".
 #[test]
 fn a_snapshot_whose_manifest_matches_an_ordinary_gitignore_rule_reads_back() {
@@ -714,7 +756,7 @@ fn a_snapshot_whose_manifest_matches_an_ordinary_gitignore_rule_reads_back() {
     template.repo.write(".gitignore", "MANIFEST\n");
     template.repo.commit_all("test: an ordinary MANIFEST rule");
 
-    run(&template, &["--dirty", "--write"]).success();
+    run(&template, &["--write"]).success();
     assert!(
         template
             .repo
@@ -723,7 +765,7 @@ fn a_snapshot_whose_manifest_matches_an_ordinary_gitignore_rule_reads_back() {
         "sanity: the rule really does keep git from tracking it"
     );
 
-    let output = run(&template, &["--dirty", "--json"]).success();
+    let output = run(&template, &["--json"]).success();
     assert_eq!(output.json()["cases"][0]["snapshot"], "compared");
 }
 
@@ -740,7 +782,7 @@ fn an_ignored_path_outside_the_render_root_is_not_warned_about() {
     template.repo.write(".opencode/plans/one.md", "a plan\n");
     common::global_gitignore(template.repo.config_home(), ".opencode/\n");
 
-    run(&template, &["--dirty"])
+    run(&template, &[])
         .success()
         .silent_about("skipped by .gitignore");
 }
@@ -1066,9 +1108,11 @@ fn the_snapshot_manifest_records_the_executable_bit() {
 
     built.repo.commit_all("test: record the snapshot");
 
-    // Drop the bit in the template. Only the mode changed, and the case must
-    // still fail — on Windows the file on disk cannot carry it, which is why
-    // the manifest does.
+    // Drop the bit in the template's committed *mode*, not on disk — on
+    // Windows the file on disk cannot carry it, which is why the manifest
+    // does, and it is why this asserts against `--ref HEAD` rather than the
+    // default working-tree read: the disk copy still has the bit set, and
+    // only Git's own record of the mode changed.
     built
         .repo
         .git(&["update-index", "--chmod=-x", "template/run.sh"]);
@@ -1076,7 +1120,7 @@ fn the_snapshot_manifest_records_the_executable_bit() {
         .repo
         .git(&["commit", "-q", "-m", "chore: drop the bit"]);
 
-    let output = run(&built, &["--json"]).code(1);
+    let output = run(&built, &["--json", "--ref", "HEAD"]).code(1);
     let change = &output.json()["cases"][0]["failures"][0]["changes"][0];
     assert_eq!(change["path"], "run.sh");
     assert_eq!(change["modeOnly"], true);
@@ -1108,37 +1152,6 @@ fn a_binary_file_round_trips_through_a_snapshot_without_a_patch() {
     let change = &output.json()["cases"][0]["failures"][0]["changes"][0];
     assert_eq!(change["kind"], "modified");
     assert!(change["patch"].is_null(), "no patch for binary");
-}
-
-#[test]
-fn write_is_refused_on_a_template_with_no_working_tree() {
-    let dir = tempfile::tempdir().unwrap();
-    let template = template(
-        dir.path(),
-        &[("tests/c.toml", "[answers]\nproject_name = \"a\"\n")],
-    );
-
-    let bare = dir.path().join("bare.git");
-    Repo::at(template.repo.path.clone()).git(&[
-        "clone",
-        "--bare",
-        "-q",
-        &template.source(),
-        bare.to_str().unwrap(),
-    ]);
-
-    let output = tpl_outside(
-        dir.path(),
-        template.repo.config_home(),
-        &[
-            "--json",
-            "test",
-            &format!("file://{}", bare.display()),
-            "--write",
-        ],
-    )
-    .failure();
-    assert_eq!(output.error_code(), "tpl::testing::write_needs_local");
 }
 
 #[test]
