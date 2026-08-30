@@ -1651,6 +1651,9 @@ pub struct Status {
     pub recorded: Option<Recorded>,
     /// What the configured `ref` resolves to now.
     pub available_revision_description: Option<String>,
+    /// The commit `available_revision_description` describes, for a caller
+    /// that wants the raw id rather than parsing the prose.
+    pub available_commit: Option<Oid>,
     /// Whether the template has moved since the last rendering.
     pub template_moved: bool,
     /// Whether the ref's tip is an ancestor of `HEAD`.
@@ -1707,6 +1710,7 @@ pub fn status(
     let available_revision_description = resolved
         .as_ref()
         .map(|r| describe_revision(&r.reference, r.revision));
+    let available_commit = resolved.as_ref().map(|r| r.revision);
 
     let template_moved = match (&resolved, &recorded) {
         // A `--dirty` resolution reports the *base* commit, so comparing
@@ -1754,6 +1758,7 @@ pub fn status(
         tip,
         recorded,
         available_revision_description,
+        available_commit,
         template_moved,
         merged,
         remote,
@@ -2405,6 +2410,7 @@ mod tests {
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
             available_revision_description: None,
+            available_commit: None,
             template_moved: false,
             merged: true,
             remote: None,
@@ -2425,6 +2431,7 @@ mod tests {
             tip: Some(Oid::from_bytes([1; 20])),
             recorded: None,
             available_revision_description: None,
+            available_commit: None,
             template_moved: false,
             merged: true,
             remote: None,

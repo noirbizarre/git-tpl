@@ -1,6 +1,6 @@
 ---
 source: tests/snapshots.rs
-expression: output.transcript()
+expression: transcript
 ---
 exit: 2
 --- stdout ---
@@ -13,6 +13,7 @@ exit: 2
   "renderedCommit": "[sha]",
   "dirty": false,
   "availableRevision": "main ([short])",
+  "availableCommit": "[sha]",
   "templateMoved": true,
   "merged": true,
   "renderingCount": 1,

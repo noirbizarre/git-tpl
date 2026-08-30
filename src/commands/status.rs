@@ -129,6 +129,7 @@ fn json(status: &ops::Status) -> serde_json::Value {
         "renderedCommit": recorded.and_then(|r| r.revision.map(|c| c.to_hex())),
         "dirty": recorded.map(|r| r.dirty).unwrap_or(false),
         "availableRevision": status.available_revision_description,
+        "availableCommit": status.available_commit.map(|c| c.to_hex()),
         "templateMoved": status.template_moved,
         "merged": status.merged,
         "renderingCount": status.rendering_count,
