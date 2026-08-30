@@ -139,7 +139,7 @@ pub struct DataSourceDecl {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 
-    /// `toml` or `json`. Inferred from the extension when absent.
+    /// `toml`, `json` or `yaml`. Inferred from the extension when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
 
