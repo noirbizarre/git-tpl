@@ -819,6 +819,46 @@ MIT = "MIT License"
     pub fn source(&self) -> String {
         self.repo.path.to_string_lossy().into_owned()
     }
+
+    /// A template that `[extends]` `parent`, pinned to a tag on its current
+    /// tip.
+    ///
+    /// `name` is both the child's own repository directory (a sibling of
+    /// `parent`'s) and its manifest `name`, so a multi-level chain can call
+    /// this repeatedly with a fresh name at each layer without repositories
+    /// colliding on disk. `manifest_extra` is raw TOML appended after
+    /// `[extends]` — a test's own `[questions]`, `[computed]`, `[data]` or
+    /// `[remotes]` overrides. `files` are written under `template/`, exactly
+    /// like [`Template::with_shared`]'s `files`.
+    pub fn extending(
+        name: &str,
+        parent: &Template,
+        tag: &str,
+        manifest_extra: &str,
+        files: &[(&str, &str)],
+    ) -> Self {
+        parent.repo.git(&["tag", tag]);
+        let source = parent.source();
+        let dir = parent
+            .repo
+            .path
+            .parent()
+            .expect("a template repository has a parent directory")
+            .to_path_buf();
+
+        let repo = Repo::init_in(&dir, name);
+        repo.write(
+            "template.toml",
+            &format!(
+                "name = \"{name}\"\n\n[extends]\nsource = \"{source}\"\nrev = \"{tag}\"\n\n{manifest_extra}\n"
+            ),
+        );
+        for (path, content) in files {
+            repo.write(&format!("template/{path}"), content);
+        }
+        repo.commit_all("feat: initial template");
+        Self { repo }
+    }
 }
 
 /// A workspace holding a template and a project side by side.

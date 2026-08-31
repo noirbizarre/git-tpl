@@ -76,7 +76,8 @@ src/
 │   └── libgit2.rs   the only implementation
 ├── ops/             orchestration, one function per command
 │   ├── mod.rs       init, update, status, diff, merge, fetch, push, and the rest
-│   ├── resolve.rs   fetching a template to a revision
+│   ├── resolve.rs   fetching a template to a revision, and its `[extends]` chain (ADR-034)
+│   ├── extends.rs   merging an `[extends]` chain's manifests into one (ADR-034)
 │   ├── backport.rs  the patch that carries a fix upstream (ADR-020)
 │   ├── hunks.rs     interactive hunk selection (ADR-023)
 │   ├── unsubstitute.rs  reversing a substitution in a change (ADR-022)
@@ -90,8 +91,9 @@ src/
 
 `ops/` holds one *function* per command in `mod.rs` — `init`, `update`, `status`, `diff`, `merge`, `fetch`, `push`,
 `lint`, `questions` and the rest — and a file of its own for each command too large to be one: `backport`,
-`testing`, `hunks`, `unsubstitute`, plus `resolve` for fetching a template. `commands/` is the directory with one
-module per subcommand; that is where argument handling and output formatting live, and nothing else.
+`testing`, `hunks`, `unsubstitute`, plus `resolve` for fetching a template and `extends` for merging an `[extends]`
+chain. `commands/` is the directory with one module per subcommand; that is where argument handling and output
+formatting live, and nothing else.
 
 Dependencies point inward. `ops` uses `render`, `graph`, `git`; nothing in `template/` or `render.rs` knows a
 command exists.

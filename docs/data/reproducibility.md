@@ -8,6 +8,11 @@ This page is about how much of that answer git-tpl can give.
 **The template.** `ref` resolves to a commit SHA, recorded in the trailers as `Template-Commit`.
 Rendering that revision again gives the same template files.
 
+**A template's parent, if it has one.** `[extends].rev` follows exactly the same rule as `ref` above — a tag or a
+SHA is a pin, a branch is rejected outright, and the resolved commit is recorded as `Template-Extends`, one per
+ancestor. This is not a second rule invented for inheritance; it is the same one, applied to the same kind of
+reference. See [ADR-034](../adr/034-template-inheritance.md).
+
 **Template data.** Read from the template's Git tree at that same commit, so it is pinned by the template
 revision.
 There is no second thing to pin, and no way for a template's files and its data to drift apart.

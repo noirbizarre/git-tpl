@@ -540,16 +540,29 @@ pub fn validate_pattern(name: &str, question: &Question, answer: &Value) -> Resu
 /// read out of the tree once, up front, by
 /// [`Resolved::partials`](crate::ops::Resolved::partials).
 ///
-/// A `BTreeMap` rather than a `HashMap` because invariant 2 forbids iteration
-/// order that varies between runs — here it decides the order of the names
-/// listed when a lookup fails.
+/// Each name maps to *every* declaration of it across an `[extends]` chain,
+/// nearest (the template actually resolved) first — for a template with no
+/// parent, that is always exactly one. A `BTreeMap` rather than a `HashMap`
+/// because invariant 2 forbids iteration order that varies between runs —
+/// here it decides the order of the names listed when a lookup fails.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct Partials(BTreeMap<String, String>);
+pub struct Partials(BTreeMap<String, Vec<String>>);
+
+/// The loader namespace ADR-012 reserved for reaching an ancestor's own file.
+/// See ADR-034.
+pub const PARENT_PREFIX: &str = "parent:";
 
 impl Partials {
-    /// Collect partials from `name -> source` pairs.
+    /// Collect one layer's partials from `name -> source` pairs.
+    ///
+    /// `list_tree` never yields two entries at the same path within one tree,
+    /// so within one layer each name maps to exactly one declaration.
     pub fn new(entries: impl IntoIterator<Item = (String, String)>) -> Self {
-        Self(entries.into_iter().collect())
+        let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for (name, content) in entries {
+            map.entry(name).or_default().push(content);
+        }
+        Self(map)
     }
 
     /// No partials at all — the common case, and every call site's fallback.
@@ -557,9 +570,44 @@ impl Partials {
         Self(BTreeMap::new())
     }
 
+    /// Merge an `[extends]` chain's own partial sets into one.
+    ///
+    /// `layers` must already be ordered nearest first — the template actually
+    /// resolved, then its parent, then its grandparent, and so on. A bare
+    /// name resolves to the nearest layer that declares it (ADR-034): the
+    /// same "the unit of override is the name" rule already applied to
+    /// `[data]`, extended to files outside the render root instead of
+    /// invented fresh for them.
+    pub fn merge_chain(layers: impl IntoIterator<Item = Partials>) -> Self {
+        let mut merged: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for layer in layers {
+            for (name, mut declarations) in layer.0 {
+                merged.entry(name).or_default().append(&mut declarations);
+            }
+        }
+        Self(merged)
+    }
+
     /// The names a template may import, in sorted order.
+    ///
+    /// Bare names only — `parent:x` is not a name of its own, it is a way of
+    /// asking for a *shadowed* declaration of `x`, and listing it here would
+    /// suggest an import a typo could not have meant.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.0.keys().map(String::as_str)
+    }
+
+    /// Drop this layer's own declaration of each name in `excluded`, if any.
+    ///
+    /// For an ancestor's own `[extends].remove` (ADR-034): applied to that
+    /// ancestor's own single-layer `Partials`, before it is folded into the
+    /// chain by [`Partials::merge_chain`], so a removed partial is absent from
+    /// the merge entirely rather than merely unreachable by a bare name.
+    pub fn without(mut self, excluded: &[String]) -> Self {
+        for name in excluded {
+            self.0.remove(name);
+        }
+        self
     }
 
     /// Whether there is nothing to load.
@@ -568,8 +616,17 @@ impl Partials {
     }
 
     /// The source of one partial.
+    ///
+    /// A bare name resolves to the nearest declaration. `parent:name` means
+    /// "the next declaration of that same name, one layer further out" — the
+    /// value a bare reference would have resolved to had the nearer layer not
+    /// overridden it. `None` when there is no such shadowed declaration,
+    /// including — always — for a template with no `[extends]` at all.
     pub fn get(&self, name: &str) -> Option<&str> {
-        self.0.get(name).map(String::as_str)
+        match name.strip_prefix(PARENT_PREFIX) {
+            Some(rest) => self.0.get(rest)?.get(1).map(String::as_str),
+            None => self.0.get(name)?.first().map(String::as_str),
+        }
     }
 }
 

@@ -547,7 +547,15 @@ impl<'r> Rendered<'r> {
 /// data-backed choices on a conditional branch without imposing the cost on
 /// everyone.
 pub struct Loader<'a> {
-    template: TemplateTree<'a>,
+    // Index `0` is the template actually resolved; index `i + 1` is the
+    // ancestor `data_origin`'s value `i` names. A template with no
+    // `[extends]` always has exactly one entry here.
+    templates: Vec<TemplateTree<'a>>,
+    // `[data]` entry name -> index into `templates`, offset by one from
+    // `ops::extends::Merged::data_origin` (whose `0` means "the nearest
+    // parent", i.e. `templates[1]`). Absent means "read from `templates[0]`",
+    // which is every entry for a template with no `[extends]`.
+    data_origin: BTreeMap<String, usize>,
     // `None` when there is no project — `git tpl render --output` and
     // `git tpl lint` resolve a template on its own. A `local` source then has
     // nothing to be relative *to*, which is refused rather than guessed at:
@@ -581,7 +589,8 @@ impl<'a> Loader<'a> {
     /// remember to close the gate.
     pub fn new(template: TemplateTree<'a>, project_root: Option<PathBuf>) -> Self {
         Self {
-            template,
+            templates: vec![template],
+            data_origin: BTreeMap::new(),
             project_root,
             cache: BTreeMap::new(),
             provenance: Vec::new(),
@@ -591,10 +600,38 @@ impl<'a> Loader<'a> {
         }
     }
 
+    /// Extend a loader with an `[extends]` chain's own ancestor trees.
+    ///
+    /// `ancestors` is ordered nearest first, matching
+    /// [`crate::ops::resolve::Resolved`]'s own order. `data_origin` names,
+    /// for each `[data]` entry an ancestor currently contributes, which one —
+    /// `0` is the nearest parent, i.e. `ancestors[0]` — so a `kind = "template"`
+    /// read reaches the tree that actually declared it, not the leaf's.
+    pub fn with_ancestors(
+        mut self,
+        ancestors: Vec<TemplateTree<'a>>,
+        data_origin: BTreeMap<String, usize>,
+    ) -> Self {
+        self.templates.extend(ancestors);
+        self.data_origin = data_origin;
+        self
+    }
+
     /// Record what the trust gate decided, by source name.
     pub fn with_decisions(mut self, decisions: BTreeMap<String, Decision>) -> Self {
         self.decisions = decisions;
         self
+    }
+
+    /// The tree a `[data]` entry named `name` should be read from — the
+    /// ancestor that declared it, or the template actually resolved if none
+    /// did (or the entry was overridden closer to the leaf).
+    fn template_for(&self, name: &str) -> &TemplateTree<'a> {
+        let index = self
+            .data_origin
+            .get(name)
+            .map_or(0, |ancestor| ancestor + 1);
+        &self.templates[index]
     }
 
     /// What contributed to this run, in load order.
@@ -717,7 +754,7 @@ impl<'a> Loader<'a> {
             kind,
             location,
             revision: match kind {
-                SourceKind::TemplateFile => Some(self.template.revision),
+                SourceKind::TemplateFile => Some(self.template_for(name).revision),
                 SourceKind::Git => git_revision,
                 _ => None,
             },
@@ -931,9 +968,10 @@ impl<'a> Loader<'a> {
     /// template's files and its data to drift apart.
     fn read_template_file(&self, name: &str, path: &str) -> Result<Vec<u8>, DataError> {
         let normalised = path.trim_start_matches("./");
-        self.template
+        let template = self.template_for(name);
+        template
             .repo
-            .read_path(self.template.tree, normalised)
+            .read_path(template.tree, normalised)
             .map_err(|e| DataError::Load {
                 name: name.to_string(),
                 location: path.to_string(),
@@ -946,7 +984,7 @@ impl<'a> Loader<'a> {
                 kind: SourceKind::TemplateFile,
                 reason: format!(
                     "no such file in the template repository at {}",
-                    crate::ops::describe_revision(&self.template.reference, self.template.revision)
+                    crate::ops::describe_revision(&template.reference, template.revision)
                 ),
             })
     }

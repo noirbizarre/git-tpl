@@ -55,6 +55,12 @@ Cyclic dependency in template `rust-library`.
   computed.a → computed.b → computed.a
 ```
 
+### With `[extends]`
+
+A child extending a parent (see [`[extends]`](format.md#extends)) inherits its parent's `[computed]` entries by
+name, exactly like `[questions]`: the parent's own entries come first, an entry the child redeclares replaces the
+parent's entirely and keeps the parent's position, and a name new to the child is appended after them.
+
 ## Available while prompting
 
 A computed value is resolved as soon as its dependencies are, which means a *later* question can use it:

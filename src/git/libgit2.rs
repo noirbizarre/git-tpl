@@ -953,6 +953,15 @@ impl GitBackend for LibGit2 {
         })
     }
 
+    fn is_tag(&self, reference: &str) -> Result<bool, GitError> {
+        // Mirrors the `refs/tags/{reference}` candidate in `resolve_revision`
+        // exactly, so the two can never disagree about what counts as a tag.
+        Ok(self
+            .repo
+            .revparse_single(&format!("refs/tags/{reference}"))
+            .is_ok())
+    }
+
     fn default_branch(&self) -> Result<String, GitError> {
         // `HEAD` in a bare clone points at whatever the remote said its default
         // branch was, which is the correct answer and needs no guessing between

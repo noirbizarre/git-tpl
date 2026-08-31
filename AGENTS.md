@@ -70,7 +70,8 @@ src/
 │   └── libgit2.rs   the only implementation
 ├── ops/             orchestration, one function per command
 │   ├── mod.rs       init, update, status, diff, merge, fetch, push, and the rest
-│   ├── resolve.rs   fetching a template to a revision
+│   ├── resolve.rs   fetching a template to a revision, and its `[extends]` chain (ADR-034)
+│   ├── extends.rs   merging an `[extends]` chain's manifests into one (ADR-034)
 │   ├── backport.rs  the patch that carries a fix upstream (ADR-020)
 │   ├── hunks.rs     interactive hunk selection (ADR-023)
 │   ├── unsubstitute.rs  reversing a substitution in a change (ADR-022)
@@ -95,11 +96,13 @@ commit and an ADR.
 **`src/git/mod.rs`** — adding to the trait is right; adding a `git2` type to a signature is not.
 
 **`src/ops/`** — this is where the commands' semantics live: `mod.rs` for the commands that need one function, a
-file of its own for the ones that do not — `backport`, `testing`, `resolve`. Not every file of its own is a command,
-though: `hunks` and `unsubstitute` are mechanisms `backport` uses internally, never invoked as an operation in their
-own right, so they carry no `Error` enum or `tpl::<name>::*` diagnostics catalogue entry of their own — their
-failures are `backport`'s failures. A change to a command-shaped file almost certainly needs a documentation change
-in `docs/usage/`; a change to a supporting mechanism does not, unless it changes what `backport` itself does.
+file of its own for the ones that do not — `backport`, `testing`, `resolve`, `extends`. Not every file of its own is
+a command, though: `hunks` and `unsubstitute` are mechanisms `backport` uses internally, never invoked as an
+operation in their own right, so they carry no `Error` enum or `tpl::<name>::*` diagnostics catalogue entry of their
+own — their failures are `backport`'s failures. `extends` is the same shape as `resolve` in this respect, not the
+same shape as `hunks`: it has its own `ExtendsError` and its own `tpl::extends::*` codes, because a chain fails in
+ways specific to it. A change to a command-shaped file almost certainly needs a documentation change in
+`docs/usage/`; a change to a supporting mechanism does not, unless it changes what `backport` itself does.
 
 **`skills/git-tpl/SKILL.md`** — a second, independent description of the CLI surface, written for an agent
 working in *another* project. Nothing notices when it drifts except a human reading a diff, so treat any change to

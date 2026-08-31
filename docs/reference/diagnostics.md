@@ -34,12 +34,18 @@ Something is wrong with the template itself.
 | `tpl::manifest::invalid_question` | A question declaration is not coherent — see the message. Covers a `default_from` naming no source, one whose expression does not parse, one referencing something that is not a [seed namespace](../templates/questions.md#machine-seeded-defaults), and a `default_when_skipped` with no `when` to skip or no `default` to inject. |
 | `tpl::manifest::conflicting_note` | Both `note` and `note_file` are declared. Keep one. |
 | `tpl::manifest::invalid_remote` | A `[remotes]` entry has no name, no URL, or a name Git will not accept. |
+| `tpl::manifest::invalid_extends` | An `[extends]` declaration has no `source`, no `rev`, or an empty `remove` path. |
+| `tpl::manifest::extends_kind_collision` | A name is declared as a question by one layer of an `[extends]` chain and a computed value by another. |
 | `tpl::graph::invalid_expression` | An expression in the manifest does not parse. |
 | `tpl::graph::unknown_reference` | An expression names something the template never declares. Carries a suggestion. |
 | `tpl::graph::cycle` | Questions, computed values or data sources depend on each other in a loop. |
 | `tpl::resolve::missing_root` | The render root does not exist in the template. |
 | `tpl::resolve::dirty_needs_local` | `--dirty` was used on a remote template, which has no working tree. |
 | `tpl::resolve::cache` | The temporary clone could not be created. |
+| `tpl::extends::unpinned` | An `[extends].rev` resolves to a branch rather than a tag or a commit. See [ADR-034](../adr/034-template-inheritance.md). |
+| `tpl::extends::cycle` | An `[extends]` chain revisits a template it has already resolved. |
+| `tpl::extends::depth` | An `[extends]` chain is deeper than the limit. |
+| `tpl::extends::remove_missing` | `[extends].remove` names a path the parent does not have. |
 
 ## Rendering
 

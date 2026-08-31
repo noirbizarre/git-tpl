@@ -486,6 +486,14 @@ reads better; git-tpl still asks `project_name` first, because `package_name`'s 
 
 Within that constraint, ties are broken by declaration order, so the sequence is stable across runs.
 
+### With `[extends]`
+
+A template with a parent (see [`[extends]`](format.md#extends)) is asked its parent's questions first, in the
+parent's own declaration order, then its own new ones — "declaration order" above means the position in this
+merged sequence, not the position in either manifest alone. A question the child redeclares by name replaces the
+parent's entirely and **keeps the parent's position**: overriding `[questions.license]` to change its default
+does not move it later in the prompt sequence just because the child wrote it last.
+
 ### Errors caught before any prompt
 
 The graph is validated up front, so these fail before you are asked anything:

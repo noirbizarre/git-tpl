@@ -236,16 +236,79 @@ pub fn render_entries(
     partials: &Arc<Partials>,
     undefined: Undefined,
 ) -> Result<Vec<Rendered>, RenderError> {
+    render_indexed(
+        entries.iter().map(|entry| (entry, 0)).collect(),
+        |_origin, oid| template.read_blob(oid),
+        context,
+        partials,
+        undefined,
+    )
+}
+
+/// One entry in an `[extends]` chain's merged, pre-render file layering.
+///
+/// Produced by [`crate::ops::Resolved::entries`], which has already resolved
+/// the override across layers: for a given pre-render path, only the nearest
+/// layer's entry survives. What is left here is exactly what `render_entries`
+/// would have seen for a single-layer template, plus which repository each
+/// entry's blob has to be read from.
+pub struct LayeredEntry {
+    /// The entry, from whichever layer's tree contributed it.
+    pub entry: TreeEntry,
+    /// Which of `render_layered_entries`'s `repos` holds `entry.oid` — `0` is
+    /// the template actually resolved, `1` its parent, and so on up the
+    /// chain.
+    pub origin: usize,
+}
+
+/// [`render_entries`], for a merged `[extends]` chain.
+///
+/// One collision map across every layer, not one per layer: two *different*
+/// pre-render paths — one from the leaf, one from an ancestor — landing on the
+/// same *rendered* path is a genuine collision, exactly as it would be within
+/// a single layer, and must be caught even though the two paths never shared a
+/// layer to be checked together in.
+pub fn render_layered_entries(
+    repos: &[&dyn GitBackend],
+    entries: &[LayeredEntry],
+    context: &Context,
+    partials: &Arc<Partials>,
+    undefined: Undefined,
+) -> Result<Vec<Rendered>, RenderError> {
+    render_indexed(
+        entries
+            .iter()
+            .map(|layered| (&layered.entry, layered.origin))
+            .collect(),
+        |origin, oid| repos[origin].read_blob(oid),
+        context,
+        partials,
+        undefined,
+    )
+}
+
+/// The shared body of [`render_entries`] and [`render_layered_entries`].
+///
+/// Reading a blob is abstracted behind `read_blob(origin, oid)` so the single-
+/// repository and layered-chain cases can share one collision map and one
+/// path-rendering pass, rather than the layered case duplicating logic that
+/// must stay in lockstep with it.
+fn render_indexed(
+    mut entries: Vec<(&TreeEntry, usize)>,
+    read_blob: impl Fn(usize, Oid) -> Result<Vec<u8>, crate::git::GitError>,
+    context: &Context,
+    partials: &Arc<Partials>,
+    undefined: Undefined,
+) -> Result<Vec<Rendered>, RenderError> {
     // Sorted input in, sorted output out. Rendering can reorder paths — a
     // templated segment may render to anything — so the result is re-sorted
     // below rather than assumed.
-    let mut sorted: Vec<&TreeEntry> = entries.iter().collect();
-    sorted.sort_by(|a, b| a.path.cmp(&b.path));
+    entries.sort_by(|a, b| a.0.path.cmp(&b.0.path));
 
-    let mut out: Vec<Rendered> = Vec::with_capacity(sorted.len());
+    let mut out: Vec<Rendered> = Vec::with_capacity(entries.len());
     let mut seen: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
 
-    for entry in sorted {
+    for (entry, origin) in entries {
         // Symlinks are copied as-is: their content is the target path, and
         // rendering it would silently repoint the link.
         if !entry.mode.is_blob() && entry.mode != FileMode::Link {
@@ -259,7 +322,7 @@ pub fn render_entries(
             continue;
         };
 
-        let source = template.read_blob(entry.oid)?;
+        let source = read_blob(origin, entry.oid)?;
         // A binary blob is copied even when it is named `.jinja`, so
         // "was it rendered" is not the same question as "is it named like a
         // template". This is the answer to the first.
