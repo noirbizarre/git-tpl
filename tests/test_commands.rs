@@ -571,3 +571,180 @@ fn write_skips_a_case_s_commands_but_still_records_its_snapshot() {
         "hello\n"
     );
 }
+
+// --- command templating (issue #153) ----------------------------------------
+
+/// ADR-027's own worked example, fixed: `tests/scripts/check.sh` lives
+/// beside the case file, outside the render root, so it is never
+/// materialised into the sandbox `cwd` actually is — only `TEMPLATE_ROOT`
+/// reaches it. This fails exactly the way the ADR's `$TEMPLATE_ROOT` (never
+/// expanded) version always did, unless `{{ env.TEMPLATE_ROOT }}` actually
+/// renders to the real path.
+#[test]
+fn template_root_is_reachable_through_env_templating_in_a_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(
+        dir.path(),
+        "name = \"roottemplating\"\n",
+        &[("marker.txt", "hello\n")],
+    );
+    built
+        .repo
+        .write("tests/scripts/check.sh", "#!/bin/sh\necho root-check-ran\n");
+    built.repo.make_executable("tests/scripts/check.sh");
+    built.repo.write(
+        "tests/c.toml",
+        "[answers]\n\n\
+         [commands]\n\
+         rendered = [\"{{ env.TEMPLATE_ROOT }}/tests/scripts/check.sh\"]\n",
+    );
+    built.repo.commit_all("test: template root templating");
+
+    let output = run(&built, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// The case's own `[answers]` table reaches a command through
+/// `{{ answers.* }}`, proven through a script's own exit code rather than
+/// stdout (which a passing command never has captured for the report). The
+/// script lives outside the render root, the same as the test above, so
+/// only `TEMPLATE_ROOT` templating can reach it.
+#[test]
+fn an_answer_is_reachable_through_answers_templating_in_a_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(
+        dir.path(),
+        "name = \"answertemplating\"\n\n\
+         [questions.project_name]\n\
+         type = \"string\"\n\
+         prompt = \"Project name\"\n\
+         default = \"demo\"\n",
+        &[("marker.txt", "hello\n")],
+    );
+    built.repo.write(
+        "tests/scripts/check.sh",
+        "#!/bin/sh\n[ \"$1\" = widget ] || exit 1\n",
+    );
+    built.repo.make_executable("tests/scripts/check.sh");
+    built.repo.write(
+        "tests/c.toml",
+        "[answers]\n\
+         project_name = \"widget\"\n\n\
+         [commands]\n\
+         rendered = [\"{{ env.TEMPLATE_ROOT }}/tests/scripts/check.sh {{ answers.project_name }}\"]\n",
+    );
+    built.repo.commit_all("test: answers templating");
+
+    let output = run(&built, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// `answers` comes from the case file itself, not from a render — so unlike
+/// `computed`/`data`/`template`, it is available to `before` too, before
+/// anything has been rendered at all.
+#[test]
+fn answers_templating_is_available_to_before_even_though_nothing_has_rendered_yet() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(
+        dir.path(),
+        "name = \"answertemplatingbefore\"\n\n\
+         [questions.project_name]\n\
+         type = \"string\"\n\
+         prompt = \"Project name\"\n\
+         default = \"demo\"\n",
+        &[("marker.txt", "hello\n")],
+    );
+    built.repo.write(
+        "tests/scripts/check.sh",
+        "#!/bin/sh\n[ \"$1\" = widget ] || exit 1\n",
+    );
+    built.repo.make_executable("tests/scripts/check.sh");
+    built.repo.write(
+        "tests/c.toml",
+        "[answers]\n\
+         project_name = \"widget\"\n\n\
+         [commands]\n\
+         before = [\"{{ env.TEMPLATE_ROOT }}/tests/scripts/check.sh {{ answers.project_name }}\"]\n",
+    );
+    built.repo.commit_all("test: answers templating in before");
+
+    let output = run(&built, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// `ctx.env` mirrors the *merged* environment a command is spawned with —
+/// including the case's own `commands.env` — not only whatever the outer
+/// `git tpl test` process happened to inherit.
+#[test]
+fn commands_env_is_visible_through_env_templating_not_just_the_process_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             env = { GTPL_TEST_ENVTPL = \"1\" }\n\
+             rendered = [\"sh -c '[ \\\"{{ env.GTPL_TEST_ENVTPL }}\\\" = 1 ]'\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// A command referencing an answer (or an environment key) that does not
+/// exist fails that one command — reported the same way a missing program
+/// already is — rather than silently spawning `argv[0]` with an empty
+/// string spliced into it.
+#[test]
+fn an_undefined_reference_in_a_command_template_fails_that_command_not_the_whole_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             rendered = [\"echo {{ answers.does_not_exist }}\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).code(1);
+    let json = output.json();
+    let failures = &json["cases"][0]["failures"];
+    assert_eq!(failures[0]["kind"], "commandFailed", "{json}");
+    assert_eq!(failures[0]["code"], serde_json::Value::Null, "{json}");
+    assert!(
+        failures[0]["stderr"]
+            .as_str()
+            .unwrap()
+            .contains("could not expand"),
+        "{json}"
+    );
+}
+
+/// A command with no `{{`/`{%` anywhere in it is never templated — proof
+/// that the `is_expression` gate actually skips rendering, not just usually
+/// succeeds — so a literal single brace behaves exactly as it always has.
+#[test]
+fn a_command_with_no_jinja_syntax_is_never_templated() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             rendered = [\"echo {not-a-template}\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
