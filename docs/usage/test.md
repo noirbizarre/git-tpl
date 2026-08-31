@@ -166,9 +166,9 @@ Every command also sees `TEMPLATE_ROOT`, set to the resolved template's root on 
 [ADR-030](../adr/030-test-never-resolves-a-remote-template.md)). It is distinct from both `cwd` (each list's own
 throwaway sandbox) and from a template's declared render subdirectory: a case's script does not live in the
 sandbox, so a command that needs more than a line or two writes it once, commits it in the template repository,
-and names it directly — `"$TEMPLATE_ROOT/tests/scripts/check.sh"` — instead of synthesizing it inline via `before`
-on every run. A case's own `env`/`commands.env` may still override it for a key it deliberately sets, the same as
-any other default.
+and names it directly — `"{{ env.TEMPLATE_ROOT }}/tests/scripts/check.sh"` — instead of synthesizing it inline via
+`before` on every run. A case's own `env`/`commands.env` may still override it for a key it deliberately sets, the
+same as any other default.
 
 `before`, `rendered` and `after` each stop at their own first failure — they are sequential, and a later entry
 usually assumes an earlier one worked. A failing `before`, or a render that fails without `expect.error` naming
@@ -199,6 +199,35 @@ One variable does double duty: it colourises `git tpl test`'s own progress outpu
 `CLICOLOR_FORCE`/`FORCE_COLOR` to be forwarded to `[commands]` children, as described above — so a case's own
 `cargo build` no longer needs `CARGO_TERM_COLOR` set separately for that part either. See
 [the environment](../configuration.md#the-environment) for the full colour precedence.
+
+### Templating
+
+A command is rendered as a MiniJinja template — the same engine that renders every other string in the template —
+before it is word-split, against two names:
+
+- `env.*` — exactly what that command is about to be spawned with: the inherited environment, `TEMPLATE_ROOT`,
+  `CLICOLOR_FORCE`/`FORCE_COLOR` when set, and the list's own `env`/`commands.env`, all merged in the order
+  described above. `{{ env.TEMPLATE_ROOT }}` always names the same path `$TEMPLATE_ROOT` would inside the process.
+- `answers.*` — the case's own `[answers]` table, exactly as written, with no defaults or computed values applied.
+  Available to `before` as well as `rendered`/`after`/`finally`, since it comes from the case file itself rather
+  than from a render.
+
+```toml
+[answers]
+name = "widget"
+
+[commands]
+rendered = ["{{ env.TEMPLATE_ROOT }}/tests/scripts/check.sh", "{{ answers.name }}"]
+```
+
+A command with no `{{`/`{%` in it is never templated, so every case written before this existed keeps behaving
+identically. One that references a name that does not exist — `{{ answers.projct_name }}`, a typo — fails that
+command alone, reported the same way a missing program already is, rather than silently spawning it with an empty
+string in place of the mistake.
+
+This is not `$VAR` shell expansion: a literal `$FOO` in a command is still passed through unchanged. Only
+`{{ }}`/`{% %}` mean anything, because MiniJinja renders the string — no shell runs, and nothing about the command
+format above changes.
 
 ### Progress
 

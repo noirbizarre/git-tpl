@@ -151,7 +151,9 @@ file and pointing every case at it.
 `TEMPLATE_ROOT` is set on every command in every list of every case to the resolved template's root on disk — the
 working tree for `--dirty`, and the same working tree for a local `--ref`, since this command never resolves a
 remote (ADR-030) and so never produces a separate checkout to point at instead. A case can now write
-`"$TEMPLATE_ROOT/tests/scripts/check.sh"` directly, committed and reviewed like any other file in the template.
+`"{{ env.TEMPLATE_ROOT }}/tests/scripts/check.sh"` directly, committed and reviewed like any other file in the
+template — see "Commands are MiniJinja templates" below for why that is the form that actually works, rather than
+the shell-style `$TEMPLATE_ROOT` this paragraph first proposed and issue #153 found never did.
 
 Not `GIT_TPL_ROOT`, the name first proposed: this ADR's own case schema already uses `root` for the manifest's
 declared render subdirectory, a different concept entirely, and reusing the word for a filesystem path would
@@ -164,6 +166,38 @@ permits, not a new surface. It is additive for the same reason `env` is, so it a
 superseding it. Like `commands.env`, it is set before a case's own `env`/`commands.env` is applied, so a case that
 deliberately sets the same key still wins — the same override a later, more specific value already has everywhere
 else in this ADR.
+
+### Commands are MiniJinja templates (added, issue #153)
+
+The paragraph above always claimed `"$TEMPLATE_ROOT/tests/scripts/check.sh"` worked. It never did: "The command
+format is a string, parsed without a shell" above is equally explicit that a command is only `shlex`-split, never
+shell-expanded, so the literal text `$TEMPLATE_ROOT` reached `argv[0]` unchanged and the spawn failed with "No such
+file or directory". The worked example this ADR itself gave contradicted the rule three paragraphs above it.
+
+Fixed by rendering a command as a MiniJinja template — the engine every other string a template author writes is
+already rendered by — before it is word-split, against two names:
+
+- `env`, exactly what this command is about to be spawned with: the inherited environment, `TEMPLATE_ROOT`,
+  `CLICOLOR_FORCE`/`FORCE_COLOR` when set, and this list's own `env`/`commands.env`, in that same order. `{{ env.X
+  }}` in a command and `$X` inside the process it spawns can never disagree, because both are built from the one
+  merged map.
+- `answers`, the case's own `[answers]` table, unresolved — not `computed`, `data` or `template`, none of which
+  exist until a render has actually run, so none of which `before` could ever see. `answers` alone is available to
+  every list uniformly, because it is literally the case file's own text, not something evaluation produces.
+
+This is not `$VAR` expansion: that sentence, three paragraphs up, stays true unmodified. A literal `$FOO` in a
+command is still inert; only `{{ }}`/`{% %}` mean anything, and only because MiniJinja is asked to render the
+string, exactly as it already renders a file's own body — no shell sits in between, no pipe, no glob, no
+redirection is added, and invariant 5 is untouched for the same reason `env` and `TEMPLATE_ROOT` already are: this
+changes what a string *is*, never what it does once it becomes `argv`.
+
+A command with no `{{`/`{%` is never templated at all — the same `is_expression` check every other optional
+templating site in git-tpl already uses — so every case written before this section existed keeps behaving
+identically. One that does, and references a name that does not exist (`{{ answers.projct_name }}`, say), fails
+that command with a message naming the mistake, rather than silently spawning `argv[0]` with an empty string
+spliced in: MiniJinja's strict-undefined mode, not the lenient default a bare `{{ computed }}` in a rendered file
+still gets. This is not the staged rollout ADR-014 describes for that asymmetry — there is no existing case
+depending on a typo rendering to nothing here, because this capability did not exist until now.
 
 ## Consequences
 

@@ -33,7 +33,7 @@ use crate::data::{Decision, declared_remotes};
 use crate::git::{ChangeKind, FileMode, Oid};
 use crate::render::Rendered;
 use crate::suggest::closest;
-use crate::template::Value;
+use crate::template::{Value, is_expression};
 use crate::userconfig::UserConfig;
 
 /// The directory cases are read from when `--tests` does not say otherwise.
@@ -1349,6 +1349,7 @@ fn run_case(
             cwd,
             &root,
             &case.commands.before.env,
+            &case.answers,
             true,
             &mut failures,
             &case.name,
@@ -1441,6 +1442,7 @@ fn run_case(
                             cwd,
                             &root,
                             &case.commands.rendered.env,
+                            &case.answers,
                             true,
                             &mut failures,
                             &case.name,
@@ -1480,6 +1482,7 @@ fn run_case(
                             cwd,
                             &root,
                             &case.commands.after.env,
+                            &case.answers,
                             true,
                             &mut failures,
                             &case.name,
@@ -1507,6 +1510,7 @@ fn run_case(
         cwd,
         &root,
         &case.commands.finally.env,
+        &case.answers,
         false,
         &mut finally_failures,
         &case.name,
@@ -1653,6 +1657,7 @@ fn execute_commands(
     cwd: &Path,
     root: &Path,
     env: &BTreeMap<String, String>,
+    answers: &BTreeMap<String, Value>,
     stop_on_failure: bool,
     failures: &mut Vec<Failure>,
     name: &str,
@@ -1663,7 +1668,7 @@ fn execute_commands(
     for command in commands {
         run += 1;
         progress.case_status(name, Status::Command { step, command });
-        let result = run_one(command, cwd, root, env, color, name, progress);
+        let result = run_one(command, cwd, root, env, answers, color, name, progress);
         progress.command_finished(name, step, command, result.is_ok());
         if let Err((code, stdout, stderr)) = result {
             failures.push(Failure::CommandFailed {
@@ -1681,13 +1686,73 @@ fn execute_commands(
     run
 }
 
+/// Render `command` as a MiniJinja template before it is word-split, against
+/// `env` — mirroring exactly what this command is about to be spawned with,
+/// in the same precedence order `run_one` builds below, so `{{ env.X }}`
+/// here and `$X` inside the process always agree — and `answers`, the
+/// case's own `[answers]` table, unresolved. Not `computed`/`data`/
+/// `template`: those only exist once a render has actually run, unavailable
+/// to `before`, and exposing them would blur "a case's `[commands]` are
+/// data, not a render" (ADR-016) further than the one thing this fixes
+/// needs. See "Commands are MiniJinja templates" in ADR-027 (issue #153).
+///
+/// Skipped entirely when `command` carries no `{{`/`{%` — the same
+/// `is_expression` gate every other optional-templating site in this crate
+/// uses — so a plain command costs nothing and behaves exactly as before
+/// this existed.
+///
+/// Strict undefined: a typo'd `answers.x` or `env.X` is this command's own
+/// failure, not a silently empty path. ADR-014's direction, kept from day
+/// one here rather than staged, since nothing depended on the lenient
+/// behaviour before this function existed.
+fn expand_command(
+    command: &str,
+    root: &Path,
+    color: bool,
+    env: &BTreeMap<String, String>,
+    answers: &BTreeMap<String, Value>,
+) -> Result<String, String> {
+    if !is_expression(command) {
+        return Ok(command.to_string());
+    }
+
+    // Same three layers `run_one` applies to the real `Command` below, in
+    // the same order, so this mirror can never disagree with what the
+    // process actually receives.
+    let mut ctx_env: BTreeMap<String, minijinja::Value> = std::env::vars()
+        .map(|(key, value)| (key, minijinja::Value::from(value)))
+        .collect();
+    ctx_env.insert(
+        TEMPLATE_ROOT_ENV.to_string(),
+        minijinja::Value::from(root.display().to_string()),
+    );
+    if color {
+        ctx_env.insert("CLICOLOR_FORCE".to_string(), minijinja::Value::from("1"));
+        ctx_env.insert("FORCE_COLOR".to_string(), minijinja::Value::from("1"));
+    }
+    for (key, value) in env {
+        ctx_env.insert(key.clone(), minijinja::Value::from(value.as_str()));
+    }
+
+    let mut root_value: BTreeMap<String, minijinja::Value> = BTreeMap::new();
+    root_value.insert("env".to_string(), minijinja::Value::from_iter(ctx_env));
+    root_value.insert("answers".to_string(), Value::Table(answers.clone()).into());
+
+    let jinja =
+        crate::eval::environment_with(crate::eval::no_partials(), crate::eval::Undefined::Strict);
+    jinja
+        .render_str(command, minijinja::Value::from_iter(root_value))
+        .map_err(|error| format!("could not expand `{command}`: {error}"))
+}
+
 /// Word-split `command` and run it directly — never through a shell.
 ///
 /// `shlex::split` honours quotes and backslash escapes and nothing else: no
 /// pipe, no glob, no redirection, no `$VAR` expansion. A case file is the
 /// same untrusted-repository input invariant 5 already governs everywhere
 /// else, and a real shell would hand every one of those to it for free. See
-/// ADR-027.
+/// ADR-027. `{{ }}`/`{% %}` are a separate mechanism — [`expand_command`],
+/// above — run before this, not a form of shell expansion.
 ///
 /// `env` is merged on top of the inherited environment — `Command::envs`,
 /// never `.env_clear()` — so a case that sets none behaves exactly as before
@@ -1709,14 +1774,22 @@ fn run_one(
     cwd: &Path,
     root: &Path,
     env: &BTreeMap<String, String>,
+    answers: &BTreeMap<String, Value>,
     color: bool,
     name: &str,
     progress: &mut dyn Progress,
 ) -> Result<(), (Option<i32>, String, String)> {
-    let argv = match shlex::split(command) {
+    let expanded = match expand_command(command, root, color, env, answers) {
+        Ok(expanded) => expanded,
+        Err(reason) => return Err((None, String::new(), reason)),
+    };
+
+    let argv = match shlex::split(&expanded) {
         Some(argv) if !argv.is_empty() => argv,
         // Empty, or an unterminated quote. Reported like any other failed
         // command: a fact about this one entry, not a reason to stop the run.
+        // Named by the original `command`, not `expanded`: a case author
+        // recognises their own text, even once it has been templated.
         _ => {
             return Err((
                 None,
