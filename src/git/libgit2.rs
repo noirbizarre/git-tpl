@@ -93,6 +93,20 @@ impl LibGit2 {
         Ok(Self { repo })
     }
 
+    /// Create a repository at `path`, with a fixed initial branch — `main`,
+    /// never whatever `init.defaultBranch` the machine running this happens
+    /// to have. Used by `git tpl test`'s isolated sandbox (ADR-033), where
+    /// the whole point is a result that does not depend on the ambient Git
+    /// configuration of the machine running the suite, the same way `init`
+    /// (used for a real project) correctly need not guard against it.
+    pub fn init_isolated(path: &Path) -> Result<Self, GitError> {
+        let mut opts = git2::RepositoryInitOptions::new();
+        opts.initial_head("refs/heads/main");
+        let repo = Repository::init_opts(path, &opts)
+            .map_err(|e| backend("initialise the isolated repository", &e))?;
+        Ok(Self { repo })
+    }
+
     /// Open a repository at an exact path, without searching upwards.
     ///
     /// Used for template repositories, where searching upwards could silently

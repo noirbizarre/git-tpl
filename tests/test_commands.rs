@@ -748,3 +748,157 @@ fn a_command_with_no_jinja_syntax_is_never_templated() {
     let json = output.json();
     assert_eq!(json["cases"][0]["passed"], true, "{json}");
 }
+
+// --- `git` sandbox (issue #155) ----------------------------------------------
+
+/// `git = true` seeds the sandbox with one commit before `before` runs —
+/// something for tooling like `pdm-backend`'s `source = "scm"` to describe,
+/// which a plain scratch directory has nothing for.
+#[test]
+fn git_true_seeds_an_isolated_repository_with_a_commit_to_describe() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "git = true\n\
+             [answers]\n\n\
+             [commands]\n\
+             rendered = [\"git rev-parse --verify HEAD\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// A case with no `git` key is unaffected: the default sandbox is still a
+/// plain scratch directory, never a Git repository. The regression guard for
+/// the `git` key existing at all.
+#[test]
+fn a_case_with_no_git_key_has_no_repository_in_its_sandbox() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [commands]\n\
+             rendered = [\"git rev-parse --is-inside-work-tree\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).code(1);
+    let json = output.json();
+    let failures = &json["cases"][0]["failures"];
+    assert_eq!(failures[0]["step"], "rendered", "{json}");
+}
+
+/// `git = true` gives the seed commit a built-in, synthetic identity —
+/// proved against the commit itself (`git log`), not merely the config: a
+/// config value with nothing committed would prove nothing about what a
+/// tool describing `HEAD` actually sees.
+#[test]
+fn git_true_gives_the_seed_commit_the_built_in_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "git = true\n\
+             [answers]\n\n\
+             [commands]\n\
+             rendered = [\"sh -c '[ \\\"$(git log -1 --format=%ae)\\\" = test@git-tpl.invalid ]'\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// A `[git]` table overrides the identity the seed commit is authored with.
+#[test]
+fn a_git_table_overrides_the_seed_commit_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n\n\
+             [git]\n\
+             user.name = \"Someone\"\n\
+             user.email = \"someone@example.com\"\n\n\
+             [commands]\n\
+             rendered = [\"sh -c '[ \\\"$(git log -1 --format=%ae)\\\" = someone@example.com ]'\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// `commit.gpgsign` is off in the isolated repository's own local config —
+/// the fix for the hang issue #155 reported, where a real `git commit` under
+/// an ambient `commit.gpgsign = true` waits on a GPG agent with no TTY to
+/// answer.
+#[test]
+fn commit_gpgsign_is_off_in_the_isolated_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "git = true\n\
+             [answers]\n\n\
+             [commands]\n\
+             rendered = [\"sh -c '[ \\\"$(git config --get commit.gpgsign)\\\" = false ]'\"]\n",
+        )],
+    );
+
+    let output = run(&template, &[]).success();
+    let json = output.json();
+    assert_eq!(json["cases"][0]["passed"], true, "{json}");
+}
+
+/// The isolation *layer*, not merely local-config precedence: a real,
+/// ambient global Git config — written to the exact path
+/// `tests/common/mod.rs::scrub_git_env` points the outer `git tpl test`
+/// process's own `GIT_CONFIG_GLOBAL` at, normally left absent — declares an
+/// alias only ambient config could define. A case that set `git` must not
+/// see it: `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL` are what a spawned
+/// command actually gets, not whatever `git tpl test`'s own process
+/// inherited — proving the env-var isolation itself did the work, since the
+/// seed commit's own identity (checked above) is already correct by local
+/// config precedence alone and would pass even without it.
+#[test]
+fn ambient_global_git_config_does_not_leak_into_a_cases_own_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "git = true\n\
+             [answers]\n\n\
+             [commands]\n\
+             rendered = [\"git leak\"]\n",
+        )],
+    );
+
+    std::fs::write(
+        template.repo.config_home().join("absent.gitconfig"),
+        "[alias]\n\tleak = \"!true\"\n",
+    )
+    .unwrap();
+
+    let output = run(&template, &[]).code(1);
+    let json = output.json();
+    let failures = &json["cases"][0]["failures"];
+    assert_eq!(failures[0]["step"], "rendered", "{json}");
+    assert!(
+        failures[0]["stderr"].as_str().unwrap().contains("leak"),
+        "{json}"
+    );
+}

@@ -48,6 +48,7 @@ absent = [".github/workflows/ci.yml"]
 | `expect.lacks` | Path to the text that must not appear in it. Same shape as `contains`. |
 | `expect.error` | A [diagnostic code](../reference/diagnostics.md) the render must fail with. |
 | `commands` | Setup, checks and teardown run around the rendering. See [Commands](#commands). |
+| `git` | Whether the sandbox `commands` runs in is an isolated Git repository, seeded with one commit. `false`/absent unless set. See [Git sandbox](#git-sandbox). |
 | `snapshot` | Whether this case is written and compared against a recorded snapshot. `false` unless set. See [Snapshots](#snapshots). |
 
 A path named in `expect.contains` or `expect.lacks` that the rendering never produces is a failure either way —
@@ -125,6 +126,9 @@ Four lists, each run in a fresh, empty scratch directory created just for this c
 The render is written **on top of** whatever `before` created, not into a directory cleared first — this is what
 lets a case simulate rendering into a project that already exists, the way `update` actually renders, which
 `--dirty`/`render` alone cannot exercise.
+
+`before` sees "nothing but what it creates itself" only when the case has no [`git`](#git-sandbox): a case that
+sets it finds a `.git` directory and one commit already there before `before` runs its first entry.
 
 Each entry is a plain string, split into a program and its arguments the way a shell would parse quoting and
 escapes — but no shell actually runs. There is no pipe, no glob, no redirection and no `$VAR` expansion. A
@@ -254,8 +258,52 @@ for one invocation, pass `--skip-commands`; to disable them for yourself by defa
 configuration turned off. See [ADR-027](../adr/027-test-case-commands.md) for the full reasoning, including why
 this does not reopen the rule that a *rendered* project — `render`, `init`, `update` — cannot execute anything.
 
+Both also skip a case's [`git`](#git-sandbox): disabling `[commands]` disables everything the sandbox exists to
+serve, not only the four lists themselves — there is nothing left for an isolated repository to prove if nothing
+runs inside it.
+
 A case's [`trust`](#trust) rests on the same act of consent, extended to a template's declared remote data sources
 — see [ADR-028](../adr/028-test-case-trust.md).
+
+## Git sandbox
+
+```toml
+git = true
+
+[commands]
+rendered = ["pdm install", "pdm build"]
+```
+
+Some tooling needs Git for its own identity — `pdm-backend`'s `source = "scm"`, and every `setuptools_scm`-alike
+version source, read `git describe` before installing a single dependency. `git = true` makes the sandbox
+`commands` runs in an isolated Git repository rather than a plain scratch directory: one empty commit, already
+there before `before` runs its first entry, so there is something for that tooling to find.
+
+The identity is a built-in default unless overridden:
+
+```toml
+[git]
+user.name = "Someone"
+user.email = "someone@example.com"
+```
+
+`git.user.name`/`git.user.email` are the only keys a case may set; everything else about the seed commit —
+`commit.gpgsign` off, the branch it lands on — is fixed. `git = false`, or no `git` key at all, is today's plain
+scratch directory, byte for byte: this is opt-in, the same choice `snapshot` already made for the same reason.
+
+**Isolation is by construction, not by fighting the running machine's configuration file by file.** The seed
+commit is written through git-tpl's own Git backend, never a spawned `git` process, so no hook, alias or ambient
+identity is ever consulted for it — the chosen identity lands in the sandbox's own local `.git/config` before
+anything asks for a signature, and Git's own precedence (local always outranks global and system) makes it
+authoritative regardless of what either ambient level says. And because a case's own `[commands]` may still
+invoke a literal `git` — the whole point of seeding a repository at all — every command in a case that set `git`
+is spawned with `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` pointed at a path that is never created, so a
+literal `git` sees only the sandbox's own local config: no credential helper, no alias, no `commit.gpgsign` the
+machine running the suite happens to have. `commands.env`/a list's own `env` may still override either variable
+for a case that deliberately wants to.
+
+See [ADR-033](../adr/033-test-case-git-sandbox.md) for the full reasoning, and issue #155 for where the gap this
+closes came from.
 
 ## Trust
 

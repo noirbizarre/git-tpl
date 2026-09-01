@@ -30,7 +30,7 @@ use super::{
 };
 use crate::data::format::{Format, parse_value};
 use crate::data::{Decision, declared_remotes};
-use crate::git::{ChangeKind, FileMode, Oid};
+use crate::git::{ChangeKind, FileMode, GitBackend, GitError, LibGit2, Oid};
 use crate::render::Rendered;
 use crate::suggest::closest;
 use crate::template::{Value, is_expression};
@@ -250,6 +250,11 @@ pub struct Case {
     pub expect: Expect,
     /// What to run before, around and after the rendering. See ADR-027.
     pub commands: Commands,
+    /// The case's isolated Git sandbox, if it asked for one.
+    ///
+    /// `None` on omission: today's plain scratch directory, unchanged. See
+    /// ADR-033.
+    pub git: Option<GitSandbox>,
     /// Whether this case is tested against a recorded snapshot at all.
     ///
     /// `false` on omission: writing and comparing a snapshot are both
@@ -425,6 +430,102 @@ impl CommandList {
     }
 }
 
+/// A case's isolated Git sandbox: the identity its one seed commit — and any
+/// later commit a case's own `[commands]` makes inside it — is authored
+/// with. See ADR-033.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GitSandbox {
+    /// `user.name`, written to the sandbox's local `.git/config`.
+    pub user_name: String,
+    /// `user.email`, alongside `user_name`.
+    pub user_email: String,
+}
+
+impl GitSandbox {
+    /// The identity used when a case writes `git = true` rather than
+    /// overriding it. Synthetic and `.invalid` (RFC 2606), so nobody mistakes
+    /// it for a real address — the same convention
+    /// `tests/common/mod.rs::Repo::configure` already uses for every
+    /// repository this project's own test suite builds.
+    fn default_identity() -> Self {
+        GitSandbox {
+            user_name: "git-tpl test".to_string(),
+            user_email: "test@git-tpl.invalid".to_string(),
+        }
+    }
+
+    /// Parse the table form: `[git]` with an optional `user` sub-table.
+    /// `user.name`/`user.email` nest that way because they are TOML dotted
+    /// keys under `[git]`, not a single `git.user.name` string.
+    fn parse(
+        table: &BTreeMap<String, Value>,
+        shape: &impl Fn(String) -> TestingError,
+    ) -> Result<Self, TestingError> {
+        for key in table.keys() {
+            if key != "user" {
+                let hint = closest(key, ["user"])
+                    .map(|near| format!(" Did you mean `{near}`?"))
+                    .unwrap_or_default();
+                return Err(shape(format!(
+                    "`git.{key}` is not a git sandbox key.{hint} \
+                     A case may override `git.user.name` and `git.user.email`; \
+                     everything else uses the built-in default identity."
+                )));
+            }
+        }
+
+        let defaults = Self::default_identity();
+        let (user_name, user_email) = match table.get("user") {
+            None => (defaults.user_name, defaults.user_email),
+            Some(Value::Table(user)) => {
+                for key in user.keys() {
+                    if !matches!(key.as_str(), "name" | "email") {
+                        let hint = closest(key, ["name", "email"])
+                            .map(|near| format!(" Did you mean `{near}`?"))
+                            .unwrap_or_default();
+                        return Err(shape(format!(
+                            "`git.user.{key}` is not a git sandbox key.{hint} \
+                             A case may set `git.user.name` and `git.user.email`."
+                        )));
+                    }
+                }
+                let name = match user.get("name") {
+                    None => defaults.user_name,
+                    Some(Value::String(name)) => name.clone(),
+                    Some(other) => {
+                        return Err(shape(format!(
+                            "`git.user.name` must be a string, not {}.",
+                            other.type_name()
+                        )));
+                    }
+                };
+                let email = match user.get("email") {
+                    None => defaults.user_email,
+                    Some(Value::String(email)) => email.clone(),
+                    Some(other) => {
+                        return Err(shape(format!(
+                            "`git.user.email` must be a string, not {}.",
+                            other.type_name()
+                        )));
+                    }
+                };
+                (name, email)
+            }
+            Some(other) => {
+                return Err(shape(format!(
+                    "`git.user` must be a table, not {}.",
+                    other.type_name()
+                )));
+            }
+        };
+
+        Ok(GitSandbox {
+            user_name,
+            user_email,
+        })
+    }
+}
+
 /// Which `[commands]` list a [`Failure::CommandFailed`] came from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandStep {
@@ -540,14 +641,17 @@ impl Case {
         for key in table.keys() {
             if !matches!(
                 key.as_str(),
-                "answers" | "trust" | "expect" | "commands" | "snapshot"
+                "answers" | "trust" | "expect" | "commands" | "snapshot" | "git"
             ) {
-                let hint = closest(key, ["answers", "trust", "expect", "commands", "snapshot"])
-                    .map(|near| format!(" Did you mean `{near}`?"))
-                    .unwrap_or_default();
+                let hint = closest(
+                    key,
+                    ["answers", "trust", "expect", "commands", "snapshot", "git"],
+                )
+                .map(|near| format!(" Did you mean `{near}`?"))
+                .unwrap_or_default();
                 return Err(shape(format!(
                     "`{key}` is not a test case key.{hint} \
-                     A case has `answers`, `trust`, `expect`, `commands` and `snapshot`."
+                     A case has `answers`, `trust`, `expect`, `commands`, `snapshot` and `git`."
                 )));
             }
         }
@@ -609,6 +713,22 @@ impl Case {
             }
         };
 
+        // `None` on omission, same as `snapshot`: an isolated sandbox is an
+        // extra assertion a case opts into, not a side effect of anything
+        // else it wrote. See ADR-033.
+        let git = match table.get("git") {
+            None | Some(Value::Bool(false)) => None,
+            Some(Value::Bool(true)) => Some(GitSandbox::default_identity()),
+            Some(Value::Table(inner)) => Some(GitSandbox::parse(inner, &shape)?),
+            Some(other) => {
+                return Err(shape(format!(
+                    "`git` must be `true`, `false`, or a table overriding \
+                     `user.name`/`user.email`, not {}.",
+                    other.type_name()
+                )));
+            }
+        };
+
         // A case expecting an error has no rendering for `commands.rendered`
         // or `commands.after` to run against — the same vacuous-assertion
         // refusal `Expect::parse` already applies to `files`/`absent`/
@@ -642,6 +762,7 @@ impl Case {
             trust,
             expect,
             commands,
+            git,
             snapshot,
         })
     }
@@ -1306,13 +1427,17 @@ fn run_case(
         });
     }
 
-    // No `[commands]`, commands disabled for this run, or `--write`: the
-    // exact pre-existing behaviour, unchanged, with no sandbox created at
-    // all. `--write` never runs a case's `[commands]` (ADR-032); by
-    // construction whenever `write` is true here, `case.snapshot` is true
-    // (the check above already returned for the case where it is not), so
-    // only its rendering needs to happen — never a sandbox.
-    if write || !run_commands || case.commands.is_empty() {
+    // No `[commands]` and no `git`, commands disabled for this run, or
+    // `--write`: the exact pre-existing behaviour, unchanged, with no
+    // sandbox created at all. `--write` never runs a case's `[commands]`
+    // (ADR-032); by construction whenever `write` is true here,
+    // `case.snapshot` is true (the check above already returned for the
+    // case where it is not), so only its rendering needs to happen — never a
+    // sandbox. `!run_commands` (`--skip-commands`/`tpl.testCommands`) skips
+    // `git` too, a corollary rather than a separate toggle: it disables
+    // everything the sandbox exists to serve, not only `[commands]` itself.
+    // See ADR-033.
+    if write || !run_commands || (case.commands.is_empty() && case.git.is_none()) {
         return run_case_plain(
             template, source, tests_dir, case, write, user, decisions, progress,
         );
@@ -1329,6 +1454,34 @@ fn run_case(
     // directory here (`test` never resolves a remote — ADR-030), so there is
     // exactly one answer regardless of which one is running.
     let root = template.repo.workdir()?;
+
+    // Seed the sandbox as an isolated Git repository before `before` runs,
+    // if the case asked for one. A failure here is a fact about the machine
+    // running the suite, not about the template — the same class of failure
+    // `SandboxFailed` two lines above already reports with this code — so it
+    // aborts the run rather than being recorded as one more case failure.
+    // See ADR-033.
+    if let Some(git) = &case.git {
+        init_git_sandbox(cwd, git).map_err(|error| TestingError::SandboxFailed {
+            case: case.name.clone(),
+            reason: error.to_string(),
+        })?;
+    }
+
+    // `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL`, merged under every list's
+    // own resolved `env` — never over it, so a case that deliberately sets
+    // either key still wins, the same override precedent `TEMPLATE_ROOT` and
+    // the colour variables already have. Empty, and so a no-op `extend`,
+    // for a case that did not ask for `git`. See ADR-033.
+    let git_isolation = case.git.as_ref().map(|_| git_isolation_env(cwd));
+    let env_for = |list_env: &BTreeMap<String, String>| match &git_isolation {
+        None => list_env.clone(),
+        Some(isolation) => {
+            let mut merged = isolation.clone();
+            merged.extend(list_env.clone());
+            merged
+        }
+    };
 
     // Rust has no try/finally. This closure is the substitute: everything
     // that can fail with a genuine `?` — a materialised write, a snapshot
@@ -1348,7 +1501,7 @@ fn run_case(
             &case.commands.before.commands,
             cwd,
             &root,
-            &case.commands.before.env,
+            &env_for(&case.commands.before.env),
             &case.answers,
             true,
             &mut failures,
@@ -1441,7 +1594,7 @@ fn run_case(
                             &case.commands.rendered.commands,
                             cwd,
                             &root,
-                            &case.commands.rendered.env,
+                            &env_for(&case.commands.rendered.env),
                             &case.answers,
                             true,
                             &mut failures,
@@ -1481,7 +1634,7 @@ fn run_case(
                             &case.commands.after.commands,
                             cwd,
                             &root,
-                            &case.commands.after.env,
+                            &env_for(&case.commands.after.env),
                             &case.answers,
                             true,
                             &mut failures,
@@ -1509,7 +1662,7 @@ fn run_case(
         &case.commands.finally.commands,
         cwd,
         &root,
-        &case.commands.finally.env,
+        &env_for(&case.commands.finally.env),
         &case.answers,
         false,
         &mut finally_failures,
@@ -1535,11 +1688,68 @@ fn run_case(
     })
 }
 
-/// `run_case`, before ADR-027: no sandbox, no `[commands]`, the render
-/// checked directly against `expect` and the snapshot. Kept as its own
-/// function so a case with no `[commands]` — the overwhelming majority —
-/// takes a path that is byte-for-byte what it always has been, with no
-/// temporary directory created for nothing.
+/// Turn a case's freshly created sandbox into an isolated Git repository —
+/// one empty commit, authored with the case's own identity (or the built-in
+/// default) — never the ambient `user.name`/`user.email`/`commit.gpgsign` of
+/// the machine running the suite.
+///
+/// Seeded entirely through [`GitBackend`], never a spawned `git` process, so
+/// no hook, alias or ambient identity is ever consulted for this: the
+/// identity is written to the sandbox's own local `.git/config` before
+/// anything asks for a signature, and Git's own precedence — local always
+/// outranks global and system — makes it authoritative regardless of what
+/// either ambient level says. See ADR-033 and issue #155.
+fn init_git_sandbox(cwd: &Path, git: &GitSandbox) -> Result<(), GitError> {
+    let repo = LibGit2::init_isolated(cwd)?;
+    repo.set_config_str("user.name", &git.user_name)?;
+    repo.set_config_str("user.email", &git.user_email)?;
+    // A literal `git commit` a case's own `[commands]` runs later would try
+    // to GPG-sign under an ambient `commit.gpgsign = true` and hang waiting
+    // for an agent with no TTY to answer — the exact failure issue #155
+    // reported. Pinned locally so that cannot happen regardless of the
+    // machine running the suite.
+    repo.set_config_bool("commit.gpgsign", false)?;
+    let empty_tree = repo.build_tree(&[])?;
+    let seed = repo.create_commit(empty_tree, &[], "git tpl test sandbox")?;
+    // The branch `init_isolated` pinned HEAD at, so it has a commit to point
+    // at rather than staying unborn — the whole reason a case asks for this:
+    // something like `pdm-backend`'s `source = "scm"` needs a commit to
+    // describe from, not merely a `.git` directory.
+    repo.set_ref("refs/heads/main", seed, "tpl: seed the isolated sandbox")?;
+    Ok(())
+}
+
+/// Where `GIT_CONFIG_GLOBAL` points a case's own `[commands]` at, when it
+/// asked for `git`: inside the sandbox's own `.git/`, never created, so real
+/// Git treats the "global" level as empty rather than reading the running
+/// machine's own `~/.gitconfig`. Mirrors `tests/common/mod.rs::scrub_git_env`,
+/// written for the identical reason one layer further out — isolating this
+/// project's own test suite from the developer's `~/.gitconfig`.
+const GIT_ISOLATION_ABSENT_GLOBAL_CONFIG: &str = "git-tpl-test-absent-global-config";
+
+/// `GIT_CONFIG_NOSYSTEM`/`GIT_CONFIG_GLOBAL`, scoped to a case that asked for
+/// `git`: the two variables that make a literal `git` a case's own
+/// `[commands]` spawns see nothing beyond the sandbox's own local
+/// `.git/config` — never the global or system config of the machine running
+/// `git tpl test`. See ADR-033.
+fn git_isolation_env(cwd: &Path) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
+        (
+            "GIT_CONFIG_GLOBAL".to_string(),
+            cwd.join(".git")
+                .join(GIT_ISOLATION_ABSENT_GLOBAL_CONFIG)
+                .display()
+                .to_string(),
+        ),
+    ])
+}
+
+/// `run_case`, before ADR-027: no sandbox, no `[commands]`, no `git`, the
+/// render checked directly against `expect` and the snapshot. Kept as its
+/// own function so a case with neither `[commands]` nor `git` — the
+/// overwhelming majority — takes a path that is byte-for-byte what it always
+/// has been, with no temporary directory created for nothing.
 ///
 /// Since ADR-032, this is also the *only* path a `--write` run ever takes,
 /// for every case it does not skip outright: `[commands]` never run under
@@ -2553,12 +2763,83 @@ mod tests {
         "[expect.lacks]\n\"a\" = 1\n",
         "`expect.lacks.\"a\"` must be an array of strings"
     )]
+    #[case("git = 1\n", "`git` must be `true`, `false`, or a table overriding")]
     fn a_section_of_the_wrong_type_names_the_type_it_should_be(
         #[case] body: &str,
         #[case] expected: &str,
     ) {
         let reason = shape_reason(case(body));
         assert!(reason.contains(expected), "{reason}");
+    }
+
+    #[test]
+    fn git_true_gives_the_built_in_identity() {
+        let parsed = case("git = true\n").unwrap();
+        let git = parsed.git.expect("git sandbox");
+        assert_eq!(git.user_name, "git-tpl test");
+        assert_eq!(git.user_email, "test@git-tpl.invalid");
+    }
+
+    #[rstest]
+    #[case("")]
+    #[case("git = false\n")]
+    fn git_false_and_git_absent_parse_identically(#[case] body: &str) {
+        assert_eq!(case(body).unwrap().git, None);
+    }
+
+    #[test]
+    fn a_git_table_may_override_the_identity() {
+        let parsed =
+            case("[git]\nuser.name = \"Someone\"\nuser.email = \"someone@example.com\"\n").unwrap();
+        let git = parsed.git.expect("git sandbox");
+        assert_eq!(git.user_name, "Someone");
+        assert_eq!(git.user_email, "someone@example.com");
+    }
+
+    #[test]
+    fn a_git_table_may_override_only_one_leaf() {
+        // The other leaf still falls back to the built-in default: an
+        // override is per-key, not all-or-nothing.
+        let parsed = case("[git]\nuser.name = \"Someone\"\n").unwrap();
+        let git = parsed.git.expect("git sandbox");
+        assert_eq!(git.user_name, "Someone");
+        assert_eq!(git.user_email, "test@git-tpl.invalid");
+    }
+
+    #[test]
+    fn an_unknown_top_level_key_hints_git() {
+        let reason = shape_reason(case("gi = true\n"));
+        assert!(reason.contains("Did you mean `git`?"), "{reason}");
+    }
+
+    #[test]
+    fn an_unknown_git_key_is_refused_with_a_suggestion() {
+        let reason = shape_reason(case("[git]\nusr.name = \"x\"\n"));
+        assert!(reason.contains("Did you mean `user`?"), "{reason}");
+    }
+
+    #[test]
+    fn an_unknown_git_user_key_is_refused_with_a_suggestion() {
+        let reason = shape_reason(case("[git.user]\nemai = \"x\"\n"));
+        assert!(reason.contains("Did you mean `email`?"), "{reason}");
+    }
+
+    #[test]
+    fn a_git_user_leaf_of_the_wrong_type_names_the_type_it_should_be() {
+        let reason = shape_reason(case("[git.user]\nname = 1\n"));
+        assert!(
+            reason.contains("`git.user.name` must be a string"),
+            "{reason}"
+        );
+    }
+
+    #[test]
+    fn git_must_be_a_table_when_not_a_bool() {
+        let reason = shape_reason(case("git = \"yes\"\n"));
+        assert!(
+            reason.contains("`git` must be `true`, `false`, or a table overriding"),
+            "{reason}"
+        );
     }
 
     #[test]
