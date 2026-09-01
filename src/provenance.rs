@@ -153,13 +153,19 @@ impl Provenance {
                     }
                 }
                 keys::EXTENDS => {
-                    // Read back as the raw trailer text, exactly like `data`
-                    // above: `Recorded` is text a person or an older git-tpl
-                    // may have written, and splitting `<source>@<sha>` apart
-                    // here would assume a source never contains an `@`, which
-                    // an scp-style Git URL (`git@host:path`) already violates.
-                    recorded.extends.push(value.to_string());
-                    found_any = true;
+                    // Split from the *right*: an scp-style Git URL
+                    // (`git@host:path`) can itself contain an `@`, but the
+                    // trailing `@<short-sha>` never does, so `rsplit_once` is
+                    // the one split that is always unambiguous here — the
+                    // same reasoning `Data-Source`'s `name = value` avoids by
+                    // using a different separator, applied to a value that
+                    // cannot change its own separator.
+                    if let Some((source, revision)) = value.rsplit_once('@') {
+                        recorded
+                            .extends
+                            .push((source.trim().to_string(), revision.trim().to_string()));
+                        found_any = true;
+                    }
                 }
                 keys::VERSION => {
                     recorded.version = Some(value.to_string());
@@ -191,9 +197,11 @@ pub struct Recorded {
     pub answers_digest: Option<String>,
     /// The data sources, as `(name, trailer)`.
     pub data: Vec<(String, String)>,
-    /// The ancestor chain, as raw `<source>@<sha>` trailer text, nearest
-    /// parent first.
-    pub extends: Vec<String>,
+    /// The ancestor chain, as `(source, short-sha)` pairs, nearest parent
+    /// first — the same shape `data` already takes for the same reason: this
+    /// is text a person or an older git-tpl may have written, not a value
+    /// this crate re-resolved.
+    pub extends: Vec<(String, String)>,
     /// The git-tpl version that rendered it.
     pub version: Option<String>,
 }
@@ -351,8 +359,14 @@ mod tests {
         assert_eq!(
             recorded.extends,
             [
-                "https://github.com/org/parent@a1b2c3d".to_string(),
-                "https://github.com/org/grandparent@1122334".to_string(),
+                (
+                    "https://github.com/org/parent".to_string(),
+                    "a1b2c3d".to_string()
+                ),
+                (
+                    "https://github.com/org/grandparent".to_string(),
+                    "1122334".to_string()
+                ),
             ]
         );
         // Nearest parent first, root ancestor last -- the same order the
@@ -374,6 +388,28 @@ mod tests {
     #[test]
     fn no_extends_trailer_is_written_for_a_template_with_no_parent() {
         assert!(!sample().to_message().contains("Template-Extends"));
+    }
+
+    /// An scp-style Git URL contains its own `@`, so the source and the
+    /// trailing `@<short-sha>` must be split from the right, not the left.
+    #[test]
+    fn an_scp_style_ancestor_source_round_trips() {
+        let provenance = Provenance {
+            extends: vec![ExtendsProvenance {
+                source: "git@github.com:org/parent.git".into(),
+                revision: oid("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"),
+            }],
+            ..sample()
+        };
+
+        let recorded = Provenance::parse(&provenance.to_message()).unwrap();
+        assert_eq!(
+            recorded.extends,
+            [(
+                "git@github.com:org/parent.git".to_string(),
+                "a1b2c3d".to_string()
+            )]
+        );
     }
 
     /// A hand-made commit on the ref is tolerated rather than treated as

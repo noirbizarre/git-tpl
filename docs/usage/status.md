@@ -22,6 +22,15 @@ The template has moved. Run:
   git tpl update
 ```
 
+For a template rendered through an [`[extends]`](../templates/format.md#extends) chain, an `Extends` line follows
+`Rendered`, naming each ancestor the way the trailers do:
+
+```console
+Extends:   https://github.com/org/base-template@a1b2c3d
+```
+
+Absent entirely for a template with no chain.
+
 ## What each line means
 
 **Template** — `source` from `.config/git.tpl.toml`, exactly as it is written there.
@@ -35,6 +44,9 @@ even though its name did not change.
 
 **Rendered** — how many renderings are on the ref.
 Read from the [commit trailers](../concepts/git-model.md#what-is-in-the-commit).
+
+**Extends** — the [`[extends]`](../templates/format.md#extends) chain the last rendering recorded, nearest parent
+first. Shown only when there is one.
 
 **Merged** — whether the ref tip is an ancestor of `HEAD`.
 `no` means there is a rendering you have not taken yet, and `git tpl diff` will show it.
@@ -88,6 +100,7 @@ git tpl --json status
   "renderedReference": "v1.3.0",
   "renderedCommit": "8b3e7d1f7eee32eed1f846ccc477af18b4e605d6",
   "dirty": false,
+  "renderedExtends": [],
   "availableReferenceDescription": "v1.4.0 (4f2c1a9)",
   "availableCommit": "4f2c1a9d5e6b7c8f9a0b1c2d3e4f5a6b7c8d9e0f",
   "templateMoved": true,
@@ -105,6 +118,10 @@ git tpl --json status
 
 `remote` is `null` when no remote copy exists.
 `dirty` records whether the rendering on the ref was produced from a template working tree rather than a commit.
+`renderedExtends` is the [`[extends]`](../templates/format.md#extends) chain the last rendering recorded, nearest
+parent first, as `{source, revision}` objects — `[]`, not `null`, for a template with no chain, read from the
+`Template-Extends` trailers rather than re-resolved, so it still answers correctly when the template cannot be
+reached right now.
 `availableCommit` is `null` exactly when `availableReferenceDescription` is — no template resolves, typically because
 fetching it failed.
 Human output goes to stderr, so `--json` leaves stdout machine-readable.

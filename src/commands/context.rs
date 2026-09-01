@@ -73,7 +73,15 @@ pub fn run(args: ContextArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     }
 
     if global.json {
-        println!("{}", crate::report::success(rendered.context.to_json()));
+        let mut payload = rendered.context.to_json();
+        if let serde_json::Value::Object(map) = &mut payload {
+            // Always present, `chain` empty for a template with no
+            // `[extends]`: a script should be able to index this without
+            // first checking whether the key exists (the same rule
+            // `status --json` follows for its own optional fields).
+            map.insert("extends".to_string(), extends_json(&rendered.template));
+        }
+        println!("{}", crate::report::success(payload));
         return Ok(crate::exit::SUCCESS);
     }
 
@@ -98,4 +106,32 @@ pub fn run(args: ContextArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     section("Data", rendered.context.data());
 
     Ok(crate::exit::SUCCESS)
+}
+
+/// The `[extends]` chain, and which layer of it declared each question or
+/// data source currently in effect.
+///
+/// `Context` itself carries no such metadata — it is a flat `name -> value`
+/// map, on purpose (ADR-006: no runtime context, and no reason to widen it
+/// for this) — so this is built separately, straight from `Resolved`, the
+/// one place a chain several layers deep is still fully in hand. `question`
+/// and `data` map a name to an index into `chain`, so a caller debugging an
+/// override does not have to reason about anything but this one payload.
+fn extends_json(template: &ops::Resolved) -> serde_json::Value {
+    let chain: Vec<serde_json::Value> = template
+        .extends_provenance()
+        .iter()
+        .map(|ancestor| {
+            serde_json::json!({
+                "source": ancestor.source,
+                "revision": ancestor.revision.to_hex(),
+            })
+        })
+        .collect();
+
+    serde_json::json!({
+        "chain": chain,
+        "questions": template.question_origin(),
+        "data": template.data_origin(),
+    })
 }

@@ -154,6 +154,10 @@ pub struct Resolved {
     /// currently in effect. Absent for an entry this template's own manifest
     /// declares or overrides.
     data_origin: BTreeMap<String, usize>,
+    /// `[questions.<name>]` -> index into `ancestors` that declared the
+    /// question currently in effect. Absent for one this template's own
+    /// manifest declares or overrides. See [`Resolved::question_origin`].
+    question_origin: BTreeMap<String, usize>,
     /// Kept so the temporary clone outlives the resolution.
     _cache: Option<tempfile::TempDir>,
 }
@@ -284,6 +288,18 @@ impl Resolved {
         &self.data_origin
     }
 
+    /// `[questions.<name>]` -> index into [`Resolved::extends_provenance`]'s
+    /// chain (`0` is the nearest parent), for every question an ancestor
+    /// currently contributes. Absent for one this template's own manifest
+    /// declares or overrides.
+    ///
+    /// For `git tpl context --json`, so a chain several layers deep can be
+    /// debugged without cloning every ancestor by hand to find which one
+    /// wrote a given question.
+    pub fn question_origin(&self) -> &BTreeMap<String, usize> {
+        &self.question_origin
+    }
+
     /// The ancestor chain, for the `Template-Extends` provenance trailer —
     /// nearest parent first, root ancestor last. Empty for a template with no
     /// `[extends]`.
@@ -321,10 +337,15 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
 
     // A template with no `[extends]` is a chain of one: its own manifest is
     // already the effective one, and there is nothing to fold.
-    let (ancestors, manifest, data_origin) = if leaf.manifest.extends.is_some() {
+    let (ancestors, manifest, data_origin, question_origin) = if leaf.manifest.extends.is_some() {
         resolve_ancestors(&leaf, request.source)?
     } else {
-        (Vec::new(), leaf.manifest.clone(), BTreeMap::new())
+        (
+            Vec::new(),
+            leaf.manifest.clone(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        )
     };
 
     Ok(Resolved {
@@ -338,6 +359,7 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
         dirty: leaf.dirty,
         ignored: leaf.ignored,
         ancestors,
+        question_origin,
         data_origin,
         _cache: leaf._cache,
     })
@@ -451,8 +473,14 @@ fn resolve_layer(
 }
 
 /// An ancestor chain, folded into one effective manifest — what
-/// [`resolve_ancestors`] produces.
-type AncestorChain = (Vec<Ancestor>, Manifest, BTreeMap<String, usize>);
+/// [`resolve_ancestors`] produces: the ancestors, the merged manifest, its
+/// `[data]` origins, and its `[questions]` origins, in that order.
+type AncestorChain = (
+    Vec<Ancestor>,
+    Manifest,
+    BTreeMap<String, usize>,
+    BTreeMap<String, usize>,
+);
 
 /// Walk an `[extends]` chain above `leaf`, and fold it into one manifest.
 ///
@@ -526,9 +554,10 @@ fn resolve_ancestors(leaf: &Layer, leaf_source: &str) -> Result<AncestorChain, R
     let extends::Merged {
         manifest,
         data_origin,
+        question_origin,
     } = extends::merge_chain(&manifest_refs)?;
 
-    Ok((ancestors, manifest, data_origin))
+    Ok((ancestors, manifest, data_origin, question_origin))
 }
 
 /// `remove` paths made root-relative, for filtering an ancestor's own

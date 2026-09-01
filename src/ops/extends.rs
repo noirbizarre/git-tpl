@@ -117,6 +117,16 @@ pub struct Merged {
     /// nearest parent) that declared the entry currently in effect. Absent
     /// for an entry the leaf declared or overrode.
     pub data_origin: BTreeMap<String, usize>,
+    /// `[questions.<name>]` -> index into the ancestor chain (`0` = the
+    /// nearest parent) that declared the question currently in effect.
+    /// Absent for one the leaf declared or overrode.
+    ///
+    /// Read by `git tpl context --json` so a chain can be debugged without
+    /// cloning every ancestor by hand to find which one wrote a given
+    /// question. `[data]` needs the equivalent for a different reason too —
+    /// reading a `kind = "template"` file from the right tree — which is why
+    /// it existed first; this one exists purely for that debugging.
+    pub question_origin: BTreeMap<String, usize>,
 }
 
 /// Merge a chain's manifests into one effective manifest.
@@ -150,6 +160,7 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
     };
 
     let mut data_origin: BTreeMap<String, usize> = BTreeMap::new();
+    let mut question_origin: BTreeMap<String, usize> = BTreeMap::new();
 
     // Root-to-leaf: `layers` is nearest-first, so this is `.rev()`.
     for (layer_index, layer) in layers.iter().enumerate().rev() {
@@ -167,6 +178,18 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
                 data_origin.insert(name.clone(), layer_index - 1);
             }
         }
+
+        // Same rule, same reason, for questions: the last layer visited
+        // (root-to-leaf, so the nearest one that declares a name) is the one
+        // in effect, and re-declaring the same name at a nearer layer must
+        // erase an origin recorded for a further one.
+        for name in layer.questions.keys() {
+            if layer_index == 0 {
+                question_origin.remove(name);
+            } else {
+                question_origin.insert(name.clone(), layer_index - 1);
+            }
+        }
     }
 
     check_kind_collisions(&manifest)?;
@@ -174,6 +197,7 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
     Ok(Merged {
         manifest,
         data_origin,
+        question_origin,
     })
 }
 
@@ -347,6 +371,53 @@ mod tests {
         assert_eq!(merged.manifest.data.len(), 2);
         assert_eq!(merged.data_origin.get("shared"), Some(&0));
         assert_eq!(merged.data_origin.get("own"), None);
+    }
+
+    /// `[questions]` records its origin the same way `[data]` does, for
+    /// `git tpl context --json` to report which layer a question came from.
+    #[test]
+    fn questions_record_their_origin_the_same_way_data_does() {
+        let leaf = manifest(
+            r#"
+            name = "child"
+            [questions.own]
+            type = "string"
+            "#,
+        );
+        let parent = manifest(
+            r#"
+            name = "parent"
+            [questions.inherited]
+            type = "string"
+            "#,
+        );
+        let merged = merge_chain(&[&leaf, &parent]).unwrap();
+        assert_eq!(merged.question_origin.get("inherited"), Some(&0));
+        assert_eq!(merged.question_origin.get("own"), None);
+    }
+
+    /// A leaf overriding an ancestor's question owns it outright, the same
+    /// way overriding a data source does.
+    #[test]
+    fn a_leaf_overriding_a_question_owns_it_outright() {
+        let leaf = manifest(
+            r#"
+            name = "child"
+            [questions.shared]
+            type = "string"
+            prompt = "overridden"
+            "#,
+        );
+        let parent = manifest(
+            r#"
+            name = "parent"
+            [questions.shared]
+            type = "string"
+            prompt = "original"
+            "#,
+        );
+        let merged = merge_chain(&[&leaf, &parent]).unwrap();
+        assert_eq!(merged.question_origin.get("shared"), None);
     }
 
     /// A leaf overriding an ancestor's data source reads from the leaf's own

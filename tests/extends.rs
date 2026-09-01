@@ -518,7 +518,8 @@ fn parent_prefix_reaches_the_shadowed_partial() {
 }
 
 /// The whole ancestor chain is recorded in the rendered commit, nearest
-/// parent first, and `git tpl status` can read it back via the trailers.
+/// parent first, and `git tpl status` can read it back — both directly, via
+/// its own `renderedExtends` field, and via the raw trailers underneath it.
 #[test]
 fn the_rendered_commit_records_the_whole_ancestor_chain() {
     let dir = tempfile::tempdir().unwrap();
@@ -559,6 +560,118 @@ fn the_rendered_commit_records_the_whole_ancestor_chain() {
     assert_eq!(lines.len(), 2);
     assert!(lines[0].contains(&parent.source()), "{lines:?}");
     assert!(lines[1].contains(&grandparent.source()), "{lines:?}");
+
+    // The same chain, structured, without a caller having to parse trailers
+    // at all.
+    let rendered_extends = status["renderedExtends"]
+        .as_array()
+        .expect("renderedExtends");
+    assert_eq!(rendered_extends.len(), 2);
+    assert_eq!(rendered_extends[0]["source"], parent.source());
+    assert_eq!(rendered_extends[1]["source"], grandparent.source());
+}
+
+/// The text report names the chain too, only when there is one.
+#[test]
+fn status_text_names_the_extends_chain_only_when_there_is_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = base(dir.path());
+    let child = Template::extending("child", &parent, "v1.0.0", "", &[("dummy.txt", "x")]);
+
+    let project = Repo::init_in(dir.path(), "project");
+    project.write("NOTES.md", "notes\n");
+    project.commit_all("chore: initial commit");
+
+    tpl(&project, &["init", &parent.source(), "--defaults"]).success();
+    let plain = tpl(&project, &["status"]).all();
+    assert!(!plain.contains("Extends:"), "{plain}");
+
+    // A second project, this time attached to the extending template.
+    let project2 = Repo::init_in(dir.path(), "project2");
+    project2.write("NOTES.md", "notes\n");
+    project2.commit_all("chore: initial commit");
+    tpl(&project2, &["init", &child.source(), "--defaults"]).success();
+    let plain = tpl(&project2, &["status"]).all();
+    assert!(plain.contains("Extends:"), "{plain}");
+    assert!(plain.contains(&parent.source()), "{plain}");
+}
+
+/// A template with no `[extends]` reports an empty chain, not a missing
+/// field -- a script must be able to index `renderedExtends` unconditionally.
+#[test]
+fn status_reports_an_empty_chain_for_a_template_with_no_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = base(dir.path());
+
+    let project = Repo::init_in(dir.path(), "project");
+    project.write("NOTES.md", "notes\n");
+    project.commit_all("chore: initial commit");
+
+    tpl(&project, &["init", &template.source(), "--defaults"]).success();
+
+    let status = tpl(&project, &["--json", "status"]).success().json();
+    assert_eq!(status["renderedExtends"], serde_json::json!([]));
+}
+
+/// `git tpl context --json` reports the ancestor chain, and which layer
+/// declared each inherited question and data source -- so a chain several
+/// layers deep can be debugged without cloning every ancestor by hand.
+#[test]
+fn context_reports_the_chain_and_which_layer_declared_what() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = Template::with_shared(
+        dir.path(),
+        r#"
+        name = "base"
+        [data.licenses]
+        source = "data/licenses.toml"
+        [questions.inherited]
+        type = "string"
+        default = "from the base"
+        "#,
+        &[("dummy.txt", "x")],
+        &[("data/licenses.toml", "ids = [\"MIT\"]\n")],
+    );
+    let child = Template::extending(
+        "child",
+        &parent,
+        "v1.0.0",
+        r#"
+        [questions.own]
+        type = "string"
+        default = "child's own"
+        "#,
+        &[("dummy.txt", "x")],
+    );
+
+    let scratch = Scratch::new();
+    let json = scratch.json(&["context", &child.source(), "--defaults"]);
+
+    let chain = json["extends"]["chain"].as_array().expect("chain");
+    assert_eq!(chain.len(), 1);
+    assert_eq!(chain[0]["source"], parent.source());
+
+    // Declared by the parent, at index 0 of the chain above.
+    assert_eq!(json["extends"]["questions"]["inherited"], 0);
+    assert_eq!(json["extends"]["data"]["licenses"], 0);
+    // The child's own question is absent -- it needs no origin, it is the
+    // template actually resolved.
+    assert!(json["extends"]["questions"].get("own").is_none());
+}
+
+/// A template with no `[extends]` reports an empty chain and no origins --
+/// the common case, and it must cost nothing to check.
+#[test]
+fn context_reports_an_empty_chain_for_a_template_with_no_parent() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = base(dir.path());
+
+    let scratch = Scratch::new();
+    let json = scratch.json(&["context", &template.source(), "--defaults"]);
+
+    assert_eq!(json["extends"]["chain"], serde_json::json!([]));
+    assert_eq!(json["extends"]["questions"], serde_json::json!({}));
+    assert_eq!(json["extends"]["data"], serde_json::json!({}));
 }
 
 /// `git tpl lint` still succeeds on an extending template -- it checks the

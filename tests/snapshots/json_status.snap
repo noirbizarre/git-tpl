@@ -1,5 +1,6 @@
 ---
 source: tests/snapshots.rs
+assertion_line: 29
 expression: transcript
 ---
 exit: 2
@@ -12,6 +13,7 @@ exit: 2
   "renderedReference": "main",
   "renderedCommit": "[sha]",
   "dirty": false,
+  "renderedExtends": [],
   "availableReferenceDescription": "main ([short])",
   "availableCommit": "[sha]",
   "templateMoved": true,

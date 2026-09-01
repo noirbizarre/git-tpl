@@ -40,6 +40,29 @@ Without `--eval`, the whole context, split the way the renderer sees it:
 `flat` mirrors the renderer exactly.
 A dump that disagreed with it would be worse than none, because it would be believed.
 
+## `extends` (JSON only)
+
+For a template with an [`[extends]`](../templates/format.md#extends) chain, `--json`'s payload carries an
+`extends` key alongside the sections above:
+
+```json
+"extends": {
+  "chain": [{ "source": "https://github.com/org/base-template", "revision": "a1b2c3d..." }],
+  "questions": { "license": 0 },
+  "data": { "licenses": 0 }
+}
+```
+
+`chain` is the ancestor chain, nearest parent first. `questions` and `data` map a name to an index into `chain` —
+which layer's declaration is the one currently in effect — for every question or data source an ancestor
+contributes; a name the template's own manifest declares or overrides is simply absent. `chain` is `[]` and
+`questions`/`data` are `{}` for a template with no `[extends]`, always present so a script never has to check
+whether the key exists first.
+
+This is a debugging aid, not a rendering concern: `Context` itself carries no such metadata — see
+[ADR-006](../adr/006-no-runtime-context.md) — it is built separately, from the resolved template, at the point
+`--json` writes its payload.
+
 ## No local data sources
 
 A `local` data source is resolved relative to the project root, and `context` has no project — like `render`, it
