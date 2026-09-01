@@ -193,7 +193,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::testing::remote_not_supported` | `test` was pointed at a remote source; it only reads a local working tree, with or without `--ref`. |
 | `tpl::testing::snapshot_read` | A recorded snapshot is unreadable, or its `MANIFEST` contradicts the files beside it. |
 | `tpl::testing::snapshot_write` | A snapshot could not be written to the working tree. |
-| `tpl::testing::sandbox_failed` | A case's temporary sandbox, for `[commands]`, could not be created. |
+| `tpl::testing::sandbox_failed` | A case's temporary sandbox, for `[commands]` or an isolated `git` (ADR-033), could not be created. |
 | `tpl::testing::sandbox_write` | The rendering could not be materialised into a case's sandbox. |
 
 ## Git
