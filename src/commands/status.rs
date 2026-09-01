@@ -14,7 +14,7 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // only which remote a report compared against would be a flag whose effect
     // is invisible in the output it produces.
     let preferences = Preferences::load(&ctx.repo)?;
-    let status = ops::status(&ctx.repo, &ctx.root, &preferences, args.dirty)?;
+    let status = ops::status(&ctx.repo, &ctx.root, &preferences, &ctx.user, args.dirty)?;
 
     if global.json {
         println!("{}", crate::report::success(json(&status)));

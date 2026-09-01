@@ -46,6 +46,8 @@ Something is wrong with the template itself.
 | `tpl::extends::cycle` | An `[extends]` chain revisits a template it has already resolved. |
 | `tpl::extends::depth` | An `[extends]` chain is deeper than the limit. |
 | `tpl::extends::remove_missing` | `[extends].remove` names a path the parent does not have. |
+| `tpl::extends::untrusted` | A remote `[extends]` ancestor was not authorised. Pass `--trust`, add the template to `[trust]`, or answer the confirmation interactively — unlike `tpl::data::untrusted`, a `git tpl test` case's own `trust` field never grants this; see [ADR-034](../adr/034-template-inheritance.md). |
+| `tpl::extends::cancelled` | The confirmation for a remote `[extends]` ancestor was cancelled. |
 
 ## Rendering
 

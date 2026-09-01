@@ -86,6 +86,35 @@ pub enum ExtendsError {
         /// The path that does not exist in the parent.
         path: String,
     },
+
+    /// A remote ancestor was not authorised for cloning.
+    ///
+    /// Deliberately its own variant rather than a transparent wrap of
+    /// [`crate::data::DataError::Untrusted`]: that error's own help text says
+    /// "for `git tpl test`, set `trust = true` on the case instead", which is
+    /// wrong here — a case's `trust` is scoped to declared `[data]` sources
+    /// (ADR-028); an `[extends]` ancestor is resolved once, before any case
+    /// is even read, and is governed by `[trust]`/`--trust` alone. Reusing
+    /// the mechanism (`TrustGate`, `Decision`) without reusing the message
+    /// is the point.
+    #[error("`{origin}` is not trusted")]
+    #[diagnostic(
+        code(tpl::extends::untrusted),
+        help(
+            "an `[extends]` ancestor is cloned exactly like a `[data]` `kind = \"git\"` source, \
+             and is confirmed the same way — pass `--trust`, or add the template to `[trust]`"
+        )
+    )]
+    Untrusted {
+        /// The ancestor's own source.
+        // Not named `source`: thiserror reserves that name for `#[source]`.
+        origin: String,
+    },
+
+    /// The confirmation was cancelled, rather than answered either way.
+    #[error("cancelled")]
+    #[diagnostic(code(tpl::extends::cancelled))]
+    Cancelled,
 }
 
 /// Whether `rev` is pinned: a tag or a commit SHA, never a branch (ADR-034).

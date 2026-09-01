@@ -101,6 +101,42 @@ branch — is rejected before the parent is ever merged in. This needs one new c
 `is_tag`, since `resolve_revision` already resolves a tag, a branch or a SHA to the same `Oid` and deliberately
 does not say which kind of reference it matched.
 
+### A remote ancestor is trusted exactly like a `[data]` `git` source
+
+An ancestor's `source` is chosen by the *template author*, not typed by the user — exactly the property that
+already makes a `[data]` `kind = "git"` source require confirmation before it is cloned (`docs/data/remote.md`:
+"a `git` source's clone... is gated the same way" an HTTP fetch is). An `[extends]` ancestor is cloned by the same
+mechanism, for the same reason, so it is confirmed the same way: `--trust`, a `[trust]` entry, or an interactive
+confirmation, using the same `TrustGate`/`Decision` machinery — a remote ancestor is a `RemoteRequest { kind:
+SourceKind::Git, .. }`, indistinguishable at the gate from a `[data]` git source.
+
+Two things make this differ mechanically from `[data]`'s own confirmation, both consequences of the same fact:
+unlike `[data]`, which is fully known from the leaf's own manifest before anything is fetched, the chain is only
+discoverable *incrementally* — an ancestor's own `[extends]`, naming the next one, cannot be read until that
+ancestor is already cloned.
+
+- **Confirmed one ancestor at a time, as each is discovered**, immediately before it is cloned — not, as `[data]`
+  does, as one combined list before evaluation. There is no way to show the whole chain up front without already
+  having reached every repository in it.
+- **A local directory is exempt**, the same distinction `local_path`/`SourceKind::is_network` already draw
+  everywhere else — there is nothing to clone across a network, so nothing to confirm. This is also why every
+  existing `[extends]` test, all of which use local ancestors, needed no change at all when this landed: the
+  local path is the common case in the test suite, and correctly requires no confirmation.
+- **Per-ancestor, not leaf-wide.** A `[trust]` entry, or `--trust`, covering the *leaf* template does not
+  extend to what it `[extends]` — each ancestor's own source is checked independently. Trusting a template is not
+  the same as trusting everything it might, in turn, pull in; conflating the two would mean a `[trust]` entry
+  written for one template silently also covering a repository its author added later, that the entry's author
+  never saw.
+
+`git tpl lint`, `git tpl questions` and `git tpl status` resolve a template — and therefore its `[extends]`
+chain — without ever evaluating a `[data]` source, so they need this confirmation too, unlike `[data]`'s own
+gate, which only ever runs inside an actual render. None of the three gained a `--trust` flag of their own:
+`lint` and `questions` refuse outright when an ancestor is not already covered by `[trust]`, and `status`
+degrades exactly like any other resolve failure it already tolerates on its best-effort "available" side.
+`git tpl test` resolves the chain once, before any case is read, so it checks `[trust]` alone too — independent
+of a case's own `trust = true/false`, which stays exactly what ADR-028 already says it means: declared `[data]`
+sources, nothing about the manifest chain that produced them.
+
 ### Merge order
 
 Ancestors' questions, computed values, data sources and remotes come first, in ancestor order (root ancestor
@@ -184,5 +220,12 @@ a same-name collision exactly as legible as today's `[data]` name collision, and
 `docs/templates/format.md`, `docs/templates/questions.md`, `docs/templates/computed.md` and
 `docs/data/reproducibility.md` are updated in the same change. New diagnostic codes
 (`tpl::manifest::invalid_extends`, `tpl::manifest::extends_kind_collision`, `tpl::extends::cycle`,
-`tpl::extends::depth`, `tpl::extends::unpinned`, `tpl::extends::remove_missing`) are added to
-`docs/reference/diagnostics.md` and pinned by `tests/diagnostics.rs`.
+`tpl::extends::depth`, `tpl::extends::unpinned`, `tpl::extends::remove_missing`, `tpl::extends::untrusted`,
+`tpl::extends::cancelled`) are added to `docs/reference/diagnostics.md` and pinned by `tests/diagnostics.rs`.
+
+`resolve()` gains two parameters, `&UserConfig` and `&mut Trust<'_>`, to carry the confirmation described above.
+Every caller that already threads both through to a render (`init`, `update`, `render`, `context`, `backport`,
+`--dirty` previews) inherits it for free, since the fix lives inside `render_files`, their shared entry point.
+`status`, `lint`, `questions` and `test`'s own initial resolution gain `&UserConfig` where they did not already
+have it — a mechanical thread-through, since their command-layer callers already hold one — and construct a
+`Trust::refuse()` for the (common) case where the ancestor in question is not already covered by `[trust]`.

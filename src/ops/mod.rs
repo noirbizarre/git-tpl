@@ -620,14 +620,22 @@ pub fn render_files(
     supplied: BTreeMap<String, Value>,
     user: &UserConfig,
     answering: Answering<'_>,
-    trust: Trust<'_>,
+    mut trust: Trust<'_>,
 ) -> Result<RenderedFiles, OpError> {
-    let template = resolve::resolve(Request {
-        source: target.source,
-        reference: target.reference,
-        root: target.root,
-        dirty: target.dirty,
-    })?;
+    // A reborrow, not a move: `resolve` confirms an `[extends]` ancestor's
+    // source (if any), and `render_resolved` below still needs the same
+    // `trust` afterwards, for `[data]`. The two are independent confirmations
+    // over the same invocation's `Trust`, not one shared decision.
+    let template = resolve::resolve(
+        Request {
+            source: target.source,
+            reference: target.reference,
+            root: target.root,
+            dirty: target.dirty,
+        },
+        user,
+        &mut trust,
+    )?;
 
     let rendered = render_resolved(
         &template,
@@ -1739,6 +1747,7 @@ pub fn status(
     project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
+    user: &UserConfig,
     dirty: bool,
 ) -> Result<Status, OpError> {
     let config = Config::load(project_root)?;
@@ -1758,12 +1767,28 @@ pub fn status(
     // `dirty` compares against the template's working tree instead of its
     // committed revision, which is how an author asks "does my uncommitted
     // edit change anything here?" without committing it first.
-    let resolved = resolve::resolve(Request {
-        source: &config.template.source,
-        reference: config.template.r#ref.as_deref(),
-        root: config.template.root.as_deref(),
-        dirty,
-    })
+    //
+    // `status` prompts for nothing and has no `--trust` of its own, so the
+    // only way an `[extends]` ancestor is ever confirmed here is a `[trust]`
+    // entry matching *its own* source — checked inside `resolve` itself, per
+    // ancestor. This fallback gate is deliberately unconditional `refuse`,
+    // never `always`: an `[extends]` chain is not trusted merely because the
+    // leaf template's own `source` happens to be (ADR-034) — a `Trust`
+    // constructed from that would silently allow *every* ancestor once the
+    // leaf matched, which is exactly the shortcut ADR-034 rules out. An
+    // ancestor outside `[trust]` then degrades exactly like any other resolve
+    // failure here — the "available" side is already best-effort.
+    let mut trust = Trust::refuse();
+    let resolved = resolve::resolve(
+        Request {
+            source: &config.template.source,
+            reference: config.template.r#ref.as_deref(),
+            root: config.template.root.as_deref(),
+            dirty,
+        },
+        user,
+        &mut trust,
+    )
     .ok();
 
     let available_reference_description = resolved
@@ -1941,8 +1966,14 @@ pub struct Linted {
 /// Severity policy — `--deny` and `--allow` — is deliberately *not* applied
 /// here. It is a decision about how to present findings, not about what the
 /// template contains, and the command layer owns presentation.
-pub fn lint(request: Request<'_>) -> Result<Linted, OpError> {
-    let template = resolve::resolve(request)?;
+///
+/// `lint` has no `--trust` of its own and prompts for nothing, so an
+/// `[extends]` ancestor outside `[trust]` refuses outright — unlike `status`,
+/// which tolerates the whole resolution failing, `lint` has nothing useful to
+/// say without one.
+pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> {
+    let mut trust = Trust::refuse();
+    let template = resolve::resolve(request, user, &mut trust)?;
 
     // This template's own files only, even when it extends another: static
     // analysis of an inherited file in a repository lint has no reason to
@@ -1994,8 +2025,12 @@ pub struct Questionnaire {
 /// Resolution order, not declaration order: when a `when` or a `default`
 /// references an earlier answer, this is the order a caller has to answer in,
 /// and it is the order the graph already computes for prompting.
-pub fn questions(request: Request<'_>) -> Result<Questionnaire, OpError> {
-    let template = resolve::resolve(request)?;
+///
+/// No `--trust` of its own and prompts for nothing, same as `lint`: an
+/// `[extends]` ancestor outside `[trust]` refuses outright.
+pub fn questions(request: Request<'_>, user: &UserConfig) -> Result<Questionnaire, OpError> {
+    let mut trust = Trust::refuse();
+    let template = resolve::resolve(request, user, &mut trust)?;
     let graph = Graph::build(&template.manifest)?;
 
     let order: Vec<String> = graph

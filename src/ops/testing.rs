@@ -1216,12 +1216,23 @@ pub fn run(
         .into());
     }
 
-    let template = resolve::resolve(super::Request {
-        source: target.source,
-        reference: target.reference,
-        root: target.root,
-        dirty: target.dirty,
-    })?;
+    // The leaf is always local (checked above), but an `[extends]` ancestor
+    // can still be remote. This resolution happens once, before any case is
+    // even read, so it cannot follow a case's own `trust` field the way
+    // declared `[data]` sources do (ADR-028) — an ancestor is confirmed
+    // against `[trust]` alone, the same as `lint`/`questions`/`status`, none
+    // of which have a `--trust` of `test`'s own to fall back on either.
+    let mut trust = Trust::refuse();
+    let template = resolve::resolve(
+        super::Request {
+            source: target.source,
+            reference: target.reference,
+            root: target.root,
+            dirty: target.dirty,
+        },
+        user,
+        &mut trust,
+    )?;
 
     let tests_dir = tests_dir.unwrap_or(DEFAULT_TESTS_DIR).trim_end_matches('/');
     let cases = discover(&template, tests_dir, filter)?;

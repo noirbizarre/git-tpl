@@ -13,14 +13,16 @@ use std::sync::Arc;
 use miette::Diagnostic;
 use thiserror::Error;
 
+use super::Trust;
 use super::extends::{self, ExtendsError};
-use crate::data::TemplateTree;
+use crate::data::{Decision, REMOTE_LIMIT_BYTES, RemoteRequest, SourceKind, TemplateTree};
 use crate::eval::Partials;
 use crate::git::libgit2::LibGit2;
 use crate::git::{GitBackend, GitError, Oid, TreeEntry};
 use crate::provenance::{ExtendsProvenance, WORKTREE_REF};
 use crate::render::{LayeredEntry, RenderError, TEMPLATE_SUFFIX, collect_partials};
 use crate::template::{DataSourceDecl, MANIFEST_NAME, Manifest, ManifestError};
+use crate::userconfig::UserConfig;
 
 /// Errors from resolving a template.
 #[derive(Debug, Error, Diagnostic)]
@@ -327,7 +329,19 @@ pub struct Request<'a> {
 }
 
 /// Fetch and resolve a template, and its `[extends]` chain if it has one.
-pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
+///
+/// `user` and `trust` exist for the `[extends]` chain alone: an ancestor's
+/// source is chosen by the *template author*, exactly like a `[data]`
+/// `kind = "git"` source, and is cloned exactly like one — so it is confirmed
+/// exactly like one, before that clone happens. This is unrelated to, and
+/// does not affect, a *separate* leaf-wide `[trust]` shortcut for `[data]`
+/// sources applied later, in `render_resolved`: trusting the leaf template
+/// does not imply trusting what it extends (ADR-034).
+pub fn resolve(
+    request: Request<'_>,
+    user: &UserConfig,
+    trust: &mut Trust<'_>,
+) -> Result<Resolved, ResolveError> {
     let leaf = resolve_layer(
         request.source,
         request.reference,
@@ -338,7 +352,7 @@ pub fn resolve(request: Request<'_>) -> Result<Resolved, ResolveError> {
     // A template with no `[extends]` is a chain of one: its own manifest is
     // already the effective one, and there is nothing to fold.
     let (ancestors, manifest, data_origin, question_origin) = if leaf.manifest.extends.is_some() {
-        resolve_ancestors(&leaf, request.source)?
+        resolve_ancestors(&leaf, request.source, user, trust)?
     } else {
         (
             Vec::new(),
@@ -487,8 +501,15 @@ type AncestorChain = (
 /// Depth and cycles are checked as each ancestor is fetched, by name, before
 /// anything about it is trusted further — a chain that is too deep or that
 /// revisits a template it has already resolved is rejected up front, exactly
-/// as the issue that motivated ADR-034 asked for.
-fn resolve_ancestors(leaf: &Layer, leaf_source: &str) -> Result<AncestorChain, ResolveError> {
+/// as the issue that motivated ADR-034 asked for. A remote ancestor's source
+/// is confirmed the same way, before it is ever cloned — see
+/// [`confirm_ancestor`].
+fn resolve_ancestors(
+    leaf: &Layer,
+    leaf_source: &str,
+    user: &UserConfig,
+    trust: &mut Trust<'_>,
+) -> Result<AncestorChain, ResolveError> {
     let mut ancestors: Vec<Ancestor> = Vec::new();
     // `(source, revision)` rather than `source` alone: the same source at two
     // different revisions is not a cycle, only reading the exact same
@@ -505,6 +526,13 @@ fn resolve_ancestors(leaf: &Layer, leaf_source: &str) -> Result<AncestorChain, R
             }
             .into());
         }
+
+        // Confirmed *before* the clone, one ancestor at a time: the chain is
+        // only discoverable incrementally (this ancestor's own `[extends]`,
+        // naming the next one, is not readable until it is cloned), so —
+        // unlike `[data]`, fully known from the leaf's manifest alone — there
+        // is no way to list the whole chain before any of it is reached.
+        confirm_ancestor(&declared.source, ancestors.len(), user, trust)?;
 
         let layer = resolve_layer(&declared.source, Some(&declared.rev), None, false)?;
 
@@ -558,6 +586,51 @@ fn resolve_ancestors(leaf: &Layer, leaf_source: &str) -> Result<AncestorChain, R
     } = extends::merge_chain(&manifest_refs)?;
 
     Ok((ancestors, manifest, data_origin, question_origin))
+}
+
+/// Confirm one `[extends]` ancestor's source before it is cloned.
+///
+/// A local directory is exempt — matches every other "is this a network
+/// operation" check in the codebase (`SourceKind::is_network`, the leaf's own
+/// source): there is nothing to clone across a network, so nothing to
+/// confirm. A `[trust]` entry covering this *ancestor's own* source is prior
+/// consent and grants without asking, the same way it does for a `[data]`
+/// source — but, deliberately, `[trust]` covering the *leaf* does not: each
+/// ancestor is checked against its own source, independently (ADR-034).
+fn confirm_ancestor(
+    source: &str,
+    depth: usize,
+    user: &UserConfig,
+    trust: &mut Trust<'_>,
+) -> Result<(), ExtendsError> {
+    if local_path(source).is_some() {
+        return Ok(());
+    }
+    if user.trust.allows(source) {
+        return Ok(());
+    }
+
+    // A stable, unique name per hop — mostly for the interactive prompt's own
+    // display; nothing currently replays a decision across ancestors the way
+    // `git tpl test` replays one across cases.
+    let name = format!("extends:{depth}");
+    let request = RemoteRequest {
+        name: name.clone(),
+        source: source.to_string(),
+        kind: SourceKind::Git,
+    };
+
+    let decisions = trust
+        .gate()
+        .confirm(&[request], REMOTE_LIMIT_BYTES)
+        .map_err(|_| ExtendsError::Cancelled)?;
+
+    match decisions.get(&name) {
+        Some(Decision::Allow) => Ok(()),
+        _ => Err(ExtendsError::Untrusted {
+            origin: source.to_string(),
+        }),
+    }
 }
 
 /// `remove` paths made root-relative, for filtering an ancestor's own
@@ -682,12 +755,18 @@ mod tests {
     fn dirty_on_a_remote_template_is_refused_up_front() {
         // `Resolved` holds a live repository handle and is deliberately not
         // `Debug`, so the error is matched rather than unwrapped.
-        let result = resolve(Request {
-            source: "https://github.com/a/b",
-            reference: None,
-            root: None,
-            dirty: true,
-        });
+        let user = UserConfig::default();
+        let mut trust = Trust::refuse();
+        let result = resolve(
+            Request {
+                source: "https://github.com/a/b",
+                reference: None,
+                root: None,
+                dirty: true,
+            },
+            &user,
+            &mut trust,
+        );
 
         match result {
             Err(ResolveError::DirtyNeedsLocal { .. }) => {}

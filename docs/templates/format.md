@@ -168,6 +168,13 @@ A chain may be several templates deep (a `base`, extended by a language-specific
 project's own), up to a small depth limit, but each template names exactly one parent — no multiple inheritance,
 no diamonds. A chain that revisits a template it has already resolved is rejected before anything renders.
 
+A remote (non-local) `source` needs the same confirmation a `[data]` `kind = "git"` source does — `--trust`, a
+`[trust]` entry, or an interactive confirmation — because it is chosen by the template's author, not typed on the
+command line, exactly like a git-kind data source is. See [Confirmation](../data/remote.md#confirmation). Unlike
+`[data]`, which is confirmed all at once before evaluation, an ancestor is confirmed as it is discovered — the
+chain is only readable one clone at a time. `git tpl lint`, `git tpl questions` and `git tpl status` resolve this
+chain too and need the same confirmation, even though none of them ever touch a `[data]` source.
+
 `git tpl status` and the rendered commit's trailers record the whole chain, not just the directly-configured
 template — see [What is in the commit](../concepts/git-model.md#what-is-in-the-commit). Full reasoning:
 [ADR-034](../adr/034-template-inheritance.md).

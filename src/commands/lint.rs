@@ -22,12 +22,15 @@ pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // message, not a clone of the template repository.
     let levels = Levels::parse(&args.deny, &args.allow).map_err(OpError::from)?;
 
-    let ops::Linted { template, findings } = ops::lint(ops::Request {
-        source: &source,
-        reference: args.r#ref.as_deref(),
-        root: args.root.as_deref(),
-        dirty: args.dirty,
-    })?;
+    let ops::Linted { template, findings } = ops::lint(
+        ops::Request {
+            source: &source,
+            reference: args.r#ref.as_deref(),
+            root: args.root.as_deref(),
+            dirty: args.dirty,
+        },
+        &ctx.user,
+    )?;
 
     // Policy is applied here and not in `ops`: which findings fail this run is
     // a presentation decision, not a fact about the template.

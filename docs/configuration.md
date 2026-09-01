@@ -253,7 +253,9 @@ A template the list does *not* name is still refused, loudly, when there is nobo
 omission.
 
 **What trust gates.** Only what a template asks git-tpl to do on its behalf, which today means any network access
-its data sources require: a [remote](data/remote.md) fetch, and a [Git](data/git.md) source's clone.
+its data sources require — a [remote](data/remote.md) fetch, a [Git](data/git.md) source's clone — plus cloning a
+remote [`[extends]`](templates/format.md#extends) ancestor, which is the same kind of network access, gated the
+same way, checked once per ancestor as the chain is discovered rather than once for the whole template.
 Rendering never requires trust, because a template cannot execute anything, trusted or not.
 
 Note the name: the project file is `git.tpl.toml`, mirroring `git tpl`; this one is named after the binary.
