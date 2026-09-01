@@ -9,7 +9,7 @@
 
 mod common;
 
-use common::{Repo, file_url, tpl};
+use common::{Repo, file_url, local_toml_path, tpl};
 
 /// A parent template with one file, tagged `v1.0.0`.
 fn parent(dir: &std::path::Path) -> Repo {
@@ -104,7 +104,7 @@ fn trusting_the_leaf_does_not_trust_a_remote_ancestor() {
     // Covers the *child's* own source, not the parent's.
     project.user_config(&format!(
         "[trust]\ntemplates = [\"{}\"]\n",
-        child.path.display()
+        local_toml_path(&child.path)
     ));
 
     let output = init(&project, &child, &[]).failure();
@@ -119,7 +119,7 @@ fn trusting_the_leaf_does_not_trust_a_remote_ancestor() {
 fn a_local_ancestor_needs_no_trust() {
     let dir = tempfile::tempdir().unwrap();
     let parent = parent(dir.path());
-    let child = child(dir.path(), &parent.path.to_string_lossy());
+    let child = child(dir.path(), &local_toml_path(&parent.path));
     let project = project(dir.path());
 
     init(&project, &child, &[]).success();

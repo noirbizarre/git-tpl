@@ -416,6 +416,18 @@ pub fn file_url(path: &Path) -> String {
     format!("file:///{}", path.trim_start_matches('/'))
 }
 
+/// A local path's string form, safe to embed in a TOML string literal.
+///
+/// A raw Windows path (`C:\Users\...`) written directly into a TOML string
+/// is read as escape sequences (`\U`, `\u`...) and fails to parse. Unlike
+/// [`file_url`], this keeps the path looking local — no `file://` prefix —
+/// for a fixture that must still satisfy `local_path()`'s own "is this on
+/// this machine" check; Windows accepts forward slashes in a path just as
+/// well as backslashes, so converting costs nothing.
+pub fn local_toml_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}
+
 pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
     run_tpl(&repo.path, repo.config_home(), args, "never")
 }
@@ -820,6 +832,19 @@ MIT = "MIT License"
         self.repo.path.to_string_lossy().into_owned()
     }
 
+    /// What a child's `[extends].source` records when this template is its
+    /// parent — the same TOML-safe form `Template::extending` embeds.
+    ///
+    /// Differs from [`Template::source`] only on Windows: that one is a raw
+    /// filesystem path, fine as a CLI argument but not as something *another*
+    /// template's `template.toml` embeds — see `local_toml_path`. A test
+    /// asserting on a recorded/declared ancestor source (a trailer, a
+    /// `--json` field) needs this one; a test just passing a source on the
+    /// command line needs `source`.
+    pub fn declared_source(&self) -> String {
+        local_toml_path(&self.repo.path)
+    }
+
     /// A template that `[extends]` `parent`, pinned to a tag on its current
     /// tip.
     ///
@@ -838,7 +863,10 @@ MIT = "MIT License"
         files: &[(&str, &str)],
     ) -> Self {
         parent.repo.git(&["tag", tag]);
-        let source = parent.source();
+        // Not `parent.source()`: that is a raw filesystem path, and on
+        // Windows its backslashes are read as TOML escape sequences once
+        // embedded in the string literal below.
+        let source = parent.declared_source();
         let dir = parent
             .repo
             .path

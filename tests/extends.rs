@@ -335,7 +335,7 @@ fn an_unpinned_parent_is_rejected() {
         "template.toml",
         &format!(
             "name = \"child\"\n\n[extends]\nsource = \"{}\"\nrev = \"main\"\n",
-            parent.source()
+            common::local_toml_path(&parent.repo.path)
         ),
     );
     child.commit_all("feat: initial child template");
@@ -365,7 +365,7 @@ fn a_parent_pinned_to_a_commit_sha_is_accepted() {
         "template.toml",
         &format!(
             "name = \"child\"\n\n[extends]\nsource = \"{}\"\nrev = \"{sha}\"\n",
-            parent.source()
+            common::local_toml_path(&parent.repo.path)
         ),
     );
     child.commit_all("feat: initial child template");
@@ -386,7 +386,9 @@ fn a_cyclic_chain_is_rejected() {
     repo.commit_all("feat: v1, no extends");
     repo.git(&["tag", "v1"]);
 
-    let source = repo.path.to_string_lossy().into_owned();
+    // Not a raw `to_string_lossy()`: on Windows its backslashes would be read
+    // as TOML escape sequences once embedded in the `template.toml` below.
+    let source = common::local_toml_path(&repo.path);
     repo.write(
         "template.toml",
         &format!("name = \"a\"\n\n[extends]\nsource = \"{source}\"\nrev = \"v1\"\n"),
@@ -543,12 +545,15 @@ fn the_rendered_commit_records_the_whole_ancestor_chain() {
     let message = project.commit_message(ref_name);
 
     assert!(message.contains("Template-Source:"), "{message}");
+    // `.declared_source()`, not `.source()`: the trailer records what the
+    // *child* actually wrote in its own `[extends].source`, which on Windows
+    // is the forward-slash form `Template::extending` had to embed.
     let parent_line = message
         .lines()
-        .find(|l| l.starts_with("Template-Extends:") && l.contains(&parent.source()));
+        .find(|l| l.starts_with("Template-Extends:") && l.contains(&parent.declared_source()));
     let grandparent_line = message
         .lines()
-        .find(|l| l.starts_with("Template-Extends:") && l.contains(&grandparent.source()));
+        .find(|l| l.starts_with("Template-Extends:") && l.contains(&grandparent.declared_source()));
     assert!(parent_line.is_some(), "{message}");
     assert!(grandparent_line.is_some(), "{message}");
 
@@ -558,8 +563,11 @@ fn the_rendered_commit_records_the_whole_ancestor_chain() {
         .filter(|l| l.starts_with("Template-Extends:"))
         .collect();
     assert_eq!(lines.len(), 2);
-    assert!(lines[0].contains(&parent.source()), "{lines:?}");
-    assert!(lines[1].contains(&grandparent.source()), "{lines:?}");
+    assert!(lines[0].contains(&parent.declared_source()), "{lines:?}");
+    assert!(
+        lines[1].contains(&grandparent.declared_source()),
+        "{lines:?}"
+    );
 
     // The same chain, structured, without a caller having to parse trailers
     // at all.
@@ -567,8 +575,8 @@ fn the_rendered_commit_records_the_whole_ancestor_chain() {
         .as_array()
         .expect("renderedExtends");
     assert_eq!(rendered_extends.len(), 2);
-    assert_eq!(rendered_extends[0]["source"], parent.source());
-    assert_eq!(rendered_extends[1]["source"], grandparent.source());
+    assert_eq!(rendered_extends[0]["source"], parent.declared_source());
+    assert_eq!(rendered_extends[1]["source"], grandparent.declared_source());
 }
 
 /// The text report names the chain too, only when there is one.
@@ -593,7 +601,7 @@ fn status_text_names_the_extends_chain_only_when_there_is_one() {
     tpl(&project2, &["init", &child.source(), "--defaults"]).success();
     let plain = tpl(&project2, &["status"]).all();
     assert!(plain.contains("Extends:"), "{plain}");
-    assert!(plain.contains(&parent.source()), "{plain}");
+    assert!(plain.contains(&parent.declared_source()), "{plain}");
 }
 
 /// A template with no `[extends]` reports an empty chain, not a missing
@@ -649,7 +657,7 @@ fn context_reports_the_chain_and_which_layer_declared_what() {
 
     let chain = json["extends"]["chain"].as_array().expect("chain");
     assert_eq!(chain.len(), 1);
-    assert_eq!(chain[0]["source"], parent.source());
+    assert_eq!(chain[0]["source"], parent.declared_source());
 
     // Declared by the parent, at index 0 of the chain above.
     assert_eq!(json["extends"]["questions"]["inherited"], 0);
