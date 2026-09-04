@@ -138,7 +138,7 @@ demand = "2"
 # The `git tpl test` spinner. Pairs with `console` (same author): both decide
 # from the same terminal-detection primitives, so the two never disagree
 # about whether a spinner belongs on screen.
-indicatif = "0.17"
+indicatif = "0.18"
 
 # Configuration & data
 serde = { version = "1", features = ["derive"] }
