@@ -146,6 +146,8 @@ diagnostic naming the fix rather than clap's "unexpected argument" — the probl
 **A Git repository at the destination** — the current directory by default, or `<dir>` if given.
 `init` needs somewhere to put a ref.
 Pass `--init` to create the directory and the repository, or create them yourself first.
+`--dry-run` is exempt: it creates nothing, so it previews against the template alone, even against a
+destination that does not exist yet or is not a Git repository.
 
 **No existing `.config/git.tpl.toml`.** A project has one template.
 Re-running `init` is refused with `tpl::ops::already_initialised`, because it would silently discard the recorded

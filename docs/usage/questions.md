@@ -23,9 +23,9 @@ template reads its checked-out branch's `HEAD`; a URL reads the remote's default
 `--dirty` is the one to reach for while authoring: it shows the schema a question you have just added produces,
 before you commit it.
 
-`init --dry-run` lists question *names*, on stderr, and needs a repository and a network fetch to do it.
-That is enough to reassure a human and not enough to write an answers file with — which is what anything driving
-git-tpl non-interactively needs first.
+`init --dry-run` lists question *names*, on stderr, and needs a network fetch to do it — no repository at the
+destination required. That is enough to reassure a human and not enough to write an answers file with — which
+is what anything driving git-tpl non-interactively needs first.
 
 ## Generating an answers file
 
