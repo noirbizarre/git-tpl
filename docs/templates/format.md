@@ -164,6 +164,59 @@ any of them by name, add files, and replace files the parent renders. The rules,
   same name, one layer further out — the value a bare reference would have resolved to had the nearer layer not
   overridden it. This is the `<prefix>:` loader namespace [shared partials](#shared-partials) already reserves.
 
+#### Extending a shared base across the chain
+
+`{% extends %}`/`{% block %}` compose with the chain exactly like [shared partials](#shared-partials) do, because
+they *are* shared partials, merged into the same namespace by the same rule.
+
+The everyday case needs nothing special: a parent declares a base with blocks, and a child with no partial of its
+own by that name just extends it bare — the parent's declaration is the only, and therefore nearest, one:
+
+```jinja
+{# the parent's base.html.jinja #}
+{% block title %}Default title{% endblock %}
+{% block content %}Default content{% endblock %}
+```
+
+```jinja
+{# the child's template/page.html.jinja #}
+{% extends "base.html.jinja" %}
+{% block title %}Overridden title{% endblock %}
+{% block content %}{{ super() }} + more{% endblock %}
+```
+
+renders to:
+
+```
+Overridden title
+Default content + more
+```
+
+The `<prefix>:` form matters only once the child declares its *own* `base.html.jinja` too, shadowing the
+parent's for a bare reference — the same trap [ADR-012](../adr/012-template-loader.md) built the prefix for.
+From inside that shadow, `parent:base.html.jinja` reaches the parent's original — one layer further out from
+wherever the reference is written, not from the leaf that is actually rendering:
+
+```jinja
+{# the parent's base.html.jinja #}
+{% block content %}Default content{% endblock %}
+```
+
+```jinja
+{# the child's own base.html.jinja -- shadows the parent's for a bare reference #}
+{% extends "parent:base.html.jinja" %}
+{% block content %}{{ super() }} + child layer{% endblock %}
+```
+
+```jinja
+{# the child's template/page.html.jinja -- extends its own base.html.jinja, bare #}
+{% extends "base.html.jinja" %}
+{% block content %}{{ super() }} + page layer{% endblock %}
+```
+
+renders `content` to `Default content + child layer + page layer`: the parent's original, extended once by the
+child's own shadow, extended again by the child's page.
+
 A chain may be several templates deep (a `base`, extended by a language-specific template, extended by a
 project's own), up to a small depth limit, but each template names exactly one parent — no multiple inheritance,
 no diamonds. A chain that revisits a template it has already resolved is rejected before anything renders.
@@ -348,6 +401,39 @@ Partials are read from the same pinned revision as everything else, so editing o
 advances the ref.
 They are available to manifest expressions too — a `computed` value may `{% import %}` the same macro a file
 does.
+
+A partial can also be the base of a `{% extends %}` chain. `{% block %}`, `{% extends %}` and `{{ super() }}` are
+plain Jinja, and the loader that serves `{% import %}` and `{% include %}` serves these exactly the same way, by
+name, from the same partial namespace — there is nothing extends-specific to configure:
+
+```
+base.html.jinja                          ← the partial, declares the blocks
+template/page.html.jinja                 ← extends it
+```
+
+```jinja
+{# base.html.jinja #}
+{% block title %}Default title{% endblock %}
+{% block content %}Default content{% endblock %}
+```
+
+```jinja
+{# template/page.html.jinja #}
+{% extends "base.html.jinja" %}
+{% block title %}{{ project_name }}{% endblock %}
+{% block content %}{{ super() }} + more{% endblock %}
+```
+
+renders to:
+
+```
+demo
+Default content + more
+```
+
+`title` is replaced outright; `content` extends the base's own content with `{{ super() }}` rather than
+replacing it. The overall shape — which block comes first, and the newline between them — comes from the *base*,
+since a file extending another contributes only its blocks, nothing else in its own body.
 
 !!! tip "Getting the name wrong"
 

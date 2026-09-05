@@ -519,6 +519,96 @@ fn parent_prefix_reaches_the_shadowed_partial() {
     );
 }
 
+/// The everyday pattern: a parent declares a base with `{% block %}`s, a
+/// child that has no partial of its own by that name just `{% extends %}`
+/// it -- the parent's declaration is the only, and therefore nearest, one,
+/// so no `parent:` prefix is needed. `{{ super() }}` proves a block can
+/// extend the parent's content across the chain, not just replace it.
+#[test]
+fn a_child_page_bare_extends_a_parent_only_base() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = Template::with_shared(
+        dir.path(),
+        "name = \"base\"\n",
+        &[("dummy.txt", "x")],
+        &[(
+            "base.html.jinja",
+            "{% block title %}Default title{% endblock %}\n\
+             {% block content %}Default content{% endblock %}\n",
+        )],
+    );
+    let child = Template::extending(
+        "child",
+        &parent,
+        "v1.0.0",
+        "",
+        &[(
+            "page.html.jinja",
+            "{% extends \"base.html.jinja\" %}\n\
+             {% block title %}Overridden title{% endblock %}\n\
+             {% block content %}{{ super() }} + more{% endblock %}\n",
+        )],
+    );
+
+    let scratch = Scratch::new();
+    scratch.render(&child.source()).success();
+
+    assert_eq!(
+        scratch.read("page.html"),
+        "Overridden title\nDefault content + more\n"
+    );
+}
+
+/// The ADR-012/034 "trap" `parent:` exists for: the child declares its own
+/// `base.html.jinja` too (shadowing the parent's for a bare reference), and
+/// that shadow itself reaches the parent's original with `parent:` -- one
+/// hop out from wherever the reference is written, not from the leaf. A
+/// three-layer `super()` chain (parent's original, the child's own shadow,
+/// the child's page) proves both hops resolve to the right file.
+#[test]
+fn a_child_own_shadow_reaches_the_parents_base_with_the_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = Template::with_shared(
+        dir.path(),
+        "name = \"base\"\n",
+        &[("dummy.txt", "x")],
+        &[(
+            "base.html.jinja",
+            "{% block content %}Default content{% endblock %}\n",
+        )],
+    );
+    let child = Template::extending(
+        "child",
+        &parent,
+        "v1.0.0",
+        "",
+        &[(
+            "page.html.jinja",
+            "{% extends \"base.html.jinja\" %}\n\
+             {% block content %}{{ super() }} + page layer{% endblock %}\n",
+        )],
+    );
+    // The child's own shadow of `base.html.jinja` -- outside the render
+    // root, exactly like the parent's, so it is a partial too, and it wins
+    // the bare name for anything else in the child's own tree.
+    child.repo.write(
+        "base.html.jinja",
+        "{% extends \"parent:base.html.jinja\" %}\n\
+         {% block content %}{{ super() }} + child layer{% endblock %}\n",
+    );
+    child
+        .repo
+        .commit_all("feat: add the child's own shadow base");
+
+    let scratch = Scratch::new();
+    scratch.render(&child.source()).success();
+
+    assert_eq!(
+        scratch.read("page.html"),
+        "Default content + child layer + page layer\n"
+    );
+}
+
 /// The whole ancestor chain is recorded in the rendered commit, nearest
 /// parent first, and `git tpl status` can read it back — both directly, via
 /// its own `renderedExtends` field, and via the raw trailers underneath it.
