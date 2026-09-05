@@ -12,8 +12,8 @@ use tpl::git::GitError;
 use tpl::git::libgit2::LibGit2;
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::testing::{
-    CaseOutcome, CommandStep, Failure, Progress, Report, SnapshotChange, SnapshotOutcome, Status,
-    Stream,
+    CaseOutcome, CommandStep, Failure, Progress, Report, RunOptions, SnapshotChange,
+    SnapshotOutcome, Status, Stream,
 };
 use tpl::ops::{self, OpError, Target};
 
@@ -26,9 +26,10 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let source = ctx.user.expand(&args.template).into_owned();
     let run_commands = test_commands_enabled(args.skip_commands)?;
 
-    // Chosen once, up front: `--quiet`/`--json` get nothing, `-v` gets a
-    // scrolling log with live command output, a real terminal otherwise gets
-    // a spinner, and anything else (piped, in a CI log) gets plain lines.
+    // Chosen once, up front: `--quiet`/`--json` get nothing, GitHub Actions
+    // (auto-detected) gets grouped workflow commands, `-v` gets a scrolling
+    // log with live command output, a real terminal otherwise gets a
+    // spinner, and anything else (piped, in a CI log) gets plain lines.
     let mut progress = TestProgress::new(&ctx, global.verbose > 0);
     let report = ops::testing::run(
         Target {
@@ -40,16 +41,20 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             // what was last committed.
             dirty: args.r#ref.is_none(),
         },
-        args.tests.as_deref(),
-        &args.cases,
-        args.write,
-        run_commands,
+        RunOptions {
+            tests_dir: args.tests.as_deref(),
+            filter: &args.cases,
+            write: args.write,
+            run_commands,
+            // Told to `[commands]` children so a colour-aware tool does not
+            // silently mute itself just because its stdout/stderr are pipes
+            // — never on `--color=never`/`NO_COLOR`, since that already
+            // decided `is_colored()` to be false.
+            color: ctx.out.theme.is_colored(),
+            shard: args.shard.as_deref(),
+            record_durations: args.record_durations,
+        },
         &ctx.user,
-        // Told to `[commands]` children so a colour-aware tool does not
-        // silently mute itself just because its stdout/stderr are pipes —
-        // never on `--color=never`/`NO_COLOR`, since that already decided
-        // `is_colored()` to be false.
-        ctx.out.theme.is_colored(),
         &mut progress,
     )?;
     // Clears any spinner before the final report prints, so its last
@@ -103,6 +108,22 @@ enum TestProgress {
         /// prints — that is what `-v` adds.
         verbose: bool,
     },
+    /// `GITHUB_ACTIONS=true` in the environment, and not `--json`/`--quiet`.
+    ///
+    /// No opt-out flag exists, matching this project's other CI
+    /// auto-detection (`theme::decide`'s `TERM=dumb`) — the signal is
+    /// unambiguous and does not need a knob. Every case is wrapped in a
+    /// `::group::`/`::endgroup::` workflow command, command output is
+    /// forwarded unconditionally (as `-v` would), and a failing case gets
+    /// exactly one `::error::` annotation naming its own file. All of it
+    /// goes to **stdout**, not stderr — the one deliberate exception to
+    /// "human output goes to stderr" (see `src/report.rs`'s header): GitHub
+    /// reads workflow commands from a step's stdout, and splitting a
+    /// `::group::` marker from the content it folds across two streams
+    /// risks the runner interleaving them out of order. Safe only because
+    /// this variant is never chosen when `--json` is set — `choose` checks
+    /// `speaks` (false under `--json`) first. See ADR-035.
+    GitHubActions { theme: Theme },
 }
 
 impl TestProgress {
@@ -111,6 +132,7 @@ impl TestProgress {
             ctx.out.speaks(),
             verbose,
             console::user_attended_stderr(),
+            std::env::var("GITHUB_ACTIONS").as_deref() == Ok("true"),
             ctx.out.theme.clone(),
         )
     }
@@ -120,9 +142,22 @@ impl TestProgress {
     /// already uses for the same reason: a real terminal cannot be faked for
     /// a test, but a `bool` can, so the *decision* stays testable even though
     /// [`new`](Self::new) that supplies it is not.
-    fn choose(speaks: bool, verbose: bool, is_terminal: bool, theme: Theme) -> Self {
+    fn choose(
+        speaks: bool,
+        verbose: bool,
+        is_terminal: bool,
+        github_actions: bool,
+        theme: Theme,
+    ) -> Self {
         if !speaks {
             return Self::Silent;
+        }
+        // Checked ahead of `-v`/terminal: GitHub Actions mode implies
+        // verbose-style forwarding unconditionally (see ADR-035), so it must
+        // win the precedence race regardless of whether `-v` was also
+        // passed.
+        if github_actions {
+            return Self::GitHubActions { theme };
         }
         if verbose {
             return Self::Line {
@@ -201,6 +236,29 @@ fn counted(style: &console::Style, count: usize, label: &str) -> String {
     }
 }
 
+/// Escape a value used as workflow-command *data* — the part after the
+/// final `::` — per GitHub's own reference:
+/// <https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions>.
+///
+/// `%` first, so escaping does not double-escape a `%` that is itself part
+/// of an already-produced `%0A` et al.
+fn workflow_data_escape(value: &str) -> String {
+    value
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+/// Escape a value used as a workflow-command *property* (`file=`, `title=`)
+/// — the same substitutions as [`workflow_data_escape`], plus `:` and `,`,
+/// which a property value would otherwise let be misread as the next
+/// property's delimiter.
+fn workflow_property_escape(value: &str) -> String {
+    workflow_data_escape(value)
+        .replace(':', "%3A")
+        .replace(',', "%2C")
+}
+
 /// `✔ case` (green tick, bold white name) or `✘ case` (red cross, yellow
 /// name) — printed once, permanently, above the still-running spinner (or as
 /// a plain line, piped) rather than overwritten like [`phase_line`]'s.
@@ -226,6 +284,9 @@ impl Progress for TestProgress {
             Self::Silent => {}
             Self::Spinner { bar, theme } => bar.set_message(format!("{} …", bold(theme, name))),
             Self::Line { theme, .. } => eprintln!("{} …", bold(theme, name)),
+            // `::group::` opens the fold; `case_finished` below closes it
+            // with `::endgroup::`. Stdout, per ADR-035.
+            Self::GitHubActions { .. } => println!("::group::{name}"),
         }
     }
 
@@ -254,6 +315,16 @@ impl Progress for TestProgress {
                 }
                 eprintln!("  {} {}", bold(theme, name), phase_line(theme, &status));
             }
+            // Uncoloured: a workflow command's message is not a terminal,
+            // and an ANSI escape inside `::debug::…::` is, at best, ignored,
+            // and at worst misread. `::debug::` rather than a plain line:
+            // GitHub only shows it when step debug logging is enabled,
+            // keeping a default GitHub Actions log focused on the group's
+            // command lines and the final case summary. See ADR-035.
+            Self::GitHubActions { .. } => {
+                let line = phase_line(&Theme::plain(), &status);
+                println!("::debug::{name}: {}", workflow_data_escape(&line));
+            }
         }
     }
 
@@ -270,6 +341,14 @@ impl Progress for TestProgress {
                 bold(theme, name),
                 command_line(theme, step, command, ok)
             ),
+            // Visible, not `::debug::` — this is the per-command status
+            // line the feature asks for. Colour is fine: this is a plain
+            // stdout line, not a workflow command's own payload.
+            Self::GitHubActions { theme } => println!(
+                "  {} {}",
+                bold(theme, name),
+                command_line(theme, step, command, ok)
+            ),
         }
     }
 
@@ -282,6 +361,12 @@ impl Progress for TestProgress {
         if let Self::Line { verbose: true, .. } = self {
             let _ = std::io::stderr().write_all(chunk);
         }
+        // Unconditional under GitHub Actions: the whole point of grouping
+        // every case is that there is nothing left to trade the wall of
+        // text away for — it folds regardless. Stdout, per ADR-035.
+        if let Self::GitHubActions { .. } = self {
+            let _ = std::io::stdout().write_all(chunk);
+        }
     }
 
     fn case_finished(&mut self, outcome: &CaseOutcome) {
@@ -293,6 +378,28 @@ impl Progress for TestProgress {
             // below it, so the spinner never stops ticking to make room.
             Self::Spinner { bar, theme } => bar.println(case_summary(theme, outcome)),
             Self::Line { theme, .. } => eprintln!("{}", case_summary(theme, outcome)),
+            Self::GitHubActions { theme } => {
+                println!("{}", case_summary(theme, outcome));
+                // Exactly one `::error::` per failing case, however many
+                // assertions it failed (see ADR-035) — annotated to the
+                // case's own file, so it surfaces on GitHub's "Files
+                // changed" view without opening the log at all.
+                if !outcome.passed() {
+                    let message: String = outcome
+                        .failures
+                        .iter()
+                        .flat_map(|failure| failure_lines(&Theme::plain(), failure, false))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    println!(
+                        "::error file={},title={}::{}",
+                        workflow_property_escape(&outcome.path),
+                        workflow_property_escape(&format!("case `{}` failed", outcome.name)),
+                        workflow_data_escape(&message),
+                    );
+                }
+                println!("::endgroup::");
+            }
         }
     }
 }
@@ -348,6 +455,25 @@ fn print_text(ctx: &Standalone, report: &Report, write: bool) {
             if report.cases.len() == 1 { "" } else { "s" }
         ),
     ));
+    if let Some(shard) = report.shard {
+        ctx.out.say(field(
+            theme,
+            "Shard",
+            &format!(
+                "{}/{} — {} of {} case{}, {}",
+                shard.index,
+                shard.total,
+                report.cases.len(),
+                shard.cases_total,
+                if shard.cases_total == 1 { "" } else { "s" },
+                if shard.balanced {
+                    "balanced by recorded duration"
+                } else {
+                    "split evenly by count"
+                },
+            ),
+        ));
+    }
     ctx.out.blank();
 
     for case in &report.cases {
@@ -514,15 +640,26 @@ fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize, write: bool) {
     }
 }
 
-fn print_failure(ctx: &Standalone, failure: &Failure) {
-    let theme = &ctx.out.theme;
-    let say = |text: String| ctx.out.say(format!("    {text}"));
+/// Every line [`print_failure`] would show for one failure, as data rather
+/// than a side effect — shared with the GitHub Actions reporter's single
+/// `::error::` annotation, which needs the identical prose collapsed into
+/// one string.
+///
+/// `verbose` is a parameter rather than read from `ctx.out.global`: the
+/// GitHub Actions reporter has no `Standalone` at the point it calls this,
+/// and always wants the non-verbose form regardless of the actual `-v` the
+/// command was invoked with — an annotation is not the place for a raw
+/// captured-output dump, and the group's own live forwarding already showed
+/// it (`command_output`, above).
+fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut say = |text: String| lines.push(format!("    {text}"));
 
     match failure {
         Failure::MissingFile { path, closest } => {
             say(format!("missing file      {path}"));
             if let Some(near) = closest {
-                ctx.out.say(muted(
+                lines.push(muted(
                     theme,
                     &format!("      the template rendered `{near}`"),
                 ));
@@ -564,7 +701,7 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
                     .unwrap_or_default()
             ));
             if let Some(code) = code {
-                ctx.out.say(muted(
+                lines.push(muted(
                     theme,
                     &format!("      add `error = \"{code}\"` if that is the point of the case"),
                 ));
@@ -576,7 +713,7 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
             message,
         } => {
             say(format!("expected {expected}, got {}", actual.join(" → ")));
-            ctx.out.say(muted(theme, &format!("      {message}")));
+            lines.push(muted(theme, &format!("      {message}")));
         }
         Failure::SnapshotDiff { changes } => {
             say(format!(
@@ -586,30 +723,27 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
             ));
             for change in changes {
                 let note = if change.mode_only { " (mode)" } else { "" };
-                ctx.out.say(muted(
+                lines.push(muted(
                     theme,
                     &format!("      {} {}{note}", change.kind.label(), change.path),
                 ));
                 // Hunks only when asked for. A suite with a large rendering
                 // would otherwise bury the list of what changed under the
                 // change itself.
-                if ctx.out.global.verbose > 0
-                    && let Some(patch) = &change.patch
-                {
+                if verbose && let Some(patch) = &change.patch {
                     for line in patch.lines() {
-                        ctx.out.say(format!("        {}", patch_line(theme, line)));
+                        lines.push(format!("        {}", patch_line(theme, line)));
                     }
                 }
             }
-            ctx.out.say(muted(
+            lines.push(muted(
                 theme,
                 "      re-record with `git tpl test --write` once the change is intended",
             ));
         }
         Failure::SnapshotMissing => {
             say("snapshot requested but never recorded".to_string());
-            ctx.out
-                .say(muted(theme, "      record one with `git tpl test --write`"));
+            lines.push(muted(theme, "      record one with `git tpl test --write`"));
         }
         Failure::CommandFailed {
             step,
@@ -626,16 +760,24 @@ fn print_failure(ctx: &Standalone, failure: &Failure) {
             // command produced it — repeating the captured (lossily
             // converted, tail-capped) copy here would only be a worse
             // version of what the user already watched happen.
-            if ctx.out.global.verbose == 0 {
+            if !verbose {
                 // stderr first: it is where a failing command explains
                 // itself. stdout only when there is nothing on stderr to
                 // show instead.
                 let output = if stderr.is_empty() { stdout } else { stderr };
                 for line in output.lines() {
-                    ctx.out.say(muted(theme, &format!("      {line}")));
+                    lines.push(muted(theme, &format!("      {line}")));
                 }
             }
         }
+    }
+
+    lines
+}
+
+fn print_failure(ctx: &Standalone, failure: &Failure) {
+    for line in failure_lines(&ctx.out.theme, failure, ctx.out.global.verbose > 0) {
+        ctx.out.say(line);
     }
 }
 
@@ -665,7 +807,16 @@ fn json(report: &Report) -> serde_json::Value {
             "snapshotsCompared": report.snapshots_compared(),
             "commandsEnabled": report.commands_enabled,
             "commandsRun": report.commands_run(),
+            "durationsRecorded": report.durations_recorded,
         },
+        // A run-level fact, not a per-case one — `null` unless `--shard` was
+        // given. See ADR-036.
+        "shard": report.shard.map(|shard| serde_json::json!({
+            "index": shard.index,
+            "total": shard.total,
+            "casesTotal": shard.cases_total,
+            "balanced": shard.balanced,
+        })),
         "cases": report.cases.iter().map(|case| serde_json::json!({
             "name": case.name,
             "path": case.path,
@@ -678,6 +829,9 @@ fn json(report: &Report) -> serde_json::Value {
             // colourise it for. See ADR-032.
             "snapshotChanges": case.snapshot_changes.iter().map(snapshot_change_json).collect::<Vec<_>>(),
             "commandsRun": case.commands_run,
+            // Always present, regardless of `--shard`/`--record-durations`
+            // — see `CaseOutcome::duration_ms`. See ADR-036.
+            "durationMs": case.duration_ms,
             "failures": case.failures.iter().map(failure_json).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })
@@ -790,6 +944,7 @@ mod tests {
             files: 1,
             commands_run: 0,
             snapshot_changes: Vec::new(),
+            duration_ms: 0,
         }
     }
 
@@ -809,6 +964,7 @@ mod tests {
                 Self::Silent => "Silent",
                 Self::Spinner { .. } => "Spinner",
                 Self::Line { .. } => "Line",
+                Self::GitHubActions { .. } => "GitHubActions",
             })
         }
     }
@@ -872,28 +1028,35 @@ mod tests {
     }
 
     #[rstest]
-    // `--quiet`/`--json`: silent regardless of `-v` or a terminal.
-    #[case(false, false, false, "Silent")]
-    #[case(false, true, true, "Silent")]
+    // `--quiet`/`--json`: silent regardless of `-v`, a terminal, or GitHub
+    // Actions — `speaks` is checked first, and wins.
+    #[case(false, false, false, false, "Silent")]
+    #[case(false, true, true, false, "Silent")]
+    #[case(false, false, false, true, "Silent")]
+    // GitHub Actions: wins over `-v` and a terminal either way.
+    #[case(true, false, false, true, "GitHubActions")]
+    #[case(true, true, true, true, "GitHubActions")]
     // `-v`: a scrolling log either way.
-    #[case(true, true, false, "Line")]
-    #[case(true, true, true, "Line")]
+    #[case(true, true, false, false, "Line")]
+    #[case(true, true, true, false, "Line")]
     // The default: a spinner only on a real terminal.
-    #[case(true, false, true, "Spinner")]
-    #[case(true, false, false, "Line")]
-    fn choose_dispatches_on_speaks_verbose_and_terminal(
+    #[case(true, false, true, false, "Spinner")]
+    #[case(true, false, false, false, "Line")]
+    fn choose_dispatches_on_speaks_verbose_terminal_and_github_actions(
         #[case] speaks: bool,
         #[case] verbose: bool,
         #[case] is_terminal: bool,
+        #[case] github_actions: bool,
         #[case] expected: &str,
     ) {
-        let progress = TestProgress::choose(speaks, verbose, is_terminal, Theme::plain());
+        let progress =
+            TestProgress::choose(speaks, verbose, is_terminal, github_actions, Theme::plain());
         assert_eq!(format!("{progress:?}"), expected);
     }
 
     #[test]
     fn a_spinner_reflects_every_progress_event_in_its_own_message() {
-        let mut progress = TestProgress::choose(true, false, true, Theme::plain());
+        let mut progress = TestProgress::choose(true, false, true, false, Theme::plain());
 
         progress.case_started("basic");
         assert!(spinner_message(&progress).contains("basic"));
@@ -940,12 +1103,80 @@ mod tests {
         // child writes to the real stderr, so this proves the `-v` path
         // runs end to end without panicking rather than asserting on bytes
         // already covered by the integration suite's own `-v` runs.
-        let mut progress = TestProgress::choose(true, true, false, Theme::plain());
+        let mut progress = TestProgress::choose(true, true, false, false, Theme::plain());
         progress.case_started("basic");
         progress.case_status("basic", Status::Rendering);
         progress.command_finished("basic", CommandStep::Rendered, "true", true);
         progress.command_output("basic", Stream::Stdout, b"hello\n");
         progress.case_finished(&outcome("basic", true));
         progress.finish();
+    }
+
+    #[test]
+    fn a_github_actions_progress_accepts_every_event_including_a_failure() {
+        // As with the plain-line/verbose variants above: there is no
+        // in-process way to capture what this writes to the real stdout, so
+        // this proves the path runs end to end without panicking — the
+        // integration suite (`tests/test_github_actions.rs`) asserts on the
+        // actual workflow-command text.
+        let mut progress = TestProgress::choose(true, false, false, true, Theme::plain());
+        progress.case_started("basic");
+        progress.case_status("basic", Status::Rendering);
+        progress.command_finished("basic", CommandStep::Rendered, "true", true);
+        progress.command_output("basic", Stream::Stdout, b"hello\n");
+        progress.case_finished(&outcome("basic", false));
+        progress.finish();
+    }
+
+    #[test]
+    fn workflow_data_escape_handles_percent_cr_and_lf() {
+        assert_eq!(workflow_data_escape("100%"), "100%25");
+        assert_eq!(workflow_data_escape("a\r\nb"), "a%0D%0Ab");
+        // `%` first: a literal `%0A` in the input must not be re-escaped
+        // once `\n` has already produced one of its own.
+        assert_eq!(workflow_data_escape("%0A"), "%250A");
+    }
+
+    #[test]
+    fn workflow_property_escape_additionally_escapes_colon_and_comma() {
+        assert_eq!(workflow_property_escape("tests/a.toml"), "tests/a.toml");
+        assert_eq!(
+            workflow_property_escape("case `a`: one, two"),
+            "case `a`%3A one%2C two"
+        );
+    }
+
+    #[test]
+    fn failure_lines_matches_what_print_failure_used_to_print_directly() {
+        let theme = Theme::plain();
+        let lines = failure_lines(
+            &theme,
+            &Failure::ContainsMissing {
+                path: "a.toml".to_string(),
+                needle: "x".to_string(),
+            },
+            false,
+        );
+        assert_eq!(lines, vec!["    `a.toml` does not contain: x".to_string()]);
+    }
+
+    #[test]
+    fn failure_lines_hides_the_snapshot_patch_unless_verbose() {
+        let theme = Theme::plain();
+        let failure = Failure::SnapshotDiff {
+            changes: vec![SnapshotChange {
+                path: "a.toml".to_string(),
+                kind: tpl::git::ChangeKind::Modified,
+                mode_only: false,
+                patch: Some("@@ -1 +1 @@\n-a\n+b\n".to_string()),
+            }],
+        };
+        let quiet = failure_lines(&theme, &failure, false);
+        let verbose = failure_lines(&theme, &failure, true);
+        assert!(!quiet.iter().any(|line| line.contains("@@")), "{quiet:?}");
+        assert!(
+            verbose.iter().any(|line| line.contains("@@")),
+            "{verbose:?}"
+        );
     }
 }

@@ -62,6 +62,22 @@ pub const SNAPSHOT_FILES: &str = "files";
 /// rather than reporting every file as changed. See ADR-016.
 const SNAPSHOT_VERSION: &str = "# git-tpl snapshot 1";
 
+/// The subdirectory of the tests directory holding recorded case durations.
+///
+/// Nested under a `/`, like [`SNAPSHOTS_DIR`], for the same reason:
+/// `discover`'s top-level-only scan already excludes anything under it, so a
+/// durations file is never mistaken for a case. See ADR-036.
+pub const DURATIONS_DIR: &str = "__timings__";
+
+/// The file recording every case's last measured duration.
+pub const DURATIONS_FILE: &str = "durations";
+
+/// The durations format's version, written as the file's first line.
+///
+/// Mirrors [`SNAPSHOT_VERSION`] — same reasoning, same mechanism, a
+/// different file. See ADR-036.
+const DURATIONS_VERSION: &str = "# git-tpl durations 1";
+
 /// How many bytes are sniffed for a NUL before a file is called binary.
 ///
 /// Git's own heuristic. A binary file is stored verbatim like any other, but no
@@ -224,6 +240,62 @@ pub enum TestingError {
     SandboxWrite {
         /// The case whose sandbox could not be written to.
         case: String,
+        /// The path that failed.
+        path: String,
+        /// What the operating system reported.
+        reason: String,
+    },
+
+    /// `--shard` was not `INDEX/TOTAL`, both 1-based, `INDEX <= TOTAL`.
+    #[error("`--shard {spec}` is not usable")]
+    #[diagnostic(code(tpl::testing::malformed_shard), help("{reason}"))]
+    MalformedShard {
+        /// The raw `--shard` value.
+        spec: String,
+        /// What is wrong with it, and how to write it correctly.
+        reason: String,
+    },
+
+    /// A shard's split selected no cases at all.
+    ///
+    /// Refused rather than reported as an empty, green run — the same
+    /// reasoning [`TestingError::NoSuchCase`] already gives: a matrix whose
+    /// `strategy.job-total` outgrew the suite must not exit `0` having
+    /// tested nothing. See ADR-036.
+    #[error("shard {index}/{total} selected no cases ({available} available)")]
+    #[diagnostic(
+        code(tpl::testing::empty_shard),
+        help("pick a smaller `--shard` TOTAL, or check it matches `strategy.job-total`")
+    )]
+    EmptyShard {
+        /// The 1-based index that was asked for.
+        index: usize,
+        /// The 1-based total that was asked for.
+        total: usize,
+        /// How many cases existed before `--shard` narrowed them down.
+        available: usize,
+    },
+
+    /// The recorded durations file cannot be read, or contradicts itself.
+    #[error("the recorded durations at `{path}` are unreadable")]
+    #[diagnostic(
+        code(tpl::testing::durations_read),
+        help("reason: {reason}\nre-record it with `git tpl test --record-durations`")
+    )]
+    DurationsRead {
+        /// The durations file's path.
+        path: String,
+        /// What is wrong with it.
+        reason: String,
+    },
+
+    /// The durations file could not be written.
+    #[error("could not write the recorded durations")]
+    #[diagnostic(
+        code(tpl::testing::durations_write),
+        help("path: {path}\nreason: {reason}")
+    )]
+    DurationsWrite {
         /// The path that failed.
         path: String,
         /// What the operating system reported.
@@ -1120,6 +1192,15 @@ pub struct CaseOutcome {
     /// `[commands]` output it no longer produces, since nothing runs to
     /// stream. See ADR-032.
     pub snapshot_changes: Vec<SnapshotChange>,
+    /// Wall-clock time `run` spent on this case, in whole milliseconds.
+    ///
+    /// Always measured, not gated behind `--record-durations`: two
+    /// `Instant::now()` calls cost nothing, and a plain run's own report
+    /// becomes more useful for free. Milliseconds, not `Duration`: this is a
+    /// plain report field serialised straight to JSON, and sub-millisecond
+    /// precision means nothing once a case has spawned a process. See
+    /// ADR-036.
+    pub duration_ms: u64,
 }
 
 impl CaseOutcome {
@@ -1127,6 +1208,22 @@ impl CaseOutcome {
     pub fn passed(&self) -> bool {
         self.failures.is_empty()
     }
+}
+
+/// The `--shard` facts about a run. `None` on a plain run. See ADR-036.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShardInfo {
+    /// The 1-based index that was asked for.
+    pub index: usize,
+    /// The 1-based total that was asked for.
+    pub total: usize,
+    /// How many cases existed before this shard narrowed them down —
+    /// `discover`'s count, after the positional filter, before `--shard`.
+    pub cases_total: usize,
+    /// Whether a recorded durations file existed and was used to balance
+    /// the split; `false` means the deterministic even-by-count fallback
+    /// fired instead.
+    pub balanced: bool,
 }
 
 /// The result of a whole run.
@@ -1140,6 +1237,12 @@ pub struct Report {
     /// Whether `[commands]` ran at all for this run — `false` when
     /// `--skip-commands` or `tpl.testCommands = false` disabled them.
     pub commands_enabled: bool,
+    /// `--shard` was given, and this is how it split the suite.
+    pub shard: Option<ShardInfo>,
+    /// Whether this run measured for `--record-durations` — distinct from
+    /// [`CaseOutcome::duration_ms`], which is populated regardless: this
+    /// says whether the durations *file* was written at the end.
+    pub durations_recorded: bool,
 }
 
 impl Report {
@@ -1185,24 +1288,46 @@ impl Report {
     }
 }
 
+/// Everything about *how* a run behaves — as opposed to [`Target`] (*what*
+/// is under test) and `&mut dyn Progress` (*how it is reported*).
+///
+/// Grouped for the reason [`Target`] already was: `run` was about to carry
+/// five positional bools/`Option`s where it had three, and two adjacent
+/// `bool`s transposed at a call site is a bug the compiler cannot catch — a
+/// named field cannot be transposed silently.
+pub struct RunOptions<'a> {
+    /// Read cases from this directory instead of [`DEFAULT_TESTS_DIR`].
+    pub tests_dir: Option<&'a str>,
+    /// Run only these case names.
+    pub filter: &'a [String],
+    /// Record each case's rendering as its snapshot; see ADR-032.
+    pub write: bool,
+    /// Whether `[commands]` (and `git`, ADR-033) run at all this run.
+    pub run_commands: bool,
+    /// Told to `[commands]` children via `CLICOLOR_FORCE`/`FORCE_COLOR`.
+    ///
+    /// Sourced from the caller's own colour decision (`Theme::is_colored`),
+    /// never decided here: `ops` has no terminal to ask.
+    pub color: bool,
+    /// `--shard`'s raw `INDEX/TOTAL`, unparsed — parsed inside `run`, not by
+    /// the caller, so a malformed value is a [`TestingError`] like every
+    /// other case-shape mistake. See ADR-036.
+    pub shard: Option<&'a str>,
+    /// Time every case and record it to the durations file at the end.
+    ///
+    /// Conflicts with `shard` and `write` at the CLI layer (`src/cli.rs`),
+    /// enforced there, not re-checked here. See ADR-036.
+    pub record_durations: bool,
+}
+
 /// Run a template's test cases.
 ///
 /// The template is resolved **once**, so a report saying "12 cases at abc1234"
 /// is telling the truth even if `HEAD` moved mid-run.
-#[allow(clippy::too_many_arguments)]
 pub fn run(
     target: Target<'_>,
-    tests_dir: Option<&str>,
-    filter: &[String],
-    write: bool,
-    run_commands: bool,
+    options: RunOptions<'_>,
     user: &UserConfig,
-    // Whether a `[commands]` child should be told, via `CLICOLOR_FORCE`/
-    // `FORCE_COLOR`, that it may colourise even though its stdout/stderr are
-    // pipes rather than a terminal. Sourced from the caller's own colour
-    // decision (`Theme::is_colored`), never decided here: `ops` has no
-    // terminal to ask.
-    color: bool,
     progress: &mut dyn Progress,
 ) -> Result<Report, OpError> {
     // Checked before anything is resolved, and unconditionally — not only for
@@ -1234,8 +1359,48 @@ pub fn run(
         &mut trust,
     )?;
 
-    let tests_dir = tests_dir.unwrap_or(DEFAULT_TESTS_DIR).trim_end_matches('/');
-    let cases = discover(&template, tests_dir, filter)?;
+    let tests_dir = options
+        .tests_dir
+        .unwrap_or(DEFAULT_TESTS_DIR)
+        .trim_end_matches('/');
+    let cases = discover(&template, tests_dir, options.filter)?;
+    let cases_total = cases.len();
+
+    // Read once, before the loop, regardless of which of `--shard`/
+    // `--record-durations` is in play — the two are mutually exclusive at
+    // the CLI layer, so this is never a wasted read in practice, but keeping
+    // the two features' code paths independent here avoids coupling them.
+    let previous_durations = if options.shard.is_some() || options.record_durations {
+        read_durations(&template, tests_dir)?
+    } else {
+        None
+    };
+
+    let (cases, shard) = match options.shard {
+        None => (cases, None),
+        Some(spec) => {
+            let (index, total) = parse_shard(spec)?;
+            let (selected, balanced) =
+                shard_cases(cases, index, total, previous_durations.as_ref());
+            if selected.is_empty() {
+                return Err(TestingError::EmptyShard {
+                    index,
+                    total,
+                    available: cases_total,
+                }
+                .into());
+            }
+            (
+                selected,
+                Some(ShardInfo {
+                    index,
+                    total,
+                    cases_total,
+                    balanced,
+                }),
+            )
+        }
+    };
 
     // Nobody is asked. A case decides for itself, in the file, via its own
     // `trust` field — the same authority ADR-027 already gives a case's
@@ -1269,27 +1434,42 @@ pub fn run(
     for case in &cases {
         let decisions = if case.trust { &trusted } else { &untrusted };
         progress.case_started(&case.name);
-        let outcome = run_case(
+        let started = std::time::Instant::now();
+        let mut outcome = run_case(
             &template,
             target.source,
             tests_dir,
             case,
-            write,
-            run_commands,
+            options.write,
+            options.run_commands,
             user,
             decisions,
-            color,
+            options.color,
             progress,
         )?;
+        // `u128` → `u64`: a case running longer than 584 million years is
+        // not a truncation bug worth a `Result` for.
+        outcome.duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
         progress.case_finished(&outcome);
         outcomes.push(outcome);
+    }
+
+    let durations_recorded = options.record_durations;
+    if durations_recorded {
+        let measured: BTreeMap<String, u64> = outcomes
+            .iter()
+            .map(|outcome| (outcome.name.clone(), outcome.duration_ms))
+            .collect();
+        write_durations(&template, tests_dir, previous_durations.as_ref(), &measured)?;
     }
 
     Ok(Report {
         template,
         tests_dir: tests_dir.to_string(),
         cases: outcomes,
-        commands_enabled: run_commands,
+        commands_enabled: options.run_commands,
+        shard,
+        durations_recorded,
     })
 }
 
@@ -1435,6 +1615,9 @@ fn run_case(
             files: 0,
             commands_run: 0,
             snapshot_changes: Vec::new(),
+            // Overwritten by the caller (`run`'s loop), which times the
+            // whole `run_case` call uniformly across every dispatch path.
+            duration_ms: 0,
         });
     }
 
@@ -1696,6 +1879,9 @@ fn run_case(
         files,
         commands_run,
         snapshot_changes,
+        // Overwritten by the caller; see the other two `CaseOutcome`
+        // construction sites in this function.
+        duration_ms: 0,
     })
 }
 
@@ -1853,6 +2039,8 @@ fn run_case_plain(
         files,
         snapshot_changes,
         commands_run: 0,
+        // Overwritten by the caller; see `run_case`'s own construction sites.
+        duration_ms: 0,
     })
 }
 
@@ -2650,6 +2838,224 @@ fn write_snapshot(
     Ok(())
 }
 
+fn durations_path(tests_dir: &str) -> String {
+    format!("{tests_dir}/{DURATIONS_DIR}/{DURATIONS_FILE}")
+}
+
+fn parse_durations(
+    bytes: &[u8],
+    unreadable: &impl Fn(String) -> TestingError,
+) -> Result<BTreeMap<String, u64>, TestingError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| unreadable("it is not UTF-8".to_string()))?;
+
+    let mut out = BTreeMap::new();
+    for line in text.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // The name is first, unlike the manifest's path-last convention: a
+        // case name cannot contain a space (it is a file stem), so there is
+        // no quoting problem to avoid by ordering it differently.
+        let mut parts = line.splitn(2, ' ');
+        let (Some(name), Some(ms)) = (parts.next(), parts.next()) else {
+            return Err(unreadable(format!("`{line}` is not a durations entry")));
+        };
+        let ms = ms
+            .parse::<u64>()
+            .map_err(|_| unreadable(format!("`{ms}` is not a millisecond count")))?;
+        out.insert(name.to_string(), ms);
+    }
+    Ok(out)
+}
+
+fn render_durations(durations: &BTreeMap<String, u64>) -> String {
+    let mut out = String::new();
+    out.push_str(DURATIONS_VERSION);
+    out.push('\n');
+    out.push_str("# Written by `git tpl test --record-durations`. Do not edit by hand.\n");
+    for (name, ms) in durations {
+        out.push_str(&format!("{name} {ms}\n"));
+    }
+    out
+}
+
+/// Read the durations file recorded at a previous `--record-durations` run.
+///
+/// `Ok(None)` when it has never been recorded — never an error: `--shard`
+/// without one falls back to an even split (ADR-036), so a template's first
+/// `--shard` run, before anyone has run `--record-durations` once, must not
+/// fail.
+fn read_durations(
+    template: &Resolved,
+    tests_dir: &str,
+) -> Result<Option<BTreeMap<String, u64>>, OpError> {
+    let path = durations_path(tests_dir);
+    let unreadable = |reason: String| TestingError::DurationsRead {
+        path: path.clone(),
+        reason,
+    };
+
+    // Straight off disk when dirty, for the same reason `read_snapshot` does
+    // (issue #116): this file is data `--record-durations` writes directly,
+    // bypassing `.gitignore` on purpose, and reading it back through the
+    // dirty tree's own ignore-filtering could make a durations file whose
+    // name happens to match an ordinary rule disappear.
+    let bytes = if template.dirty {
+        let workdir = template.repo.workdir()?;
+        let full = workdir.join(&path);
+        if !full.is_file() {
+            return Ok(None);
+        }
+        std::fs::read(&full).map_err(|error| unreadable(error.to_string()))?
+    } else {
+        let Some(bytes) = template.repo.read_path(template.tree, &path)? else {
+            return Ok(None);
+        };
+        bytes
+    };
+
+    Ok(Some(parse_durations(&bytes, &unreadable)?))
+}
+
+/// Record this run's measured durations, merged over whatever was already
+/// recorded — never a full replace, so `git tpl test --record-durations
+/// some-case` does not erase every other case's history. See ADR-036.
+fn write_durations(
+    template: &Resolved,
+    tests_dir: &str,
+    previous: Option<&BTreeMap<String, u64>>,
+    measured: &BTreeMap<String, u64>,
+) -> Result<(), OpError> {
+    let mut merged = previous.cloned().unwrap_or_default();
+    merged.extend(measured.iter().map(|(name, ms)| (name.clone(), *ms)));
+
+    let workdir = template.repo.workdir()?;
+    let dir = workdir.join(tests_dir).join(DURATIONS_DIR);
+    let failed = |path: &Path, verb: &str, error: &std::io::Error| TestingError::DurationsWrite {
+        path: path.display().to_string(),
+        reason: format!("could not {verb} it: {error}"),
+    };
+    std::fs::create_dir_all(&dir).map_err(|error| failed(&dir, "create", &error))?;
+    let path = dir.join(DURATIONS_FILE);
+    std::fs::write(&path, render_durations(&merged))
+        .map_err(|error| failed(&path, "write", &error))?;
+    Ok(())
+}
+
+/// Parse `--shard`'s `INDEX/TOTAL`, both 1-based.
+fn parse_shard(spec: &str) -> Result<(usize, usize), TestingError> {
+    let malformed = |reason: &str| TestingError::MalformedShard {
+        spec: spec.to_string(),
+        reason: reason.to_string(),
+    };
+    let (index, total) = spec
+        .split_once('/')
+        .ok_or_else(|| malformed("must be written as `INDEX/TOTAL`, e.g. `--shard 2/4`"))?;
+    let index: usize = index
+        .parse()
+        .map_err(|_| malformed("INDEX is not a number"))?;
+    let total: usize = total
+        .parse()
+        .map_err(|_| malformed("TOTAL is not a number"))?;
+    if index == 0 || total == 0 {
+        return Err(malformed("INDEX and TOTAL both start at 1"));
+    }
+    if index > total {
+        return Err(malformed(&format!(
+            "INDEX ({index}) cannot exceed TOTAL ({total})"
+        )));
+    }
+    Ok((index, total))
+}
+
+/// Select this shard's cases out of every case `discover` and the positional
+/// filter already narrowed down to.
+///
+/// `durations` drives a balanced split when present and non-empty; `None` or
+/// empty falls back to a deterministic split by count, in the same order
+/// `discover` already sorted them into. See ADR-036.
+///
+/// Returns the selected cases, in `cases`' own original order (never
+/// weight-sorted order — a shard's own run order must stay as legible as an
+/// unsharded run's), and whether a balanced (as opposed to even) split was
+/// used.
+fn shard_cases(
+    cases: Vec<Case>,
+    index: usize,
+    total: usize,
+    durations: Option<&BTreeMap<String, u64>>,
+) -> (Vec<Case>, bool) {
+    if total == 1 {
+        return (cases, false);
+    }
+
+    let balanced = durations.is_some_and(|durations| !durations.is_empty());
+
+    let bucket_of: BTreeMap<String, usize> = if balanced {
+        // pytest-split's `least_duration`: known durations descending,
+        // unknown at the mean of known ones, one combined descending sort,
+        // greedy-assigned to whichever bucket currently holds the least
+        // accumulated weight. Ties (equal weight, or an equally-light
+        // bucket) break on name/lowest-index — a `BTreeMap`/`Vec`, never a
+        // hash map, so the split cannot depend on iteration order.
+        let durations = durations.expect("balanced implies Some and non-empty");
+        let known: Vec<u64> = cases
+            .iter()
+            .filter_map(|case| durations.get(&case.name).copied())
+            .collect();
+        let mean = if known.is_empty() {
+            0
+        } else {
+            known.iter().sum::<u64>() / known.len() as u64
+        };
+
+        let mut weighted: Vec<(&Case, u64)> = cases
+            .iter()
+            .map(|case| (case, durations.get(&case.name).copied().unwrap_or(mean)))
+            .collect();
+        weighted.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.name.cmp(&b.0.name)));
+
+        let mut bucket_weight = vec![0u64; total];
+        let mut bucket_of = BTreeMap::new();
+        for (case, weight) in weighted {
+            let lightest = bucket_weight
+                .iter()
+                .enumerate()
+                .min_by_key(|(index, weight)| (**weight, *index))
+                .map(|(index, _)| index)
+                .expect("total > 0, checked above");
+            bucket_weight[lightest] += weight;
+            bucket_of.insert(case.name.clone(), lightest);
+        }
+        bucket_of
+    } else {
+        // Even split by count: shard i gets a contiguous run of
+        // `len / total` cases, the first `len % total` shards getting one
+        // extra — deterministic, and matches `discover`'s own name order.
+        let per = cases.len() / total;
+        let extra = cases.len() % total;
+        let mut bucket_of = BTreeMap::new();
+        let mut i = 0;
+        for bucket in 0..total {
+            let n = per + usize::from(bucket < extra);
+            for _ in 0..n {
+                if let Some(case) = cases.get(i) {
+                    bucket_of.insert(case.name.clone(), bucket);
+                }
+                i += 1;
+            }
+        }
+        bucket_of
+    };
+
+    let wanted = index - 1;
+    let selected = cases
+        .into_iter()
+        .filter(|case| bucket_of.get(&case.name) == Some(&wanted))
+        .collect();
+    (selected, balanced)
+}
+
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
@@ -3040,6 +3446,7 @@ mod tests {
             files: 1,
             commands_run: 0,
             snapshot_changes: Vec::new(),
+            duration_ms: 0,
         });
     }
 }

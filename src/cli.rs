@@ -392,6 +392,24 @@ pub struct TestArgs {
     /// from the command line once configuration has said no.
     #[arg(long)]
     pub skip_commands: bool,
+
+    /// Run only the cases assigned to this shard of a balanced split
+    ///
+    /// `INDEX/TOTAL`, both starting at 1 — `--shard 2/4` is the second of
+    /// four. Falls back to a deterministic split by count when no durations
+    /// have been recorded yet; balances by recorded duration once they
+    /// have. See `--record-durations` below and ADR-036.
+    #[arg(long, value_name = "INDEX/TOTAL")]
+    pub shard: Option<String>,
+
+    /// Time every case and record it for later `--shard` runs to balance by
+    ///
+    /// Runs the whole suite exactly as a plain invocation would; never with
+    /// `--shard`, since recording from a partial run would corrupt the file
+    /// with incomplete data, and never with `--write`, which does not run a
+    /// case at all (ADR-032) and so has nothing real to time. See ADR-036.
+    #[arg(long, conflicts_with_all = ["shard", "write"])]
+    pub record_durations: bool,
 }
 
 /// `git tpl backport`
@@ -888,6 +906,37 @@ mod tests {
             panic!("expected test")
         };
         assert!(args.skip_commands);
+    }
+
+    #[test]
+    fn shard_and_record_durations_parse() {
+        let cli = Cli::try_parse_from(["git-tpl", "test", "--shard", "2/4"]).unwrap();
+        let Command::Test(args) = cli.command else {
+            panic!("expected test")
+        };
+        assert_eq!(args.shard.as_deref(), Some("2/4"));
+        assert!(!args.record_durations);
+
+        let cli = Cli::try_parse_from(["git-tpl", "test", "--record-durations"]).unwrap();
+        let Command::Test(args) = cli.command else {
+            panic!("expected test")
+        };
+        assert!(args.shard.is_none());
+        assert!(args.record_durations);
+    }
+
+    /// `--record-durations` runs the suite normally and times it; combined
+    /// with `--shard` it would time only a partial run, and combined with
+    /// `--write` there is nothing real to time (ADR-032, ADR-036) — both
+    /// refused at the CLI layer rather than producing a misleading file.
+    #[test]
+    fn record_durations_conflicts_with_shard_and_write() {
+        assert!(
+            Cli::try_parse_from(["git-tpl", "test", "--record-durations", "--shard", "1/2"])
+                .is_err()
+        );
+        assert!(Cli::try_parse_from(["git-tpl", "test", "--record-durations", "--write"]).is_err());
+        assert!(Cli::try_parse_from(["git-tpl", "test", "--shard", "1/2", "--write"]).is_ok());
     }
 
     #[test]
