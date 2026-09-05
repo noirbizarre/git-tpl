@@ -479,7 +479,7 @@ Under `--json`, note that `ok` is `true` whenever the *command ran*.
 Whether the suite passed is `summary.failed`:
 
 ```console
-$ git tpl --json test . | jq '{ok, failed: .summary.failed}'
+$ git tpl --json test | jq '{ok, failed: .summary.failed}'
 {"ok": true, "failed": 2}
 ```
 
