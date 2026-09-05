@@ -175,7 +175,7 @@ Template-Extends: https://github.com/org/base-template@a1b2c3d
 Tpl-Version: X.Y.Z
 ```
 
-The subject names the template's manifest `name` and the revision asked for.
+The subject names the template's manifest `name` and the reference asked for.
 `Data-Source` appears once per data source the rendering actually used — see
 [Data sources](../data/index.md#provenance).
 `Template-Extends` appears once per ancestor, nearest parent first, only for a template with an
