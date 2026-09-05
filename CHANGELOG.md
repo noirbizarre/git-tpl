@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0](https://github.com/noirbizarre/git-tpl/compare/0.12.1..0.13.0) - 2026-09-05
+
+### 💫 Features
+
+- **lint** Expose git tpl lint as a prek/pre-commit hook ([#151](https://github.com/noirbizarre/git-tpl/issues/151)) - ([06a7b28](https://github.com/noirbizarre/git-tpl/commit/06a7b28752995f1d399176865c68dedfc8163b68))
+- **template** Implement template inheritance (`[extends]`) ([#157](https://github.com/noirbizarre/git-tpl/issues/157)) - ([258a641](https://github.com/noirbizarre/git-tpl/commit/258a6416ca7d13322c49b64b2e9e1961548bc510))
+- **testing** Let a test case ask for an isolated Git sandbox ([#156](https://github.com/noirbizarre/git-tpl/issues/156)) - ([a6460cb](https://github.com/noirbizarre/git-tpl/commit/a6460cb413a1e56b14d4190d5b53e0b4fce6756b))
+
+### 🐛 Bug Fixes
+
+- **testing**  🚨 **breaking** Expand $TEMPLATE_ROOT and answers in commands via MiniJinja templating ([#154](https://github.com/noirbizarre/git-tpl/issues/154)) - ([59b335e](https://github.com/noirbizarre/git-tpl/commit/59b335edd6a71d6b079e695279fca1d6f16e922b))
+
 ## [0.12.1](https://github.com/noirbizarre/git-tpl/compare/0.12.0..0.12.1) - 2026-08-30
 
 ### 🐛 Bug Fixes
