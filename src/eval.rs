@@ -116,7 +116,10 @@ pub enum EvalError {
 
     /// The user aborted the questionnaire.
     #[error("cancelled")]
-    #[diagnostic(code(tpl::eval::cancelled))]
+    #[diagnostic(
+        code(tpl::eval::cancelled),
+        help("nothing was answered or rendered. Run it again to start over.")
+    )]
     Cancelled,
 
     /// A data source failed.
