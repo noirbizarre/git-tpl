@@ -249,6 +249,22 @@ live. In its place, `-v` shows the same coloured unified diff a normal run's sna
 shows, once per case whose snapshot changed — and the final summary names which cases were written, updated or
 left unchanged. See [ADR-032](../adr/032-write-only-writes.md).
 
+### Under GitHub Actions
+
+When `GITHUB_ACTIONS=true` is set — every job on GitHub Actions sets it, so this needs no flag and has no
+opt-out — `git tpl test` reports progress as [workflow
+commands](https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions) instead of any
+of the above: each case is wrapped in a `::group::`/`::endgroup::` pair, so a scan of the log shows one line per
+case with everything else folded away, expandable on demand. While a case's group is open, its commands' own
+stdout/stderr are forwarded live, exactly as `-v` would, whether or not `-v` was passed — a folded group has
+nothing left to trade that away for. A failing case gets exactly one `::error::` annotation, naming the case's own
+file, so it shows up on a pull request's "Files changed" view without opening the log at all. Everything that
+would otherwise be internal phase chatter — "rendering", "checking snapshot" — goes to `::debug::` instead,
+visible only once a job has step debug logging enabled.
+
+`--json` is unaffected: it is checked first, and always wins. See
+[ADR-035](../adr/035-github-actions-progress-reporter.md).
+
 ### Running `git tpl test` is the consent
 
 A case's `[commands]` need no confirmation: running `git tpl test` on a template you have in front of you is

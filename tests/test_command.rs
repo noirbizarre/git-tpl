@@ -1587,6 +1587,10 @@ fn the_human_output_explains_every_kind_of_failure() {
                 "tests/blewup.toml",
                 "[answers]\nwith_ci = \"not a boolean\"\n",
             ),
+            (
+                "tests/nosnap.toml",
+                "snapshot = true\n[answers]\nproject_name = \"a\"\n",
+            ),
         ],
     );
 
@@ -1603,7 +1607,9 @@ fn the_human_output_explains_every_kind_of_failure() {
         .says("expected the render to fail with tpl::eval::wrong_type, but it succeeded")
         .says("the render failed:")
         .says("add `error = \"tpl::eval::wrong_type\"` if that is the point of the case")
-        .says("0 passed, 8 failed");
+        .says("snapshot requested but never recorded")
+        .says("record one with `git tpl test --write`")
+        .says("0 passed, 9 failed");
 }
 
 #[test]

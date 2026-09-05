@@ -429,7 +429,7 @@ pub fn local_toml_path(path: &Path) -> String {
 }
 
 pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
-    run_tpl(&repo.path, repo.config_home(), args, "never")
+    run_tpl(&repo.path, repo.config_home(), args, "never", &[])
 }
 
 /// The same, but with colour forced on.
@@ -439,7 +439,14 @@ pub fn tpl(repo: &Repo, args: &[&str]) -> Output {
 /// styled output — without it the branch that *chooses* to style is never
 /// taken, and could be inverted without failing a single test.
 pub fn tpl_colored(repo: &Repo, args: &[&str]) -> Output {
-    run_tpl(&repo.path, repo.config_home(), args, "always")
+    run_tpl(&repo.path, repo.config_home(), args, "always", &[])
+}
+
+/// The same as [`tpl`], but with extra environment variables set on the
+/// child — for anything that reads the environment directly rather than a
+/// flag, e.g. `GITHUB_ACTIONS`.
+pub fn tpl_with_env(repo: &Repo, args: &[&str], env: &[(&str, &str)]) -> Output {
+    run_tpl(&repo.path, repo.config_home(), args, "never", env)
 }
 
 /// Run `git-tpl` in a plain directory, with no repository.
@@ -447,10 +454,16 @@ pub fn tpl_colored(repo: &Repo, args: &[&str]) -> Output {
 /// The project-free commands — `render`, `lint`, `questions`, `context` — must
 /// work here, and a test that ran them inside a repository would not prove it.
 pub fn tpl_outside(dir: &Path, config_home: &Path, args: &[&str]) -> Output {
-    run_tpl(dir, config_home, args, "never")
+    run_tpl(dir, config_home, args, "never", &[])
 }
 
-fn run_tpl(cwd: &Path, config_home: &Path, args: &[&str], color: &str) -> Output {
+fn run_tpl(
+    cwd: &Path,
+    config_home: &Path,
+    args: &[&str],
+    color: &str,
+    env: &[(&str, &str)],
+) -> Output {
     let mut command = Command::cargo_bin("git-tpl").expect("built binary");
     command.current_dir(cwd);
     // Deterministic output, whatever the developer's terminal or CI is doing.
@@ -463,6 +476,11 @@ fn run_tpl(cwd: &Path, config_home: &Path, args: &[&str], color: &str) -> Output
     command.env_remove("NO_COLOR");
     command.env_remove("FORCE_COLOR");
     command.env_remove("CLICOLOR_FORCE");
+    // The suite itself may run inside a real GitHub Actions job (its own CI);
+    // without this, every test would pick up the GitHub Actions progress
+    // reporter by accident. `tpl_with_env` re-adds it deliberately for the
+    // tests that mean to exercise that path.
+    command.env_remove("GITHUB_ACTIONS");
     // The user configuration is read from `$XDG_CONFIG_HOME/git-tpl/`, so
     // without this the suite would read whatever the developer happens to have
     // written there — and `[defaults]` would change what a prompt returns.
@@ -472,6 +490,9 @@ fn run_tpl(cwd: &Path, config_home: &Path, args: &[&str], color: &str) -> Output
     // The binary opens the repository at `cwd`; an inherited `GIT_DIR` from a
     // `git rebase --exec` or a hook would point it somewhere else entirely.
     scrub_git_env(&mut command, config_home);
+    for (key, value) in env {
+        command.env(key, value);
+    }
 
     let output = command.output().expect("run git-tpl");
     Output {

@@ -43,3 +43,4 @@ explains the code that existed.
 | [032](032-write-only-writes.md) | `--write` only writes; it does not run a case's `[commands]` or `expect` |
 | [033](033-test-case-git-sandbox.md) | A test case may ask for an isolated Git sandbox |
 | [034](034-template-inheritance.md) | A template may extend one parent, pinned, merged by name |
+| [035](035-github-actions-progress-reporter.md) | `test` reports progress as GitHub Actions workflow commands, auto-detected |
