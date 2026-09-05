@@ -5,6 +5,7 @@
 //! operations the CLI exposes.
 
 pub mod backport;
+pub mod extends;
 pub mod hunks;
 pub mod resolve;
 pub mod testing;
@@ -19,8 +20,8 @@ use thiserror::Error;
 use crate::config::{CONFIG_PATH, Config, ConfigError};
 use crate::context::Context;
 use crate::data::{
-    AlwaysTrust, DataError, Decided, Decision, Loader, REMOTE_LIMIT_BYTES, RefuseRemote,
-    TemplateTree, TrustGate, declared_remotes,
+    AlwaysTrust, DataError, Decided, Decision, Loader, REMOTE_LIMIT_BYTES, RefuseRemote, TrustGate,
+    declared_remotes,
 };
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Partials, Prompter};
 use crate::git::{AheadBehind, Change, FileStat, GitBackend, GitError, MergeOutcome, Oid};
@@ -28,7 +29,7 @@ use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
 use crate::provenance::{Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
-use crate::render::{RenderError, Rendered, render_entries, write_tree};
+use crate::render::{RenderError, Rendered, render_entries, render_layered_entries, write_tree};
 use crate::seed::SeedContext;
 use crate::template::{MANIFEST_NAME, Manifest, Value};
 use crate::userconfig::UserConfig;
@@ -619,14 +620,22 @@ pub fn render_files(
     supplied: BTreeMap<String, Value>,
     user: &UserConfig,
     answering: Answering<'_>,
-    trust: Trust<'_>,
+    mut trust: Trust<'_>,
 ) -> Result<RenderedFiles, OpError> {
-    let template = resolve::resolve(Request {
-        source: target.source,
-        reference: target.reference,
-        root: target.root,
-        dirty: target.dirty,
-    })?;
+    // A reborrow, not a move: `resolve` confirms an `[extends]` ancestor's
+    // source (if any), and `render_resolved` below still needs the same
+    // `trust` afterwards, for `[data]`. The two are independent confirmations
+    // over the same invocation's `Trust`, not one shared decision.
+    let template = resolve::resolve(
+        Request {
+            source: target.source,
+            reference: target.reference,
+            root: target.root,
+            dirty: target.dirty,
+        },
+        user,
+        &mut trust,
+    )?;
 
     let rendered = render_resolved(
         &template,
@@ -712,16 +721,15 @@ pub fn render_resolved(
         trust.gate().confirm(&requests, REMOTE_LIMIT_BYTES)?
     };
 
-    let mut loader = Loader::new(
-        TemplateTree {
-            repo: template.repo.as_ref(),
-            tree: template.tree,
-            revision: template.revision,
-            reference: template.reference.clone(),
-        },
-        project.map(|(_, root)| root.to_path_buf()),
-    )
-    .with_decisions(decisions);
+    // `template_trees()` is this template's own first, then each ancestor in
+    // order — exactly the shape `Loader::new` plus `with_ancestors` wants.
+    let mut template_trees = template.template_trees();
+    let own_tree = template_trees.remove(0);
+    let mut loader = Loader::new(own_tree, project.map(|(_, root)| root.to_path_buf()))
+        .with_decisions(decisions);
+    if template.has_ancestors() {
+        loader = loader.with_ancestors(template_trees, template.data_origin().clone());
+    }
 
     // Built only when somebody is going to be asked. When nobody is, the map
     // is empty *and* `DefaultsOnly` ignores it — two guards, because a machine
@@ -752,7 +760,6 @@ pub fn render_resolved(
         answering.prompter(),
     )?;
 
-    let entries = template.entries()?;
     // Bytes, not blobs. Turning them into Git objects is `render`'s job, and it
     // is the only part of a rendering that needs a repository to write into.
     // `strict` is the template's own choice. Lenient is still the default, so
@@ -764,13 +771,24 @@ pub fn render_resolved(
     } else {
         crate::eval::Undefined::Lenient
     };
-    let files = render_entries(
-        template.repo.as_ref(),
-        &entries,
-        &context,
-        &partials,
-        undefined,
-    )?;
+    // A template with no `[extends]` takes the plain, single-repository path
+    // unchanged; one with a chain merges every layer's entries first
+    // (`Resolved::entries`) and reads each blob from the repository that
+    // actually declared it.
+    let files = if template.has_ancestors() {
+        let entries = template.entries()?;
+        let repos = template.repos();
+        render_layered_entries(&repos, &entries, &context, &partials, undefined)?
+    } else {
+        let entries = template.own_entries()?;
+        render_entries(
+            template.repo.as_ref(),
+            &entries,
+            &context,
+            &partials,
+            undefined,
+        )?
+    };
 
     let provenance = Provenance {
         source: source.to_string(),
@@ -779,6 +797,7 @@ pub fn render_resolved(
         dirty: template.dirty,
         answers_digest: context.answers_digest(),
         data: loader.provenance().to_vec(),
+        extends: template.extends_provenance(),
         version: crate::VERSION.to_string(),
         template_name: template.manifest.name.clone(),
     };
@@ -1728,6 +1747,7 @@ pub fn status(
     project: &dyn GitBackend,
     project_root: &Path,
     preferences: &Preferences,
+    user: &UserConfig,
     dirty: bool,
 ) -> Result<Status, OpError> {
     let config = Config::load(project_root)?;
@@ -1747,12 +1767,28 @@ pub fn status(
     // `dirty` compares against the template's working tree instead of its
     // committed revision, which is how an author asks "does my uncommitted
     // edit change anything here?" without committing it first.
-    let resolved = resolve::resolve(Request {
-        source: &config.template.source,
-        reference: config.template.r#ref.as_deref(),
-        root: config.template.root.as_deref(),
-        dirty,
-    })
+    //
+    // `status` prompts for nothing and has no `--trust` of its own, so the
+    // only way an `[extends]` ancestor is ever confirmed here is a `[trust]`
+    // entry matching *its own* source — checked inside `resolve` itself, per
+    // ancestor. This fallback gate is deliberately unconditional `refuse`,
+    // never `always`: an `[extends]` chain is not trusted merely because the
+    // leaf template's own `source` happens to be (ADR-034) — a `Trust`
+    // constructed from that would silently allow *every* ancestor once the
+    // leaf matched, which is exactly the shortcut ADR-034 rules out. An
+    // ancestor outside `[trust]` then degrades exactly like any other resolve
+    // failure here — the "available" side is already best-effort.
+    let mut trust = Trust::refuse();
+    let resolved = resolve::resolve(
+        Request {
+            source: &config.template.source,
+            reference: config.template.r#ref.as_deref(),
+            root: config.template.root.as_deref(),
+            dirty,
+        },
+        user,
+        &mut trust,
+    )
     .ok();
 
     let available_reference_description = resolved
@@ -1930,10 +1966,20 @@ pub struct Linted {
 /// Severity policy — `--deny` and `--allow` — is deliberately *not* applied
 /// here. It is a decision about how to present findings, not about what the
 /// template contains, and the command layer owns presentation.
-pub fn lint(request: Request<'_>) -> Result<Linted, OpError> {
-    let template = resolve::resolve(request)?;
+///
+/// `lint` has no `--trust` of its own and prompts for nothing, so an
+/// `[extends]` ancestor outside `[trust]` refuses outright — unlike `status`,
+/// which tolerates the whole resolution failing, `lint` has nothing useful to
+/// say without one.
+pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> {
+    let mut trust = Trust::refuse();
+    let template = resolve::resolve(request, user, &mut trust)?;
 
-    let entries = template.entries()?;
+    // This template's own files only, even when it extends another: static
+    // analysis of an inherited file in a repository lint has no reason to
+    // clone a second time just to check syntax it cannot act on is left for a
+    // future ADR (`Resolved::own_entries`'s own doc comment says the same).
+    let entries = template.own_entries()?;
     // The whole repository, not just the render root: a `note_file` names a
     // path beside the manifest, in the same namespace a partial lives in.
     let repo_entries = template.repo.list_tree(template.tree)?;
@@ -1979,8 +2025,12 @@ pub struct Questionnaire {
 /// Resolution order, not declaration order: when a `when` or a `default`
 /// references an earlier answer, this is the order a caller has to answer in,
 /// and it is the order the graph already computes for prompting.
-pub fn questions(request: Request<'_>) -> Result<Questionnaire, OpError> {
-    let template = resolve::resolve(request)?;
+///
+/// No `--trust` of its own and prompts for nothing, same as `lint`: an
+/// `[extends]` ancestor outside `[trust]` refuses outright.
+pub fn questions(request: Request<'_>, user: &UserConfig) -> Result<Questionnaire, OpError> {
+    let mut trust = Trust::refuse();
+    let template = resolve::resolve(request, user, &mut trust)?;
     let graph = Graph::build(&template.manifest)?;
 
     let order: Vec<String> = graph

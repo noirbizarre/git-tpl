@@ -198,6 +198,41 @@ fn a_file_inside_the_render_root_is_not_importable() {
     world.init(&[]).failure().says("defines no partials");
 }
 
+/// `{% extends %}`/`{% block %}` share the loader too — it hands MiniJinja
+/// whatever bytes a name resolves to, with no distinction between an import,
+/// an include and an extends. `{{ super() }}` proves a block can *extend*
+/// the parent's content rather than merely replacing it, which is the other
+/// half of what makes block inheritance useful.
+#[test]
+fn a_file_extends_a_shared_base_and_overrides_its_blocks() {
+    let world = World::with_shared_template(
+        MANIFEST,
+        &[(
+            "page.html.jinja",
+            "{% extends \"base.html.jinja\" %}\n\
+             {% block title %}{{ project_name }}{% endblock %}\n\
+             {% block content %}{{ super() }} + more{% endblock %}\n",
+        )],
+        &[(
+            "base.html.jinja",
+            "{% block title %}Default title{% endblock %}\n\
+             {% block content %}Default content{% endblock %}\n",
+        )],
+    );
+
+    world.init(&[]).success();
+
+    // `title` is overridden outright; `content` extends the base's own
+    // content via `super()` rather than replacing it. The overall shape —
+    // which block comes first, and the newline between them — comes from the
+    // *base*, since a child extending a template contributes only its
+    // blocks, nothing else in its own body.
+    assert_eq!(
+        world.project.read("page.html"),
+        "demo\nDefault content + more\n"
+    );
+}
+
 /// `{% include %}` shares the loader with `{% import %}`.
 #[test]
 fn include_pulls_in_a_shared_fragment() {

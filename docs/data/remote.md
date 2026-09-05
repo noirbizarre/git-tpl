@@ -69,9 +69,17 @@ A URL that appeared later would slip past the list, which would make the list a 
 
 ## Confirmation
 
-Fetching is one of the two things a template asks git-tpl to do on its behalf — a
-[`git` source's clone](git.md) is the other — so it is shown in full before it happens.
-Rendering itself never requires trust: no template can execute anything, confirmed or not.
+Fetching is one of the things a template asks git-tpl to do on its behalf — a [`git` source's
+clone](git.md) is another, and cloning an [`[extends]`](../templates/format.md#extends) ancestor is a third — so
+it is shown in full before it happens. Rendering itself never requires trust: no template can execute anything,
+confirmed or not.
+
+An `[extends]` ancestor is confirmed the same way, for the same reason (its `source` is chosen by the template
+author, not typed on the command line) — but not at the same *time*: every `[data]` source is known from the
+leaf's own manifest before anything is evaluated, so all of them are listed together, once. An `[extends]` chain
+is only discoverable one clone at a time — an ancestor's own parent isn't readable until that ancestor has
+already been cloned — so each remote ancestor is confirmed individually, immediately before it is cloned, rather
+than as one combined list.
 
 ```console
 $ git tpl init https://github.com/org/template

@@ -19,6 +19,7 @@ mod keys {
     pub const DIRTY: &str = "Template-Dirty";
     pub const ANSWERS: &str = "Answers-Digest";
     pub const DATA: &str = "Data-Source";
+    pub const EXTENDS: &str = "Template-Extends";
     pub const VERSION: &str = "Tpl-Version";
 }
 
@@ -42,10 +43,31 @@ pub struct Provenance {
     pub answers_digest: String,
     /// The data sources that contributed, in load order.
     pub data: Vec<DataProvenance>,
+    /// The ancestor chain, nearest parent first, root ancestor last. Empty for
+    /// a template with no `[extends]`.
+    pub extends: Vec<ExtendsProvenance>,
     /// The git-tpl version that rendered it.
     pub version: String,
     /// The template's name, for the subject line.
     pub template_name: String,
+}
+
+/// One ancestor in an `[extends]` chain, as recorded in the trailers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtendsProvenance {
+    /// The ancestor's own `[extends].source`.
+    pub source: String,
+    /// The commit it resolved to.
+    pub revision: Oid,
+}
+
+impl ExtendsProvenance {
+    /// `<source>@<short-sha>` — positional rather than named like
+    /// `Data-Source`: an ancestor has no name a template author chose, and its
+    /// position in the chain is its identity.
+    fn trailer(&self) -> String {
+        format!("{}@{}", self.source, self.revision.short())
+    }
 }
 
 impl Provenance {
@@ -77,6 +99,9 @@ impl Provenance {
                 data.name,
                 data.trailer()
             ));
+        }
+        for extends in &self.extends {
+            message.push_str(&format!("{}: {}\n", keys::EXTENDS, extends.trailer()));
         }
         message.push_str(&format!("{}: {}\n", keys::VERSION, self.version));
 
@@ -127,6 +152,21 @@ impl Provenance {
                         found_any = true;
                     }
                 }
+                keys::EXTENDS => {
+                    // Split from the *right*: an scp-style Git URL
+                    // (`git@host:path`) can itself contain an `@`, but the
+                    // trailing `@<short-sha>` never does, so `rsplit_once` is
+                    // the one split that is always unambiguous here — the
+                    // same reasoning `Data-Source`'s `name = value` avoids by
+                    // using a different separator, applied to a value that
+                    // cannot change its own separator.
+                    if let Some((source, revision)) = value.rsplit_once('@') {
+                        recorded
+                            .extends
+                            .push((source.trim().to_string(), revision.trim().to_string()));
+                        found_any = true;
+                    }
+                }
                 keys::VERSION => {
                     recorded.version = Some(value.to_string());
                     found_any = true;
@@ -157,6 +197,11 @@ pub struct Recorded {
     pub answers_digest: Option<String>,
     /// The data sources, as `(name, trailer)`.
     pub data: Vec<(String, String)>,
+    /// The ancestor chain, as `(source, short-sha)` pairs, nearest parent
+    /// first — the same shape `data` already takes for the same reason: this
+    /// is text a person or an older git-tpl may have written, not a value
+    /// this crate re-resolved.
+    pub extends: Vec<(String, String)>,
     /// The git-tpl version that rendered it.
     pub version: Option<String>,
 }
@@ -210,6 +255,7 @@ mod tests {
                 revision: Some(oid("4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29")),
                 checksum: None,
             }],
+            extends: Vec::new(),
             version: "0.1.0".into(),
             template_name: "rust-library".into(),
         }
@@ -287,6 +333,83 @@ mod tests {
         let recorded = Provenance::parse(&provenance.to_message()).unwrap();
         assert_eq!(recorded.data.len(), 2);
         assert_eq!(recorded.data[1].1, "local:config/tpl.toml");
+    }
+
+    /// `git tpl status` needs the whole chain back, nearest parent first, or a
+    /// project rendered through inheritance cannot say what it came from.
+    #[test]
+    fn several_ancestors_all_round_trip() {
+        let provenance = Provenance {
+            extends: vec![
+                ExtendsProvenance {
+                    source: "https://github.com/org/parent".into(),
+                    revision: oid("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"),
+                },
+                ExtendsProvenance {
+                    source: "https://github.com/org/grandparent".into(),
+                    revision: oid("1122334455667788990011223344556677889900"),
+                },
+            ],
+            ..sample()
+        };
+
+        let message = provenance.to_message();
+        let recorded = Provenance::parse(&message).unwrap();
+
+        assert_eq!(
+            recorded.extends,
+            [
+                (
+                    "https://github.com/org/parent".to_string(),
+                    "a1b2c3d".to_string()
+                ),
+                (
+                    "https://github.com/org/grandparent".to_string(),
+                    "1122334".to_string()
+                ),
+            ]
+        );
+        // Nearest parent first, root ancestor last -- the same order the
+        // chain was resolved in, so the trailers read top-down like the chain
+        // itself.
+        let parent_line = message
+            .lines()
+            .position(|l| l.contains("org/parent"))
+            .unwrap();
+        let grandparent_line = message
+            .lines()
+            .position(|l| l.contains("org/grandparent"))
+            .unwrap();
+        assert!(parent_line < grandparent_line);
+    }
+
+    /// A template with no `[extends]` writes no trailer at all, so an
+    /// ancestor-free rendering's commit message is unchanged by this feature.
+    #[test]
+    fn no_extends_trailer_is_written_for_a_template_with_no_parent() {
+        assert!(!sample().to_message().contains("Template-Extends"));
+    }
+
+    /// An scp-style Git URL contains its own `@`, so the source and the
+    /// trailing `@<short-sha>` must be split from the right, not the left.
+    #[test]
+    fn an_scp_style_ancestor_source_round_trips() {
+        let provenance = Provenance {
+            extends: vec![ExtendsProvenance {
+                source: "git@github.com:org/parent.git".into(),
+                revision: oid("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"),
+            }],
+            ..sample()
+        };
+
+        let recorded = Provenance::parse(&provenance.to_message()).unwrap();
+        assert_eq!(
+            recorded.extends,
+            [(
+                "git@github.com:org/parent.git".to_string(),
+                "a1b2c3d".to_string()
+            )]
+        );
     }
 
     /// A hand-made commit on the ref is tolerated rather than treated as

@@ -316,12 +316,23 @@ fn dry_run(
     source: &str,
     answers: BTreeMap<String, tpl::template::Value>,
 ) -> Result<serde_json::Value, OpError> {
-    let template = ops::resolve::resolve(ops::Request {
-        source,
-        reference: args.r#ref.as_deref(),
-        root: None,
-        dirty: args.dirty,
-    })?;
+    // This early resolve is a preview (question order, before `--defaults`
+    // decides anything) and has no interactive confirmer in scope at this
+    // point in the function — the one built further down (via the `trust()`
+    // helper, hence `preview_trust` here so as not to shadow it) is scoped to
+    // the `--defaults` branch. An `[extends]` ancestor outside `[trust]`
+    // refuses outright here, the same as `lint`/`questions`.
+    let mut preview_trust = ops::Trust::refuse();
+    let template = ops::resolve::resolve(
+        ops::Request {
+            source,
+            reference: args.r#ref.as_deref(),
+            root: None,
+            dirty: args.dirty,
+        },
+        user,
+        &mut preview_trust,
+    )?;
     let graph = tpl::graph::Graph::build(&template.manifest)?;
 
     // The same rule `ops::render` applies, and for the same reason — a dry run

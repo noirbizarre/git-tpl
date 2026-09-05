@@ -18,12 +18,15 @@ pub fn run(args: QuestionsArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
     let source = ctx.user.expand(&args.template).into_owned();
 
-    let ops::Questionnaire { template, order } = ops::questions(ops::Request {
-        source: &source,
-        reference: args.r#ref.as_deref(),
-        root: args.root.as_deref(),
-        dirty: args.dirty,
-    })?;
+    let ops::Questionnaire { template, order } = ops::questions(
+        ops::Request {
+            source: &source,
+            reference: args.r#ref.as_deref(),
+            root: args.root.as_deref(),
+            dirty: args.dirty,
+        },
+        &ctx.user,
+    )?;
 
     let manifest = &template.manifest;
     let ordered: Vec<(usize, &String, &Question)> = order

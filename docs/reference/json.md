@@ -135,7 +135,8 @@ remote source has no resolved form here.
 
 ```json
 { "ok": true,
-  "answers": {…}, "computed": {…}, "gatedDefaults": {…}, "data": {…}, "template": {…}, "flat": {…} }
+  "answers": {…}, "computed": {…}, "gatedDefaults": {…}, "data": {…}, "template": {…}, "flat": {…},
+  "extends": { "chain": [], "questions": {…}, "data": {…} } }
 ```
 
 `flat` is what a template body sees: answers, computed values and `gatedDefaults` merged into one table.
@@ -143,6 +144,9 @@ remote source has no resolved form here.
 [`default_when_skipped`](../templates/questions.md#keeping-a-default-when-skipped) questions — kept apart from
 `answers` because they are not answers.
 `data` and `template` are not in `flat` — they are siblings of it here, and namespaces of their own in a template.
+
+`extends` is documented in [context](../usage/context.md#extends-json-only): the `[extends]` chain, and which
+layer of it declared each inherited question or data source — `[]`/`{}` for a template with no chain.
 
 With `--eval`:
 

@@ -128,6 +128,110 @@ template that could redirect it could redirect a push.
 These are Git remotes.
 A `remote` *data source* under `[data]` is an unrelated thing — an HTTP URL the loader reads.
 
+### `[extends]`
+
+A template may declare one parent, pinned to a tag or a commit:
+
+```toml
+[extends]
+source = "https://github.com/org/base-template"
+rev = "v3.1.0"
+remove = ["template/.github/workflows/ci.yml.jinja"]
+```
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `source` | string | *required* | Any Git URL, or a path on this machine — the same shape as `git tpl init`'s own template argument. |
+| `rev` | string | *required* | The revision the parent is pinned to. **Must be a tag or a commit SHA, never a branch** — an unpinned parent would make the same child revision render two different trees on two different days. |
+| `remove` | array of strings | `[]` | Paths to drop from the merge, relative to the *parent's own repository root* — including its `root` prefix, so a partial can be removed too. Naming a path the parent does not have is an error. |
+
+A child renders on top of its parent: it may add questions, data sources, computed values and remotes, override
+any of them by name, add files, and replace files the parent renders. The rules, applied uniformly:
+
+- **The unit of override is a whole `[questions.<name>]`, `[computed]` entry, `[data.<name>]` or `[remotes]`
+  entry, not a field within one.** A child redeclaring `[questions.license]` replaces the parent's entirely.
+- **Order:** the parent's own entries come first, in the parent's own declaration order, then the child's new
+  ones. An entry the child overrides **keeps the parent's position** — overriding a question does not move it in
+  the prompt sequence.
+- **`name`, `description`, `root`, `strict`, `note` and `note_file` are never inherited.** Each layer's own
+  manifest is authoritative for these; a child that wants its parent's note copies it.
+- **Files** are merged by their pre-render path: a child's `template/README.md.jinja` replaces the parent's file
+  at the same path entirely; a parent's file the child does not mention is included unchanged.
+- **A child may add no files of its own at all** — one that only overrides a question or a data source has
+  nothing under its own `root`, which is fine: only a template with no `[extends]` must have a non-empty `root`.
+- **Partials** merge into one namespace by name: the nearer layer's own declaration wins for a bare
+  `{% import "macros.jinja" %}`, and `{% import "parent:macros.jinja" %}` reaches the *next* declaration of that
+  same name, one layer further out — the value a bare reference would have resolved to had the nearer layer not
+  overridden it. This is the `<prefix>:` loader namespace [shared partials](#shared-partials) already reserves.
+
+#### Extending a shared base across the chain
+
+`{% extends %}`/`{% block %}` compose with the chain exactly like [shared partials](#shared-partials) do, because
+they *are* shared partials, merged into the same namespace by the same rule.
+
+The everyday case needs nothing special: a parent declares a base with blocks, and a child with no partial of its
+own by that name just extends it bare — the parent's declaration is the only, and therefore nearest, one:
+
+```jinja
+{# the parent's base.html.jinja #}
+{% block title %}Default title{% endblock %}
+{% block content %}Default content{% endblock %}
+```
+
+```jinja
+{# the child's template/page.html.jinja #}
+{% extends "base.html.jinja" %}
+{% block title %}Overridden title{% endblock %}
+{% block content %}{{ super() }} + more{% endblock %}
+```
+
+renders to:
+
+```
+Overridden title
+Default content + more
+```
+
+The `<prefix>:` form matters only once the child declares its *own* `base.html.jinja` too, shadowing the
+parent's for a bare reference — the same trap [ADR-012](../adr/012-template-loader.md) built the prefix for.
+From inside that shadow, `parent:base.html.jinja` reaches the parent's original — one layer further out from
+wherever the reference is written, not from the leaf that is actually rendering:
+
+```jinja
+{# the parent's base.html.jinja #}
+{% block content %}Default content{% endblock %}
+```
+
+```jinja
+{# the child's own base.html.jinja -- shadows the parent's for a bare reference #}
+{% extends "parent:base.html.jinja" %}
+{% block content %}{{ super() }} + child layer{% endblock %}
+```
+
+```jinja
+{# the child's template/page.html.jinja -- extends its own base.html.jinja, bare #}
+{% extends "base.html.jinja" %}
+{% block content %}{{ super() }} + page layer{% endblock %}
+```
+
+renders `content` to `Default content + child layer + page layer`: the parent's original, extended once by the
+child's own shadow, extended again by the child's page.
+
+A chain may be several templates deep (a `base`, extended by a language-specific template, extended by a
+project's own), up to a small depth limit, but each template names exactly one parent — no multiple inheritance,
+no diamonds. A chain that revisits a template it has already resolved is rejected before anything renders.
+
+A remote (non-local) `source` needs the same confirmation a `[data]` `kind = "git"` source does — `--trust`, a
+`[trust]` entry, or an interactive confirmation — because it is chosen by the template's author, not typed on the
+command line, exactly like a git-kind data source is. See [Confirmation](../data/remote.md#confirmation). Unlike
+`[data]`, which is confirmed all at once before evaluation, an ancestor is confirmed as it is discovered — the
+chain is only readable one clone at a time. `git tpl lint`, `git tpl questions` and `git tpl status` resolve this
+chain too and need the same confirmation, even though none of them ever touch a `[data]` source.
+
+`git tpl status` and the rendered commit's trailers record the whole chain, not just the directly-configured
+template — see [What is in the commit](../concepts/git-model.md#what-is-in-the-commit). Full reasoning:
+[ADR-034](../adr/034-template-inheritance.md).
+
 ## Talking to the user
 
 A template can show one note after `init`, and only after `init`.
@@ -297,6 +401,39 @@ Partials are read from the same pinned revision as everything else, so editing o
 advances the ref.
 They are available to manifest expressions too — a `computed` value may `{% import %}` the same macro a file
 does.
+
+A partial can also be the base of a `{% extends %}` chain. `{% block %}`, `{% extends %}` and `{{ super() }}` are
+plain Jinja, and the loader that serves `{% import %}` and `{% include %}` serves these exactly the same way, by
+name, from the same partial namespace — there is nothing extends-specific to configure:
+
+```
+base.html.jinja                          ← the partial, declares the blocks
+template/page.html.jinja                 ← extends it
+```
+
+```jinja
+{# base.html.jinja #}
+{% block title %}Default title{% endblock %}
+{% block content %}Default content{% endblock %}
+```
+
+```jinja
+{# template/page.html.jinja #}
+{% extends "base.html.jinja" %}
+{% block title %}{{ project_name }}{% endblock %}
+{% block content %}{{ super() }} + more{% endblock %}
+```
+
+renders to:
+
+```
+demo
+Default content + more
+```
+
+`title` is replaced outright; `content` extends the base's own content with `{{ super() }}` rather than
+replacing it. The overall shape — which block comes first, and the newline between them — comes from the *base*,
+since a file extending another contributes only its blocks, nothing else in its own body.
 
 !!! tip "Getting the name wrong"
 

@@ -171,12 +171,15 @@ Template-Ref: v1.4.0
 Template-Commit: 4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29
 Answers-Digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 Data-Source: licenses = template:data/licenses.toml@4f2c1a9
+Template-Extends: https://github.com/org/base-template@a1b2c3d
 Tpl-Version: X.Y.Z
 ```
 
 The subject names the template's manifest `name` and the revision asked for.
 `Data-Source` appears once per data source the rendering actually used — see
 [Data sources](../data/index.md#provenance).
+`Template-Extends` appears once per ancestor, nearest parent first, only for a template with an
+[`[extends]`](../templates/format.md#extends) chain — see [ADR-034](../adr/034-template-inheritance.md).
 
 `git tpl status` reads them back. So can you:
 

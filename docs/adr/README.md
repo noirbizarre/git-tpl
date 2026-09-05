@@ -42,3 +42,4 @@ explains the code that existed.
 | [031](031-non-git-front-ends-are-incidental.md) | A Git front-end works by riding ADR-001 and ADR-011, not by being supported |
 | [032](032-write-only-writes.md) | `--write` only writes; it does not run a case's `[commands]` or `expect` |
 | [033](033-test-case-git-sandbox.md) | A test case may ask for an isolated Git sandbox |
+| [034](034-template-inheritance.md) | A template may extend one parent, pinned, merged by name |

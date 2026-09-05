@@ -628,6 +628,16 @@ pub trait GitBackend {
     /// looked; it takes no part in the resolution.
     fn resolve_revision(&self, reference: &str, origin: &str) -> Result<Oid, GitError>;
 
+    /// Whether `reference` names a tag.
+    ///
+    /// `resolve_revision` deliberately does not say which kind of reference it
+    /// matched — a tag, a branch or a raw SHA are all pinned the same way for
+    /// every other caller. `[extends].rev` is the one caller that needs to
+    /// know, because a branch is not a pin (ADR-034): a tag and a branch can
+    /// be spelled identically, and nothing about the string says which one it
+    /// is until the repository itself is asked.
+    fn is_tag(&self, reference: &str) -> Result<bool, GitError>;
+
     /// The default branch, used when no `ref` is configured.
     fn default_branch(&self) -> Result<String, GitError>;
 

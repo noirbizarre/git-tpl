@@ -29,6 +29,7 @@ pub const TOP_LEVEL_KEYS: &[&str] = &[
     "computed",
     "data",
     "description",
+    "extends",
     "name",
     "note",
     "note_file",
@@ -114,6 +115,36 @@ pub enum ManifestError {
         /// What is wrong with it.
         reason: String,
     },
+
+    /// An `[extends]` declaration is unusable.
+    #[error("`[extends]`: {reason}")]
+    #[diagnostic(
+        code(tpl::manifest::invalid_extends),
+        help(
+            "`[extends]` needs `source` and `rev`; `rev` must name a tag or a commit, never a branch (ADR-034)"
+        )
+    )]
+    InvalidExtends {
+        /// What is wrong with it.
+        reason: String,
+    },
+
+    /// A name is declared as different kinds by different layers of a chain.
+    #[error("`{name}` is declared as a {this} here and a {other} by another layer in the chain")]
+    #[diagnostic(
+        code(tpl::manifest::extends_kind_collision),
+        help(
+            "answers, computed values and data sources share one namespace across the whole `[extends]` chain"
+        )
+    )]
+    ExtendsKindCollision {
+        /// The colliding name.
+        name: String,
+        /// The kind this layer declares it as.
+        this: String,
+        /// The kind another layer in the chain declares it as.
+        other: String,
+    },
 }
 
 /// A declared data source.
@@ -168,6 +199,53 @@ impl DataSourceDecl {
             // actually written is more use here than inventing the missing half.
             _ => self.source.clone(),
         }
+    }
+}
+
+/// A declared parent template. See `docs/adr/034-template-inheritance.md`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ExtendsDecl {
+    /// Any Git URL, or a path on this machine — the same shape as the
+    /// top-level `--source`.
+    pub source: String,
+
+    /// The revision the parent is pinned to. Required: there is no default
+    /// meaning "the parent's default branch", because that default branch is
+    /// itself unpinned, and an unpinned parent breaks invariant 2. Must
+    /// resolve to a tag or a commit; a branch is rejected at resolve time,
+    /// once the parent repository can actually be asked which kind it is.
+    pub rev: String,
+
+    /// Paths to drop from the merge, relative to the *parent's own repository
+    /// root* — not the render root, so a partial (which lives outside it) can
+    /// be removed too.
+    ///
+    /// Checked against the parent's own tree at resolve time: removing a path
+    /// the parent does not have is an error, or a rename upstream would
+    /// silently resurrect a file the child spent a release removing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remove: Vec<String>,
+}
+
+impl ExtendsDecl {
+    /// Checks that do not need the parent repository.
+    fn validate(&self) -> Result<(), ManifestError> {
+        if self.source.trim().is_empty() {
+            return Err(ManifestError::InvalidExtends {
+                reason: "`source` is empty".into(),
+            });
+        }
+        if self.rev.trim().is_empty() {
+            return Err(ManifestError::InvalidExtends {
+                reason: "`rev` is empty".into(),
+            });
+        }
+        if self.remove.iter().any(|path| path.trim().is_empty()) {
+            return Err(ManifestError::InvalidExtends {
+                reason: "`remove` contains an empty path".into(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -266,6 +344,15 @@ pub struct Manifest {
     /// a `BTreeMap` would silently replace with alphabetical.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub remotes: IndexMap<String, String>,
+
+    /// A parent template this one extends. See ADR-034.
+    ///
+    /// `name`, `description`, `root`, `strict`, `note` and `note_file` are
+    /// never inherited — each layer's own manifest is authoritative for them.
+    /// `questions`, `computed`, `data` and `remotes` merge with the parent's,
+    /// by name; an entry a child redeclares replaces the parent's entirely.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<ExtendsDecl>,
 }
 
 fn default_root() -> String {
@@ -333,6 +420,10 @@ impl Manifest {
             if self.questions.contains_key(name) {
                 return Err(ManifestError::NameCollision { name: name.clone() });
             }
+        }
+
+        if let Some(extends) = &self.extends {
+            extends.validate()?;
         }
 
         for (name, question) in &self.questions {
@@ -656,6 +747,11 @@ mod tests {
                 "origin".to_string(),
                 "git@example.com:a/b.git".to_string(),
             )]),
+            extends: Some(ExtendsDecl {
+                source: "https://example.invalid/base.git".into(),
+                rev: "v1.0.0".into(),
+                remove: Vec::new(),
+            }),
         };
 
         let serialized =
@@ -1338,5 +1434,92 @@ mod tests {
         assert_eq!(manifest.note, None);
         assert_eq!(manifest.note_file, None);
         assert!(manifest.remotes.is_empty());
+    }
+
+    /// The keys are additive here too: a manifest written before ADR-034
+    /// still parses, and declares no parent.
+    #[test]
+    fn a_manifest_without_extends_still_parses() {
+        let manifest = Manifest::parse(FULL, MANIFEST_NAME).unwrap();
+        assert_eq!(manifest.extends, None);
+    }
+
+    #[test]
+    fn an_extends_declaration_parses() {
+        let manifest = Manifest::parse(
+            r#"
+            name = "x"
+            [extends]
+            source = "https://example.invalid/base.git"
+            rev = "v1.0.0"
+            remove = ["template/unwanted.txt"]
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+
+        let extends = manifest.extends.unwrap();
+        assert_eq!(extends.source, "https://example.invalid/base.git");
+        assert_eq!(extends.rev, "v1.0.0");
+        assert_eq!(extends.remove, ["template/unwanted.txt"]);
+    }
+
+    /// `rev` has no default: a default meaning "the parent's default branch"
+    /// would itself be unpinned, defeating the whole point of requiring one.
+    #[test]
+    fn extends_without_a_rev_is_rejected() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [extends]
+            source = "https://example.invalid/base.git"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+        std::assert_matches!(error, ManifestError::Parse { .. });
+    }
+
+    #[rstest]
+    #[case("", "v1.0.0", "`source` is empty")]
+    #[case("https://example.invalid/base.git", "", "`rev` is empty")]
+    fn an_unusable_extends_declaration_is_rejected_at_load_time(
+        #[case] source: &str,
+        #[case] rev: &str,
+        #[case] expected: &str,
+    ) {
+        let error = Manifest::parse(
+            &format!("name = \"x\"\n[extends]\nsource = \"{source}\"\nrev = \"{rev}\""),
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidExtends { reason } = error else {
+            panic!("expected an invalid extends declaration, got {error:?}");
+        };
+        assert!(reason.contains(expected), "reason was: {reason}");
+    }
+
+    /// A rename upstream must not silently resurrect a file the child spent a
+    /// release removing — caught later, once the parent's tree can be read,
+    /// but an empty path is never valid regardless.
+    #[test]
+    fn an_empty_remove_path_is_rejected_at_load_time() {
+        let error = Manifest::parse(
+            r#"
+            name = "x"
+            [extends]
+            source = "https://example.invalid/base.git"
+            rev = "v1.0.0"
+            remove = [""]
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap_err();
+
+        let ManifestError::InvalidExtends { reason } = error else {
+            panic!("expected an invalid extends declaration, got {error:?}");
+        };
+        assert!(reason.contains("empty path"), "reason was: {reason}");
     }
 }

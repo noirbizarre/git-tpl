@@ -14,7 +14,7 @@ pub fn run(args: StatusArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // only which remote a report compared against would be a flag whose effect
     // is invisible in the output it produces.
     let preferences = Preferences::load(&ctx.repo)?;
-    let status = ops::status(&ctx.repo, &ctx.root, &preferences, args.dirty)?;
+    let status = ops::status(&ctx.repo, &ctx.root, &preferences, &ctx.user, args.dirty)?;
 
     if global.json {
         println!("{}", crate::report::success(json(&status)));
@@ -67,6 +67,20 @@ fn print_text(ctx: &Session, status: &ops::Status) {
             n => format!("{n} renderings"),
         },
     ));
+
+    // Only shown when the rendering actually extended something -- an empty
+    // "Extends:" line would ask every reader of an ordinary template to work
+    // out why it says nothing.
+    if let Some(chain) = status.recorded.as_ref().map(|r| &r.extends)
+        && !chain.is_empty()
+    {
+        let described = chain
+            .iter()
+            .map(|(source, revision)| format!("{source}@{revision}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        ctx.out.say(field(&ctx.out.theme, "Extends", &described));
+    }
 
     ctx.out.say(field(
         &ctx.out.theme,
@@ -128,6 +142,13 @@ fn json(status: &ops::Status) -> serde_json::Value {
         "renderedReference": recorded.and_then(|r| r.reference.clone()),
         "renderedCommit": recorded.and_then(|r| r.revision.map(|c| c.to_hex())),
         "dirty": recorded.map(|r| r.dirty).unwrap_or(false),
+        // Always an array, `[]` for a template with no `[extends]` -- a
+        // script should not have to check for `null` before iterating, the
+        // same rule every other field on this object already follows. What
+        // was actually *rendered*, read from the trailers, not what the
+        // configured `[extends]` resolves to now -- the same distinction
+        // `renderedReference` draws against `availableReferenceDescription`.
+        "renderedExtends": extends_json(recorded),
         "availableReferenceDescription": status.available_reference_description,
         "availableCommit": status.available_commit.map(|c| c.to_hex()),
         "templateMoved": status.template_moved,
@@ -141,4 +162,21 @@ fn json(status: &ops::Status) -> serde_json::Value {
         "worktreeClean": status.worktree_clean,
         "pending": status.is_pending(),
     })
+}
+
+/// The ancestor chain the last rendering recorded, nearest parent first.
+///
+/// Built from the raw trailer text (`Recorded::extends`), not re-resolved --
+/// `status` already treats resolving the template as best-effort (a network
+/// failure degrades `available*` to `null` rather than failing the whole
+/// report), and this is what was actually rendered regardless of whether the
+/// template can be reached right now.
+fn extends_json(recorded: Option<&tpl::provenance::Recorded>) -> serde_json::Value {
+    let chain = recorded.map(|r| r.extends.as_slice()).unwrap_or_default();
+    serde_json::Value::Array(
+        chain
+            .iter()
+            .map(|(source, revision)| serde_json::json!({ "source": source, "revision": revision }))
+            .collect(),
+    )
 }
