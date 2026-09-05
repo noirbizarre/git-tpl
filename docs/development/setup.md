@@ -106,9 +106,10 @@ These are enforced, not merely intended. Breaking one fails a hook or a test.
 else makes it decorative. The `git-backend-isolation` prek hook is what actually stops that. If you need a Git
 capability the trait lacks, add it to the trait — not a `git2` import.
 
-**`update` does not modify `HEAD`, the index or the worktree.** An integration test asserts all three are
-byte-identical across an update. The renderer writes to a Git tree builder and never to the filesystem, so this is
-structural — the test exists to keep it that way.
+**`update` does not modify `HEAD`, the index, or render output in the worktree.** An integration test asserts all
+three are unchanged, or change only in the one expected way: `.config/git.tpl.toml` itself, rewritten in place when
+a template question gains a newly recorded answer. The renderer writes to a Git tree builder and never to the
+filesystem, so a rendered file changing is structural — the test exists to keep it that way.
 
 **Rendering is deterministic.** A test renders twice and compares trees. See
 [Determinism](../concepts/determinism.md).

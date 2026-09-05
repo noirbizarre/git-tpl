@@ -222,6 +222,12 @@ fn a_file_added_to_the_template_appears_in_the_rendering() {
 
 /// A question added since the last render has no recorded answer, so it is
 /// asked — or, with `--defaults`, takes its default — and written back.
+///
+/// This is the one case where recording an answer is expected to change the
+/// worktree (AGENTS.md invariant 1): `.config/git.tpl.toml` moves, unstaged,
+/// and nothing else does. Earlier revisions of this test only checked the
+/// file's new contents, so a change reaching `HEAD` or the index — or a
+/// second file changing alongside it — would have gone unnoticed.
 #[test]
 fn a_question_added_by_the_template_is_answered_and_recorded() {
     let world = World::new();
@@ -238,6 +244,8 @@ fn a_question_added_by_the_template_is_answered_and_recorded() {
     );
     world.template.repo.commit_all("feat: ask for the edition");
 
+    let before = world.project.working_state();
+
     tpl(&world.project, &["update", "--defaults"]).success();
 
     assert!(
@@ -245,6 +253,19 @@ fn a_question_added_by_the_template_is_answered_and_recorded() {
             .project
             .read(".config/git.tpl.toml")
             .contains("edition = \"2024\"")
+    );
+
+    let after = world.project.working_state();
+    assert_eq!(before.head, after.head, "HEAD moved");
+    assert_eq!(before.index, after.index, "the index changed");
+    assert_ne!(
+        before.worktree, after.worktree,
+        "recording the answer should have changed the worktree digest"
+    );
+    assert_eq!(
+        world.project.status(),
+        "M .config/git.tpl.toml",
+        "only the config file should show as modified, and it should be unstaged"
     );
 }
 
