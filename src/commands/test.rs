@@ -12,8 +12,8 @@ use tpl::git::GitError;
 use tpl::git::libgit2::LibGit2;
 use tpl::gitconfig::{Overrides, Preferences};
 use tpl::ops::testing::{
-    CaseOutcome, CommandStep, Failure, Progress, Report, SnapshotChange, SnapshotOutcome, Status,
-    Stream,
+    CaseOutcome, CommandStep, Failure, Progress, Report, RunOptions, SnapshotChange,
+    SnapshotOutcome, Status, Stream,
 };
 use tpl::ops::{self, OpError, Target};
 
@@ -41,16 +41,20 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             // what was last committed.
             dirty: args.r#ref.is_none(),
         },
-        args.tests.as_deref(),
-        &args.cases,
-        args.write,
-        run_commands,
+        RunOptions {
+            tests_dir: args.tests.as_deref(),
+            filter: &args.cases,
+            write: args.write,
+            run_commands,
+            // Told to `[commands]` children so a colour-aware tool does not
+            // silently mute itself just because its stdout/stderr are pipes
+            // — never on `--color=never`/`NO_COLOR`, since that already
+            // decided `is_colored()` to be false.
+            color: ctx.out.theme.is_colored(),
+            shard: args.shard.as_deref(),
+            record_durations: args.record_durations,
+        },
         &ctx.user,
-        // Told to `[commands]` children so a colour-aware tool does not
-        // silently mute itself just because its stdout/stderr are pipes —
-        // never on `--color=never`/`NO_COLOR`, since that already decided
-        // `is_colored()` to be false.
-        ctx.out.theme.is_colored(),
         &mut progress,
     )?;
     // Clears any spinner before the final report prints, so its last
@@ -451,6 +455,25 @@ fn print_text(ctx: &Standalone, report: &Report, write: bool) {
             if report.cases.len() == 1 { "" } else { "s" }
         ),
     ));
+    if let Some(shard) = report.shard {
+        ctx.out.say(field(
+            theme,
+            "Shard",
+            &format!(
+                "{}/{} — {} of {} case{}, {}",
+                shard.index,
+                shard.total,
+                report.cases.len(),
+                shard.cases_total,
+                if shard.cases_total == 1 { "" } else { "s" },
+                if shard.balanced {
+                    "balanced by recorded duration"
+                } else {
+                    "split evenly by count"
+                },
+            ),
+        ));
+    }
     ctx.out.blank();
 
     for case in &report.cases {
@@ -784,7 +807,16 @@ fn json(report: &Report) -> serde_json::Value {
             "snapshotsCompared": report.snapshots_compared(),
             "commandsEnabled": report.commands_enabled,
             "commandsRun": report.commands_run(),
+            "durationsRecorded": report.durations_recorded,
         },
+        // A run-level fact, not a per-case one — `null` unless `--shard` was
+        // given. See ADR-036.
+        "shard": report.shard.map(|shard| serde_json::json!({
+            "index": shard.index,
+            "total": shard.total,
+            "casesTotal": shard.cases_total,
+            "balanced": shard.balanced,
+        })),
         "cases": report.cases.iter().map(|case| serde_json::json!({
             "name": case.name,
             "path": case.path,
@@ -797,6 +829,9 @@ fn json(report: &Report) -> serde_json::Value {
             // colourise it for. See ADR-032.
             "snapshotChanges": case.snapshot_changes.iter().map(snapshot_change_json).collect::<Vec<_>>(),
             "commandsRun": case.commands_run,
+            // Always present, regardless of `--shard`/`--record-durations`
+            // — see `CaseOutcome::duration_ms`. See ADR-036.
+            "durationMs": case.duration_ms,
             "failures": case.failures.iter().map(failure_json).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })
@@ -909,6 +944,7 @@ mod tests {
             files: 1,
             commands_run: 0,
             snapshot_changes: Vec::new(),
+            duration_ms: 0,
         }
     }
 

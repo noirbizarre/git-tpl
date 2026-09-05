@@ -203,6 +203,10 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::testing::snapshot_write` | A snapshot could not be written to the working tree. |
 | `tpl::testing::sandbox_failed` | A case's temporary sandbox, for `[commands]` or an isolated `git` (ADR-033), could not be created. |
 | `tpl::testing::sandbox_write` | The rendering could not be materialised into a case's sandbox. |
+| `tpl::testing::malformed_shard` | `--shard` was not `INDEX/TOTAL`, both 1-based, `INDEX <= TOTAL` (ADR-036). |
+| `tpl::testing::empty_shard` | `--shard` selected no cases at all — its `TOTAL` outgrew the suite. |
+| `tpl::testing::durations_read` | The recorded durations file is unreadable, or contradicts itself. |
+| `tpl::testing::durations_write` | The durations file could not be written to the working tree. |
 
 ## Git
 

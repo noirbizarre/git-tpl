@@ -109,6 +109,7 @@ do not assume it is preinstalled.
 | See the template's side of a conflict | `git tpl show <path>` |
 | Send a local fix upstream | `git tpl backport --unsubstitute --json` |
 | Share a rendering with the team | `git tpl push` / `git tpl fetch` |
+| Run a template's own test suite | `git tpl test --json` (check `summary.failed`, not just `ok`) |
 
 ## Workflows
 
@@ -210,6 +211,7 @@ there is no fix to send; edit the template's `.jinja` source by hand instead.
 | `backport` | `git tpl backport [<pathspec>...] [--exclude g]... [-o file] [--unsubstitute]` | `result`(`patched`\|`nothingToBackport`),`patch`,`unsubstituted[]` |
 | `fetch` | `git tpl fetch [--remote name] [--dry-run]` | `state`(`absent`\|`synced`\|`diverged`\|`behind`\|`ahead`),`relation{ahead,behind}` |
 | `push` | `git tpl push [--remote name] [--dry-run]` | `remote`,`ref` |
+| `test` | `git tpl test [CASE...] [--ref R] [--shard I/T] [--record-durations] [--write] [--skip-commands]` | `summary{total,passed,failed,durationsRecorded,...}`,`shard{index,total,casesTotal,balanced}`,`cases[]{name,path,passed,durationMs,failures[]}` |
 
 `revision`/`previousRevision` above are always the object `{reference, commit, dirty}` —
 `reference`/`commit` independently optional, never a formatted string.

@@ -79,6 +79,8 @@ question, so an unrecognised key here is always the case's own mistake. See
 | `--ref` | Branch, tag or commit to test; without it, the working tree. |
 | `--write` | Record each case's rendering as its snapshot. Only the cases that declare `snapshot = true` are touched; see [Snapshots](#snapshots). |
 | `--skip-commands` | Skip every case's `[commands]` for this run. |
+| `--shard INDEX/TOTAL` | Run only the cases assigned to this shard of a balanced split; see [Sharding](#sharding). |
+| `--record-durations` | Time every case and record it for a later `--shard` to balance by; see [Sharding](#sharding). |
 
 There is no `--answer`, `--answers-from` or `--defaults`.
 The case file *is* the answer set: a flag that changed the answers would change what every case asserts while
@@ -403,6 +405,46 @@ Things worth knowing:
 
 `--write` writes into the checked-out template's working tree — there is nowhere else for a snapshot to go.
 
+## Sharding
+
+```sh
+git tpl test --record-durations   # once, to seed tests/__timings__/durations
+git tpl test --shard 1/4          # then, in each of four CI matrix jobs
+git tpl test --shard 2/4
+git tpl test --shard 3/4
+git tpl test --shard 4/4
+```
+
+`--shard INDEX/TOTAL` (both starting at 1) runs only the cases assigned to this shard, out of whatever this
+invocation would otherwise run — applied after `[CASE]` filtering, not instead of it. Without a recorded durations
+file, the split is a deterministic slice by count: this never fails just because nothing has been recorded yet, so
+a template's first `--shard` run works exactly as well as its hundredth.
+
+`--record-durations` runs the suite exactly as a plain invocation would — nothing about `[commands]`, `expect` or
+snapshots changes — while timing each case, then writes `tests/__timings__/durations`, merged over whatever was
+already there. Commit that file to the template repository; a later `--shard` reads it back and bin-packs the
+split so every shard finishes in about the same time, rather than merely getting the same number of cases. A case
+missing from the file (new, or never measured) is weighted at the mean of the ones that are.
+
+`--record-durations` conflicts with `--shard` — recording from a partial run would corrupt the file with timings
+for only some of the suite — and with `--write`, which does not run a case at all and so has nothing real to time.
+
+A GitHub Actions matrix supplies both halves of `--shard` directly, with only the shard index varying between
+jobs:
+
+```yaml
+strategy:
+  matrix:
+    shard: [1, 2, 3, 4]
+steps:
+  - run: git tpl test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+```
+
+This is unrelated to the "no matrix language" rule below: that rule is about a *case file* expanding into many
+cases combinatorially, which this project still refuses. Splitting the cases that already exist across several CI
+jobs is a different question, and `--shard`/`--record-durations` is this project's answer to it. See
+[ADR-036](../adr/036-shard-and-record-durations.md).
+
 ## Cases come from the revision, not from disk
 
 | Given | Cases and snapshots come from |
@@ -443,6 +485,11 @@ $ git tpl --json test . | jq '{ok, failed: .summary.failed}'
 
 The two are separate because a caller has to be able to tell "two cases failed" from "the template could not be
 resolved", and both are non-zero exits.
+
+`--json` also carries `summary.durationsRecorded` (whether this run wrote the durations file), a top-level `shard`
+object (`null` unless `--shard` was given: `{index, total, casesTotal, balanced}`), and a `durationMs` on every
+case — measured on every run, whether or not `--shard`/`--record-durations` was used. See
+[Sharding](#sharding) and [ADR-036](../adr/036-shard-and-record-durations.md).
 
 ## What a case cannot do
 
