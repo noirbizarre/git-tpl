@@ -225,7 +225,7 @@ fn backport_refuses_a_change_to_a_substituted_line() {
 /// Pretty-printed by the harness for review; `tests/json.rs` still pins that
 /// the wire form is a single compact object.
 #[test]
-fn status_json_envelope() {
+fn status_pins_its_json_envelope_layout() {
     let world = pending();
 
     let output = tpl(&world.project, &["--json", "status"]).code(2);
@@ -235,7 +235,7 @@ fn status_json_envelope() {
 
 /// `docs/reference/json.md` — the `diff` payload, with its per-file stat.
 #[test]
-fn diff_json_envelope() {
+fn diff_pins_its_json_envelope_layout() {
     let world = pending();
     tpl(&world.project, &["update", "--defaults"]).success();
 
@@ -246,7 +246,7 @@ fn diff_json_envelope() {
 
 /// `docs/reference/json.md` — the `update` payload.
 #[test]
-fn update_json_envelope() {
+fn update_pins_its_json_envelope_layout() {
     let world = pending();
 
     let output = tpl(&world.project, &["--json", "update", "--defaults"]).success();
@@ -256,7 +256,7 @@ fn update_json_envelope() {
 
 /// `docs/reference/json.md` — the `init` payload, including the merge result.
 #[test]
-fn init_json_envelope() {
+fn init_pins_its_json_envelope_layout() {
     let world = World::new();
 
     let output = world.init(&["--json"]).success();
@@ -285,7 +285,7 @@ fn a_failure_envelope_has_a_code_and_a_help() {
 /// The `patch` key is the whole point of this one: it pins that the mailbox
 /// travels *inside* the envelope, because stdout under `--json` is one object.
 #[test]
-fn backport_json_envelope() {
+fn backport_pins_its_json_envelope_layout() {
     let world = World::new();
     world.init(&[]).success();
     world.project.write(

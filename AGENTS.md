@@ -17,9 +17,12 @@ Read `docs/concepts/git-model.md` before changing anything structural.
 Each of these is enforced by a hook or a test. If you find yourself working around one, you are about to break the
 project.
 
-1. **`update` does not modify `HEAD`, the index or the worktree.** Not "should not" — does not. The renderer writes
-   into a `TreeBuilder`, so there is no code path that opens a project file for writing. Keep it that way.
-   `tests/update.rs` fingerprints all three.
+1. **`update` does not modify `HEAD` or the index, and never writes rendered output into the worktree.** Not
+   "should not" — does not. The renderer writes into a `TreeBuilder`, so there is no code path that opens a
+   *rendered* file for writing. The one file `update` does write is `.config/git.tpl.toml` itself — project
+   configuration, not render output — and only to record a newly-answered question, unstaged, the same way a
+   hand edit would. `tests/update.rs` fingerprints `HEAD`, the index and the worktree, including the case
+   where recording an answer is the one thing expected to change.
 
 2. **Rendering is deterministic.** Same template revision, same answers, same data → byte-identical tree. This is
    what makes an unchanged template produce no commit. Never introduce a timestamp, an environment read, a hash-map

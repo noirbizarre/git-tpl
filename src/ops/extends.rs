@@ -113,7 +113,12 @@ pub enum ExtendsError {
 
     /// The confirmation was cancelled, rather than answered either way.
     #[error("cancelled")]
-    #[diagnostic(code(tpl::extends::cancelled))]
+    #[diagnostic(
+        code(tpl::extends::cancelled),
+        help(
+            "no chain was resolved, and nothing was written. Run it again to confirm, or pass `--trust`."
+        )
+    )]
     Cancelled,
 }
 

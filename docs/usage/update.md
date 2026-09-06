@@ -8,11 +8,16 @@ git tpl update [options]
 
 ## What it does not do
 
-**It does not touch your branch.** Not `HEAD`, not the index, not the worktree.
+**It does not touch your branch.** Not `HEAD`, not the index, and it never writes a *rendered* file into your
+working directory.
 
 This is structural rather than a promise: the rendered tree is built directly as a Git tree object and the ref is
-moved.
-There is no code path that writes a file into your working directory, so there is nothing to go wrong.
+moved. There is no code path that opens a rendered file for writing.
+
+The one file `update` does write on disk is `.config/git.tpl.toml` itself — project configuration, not render
+output. If a template added a question since your last render, `update` records the new answer back into that
+file (see [New questions](#new-questions) below), unstaged, exactly as a hand edit would. Nothing else in the
+worktree moves.
 
 ```console
 $ git tpl update
