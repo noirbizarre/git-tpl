@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0](https://github.com/noirbizarre/git-tpl/compare/0.12.1..0.13.0) - 2026-09-06
+
+### 💫 Features
+
+- **lint** Expose git tpl lint as a prek/pre-commit hook ([#151](https://github.com/noirbizarre/git-tpl/issues/151)) - ([06a7b28](https://github.com/noirbizarre/git-tpl/commit/06a7b28752995f1d399176865c68dedfc8163b68))
+- **template** Implement template inheritance (`[extends]`) ([#157](https://github.com/noirbizarre/git-tpl/issues/157)) - ([258a641](https://github.com/noirbizarre/git-tpl/commit/258a6416ca7d13322c49b64b2e9e1961548bc510))
+- **testing** Balance a test suite across a CI matrix with --shard/--record-durations - ([8618467](https://github.com/noirbizarre/git-tpl/commit/86184678770f17ccdf8450d5bbc0c46f26af5b4b))
+- **testing** Report progress as GitHub Actions workflow commands - ([a093a87](https://github.com/noirbizarre/git-tpl/commit/a093a87b4fa16c9768bf74820f74627422f91a57))
+- **testing** Let a test case ask for an isolated Git sandbox ([#156](https://github.com/noirbizarre/git-tpl/issues/156)) - ([a6460cb](https://github.com/noirbizarre/git-tpl/commit/a6460cb413a1e56b14d4190d5b53e0b4fce6756b))
+
+### 🐛 Bug Fixes
+
+- **diagnostics** Add help text to Cancelled variants for consistency - ([9fe8a5f](https://github.com/noirbizarre/git-tpl/commit/9fe8a5f5671a735b660188350be15b280c304e4b))
+- **docs** Use "reference" not "revision" for the name asked for - ([120868f](https://github.com/noirbizarre/git-tpl/commit/120868f5a868ce38b2a0fc1015eed981a8809a25))
+- **docs** Correct init --dry-run's repository precondition - ([da8ee21](https://github.com/noirbizarre/git-tpl/commit/da8ee21eea4eedcd3002ca832e9df169cbcd48fd))
+- **docs** Drop a stray positional argument from a test.md example - ([eb15822](https://github.com/noirbizarre/git-tpl/commit/eb1582274773492ad1943b43c0cd025e63d0f82e))
+- **docs** Stop claiming update never writes to the worktree - ([fa4afa1](https://github.com/noirbizarre/git-tpl/commit/fa4afa1c148ca7ecce028a5b7e26de8b1532f4b0))
+- **testing**  🚨 **breaking** Expand $TEMPLATE_ROOT and answers in commands via MiniJinja templating ([#154](https://github.com/noirbizarre/git-tpl/issues/154)) - ([59b335e](https://github.com/noirbizarre/git-tpl/commit/59b335edd6a71d6b079e695279fca1d6f16e922b))
+
+### 🔨 Refactor
+
+- **tests** Rename JSON-envelope snapshot tests to sentences - ([0e00eaf](https://github.com/noirbizarre/git-tpl/commit/0e00eaf3b4129fb597c4b5a681ffaad059227dc9))
+
+### 🎨 Style
+
+- Run cargo fmt on the new Cancelled help text - ([5f76366](https://github.com/noirbizarre/git-tpl/commit/5f763667a85ce203413285e22a8d7ea3156306cd))
+
 ## [0.12.1](https://github.com/noirbizarre/git-tpl/compare/0.12.0..0.12.1) - 2026-08-30
 
 ### 🐛 Bug Fixes
