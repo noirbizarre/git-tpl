@@ -208,7 +208,7 @@ insta = { version = "1", features = ["filters"] }
 # touch it. Already a runtime dependency; listed for the tests' own use.
 sha2 = "0.11"
 hex = "0.4"
-rstest = "0.26"
+rstest = "0.27"
 pretty_assertions = "1"
 # `regex::escape`, for the snapshot filter that redacts the tests' temporary
 # directory. Already in the dev tree via `insta`'s `filters`, so it costs no
