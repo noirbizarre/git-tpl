@@ -4,7 +4,7 @@ Emit a patch that carries a local fix back to the template it came from.
 
 ```sh
 git tpl backport [<pathspec>...] [--exclude <glob>]... [-o <file>]
-                 [-p] [--trust] [--unsubstitute]
+                 [-p | --list-hunks | --hunk <path>:<id>...] [--trust] [--unsubstitute]
 ```
 
 You fixed something in a generated project.
@@ -224,8 +224,9 @@ tpl::backport::hunk_refused
 
   x hunk 2 of `README.md` cannot be backported
   help: the hunk at `@@ -8,3 +9,3 @@` is the one that failed. Run
-        `git tpl backport -p` again and leave it out to send the rest, or
-        edit `README.md.jinja` by hand to carry it.
+        the backport again without it — leave it out of the `-p` selection,
+        or of the `--hunk` list — to send the rest, or edit `README.md.jinja`
+        by hand to carry it.
 ```
 
 Deselecting every hunk of a file simply leaves that file out.
@@ -245,7 +246,45 @@ tpl::backport::not_interactive
 This is the opposite of how `--unsubstitute` behaves, and deliberately so.
 Un-substitution is something git-tpl offers; not offering it on a CI runner is a decision it can take for you.
 `-p` is something you asked for, and the one answer it cannot mean is "send everything".
-To select without a prompt, name pathspecs or use `--exclude`.
+To select whole files without a prompt, name pathspecs or use `--exclude`.
+To select individual hunks without a prompt, name them in advance.
+
+### Naming hunks in advance
+
+`--list-hunks` prints the same hunks `-p` would offer, each with an id, and produces no patch.
+It needs no terminal and works under `--json`:
+
+```console
+$ git tpl backport --list-hunks
+hunks main (e754104)
+
+  template/README.md.jinja <- README.md
+    README.md:3f9a1c0be2d4  @@ -1,4 +1,5 @@  +2 -0
+    README.md:a07c55d1e9b3  @@ -8,3 +9,3 @@  +1 -1
+```
+
+`--hunk <path>:<id>` then sends exactly the hunks named, and repeats for as many as you like:
+
+```sh
+git tpl backport --hunk README.md:a07c55d1e9b3 --json
+```
+
+Four rules make this safe to run unattended:
+
+- **A file you did not name sends nothing.**
+  `-p` starts from "everything" because a person is there to take things out.
+  With nobody to ask, "everything I did not mention" is the reading that ships a change you never saw.
+- **An id is derived from the hunk's content and its path**, not from its position.
+  The same worktree gives the same ids on every run, and a file edited since the listing gives different ones.
+- **A name that matches nothing is refused**, with `tpl::backport::unknown_hunk`, even when the other names were
+  fine.
+  List again rather than guessing which hunk was meant.
+- **Selection still happens before the patch is built**, exactly as with `-p`.
+  A named hunk that cannot be carried is refused as `hunk_refused`, and the listing does not pre-judge it:
+  it is produced before the proof, so a file that would refuse is still listed.
+
+`--hunk` conflicts with `-p` and `--list-hunks`; `--list-hunks` conflicts with `-o`, since it writes no patch.
+See [ADR-037](../adr/037-non-interactive-hunk-selection.md).
 
 ## Changing a line that holds a placeholder
 
@@ -403,7 +442,8 @@ guess.
 | `tpl::backport::stale_rendering` | `.config/git.tpl.toml` was edited without re-rendering, so `refs/tpl/<id>` is not what the answers produce and every line would be measured against the wrong file. Run [`git tpl update`](update.md) first. |
 | `tpl::backport::unknown_path` | A named path is neither produced by the template nor present in the project. |
 | `tpl::backport::hunk_refused` | A hunk selected with `-p` cannot be backported. The refusal it wraps keeps its own code; this one names the hunk to leave out. |
-| `tpl::backport::not_interactive` | `-p` was asked for where no prompt can run. |
+| `tpl::backport::not_interactive` | `-p` was asked for where no prompt can run. Use `--list-hunks` and `--hunk`. |
+| `tpl::backport::unknown_hunk` | A `--hunk` is malformed, or names a hunk the current change does not have — usually because the file changed since `--list-hunks`. |
 | `tpl::backport::cancelled` | The hunk picker was cancelled. Nothing was emitted. |
 
 The full list is in [Diagnostic codes](../reference/diagnostics.md#backport), and the reasoning behind all of it
@@ -418,6 +458,8 @@ is [ADR-020](../adr/020-backport-is-a-patch.md).
 | `-o`, `--output <file>` | Write the patch here instead of to stdout. |
 | `--trust` | Fetch the template's [remote data sources](../data/index.md) without confirming. Per invocation; nothing is recorded. |
 | `-p`, `--patch` | Choose which hunks to send, one file at a time. Needs a terminal; refused under `--json` or with `tpl.interactive false`. See [Choosing hunks](#choosing-hunks). |
+| `--list-hunks` | List the hunks that could be sent, with ids, and emit no patch. Needs no terminal. See [Naming hunks in advance](#naming-hunks-in-advance). |
+| `--hunk <path>:<id>` | Send only this hunk. Repeatable. A file with no `--hunk` sends nothing. Conflicts with `-p` and `--list-hunks`. |
 | `--unsubstitute` | Reverse changed template expressions without confirming. Also the only way to reverse one at all with nobody to ask — under `--json`, or on CI. See [Changing a line that holds a placeholder](#changing-a-line-that-holds-a-placeholder). |
 
 There is deliberately no `--ref` and no `--answer`: both would change the baseline the patch is measured against.
@@ -429,3 +471,4 @@ See [What it compares](#what-it-compares).
 The patch travels *in* the payload as `patch`, rather than beside it — stdout under `--json` is one JSON object,
 always.
 The payload is described in [JSON output](../reference/json.md#backport).
+With `--list-hunks`, `result` is `plan` and the payload gains a `plan` array of files and their hunks.

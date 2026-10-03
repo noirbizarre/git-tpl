@@ -321,7 +321,7 @@ A conflicted merge is a success, not a failure: the index is left as Git leaves 
   "skipped": [], "unsubstituted": [], "insertions": 1, "deletions": 1 }
 ```
 
-`result` is `patched` or `nothingToBackport`.
+`result` is `patched`, `nothingToBackport`, or `plan` (with `--list-hunks`, below).
 
 `revision.reference` is `null` when a commit was recorded but no reference was — a hand-edited commit on the ref, or
 an older trailer format — and `backport` declines to guess which reference it might have come from.
@@ -355,7 +355,26 @@ name.
 
 `-p` is refused under `--json` with `tpl::backport::not_interactive`: there is nobody to show hunks to, and a flag
 that silently sent everything instead would be the one answer that was not asked for.
-Limit the backport with pathspecs or `--exclude`.
+Choose hunks without a prompt with `--list-hunks` and `--hunk` instead, or limit the backport with pathspecs or
+`--exclude`.
+
+With `--list-hunks`, `result` is `plan`, `patch` is `""`, `files` is empty, and the payload gains a `plan` array
+([ADR-037](../adr/037-non-interactive-hunk-selection.md)):
+
+```json
+{ "ok": true, "result": "plan", "patch": "", "files": [],
+  "plan": [ { "rendered": "README.md", "source": "template/README.md.jinja", "added": false,
+              "hunks": [ { "id": "3f9a1c0be2d4", "spec": "README.md:3f9a1c0be2d4",
+                           "header": "@@ -1,4 +1,5 @@", "insertions": 2, "deletions": 0,
+                           "lines": [ "+# Acme", "+", " # Notes", " " ] } ] } ] }
+```
+
+`spec` is exactly what `--hunk` takes.
+`id` is derived from the hunk's content and the file's path, so it is stable while the file is unchanged and stops
+matching when it changes.
+`lines` is the hunk body, each line prefixed with a space, `-` or `+`.
+A file that the template would refuse to patch is still listed, because the listing is produced before the proof;
+and a binary file appears in `skipped` instead.
 
 A refusal is a failure, with a `tpl::backport::*` [code](diagnostics.md#backport).
 Branch on the code: `substituted_region` is routine and means "edit the template by hand", while

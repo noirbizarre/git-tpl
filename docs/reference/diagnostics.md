@@ -166,9 +166,10 @@ The reasoning is [ADR-020](../adr/020-backport-is-a-patch.md).
 | `tpl::backport::stale_rendering` | The recorded answers no longer reproduce `refs/tpl/<id>`, so every line of the patch would be measured against the wrong file. Run `update` first. |
 | `tpl::backport::unknown_path` | A named path is neither produced by the template nor present in the project. |
 | `tpl::backport::output_write` | The patch could not be written to `--output`. |
-| `tpl::backport::hunk_refused` | One of the hunks selected with `-p` cannot be backported. The refusal underneath keeps its own code and its own advice; this names the hunk. Run again and leave that hunk out. See [Choosing hunks](../usage/backport.md#choosing-hunks). |
+| `tpl::backport::hunk_refused` | One of the hunks selected with `-p` or `--hunk` cannot be backported. The refusal underneath keeps its own code and its own advice; this names the hunk. Run again and leave that hunk out. See [Choosing hunks](../usage/backport.md#choosing-hunks). |
 | `tpl::backport::cancelled` | The hunk picker was cancelled. No patch was produced and nothing was written. |
-| `tpl::backport::not_interactive` | `-p` was asked for under `--json`, in a pipe, or with `tpl.interactive false` — where the hunks cannot be shown. Limit the backport with pathspecs or `--exclude` instead. |
+| `tpl::backport::not_interactive` | `-p` was asked for under `--json`, in a pipe, or with `tpl.interactive false` — where the hunks cannot be shown. Use `--list-hunks` and `--hunk` to choose hunks without a prompt, or limit the backport with pathspecs or `--exclude`. |
+| `tpl::backport::unknown_hunk` | A `--hunk` is malformed, or names no hunk of the current change — usually because the file changed since `--list-hunks`. List the hunks again. See [Naming hunks in advance](../usage/backport.md#naming-hunks-in-advance). |
 
 ## Migrations
 

@@ -144,8 +144,9 @@ pub enum BackportError {
     #[diagnostic(
         code(tpl::backport::hunk_refused),
         help(
-            "the hunk at `{hunk}` is the one that failed. Run `git tpl backport -p` again and \
-             leave it out to send the rest, or edit `{template_path}` by hand to carry it."
+            "the hunk at `{hunk}` is the one that failed. Run the backport again without it — \
+             leave it out of the `-p` selection, or of the `--hunk` list — to send the rest, \
+             or edit `{template_path}` by hand to carry it."
         )
     )]
     HunkRefused {
@@ -182,11 +183,83 @@ pub enum BackportError {
         code(tpl::backport::not_interactive),
         help(
             "`--json`, a pipe, and `tpl.interactive false` all mean there is nobody to show the \
-             hunks to. Select without a prompt instead: name pathspecs to limit what is \
+             hunks to. Select without a prompt instead: list them with `--list-hunks` and name \
+             the ones to send with `--hunk <path>:<id>`, or name pathspecs to limit what is \
              considered, or leave paths out with `--exclude`."
         )
     )]
     NotInteractive,
+
+    /// A `--hunk` that does not name a hunk of the current change.
+    ///
+    /// Either malformed, or well-formed and stale. The second is the one that
+    /// matters: ids are content-addressed (ADR-037), so a file edited since
+    /// `--list-hunks` no longer has the hunk the id named, and that is
+    /// reported here rather than answered with a different hunk.
+    #[error("`--hunk {spec}` does not name a hunk of the current change")]
+    #[diagnostic(
+        code(tpl::backport::unknown_hunk),
+        help(
+            "expected `<path>:<id>`, exactly as `git tpl backport --list-hunks` prints it. An id \
+             that was valid earlier means the file or the template's rendering changed since, \
+             so list the hunks again. A path outside the pathspecs, or under `--exclude`, \
+             is never considered."
+        )
+    )]
+    UnknownHunk {
+        /// The spec as it was written, or as it was left unmatched.
+        spec: String,
+    },
+}
+
+/// One hunk of a listing: what `--list-hunks` reports so a hunk can be named.
+#[derive(Debug, Clone)]
+pub struct PlannedHunk {
+    /// The id `--hunk` takes, after the path and a colon. See [`Hunk::id`].
+    pub id: String,
+    /// The `@@ -a,b +c,d @@` line.
+    pub header: String,
+    /// Lines the project added.
+    pub insertions: usize,
+    /// Lines the project removed.
+    pub deletions: usize,
+    /// The body, each line prefixed ` `, `-` or `+`.
+    pub lines: Vec<String>,
+}
+
+/// One file's hunks, as listed.
+#[derive(Debug, Clone)]
+pub struct PlannedFile {
+    /// The path in the project; the left half of a `--hunk` spec.
+    pub rendered: String,
+    /// The template source the file would patch, when the template owns it.
+    pub source: String,
+    /// Whether the template does not yet have the file.
+    pub added: bool,
+    /// Every hunk, in file order.
+    pub hunks: Vec<PlannedHunk>,
+}
+
+impl PlannedFile {
+    /// List `project`'s change against `rendered`.
+    fn new(path: &str, source: &str, rendered: &str, project: &str, added: bool) -> Self {
+        let hunks = hunks::hunks(rendered, project)
+            .into_iter()
+            .map(|hunk| PlannedHunk {
+                id: hunk.id(path),
+                header: hunk.header,
+                insertions: hunk.insertions,
+                deletions: hunk.deletions,
+                lines: hunk.lines,
+            })
+            .collect();
+        Self {
+            rendered: path.to_string(),
+            source: source.to_string(),
+            added,
+            hunks,
+        }
+    }
 }
 
 /// One file's worth of backported change.
@@ -252,6 +325,9 @@ pub struct Backport {
     /// spell it, and a user who has to reconstruct it from prose will get the
     /// `-C` wrong the first time.
     pub apply_command: String,
+    /// Every changed file's hunks. Only filled by [`Picking::List`], and then
+    /// `files` and `patch` are empty: a listing is not a backport.
+    pub plan: Vec<PlannedFile>,
 }
 
 /// Produce the patch that carries the project's local divergence upstream.
@@ -362,6 +438,9 @@ pub fn backport(
     let mut skipped = Vec::new();
     let mut diffs = Vec::new();
     let mut unsubstituted: Vec<Unsubstitution> = Vec::new();
+    let mut plan = Vec::new();
+    // Read once: `picking` is borrowed mutably by `choose` further down.
+    let listing = matches!(picking, Picking::List);
 
     for change in changes {
         if excluded(&change.path, exclude) {
@@ -398,6 +477,16 @@ pub fn backport(
                 }
                 let project_bytes = read_required(project, workdir_tree, &change.path)?;
                 if is_binary(&project_bytes) {
+                    // A listing reports and moves on. Refusing here would make
+                    // one binary file hide every hunk that *can* be named, and
+                    // the real backport refuses it anyway if it is selected.
+                    if listing {
+                        skipped.push(Skipped {
+                            path: change.path.clone(),
+                            reason: "binary; a text patch cannot carry it".to_string(),
+                        });
+                        continue;
+                    }
                     return Err(BackportError::Binary {
                         path: change.path.clone(),
                         template_path: change.path.clone(),
@@ -405,6 +494,11 @@ pub fn backport(
                     .into());
                 }
                 let text = to_text(&project_bytes, &change.path, &change.path)?;
+                if listing {
+                    let source = join_root(&root, &change.path);
+                    plan.push(PlannedFile::new(&change.path, &source, "", &text, true));
+                    continue;
+                }
                 // An added file is one hunk — `hunks` against an empty
                 // rendering says so — which makes deselecting it the way to
                 // drop a file named on the command line, with no second code
@@ -465,6 +559,14 @@ pub fn backport(
                     || is_binary(&file.content)
                     || is_binary(&project_bytes)
                 {
+                    // See the added-file arm: a listing reports, it does not refuse.
+                    if listing {
+                        skipped.push(Skipped {
+                            path: change.path.clone(),
+                            reason: "binary; a text patch cannot carry it".to_string(),
+                        });
+                        continue;
+                    }
                     return Err(BackportError::Binary {
                         path: change.path.clone(),
                         template_path: file.source.clone(),
@@ -475,6 +577,21 @@ pub fn backport(
                 let source_text = to_text(&template_bytes, &change.path, &file.source)?;
                 let rendered_text = to_text(&file.content, &change.path, &file.source)?;
                 let project_text = to_text(&project_bytes, &change.path, &file.source)?;
+
+                // A listing stops here: before the proof, so that a file which
+                // would be refused is still listed. Which of its hunks are
+                // refusable is only knowable per selection, and is reported
+                // when one is made (`hunk_refused`).
+                if listing {
+                    plan.push(PlannedFile::new(
+                        &change.path,
+                        &join_root(&root, &file.source),
+                        &rendered_text,
+                        &project_text,
+                        false,
+                    ));
+                    continue;
+                }
 
                 // Selection first, and only then the proof. A change that
                 // round-tripped whole does not necessarily round-trip with half
@@ -572,6 +689,16 @@ pub fn backport(
         }
     }
 
+    // A name that matched no hunk is an error even though the files that did
+    // match were fine. The likeliest cause is a file edited since the listing,
+    // and a patch silently missing the change the caller asked for is the
+    // worst answer to that.
+    if let Picking::Named(selection) = &picking
+        && let Some(spec) = selection.unmatched().into_iter().next()
+    {
+        return Err(BackportError::UnknownHunk { spec }.into());
+    }
+
     // Every arm goes through `describe_revision`, arm for arm as
     // `Provenance::Recorded::describe_revision` does. Cloning the reference
     // instead — which this did — printed the literal `<worktree>` where the
@@ -630,6 +757,7 @@ pub fn backport(
         dirty: object_dirty,
         source: config.template.source.clone(),
         apply_command,
+        plan,
     })
 }
 
@@ -640,7 +768,8 @@ pub fn backport(
 /// hunk that caused it rather than a line number the user has to go and find.
 ///
 /// Without `-p` this is the identity, and deliberately so: `Picking::All` is
-/// not a code path, it is the absence of one.
+/// not a code path, it is the absence of one. `Picking::List` never gets here —
+/// the call sites stop at the listing, before any selection.
 fn choose(
     picking: &mut Picking<'_>,
     rendered: &str,
@@ -648,21 +777,34 @@ fn choose(
     path: &str,
     template_path: &str,
 ) -> Result<(String, Vec<Hunk>, Vec<usize>), BackportError> {
-    let Picking::Ask(picker) = picking else {
-        return Ok((project.to_string(), Vec::new(), Vec::new()));
+    let (hunks, chosen) = match picking {
+        Picking::All | Picking::List => {
+            return Ok((project.to_string(), Vec::new(), Vec::new()));
+        }
+        Picking::Ask(picker) => {
+            let hunks = hunks::hunks(rendered, project);
+            let chosen = picker
+                .pick(&Selection {
+                    path,
+                    template_path,
+                    hunks: &hunks,
+                })
+                // An abort, not an empty selection. Reading a cancelled prompt
+                // as "keep nothing" would quietly emit a patch the user was in
+                // the middle of assembling.
+                .ok_or(BackportError::Cancelled)?;
+            (hunks, chosen)
+        }
+        Picking::Named(selection) => {
+            // A file nobody named contributes nothing — the opposite of `-p`,
+            // whose prompt starts from "everything". With no one to ask, "send
+            // what was not mentioned" is the reading that ships a change the
+            // caller never saw (ADR-037).
+            let hunks = hunks::hunks(rendered, project);
+            let chosen = selection.select(path, &hunks);
+            (hunks, chosen)
+        }
     };
-
-    let hunks = hunks::hunks(rendered, project);
-    let chosen = picker
-        .pick(&Selection {
-            path,
-            template_path,
-            hunks: &hunks,
-        })
-        // An abort, not an empty selection. Reading a cancelled prompt as
-        // "keep nothing" would quietly emit a patch the user was in the
-        // middle of assembling.
-        .ok_or(BackportError::Cancelled)?;
 
     Ok((hunks::apply(rendered, project, &chosen), hunks, chosen))
 }

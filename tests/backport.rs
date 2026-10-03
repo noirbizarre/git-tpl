@@ -1135,3 +1135,253 @@ fn a_refused_hunk_names_itself() {
         "the wrapped refusal is gone: {error:?}"
     );
 }
+
+// ---- naming hunks in advance, ADR-037 ---
+
+/// `notes.md` with its first and last lines changed: two hunks.
+const TWO_CHANGES: &str =
+    "ALPHA\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel\nindia\nJULIETT\n";
+
+/// The hunk specs of `path` from a `--list-hunks` payload, in file order.
+fn listed_specs(listing: &serde_json::Value, path: &str) -> Vec<String> {
+    listing["plan"]
+        .as_array()
+        .expect("a plan")
+        .iter()
+        .filter(|file| file["rendered"] == path)
+        .flat_map(|file| file["hunks"].as_array().expect("hunks").clone())
+        .map(|hunk| hunk["spec"].as_str().expect("a spec").to_string())
+        .collect()
+}
+
+/// A listing is how a caller with no terminal finds out what there is to send.
+#[test]
+fn listing_hunks_names_each_one_and_emits_no_patch() {
+    let world = pickable_world();
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+
+    let output = tpl(&world.project, &["--json", "backport", "--list-hunks"]).success();
+    let listing = output.json();
+
+    assert_eq!(listing["result"], "plan");
+    assert_eq!(listing["patch"], "");
+    assert_eq!(listing["files"].as_array().unwrap().len(), 0);
+    let specs = listed_specs(&listing, "notes.md");
+    assert_eq!(specs.len(), 2, "{listing}");
+    assert!(specs[0].starts_with("notes.md:"), "{specs:?}");
+    let first = &listing["plan"][0]["hunks"][0];
+    assert_eq!(first["insertions"], 1);
+    assert_eq!(first["deletions"], 1);
+    assert!(
+        first["lines"]
+            .as_array()
+            .unwrap()
+            .contains(&"+ALPHA".into()),
+        "{first}"
+    );
+}
+
+/// Same worktree, same ids: what lets a listing be acted on in a later run.
+#[test]
+fn two_listings_of_the_same_worktree_give_identical_ids() {
+    let world = pickable_world();
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+
+    let first = tpl(&world.project, &["--json", "backport", "--list-hunks"]).success();
+    let second = tpl(&world.project, &["--json", "backport", "--list-hunks"]).success();
+
+    assert_eq!(
+        listed_specs(&first.json(), "notes.md"),
+        listed_specs(&second.json(), "notes.md")
+    );
+}
+
+/// The point of the feature: one change goes, the other stays behind — under
+/// `--json`, where `-p` is refused.
+#[test]
+fn naming_a_listed_hunk_sends_only_that_hunk() {
+    let world = pickable_world();
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+
+    let listing = tpl(&world.project, &["--json", "backport", "--list-hunks"])
+        .success()
+        .json();
+    let specs = listed_specs(&listing, "notes.md");
+
+    let output = tpl(&world.project, &["--json", "backport", "--hunk", &specs[1]]).success();
+    let result = output.json();
+    let patch = result["patch"].as_str().unwrap();
+
+    assert_eq!(result["result"], "patched");
+    assert!(patch.contains("+JULIETT"), "{patch}");
+    assert!(!patch.contains("ALPHA"), "{patch}");
+}
+
+/// Everything listed, named, is the same document as no selection at all.
+#[test]
+fn naming_every_listed_hunk_is_the_whole_change() {
+    let world = pickable_world();
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+
+    let listing = tpl(&world.project, &["--json", "backport", "--list-hunks"])
+        .success()
+        .json();
+    let specs = listed_specs(&listing, "notes.md");
+
+    let named = tpl(
+        &world.project,
+        &["backport", "--hunk", &specs[0], "--hunk", &specs[1]],
+    )
+    .success();
+    let whole = tpl(&world.project, &["backport"]).success();
+
+    // The mailbox carries a clock, so the bodies are compared, not the headers.
+    let body = |patch: &str| patch[patch.find("diff --git").expect("a diff")..].to_string();
+    assert_eq!(body(&named.stdout), body(&whole.stdout));
+}
+
+/// With nobody to ask, a file that was not mentioned is not sent.
+#[test]
+fn a_file_with_no_named_hunk_sends_nothing_once_hunks_are_named() {
+    let world = World::with_template(
+        r#"
+name = "demo"
+"#,
+        &[
+            (
+                "notes.md",
+                "alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel\nindia\njuliett\n",
+            ),
+            ("other.md", "one\ntwo\nthree\n"),
+        ],
+    );
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+    world.project.write("other.md", "ONE\ntwo\nthree\n");
+
+    let listing = tpl(&world.project, &["--json", "backport", "--list-hunks"])
+        .success()
+        .json();
+    let specs = listed_specs(&listing, "notes.md");
+
+    let result = tpl(&world.project, &["--json", "backport", "--hunk", &specs[0]])
+        .success()
+        .json();
+    let files = result["files"].as_array().unwrap();
+
+    assert_eq!(files.len(), 1, "{result}");
+    assert_eq!(files[0]["rendered"], "notes.md");
+}
+
+/// A file edited since the listing no longer has the hunk the id named, which
+/// is refused rather than answered with a different one.
+#[test]
+fn a_stale_hunk_id_is_refused_as_unknown() {
+    let world = pickable_world();
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+
+    let listing = tpl(&world.project, &["--json", "backport", "--list-hunks"])
+        .success()
+        .json();
+    let specs = listed_specs(&listing, "notes.md");
+
+    world.project.write(
+        "notes.md",
+        "ALPHA!\nbravo\ncharlie\ndelta\necho\nfoxtrot\ngolf\nhotel\nindia\nJULIETT\n",
+    );
+
+    let output = tpl(&world.project, &["--json", "backport", "--hunk", &specs[0]]).failure();
+    assert_eq!(output.error_code(), "tpl::backport::unknown_hunk");
+}
+
+/// One good name does not excuse a bad one.
+#[test]
+fn an_unknown_name_among_good_ones_is_still_refused() {
+    let world = pickable_world();
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+
+    let listing = tpl(&world.project, &["--json", "backport", "--list-hunks"])
+        .success()
+        .json();
+    let specs = listed_specs(&listing, "notes.md");
+
+    let output = tpl(
+        &world.project,
+        &[
+            "--json",
+            "backport",
+            "--hunk",
+            &specs[0],
+            "--hunk",
+            "notes.md:000000000000",
+        ],
+    )
+    .failure();
+    assert_eq!(output.error_code(), "tpl::backport::unknown_hunk");
+}
+
+/// A spec that is not `<path>:<id>` at all.
+#[test]
+fn a_malformed_hunk_spec_is_refused() {
+    let world = pickable_world();
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+
+    let output = tpl(
+        &world.project,
+        &["--json", "backport", "--hunk", "notes.md"],
+    )
+    .failure();
+    assert_eq!(output.error_code(), "tpl::backport::unknown_hunk");
+}
+
+/// The ways of choosing exclude each other: which one wins is not a thing to
+/// guess at.
+#[test]
+fn the_ways_of_choosing_hunks_are_mutually_exclusive() {
+    let world = pickable_world();
+    world.init(&[]).success();
+    world.project.write("notes.md", TWO_CHANGES);
+
+    for args in [
+        ["backport", "--list-hunks", "--hunk", "notes.md:abc"],
+        ["backport", "--patch", "--hunk", "notes.md:abc"],
+        ["backport", "--patch", "--list-hunks", ""],
+    ] {
+        let args: Vec<&str> = args.into_iter().filter(|a| !a.is_empty()).collect();
+        let output = tpl(&world.project, &args).failure();
+        assert!(
+            !output.stdout.contains("diff --git"),
+            "{}",
+            output.transcript()
+        );
+    }
+}
+
+/// A listing happens before the proof, so a file that a real backport would
+/// refuse is still listed.
+#[test]
+fn a_file_that_would_be_refused_is_still_listed() {
+    let world = substituting_world();
+    world.init(&[]).success();
+    world.project.write(
+        "README.md",
+        "# widget — a service\n\nWritten by June in June.\n\nRun the tests.\n",
+    );
+
+    let listing = tpl(&world.project, &["--json", "backport", "--list-hunks"])
+        .success()
+        .json();
+    assert!(!listed_specs(&listing, "README.md").is_empty(), "{listing}");
+
+    // And the refusal is what naming it produces, attributed to the hunk.
+    let specs = listed_specs(&listing, "README.md");
+    let output = tpl(&world.project, &["--json", "backport", "--hunk", &specs[0]]).failure();
+    assert_eq!(output.error_code(), "tpl::backport::hunk_refused");
+}
