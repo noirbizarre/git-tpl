@@ -789,8 +789,8 @@ impl<'a> Loader<'a> {
                         "`source` is already a `<repo>@<ref>:<path>` shorthand; drop it, or drop `ref` and `path`".into(),
                     ));
                 }
-                repo::check_reference(reference).map_err(&invalid)?;
-                repo::check_path(path).map_err(&invalid)?;
+                repo::check_reference(reference).map_err(invalid)?;
+                repo::check_path(path).map_err(invalid)?;
                 Ok(GitLocation {
                     repo: rendered.source.to_string(),
                     reference: reference.to_string(),
@@ -798,7 +798,7 @@ impl<'a> Loader<'a> {
                 })
             }
             (None, None) => match repo::parse_shorthand(rendered.source) {
-                Some(location) => location.map_err(&invalid),
+                Some(location) => location.map_err(invalid),
                 // Reached by `kind = "git"` on a plain URL, and by an
                 // scp-style source that cannot be a shorthand.
                 None => Err(invalid(
