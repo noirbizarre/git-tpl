@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0](https://github.com/noirbizarre/git-tpl/compare/0.13.0..0.14.0) - 2026-10-03
+
+### 💫 Features
+
+- **backport** Select hunks without a terminal - ([196207b](https://github.com/noirbizarre/git-tpl/commit/196207bed024dc1a06ef104329f4515008a56639))
+
+### 📚 Documentation
+
+- **skill** Add the synchronize workflow - ([0247600](https://github.com/noirbizarre/git-tpl/commit/02476007fb2aecb8cd45bf802c947785d84bbd9e))
+
 ## [0.13.0](https://github.com/noirbizarre/git-tpl/compare/0.12.1..0.13.0) - 2026-09-06
 
 ### 💫 Features
