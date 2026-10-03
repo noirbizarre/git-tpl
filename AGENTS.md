@@ -76,7 +76,7 @@ src/
 │   ├── resolve.rs   fetching a template to a revision, and its `[extends]` chain (ADR-034)
 │   ├── extends.rs   merging an `[extends]` chain's manifests into one (ADR-034)
 │   ├── backport.rs  the patch that carries a fix upstream (ADR-020)
-│   ├── hunks.rs     interactive hunk selection (ADR-023)
+│   ├── hunks.rs     hunk selection, by prompt or by name (ADR-023, ADR-037)
 │   ├── unsubstitute.rs  reversing a substitution in a change (ADR-022)
 │   └── testing.rs   running a template's own tests (ADR-016)
 ├── cli.rs           argument types only

@@ -18,7 +18,8 @@
 //!
 //! Nothing here decides anything. It cuts a change into hunks, and it puts a
 //! chosen subset back together; who chooses is [`Picker`], and lives in the
-//! frontend.
+//! frontend — or is [`HunkSelection`], a choice made in advance by something
+//! that cannot be asked (`--list-hunks` / `--hunk`, ADR-037).
 
 use std::ops::Range;
 
@@ -56,6 +57,37 @@ pub struct Hunk {
     pub deletions: usize,
 }
 
+impl Hunk {
+    /// A name for this hunk that survives between two runs, 12 hex digits.
+    ///
+    /// Content-addressed rather than positional: `index` is only meaningful
+    /// inside one run, and a script that listed hunks and selected one later
+    /// would silently get a *different* hunk if the file had changed in
+    /// between. Here a changed file changes the id, so the selection is
+    /// refused (`unknown_hunk`) instead of misapplied.
+    ///
+    /// The path is part of the hash so two files with an identical change do
+    /// not share an id. Deterministic by construction (invariant 2): it hashes
+    /// text that [`hunks`] derived from the two file contents and nothing else.
+    /// Opaque on purpose — callers copy it, they never build one.
+    #[must_use]
+    pub fn id(&self, path: &str) -> String {
+        use sha2::{Digest, Sha256};
+
+        let mut hasher = Sha256::new();
+        // A separator that cannot occur inside a line, so `a` + `bc` and
+        // `ab` + `c` do not collide.
+        for part in std::iter::once(path)
+            .chain(std::iter::once(self.header.as_str()))
+            .chain(self.lines.iter().map(String::as_str))
+        {
+            hasher.update(part.as_bytes());
+            hasher.update([0]);
+        }
+        hex::encode(hasher.finalize())[..12].to_string()
+    }
+}
+
 /// One file's worth of change, offered for selection.
 pub struct Selection<'a> {
     /// The rendered path, as the user knows it.
@@ -79,12 +111,80 @@ pub trait Picker {
     fn pick(&mut self, selection: &Selection<'_>) -> Option<Vec<usize>>;
 }
 
+/// Hunks named in advance, as `<path>:<id>` pairs. `--hunk`.
+///
+/// The non-interactive counterpart of a [`Picker`] (ADR-037): the decision is
+/// taken before the command runs, by something that cannot be asked. It keeps
+/// track of which names were used, because a name that matched nothing is the
+/// signal that the file changed since the listing.
+#[derive(Debug, Clone, Default)]
+pub struct HunkSelection {
+    /// `(rendered path, hunk id)`, as given.
+    wanted: Vec<(String, String)>,
+    /// Parallel to `wanted`: whether a hunk answered to it.
+    used: Vec<bool>,
+}
+
+impl HunkSelection {
+    /// Parse `<path>:<id>` specs.
+    ///
+    /// # Errors
+    ///
+    /// The first spec that is not of that shape, verbatim.
+    pub fn parse(specs: &[String]) -> Result<Self, String> {
+        let mut wanted = Vec::with_capacity(specs.len());
+        for spec in specs {
+            // Split from the right: an id is plain hex, but a path may hold a
+            // colon.
+            match spec.rsplit_once(':') {
+                Some((path, id)) if !path.is_empty() && !id.is_empty() => {
+                    wanted.push((path.to_string(), id.to_string()));
+                }
+                _ => return Err(spec.clone()),
+            }
+        }
+        let used = vec![false; wanted.len()];
+        Ok(Self { wanted, used })
+    }
+
+    /// The indices of the hunks of `path` that were asked for.
+    pub(super) fn select(&mut self, path: &str, hunks: &[Hunk]) -> Vec<usize> {
+        let mut chosen = Vec::new();
+        for hunk in hunks {
+            let id = hunk.id(path);
+            for (position, (wanted_path, wanted_id)) in self.wanted.iter().enumerate() {
+                if wanted_path == path && *wanted_id == id {
+                    self.used[position] = true;
+                    chosen.push(hunk.index);
+                }
+            }
+        }
+        chosen
+    }
+
+    /// The specs that no hunk answered to, as `<path>:<id>`.
+    #[must_use]
+    pub fn unmatched(&self) -> Vec<String> {
+        self.wanted
+            .iter()
+            .zip(&self.used)
+            .filter(|(_, used)| !**used)
+            .map(|((path, id), _)| format!("{path}:{id}"))
+            .collect()
+    }
+}
+
 /// Whether `backport` carries the whole change, and who says otherwise.
 pub enum Picking<'a> {
     /// Carry every hunk. What `backport` does without `-p`.
     All,
     /// Ask, per file. `-p`.
     Ask(&'a mut dyn Picker),
+    /// Carry exactly the hunks named in advance, and nothing from any other
+    /// file. `--hunk`.
+    Named(&'a mut HunkSelection),
+    /// Carry nothing: report every file's hunks instead. `--list-hunks`.
+    List,
 }
 
 /// Cut a change into hunks.
@@ -336,6 +436,51 @@ mod tests {
         // `three` and `four` — and nothing from the second change.
         assert_eq!(hunks[0].lines.last().unwrap(), " four");
         assert!(!hunks[0].lines.iter().any(|line| line.contains("ten")));
+    }
+
+    #[test]
+    fn a_hunk_id_is_stable_and_twelve_hex_digits() {
+        let first = hunks(RENDERED, PROJECT);
+        let second = hunks(RENDERED, PROJECT);
+        let id = first[0].id("notes.md");
+        assert_eq!(id, second[0].id("notes.md"));
+        assert_eq!(id.len(), 12);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(id, first[1].id("notes.md"));
+    }
+
+    #[test]
+    fn the_same_change_in_two_files_has_two_ids() {
+        let hunks = hunks(RENDERED, PROJECT);
+        assert_ne!(hunks[0].id("a.md"), hunks[0].id("b.md"));
+    }
+
+    #[test]
+    fn a_changed_file_changes_the_id() {
+        let before = hunks(RENDERED, PROJECT);
+        let after = hunks(RENDERED, &PROJECT.replace("ONE", "UNO"));
+        assert_ne!(before[0].id("notes.md"), after[0].id("notes.md"));
+    }
+
+    #[test]
+    fn a_named_selection_picks_only_what_it_names_and_reports_the_rest() {
+        let hunks = hunks(RENDERED, PROJECT);
+        let wanted = format!("notes.md:{}", hunks[1].id("notes.md"));
+        let mut selection =
+            HunkSelection::parse(&[wanted, "notes.md:000000000000".to_string()]).unwrap();
+        assert_eq!(selection.select("notes.md", &hunks), vec![1]);
+        assert_eq!(selection.unmatched(), vec!["notes.md:000000000000"]);
+        // Another file's name never matches, even with a known id.
+        assert!(selection.select("other.md", &hunks).is_empty());
+    }
+
+    #[test]
+    fn a_spec_without_a_path_and_an_id_is_refused_verbatim() {
+        for bad in ["notes.md", ":abc", "notes.md:"] {
+            assert_eq!(HunkSelection::parse(&[bad.to_string()]).unwrap_err(), bad);
+        }
+        // A colon in the path is the path's own.
+        assert!(HunkSelection::parse(&["a:b.md:abc123".to_string()]).is_ok());
     }
 
     #[test]

@@ -465,8 +465,27 @@ pub struct BackportArgs {
     /// you keep are what the patch is then built and proved against. Needs a
     /// terminal: under `--json`, in a pipe, or with `tpl.interactive false` it
     /// is refused rather than quietly ignored.
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with_all = ["hunk", "list_hunks"])]
     pub patch: bool,
+
+    /// List the hunks that could be sent, with their ids; produce no patch
+    ///
+    /// The same hunks `-p` would offer, each with an id that `--hunk` accepts.
+    /// Needs no terminal, so it is how a script or an agent finds out what
+    /// there is to choose from. Ids are derived from the file's content: they
+    /// are the same on every run while the file is unchanged, and stop
+    /// matching as soon as it changes.
+    #[arg(long, conflicts_with_all = ["hunk", "output"])]
+    pub list_hunks: bool,
+
+    /// Send only this hunk, as `<path>:<id>`; repeatable
+    ///
+    /// Takes the ids `--list-hunks` prints. Once given, a file with no `--hunk`
+    /// of its own sends nothing: with nobody to ask, "everything not
+    /// mentioned" is never the safe reading. An id that names no hunk is
+    /// refused rather than skipped. See ADR-037.
+    #[arg(long = "hunk", value_name = "PATH:ID")]
+    pub hunk: Vec<String>,
 }
 
 /// `git tpl questions`

@@ -61,8 +61,21 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // is absent by default, so silence when nobody can be asked is correct.
     // `-p` was typed: it *is* the request for a prompt, so a prompt that cannot
     // run is a refusal, not a downgrade to sending everything.
+    //
+    // `--list-hunks` and `--hunk` are the answer to that refusal, not an
+    // exception to it (ADR-037): they never ask, so there is nothing for a
+    // missing terminal to break, and they hold under `--json`.
     let mut chooser = Chooser(ctx.out.theme.clone());
-    let picking = if picking(
+    // Declared here so it outlives the borrow `Picking::Named` holds, and
+    // assigned only on the branch that uses it.
+    let mut named;
+    let picking = if args.list_hunks {
+        ops::Picking::List
+    } else if !args.hunk.is_empty() {
+        named = ops::HunkSelection::parse(&args.hunk)
+            .map_err(|spec| OpError::Backport(ops::BackportError::UnknownHunk { spec }))?;
+        ops::Picking::Named(&mut named)
+    } else if picking(
         args.patch,
         preferences.interactive,
         global.json,
@@ -178,6 +191,11 @@ fn print_text(ctx: &Session, args: &BackportArgs, result: &Backport) {
         ));
     }
 
+    if args.list_hunks {
+        print_plan(ctx, result);
+        return;
+    }
+
     if result.files.is_empty() {
         ctx.out.say(muted(
             &ctx.out.theme,
@@ -251,8 +269,79 @@ fn print_text(ctx: &Session, args: &BackportArgs, result: &Backport) {
     }
 }
 
+/// The `--list-hunks` prose, on stderr: one line per file, one per hunk.
+fn print_plan(ctx: &Session, result: &Backport) {
+    if result.plan.is_empty() {
+        ctx.out.say(muted(
+            &ctx.out.theme,
+            "Nothing to backport: the project matches the template's rendering.",
+        ));
+        return;
+    }
+
+    ctx.out.say(headline(
+        &ctx.out.theme,
+        "hunks",
+        &result.revision_description,
+    ));
+    for file in &result.plan {
+        ctx.out.blank();
+        ctx.out.say(muted(
+            &ctx.out.theme,
+            &format!("  {} <- {}", file.source, file.rendered),
+        ));
+        for hunk in &file.hunks {
+            // The spec exactly as `--hunk` takes it, so it can be copied.
+            ctx.out.say(muted(
+                &ctx.out.theme,
+                &format!(
+                    "    {}:{}  {}  +{} -{}",
+                    file.rendered, hunk.id, hunk.header, hunk.insertions, hunk.deletions
+                ),
+            ));
+        }
+    }
+}
+
+/// The `--list-hunks` part of the payload.
+fn plan_json(result: &Backport) -> serde_json::Value {
+    result
+        .plan
+        .iter()
+        .map(|file| {
+            serde_json::json!({
+                "rendered": file.rendered,
+                "source": file.source,
+                "added": file.added,
+                "hunks": file.hunks.iter().map(|hunk| serde_json::json!({
+                    "id": hunk.id,
+                    // What `--hunk` takes, so a consumer never assembles one.
+                    "spec": format!("{}:{}", file.rendered, hunk.id),
+                    "header": hunk.header,
+                    "insertions": hunk.insertions,
+                    "deletions": hunk.deletions,
+                    "lines": hunk.lines,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
 /// The `--json` payload.
 fn json(args: &BackportArgs, result: &Backport) -> serde_json::Value {
+    let mut payload = payload(args, result);
+    // Only in a listing. Adding it to every payload would change the envelope
+    // of a command whose consumers pin it, to carry data that is empty on
+    // every other run.
+    if args.list_hunks {
+        payload["result"] = "plan".into();
+        payload["plan"] = plan_json(result);
+    }
+    payload
+}
+
+/// The payload every mode shares.
+fn payload(args: &BackportArgs, result: &Backport) -> serde_json::Value {
     serde_json::json!({
         "result": if result.files.is_empty() { "nothingToBackport" } else { "patched" },
         "template": result.source,

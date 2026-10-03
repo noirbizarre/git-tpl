@@ -86,6 +86,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::backport::round_trip",
     "tpl::backport::stale_rendering",
     "tpl::backport::substituted_region",
+    "tpl::backport::unknown_hunk",
     "tpl::backport::unknown_path",
     "tpl::config::io",
     "tpl::config::missing",

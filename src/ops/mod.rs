@@ -37,8 +37,10 @@ use crate::userconfig::UserConfig;
 pub use resolve::{Request, ResolveError, Resolved};
 
 pub use crate::migration::{self, Migration, MigrationError, Move};
-pub use backport::{Backport, BackportError, BackportedFile, Skipped, backport};
-pub use hunks::{Hunk, Picker, Picking, Selection};
+pub use backport::{
+    Backport, BackportError, BackportedFile, PlannedFile, PlannedHunk, Skipped, backport,
+};
+pub use hunks::{Hunk, HunkSelection, Picker, Picking, Selection};
 pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Verdict};
 
 /// Errors from any operation.
