@@ -689,13 +689,18 @@ pub fn environment_with(
     // hooks and `git diff`'s "\ No newline at end of file".
     env.set_keep_trailing_newline(true);
 
-    // The set of registered filters is closed, and `slugify` is the only member.
+    // The set of registered filters is closed; both filters are pure functions of their input.
     // A candidate qualifies only if it is pure, deterministic, and reaches
     // nothing outside its own argument. Anything that would reach outside the
     // context — reading a file, making a request, running a command — is not
     // available to templates, and will not be. There is no plugin point.
     // See docs/adr/003-minijinja-only.md and docs/concepts/determinism.md#security.
     env.add_filter("slugify", slugify_filter);
+    // A list question cannot take arbitrary user-defined names. Splitting its validated string lets a template
+    // iterate the same stable IDs its pinned child composition uses, without introducing a scripting runtime.
+    env.add_filter("split", |text: &str, separator: &str| -> Vec<String> {
+        text.split(separator).map(str::to_string).collect()
+    });
 
     // A loader, not an extension point. It resolves a name to bytes already
     // committed at the pinned template revision — it executes nothing and

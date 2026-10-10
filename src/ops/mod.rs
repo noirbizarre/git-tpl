@@ -5,6 +5,7 @@
 //! operations the CLI exposes.
 
 pub mod backport;
+pub mod compose;
 pub mod extends;
 pub mod hunks;
 pub mod resolve;
@@ -64,6 +65,11 @@ pub enum OpError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Resolve(#[from] ResolveError),
+
+    /// A pinned child template could not be rendered or would overwrite another file.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Compose(#[from] compose::ComposeError),
 
     /// The template's dependency graph is invalid.
     #[error(transparent)]
@@ -777,7 +783,7 @@ pub fn render_resolved(
     // unchanged; one with a chain merges every layer's entries first
     // (`Resolved::entries`) and reads each blob from the repository that
     // actually declared it.
-    let files = if template.has_ancestors() {
+    let mut files = if template.has_ancestors() {
         let entries = template.entries()?;
         let repos = template.repos();
         render_layered_entries(&repos, &entries, &context, &partials, undefined)?
@@ -791,6 +797,17 @@ pub fn render_resolved(
             undefined,
         )?
     };
+
+    if !template.manifest.compose.is_empty() {
+        compose::render(
+            &template.manifest.compose,
+            &context,
+            &partials,
+            user,
+            &mut trust,
+            &mut files,
+        )?;
+    }
 
     let provenance = Provenance {
         source: source.to_string(),

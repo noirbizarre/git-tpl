@@ -187,6 +187,7 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
         note: leaf.note.clone(),
         note_file: leaf.note_file.clone(),
         remotes: IndexMap::new(),
+        compose: leaf.compose.clone(),
         // Kept for introspection (`git tpl status`, `--json`) even though
         // nothing merges further from it -- the chain has already been
         // walked by the time this runs.
@@ -227,6 +228,22 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
     }
 
     check_kind_collisions(&manifest)?;
+
+    for entry in &manifest.compose {
+        if !manifest
+            .questions
+            .get(&entry.from)
+            .is_some_and(|question| question.kind == crate::template::QuestionKind::String)
+        {
+            return Err(ManifestError::InvalidCompose {
+                reason: format!(
+                    "`[[compose]]` requires a string question `{}` across the inheritance chain",
+                    entry.from
+                ),
+            }
+            .into());
+        }
+    }
 
     Ok(Merged {
         manifest,

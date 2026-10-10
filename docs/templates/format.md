@@ -128,6 +128,14 @@ template that could redirect it could redirect a push.
 These are Git remotes.
 A `remote` *data source* under `[data]` is an unrelated thing — an HTTP URL the loader reads.
 
+### `[[compose]]`
+
+Render independent module trees from one or more sibling repositories, pinned to a tag or commit.
+Every declaration has `source` (local path or Git URL, optionally an expression), `rev` (a fixed tag/commit),
+and `from` (the parent string question that names zero or more comma-separated module IDs).
+The child declares `module_name` and `module_path` as its own questions; it never inherits the parent's answers.
+See [Composing module templates](composition.md) for the output layout, trust decisions and updating projects.
+
 ### `[extends]`
 
 A template may declare one parent, pinned to a tag or a commit:

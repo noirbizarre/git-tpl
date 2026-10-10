@@ -46,3 +46,4 @@ explains the code that existed.
 | [035](035-github-actions-progress-reporter.md) | `test` reports progress as GitHub Actions workflow commands, auto-detected |
 | [036](036-shard-and-record-durations.md) | `--shard` and `--record-durations` balance a test suite across a CI matrix |
 | [037](037-non-interactive-hunk-selection.md) | `backport` hunks can be listed and named in advance, so a script can select without a prompt |
+| [038](038-compose-pinned-sibling-templates.md) | Pinned sibling templates render independent module trees in one deterministic, append-only project ref |

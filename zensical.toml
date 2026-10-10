@@ -47,6 +47,7 @@ nav = [
   ] },
   { "Templates" = [
     { "Format" = "templates/format.md" },
+    { "Composition" = "templates/composition.md" },
     { "Questions" = "templates/questions.md" },
     { "Computed values" = "templates/computed.md" },
     { "Template context" = "templates/context.md" },
