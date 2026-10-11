@@ -10,6 +10,31 @@ use std::fmt;
 use crate::data::Provenance as DataProvenance;
 use crate::git::Oid;
 
+/// The exact selected child revision used to render one group of modules.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposedRevision {
+    /// Unique question name supplying this child's module IDs.
+    pub from: String,
+    /// Evaluated child repository address.
+    pub source: String,
+    /// The reference requested, which may be a moving branch.
+    pub reference: String,
+    /// The commit actually rendered.
+    pub revision: Oid,
+}
+
+impl ComposedRevision {
+    /// The editable project lock for this child.
+    pub fn lock(&self) -> crate::config::ComposedRef {
+        crate::config::ComposedRef {
+            from: self.from.clone(),
+            source: self.source.clone(),
+            reference: self.reference.clone(),
+            commit: self.revision.to_hex(),
+        }
+    }
+}
+
 /// Trailer keys. Named constants because they are parsed back, and a typo in
 /// one half of a round trip is otherwise silent.
 mod keys {
@@ -20,6 +45,7 @@ mod keys {
     pub const ANSWERS: &str = "Answers-Digest";
     pub const DATA: &str = "Data-Source";
     pub const EXTENDS: &str = "Template-Extends";
+    pub const COMPOSE: &str = "Template-Compose";
     pub const VERSION: &str = "Tpl-Version";
 }
 
@@ -46,6 +72,8 @@ pub struct Provenance {
     /// The ancestor chain, nearest parent first, root ancestor last. Empty for
     /// a template with no `[extends]`.
     pub extends: Vec<ExtendsProvenance>,
+    /// Exact selected child commits, even when a moving branch renders identical files.
+    pub composed: Vec<ComposedRevision>,
     /// The git-tpl version that rendered it.
     pub version: String,
     /// The template's name, for the subject line.
@@ -102,6 +130,17 @@ impl Provenance {
         }
         for extends in &self.extends {
             message.push_str(&format!("{}: {}\n", keys::EXTENDS, extends.trailer()));
+        }
+        for child in &self.composed {
+            // JSON escapes URL/ref separators and control characters, so this trailer round-trips even for scp URLs.
+            message.push_str(&format!(
+                "{}: {}\n",
+                keys::COMPOSE,
+                serde_json::json!({
+                    "from": child.from, "source": child.source, "ref": child.reference,
+                    "commit": child.revision.to_hex(),
+                })
+            ));
         }
         message.push_str(&format!("{}: {}\n", keys::VERSION, self.version));
 
@@ -167,6 +206,29 @@ impl Provenance {
                         found_any = true;
                     }
                 }
+                keys::COMPOSE => {
+                    let Ok(value) = serde_json::from_str::<serde_json::Value>(value) else {
+                        continue;
+                    };
+                    let (Some(from), Some(source), Some(reference), Some(revision)) = (
+                        value.get("from").and_then(|v| v.as_str()),
+                        value.get("source").and_then(|v| v.as_str()),
+                        value.get("ref").and_then(|v| v.as_str()),
+                        value
+                            .get("commit")
+                            .and_then(|v| v.as_str())
+                            .and_then(Oid::parse),
+                    ) else {
+                        continue;
+                    };
+                    recorded.composed.push(ComposedRevision {
+                        from: from.to_string(),
+                        source: source.to_string(),
+                        reference: reference.to_string(),
+                        revision,
+                    });
+                    found_any = true;
+                }
                 keys::VERSION => {
                     recorded.version = Some(value.to_string());
                     found_any = true;
@@ -202,6 +264,8 @@ pub struct Recorded {
     /// is text a person or an older git-tpl may have written, not a value
     /// this crate re-resolved.
     pub extends: Vec<(String, String)>,
+    /// Child commits of that historical rendered ref, not moving branch tips.
+    pub composed: Vec<ComposedRevision>,
     /// The git-tpl version that rendered it.
     pub version: Option<String>,
 }
@@ -256,6 +320,7 @@ mod tests {
                 checksum: None,
             }],
             extends: Vec::new(),
+            composed: Vec::new(),
             version: "0.1.0".into(),
             template_name: "rust-library".into(),
         }
@@ -284,6 +349,22 @@ mod tests {
                 "template:data/licenses.toml@4f2c1a9".to_string()
             )]
         );
+    }
+
+    #[test]
+    fn child_branch_and_exact_commit_survive_the_rendered_commit_trailers() {
+        let child = ComposedRevision {
+            from: "sources".into(),
+            source: "git@example.com:org/source.tpl".into(),
+            reference: "main".into(),
+            revision: oid("1122334455667788990011223344556677889900"),
+        };
+        let rendering = Provenance {
+            composed: vec![child.clone()],
+            ..sample()
+        };
+        let recorded = Provenance::parse(&rendering.to_message()).unwrap();
+        assert_eq!(recorded.composed, vec![child]);
     }
 
     #[test]

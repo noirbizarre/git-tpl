@@ -597,7 +597,7 @@ fn resolve_ancestors(
 /// consent and grants without asking, the same way it does for a `[data]`
 /// source — but, deliberately, `[trust]` covering the *leaf* does not: each
 /// ancestor is checked against its own source, independently (ADR-034).
-fn confirm_ancestor(
+pub(super) fn confirm_ancestor(
     source: &str,
     depth: usize,
     user: &UserConfig,

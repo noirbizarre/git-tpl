@@ -26,6 +26,7 @@ pub const DEFAULT_ROOT: &str = "template";
 /// `the_top_level_key_list_matches_the_schema`, so a new field fails a test
 /// rather than quietly leaving the rule half blind.
 pub const TOP_LEVEL_KEYS: &[&str] = &[
+    "compose",
     "computed",
     "data",
     "description",
@@ -129,6 +130,17 @@ pub enum ManifestError {
         reason: String,
     },
 
+    /// A sibling template declaration cannot be resolved from a recorded answer.
+    #[error("`[[compose]]`: {reason}")]
+    #[diagnostic(
+        code(tpl::manifest::invalid_compose),
+        help("supply a source, pinned rev and a `from` naming a string question")
+    )]
+    InvalidCompose {
+        /// The malformed declaration.
+        reason: String,
+    },
+
     /// A name is declared as different kinds by different layers of a chain.
     #[error("`{name}` is declared as a {this} here and a {other} by another layer in the chain")]
     #[diagnostic(
@@ -225,6 +237,22 @@ pub struct ExtendsDecl {
     /// silently resurrect a file the child spent a release removing.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub remove: Vec<String>,
+}
+
+/// Render a child template once per ID in an ordered list answer.
+///
+/// Unlike `[extends]`, composition adds independent module trees; it never overrides parent files or shares their
+/// question namespace. Each instance receives `module_name` and `module_path` explicitly and is rendered with its
+/// own defaults, so source and integration skeletons remain independently usable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ComposeDecl {
+    /// Template repository URL or local path.
+    pub source: String,
+    /// A branch, tag or commit; its resolved SHA is recorded with the project at each rendering.
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// Name of a list question containing module IDs; an empty list renders no children.
+    pub from: String,
 }
 
 impl ExtendsDecl {
@@ -353,6 +381,9 @@ pub struct Manifest {
     /// by name; an entry a child redeclares replaces the parent's entirely.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extends: Option<ExtendsDecl>,
+    /// Pinned sibling templates to render below this project's root.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compose: Vec<ComposeDecl>,
 }
 
 fn default_root() -> String {
@@ -424,6 +455,36 @@ impl Manifest {
 
         if let Some(extends) = &self.extends {
             extends.validate()?;
+        }
+
+        let mut composed = std::collections::HashSet::new();
+        for entry in &self.compose {
+            if entry.source.trim().is_empty()
+                || entry.reference.trim().is_empty()
+                || entry.from.trim().is_empty()
+            {
+                return Err(ManifestError::InvalidCompose {
+                    reason: "a `[[compose]]` entry needs source, ref and from".into(),
+                });
+            }
+            if !composed.insert(&entry.from) {
+                return Err(ManifestError::InvalidCompose {
+                    reason: format!(
+                        "`[[compose]]` lists `{}` twice; use a separate list question for each child",
+                        entry.from
+                    ),
+                });
+            }
+            if self
+                .questions
+                .get(&entry.from)
+                .is_some_and(|question| question.kind != super::QuestionKind::List)
+                || (self.extends.is_none() && !self.questions.contains_key(&entry.from))
+            {
+                return Err(ManifestError::InvalidCompose {
+                    reason: format!("`[[compose]]` requires a list question `{}`", entry.from),
+                });
+            }
         }
 
         for (name, question) in &self.questions {
@@ -560,6 +621,27 @@ impl Manifest {
                 return Err(ManifestError::InvalidQuestion {
                     name: name.clone(),
                     reason: "`message` has no `pattern` to explain".into(),
+                });
+            }
+            if let Some(pattern) = &question.item_pattern {
+                if question.kind != super::QuestionKind::List {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: "`item_pattern` only applies to `list` questions".into(),
+                    });
+                }
+                if let Err(error) = regex_lite::Regex::new(pattern) {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: format!(
+                            "`item_pattern` is not a valid regular expression: {error}"
+                        ),
+                    });
+                }
+            } else if question.item_message.is_some() {
+                return Err(ManifestError::InvalidQuestion {
+                    name: name.clone(),
+                    reason: "`item_message` needs `item_pattern`".into(),
                 });
             }
         }
@@ -752,6 +834,11 @@ mod tests {
                 rev: "v1.0.0".into(),
                 remove: Vec::new(),
             }),
+            compose: vec![ComposeDecl {
+                source: "https://example.invalid/child.git".into(),
+                reference: "v1.0.0".into(),
+                from: "modules".into(),
+            }],
         };
 
         let serialized =

@@ -93,6 +93,46 @@ impl Prompter for Interactive {
                 Ok(Value::Array(select.run().map_err(cancelled)?))
             }
 
+            QuestionKind::List => {
+                let defaults = match default {
+                    Some(Value::Array(items)) => items.as_slice(),
+                    _ => &[],
+                };
+                let mut items = Vec::new();
+                let mut index = 0;
+                loop {
+                    let previous = defaults.get(index).and_then(Value::as_str);
+                    let item_title = format!("{title} #{}", index + 1);
+                    let item_help = if previous.is_some() {
+                        Some("Enter keeps the default; '-' removes this item")
+                    } else {
+                        help.or(Some("Leave blank to finish the list"))
+                    };
+                    let text = text_input(&item_title, item_help, previous.unwrap_or(""))?;
+                    if previous.is_some() && text == "-" {
+                        index += 1;
+                        continue;
+                    }
+                    if previous.is_none() && text.trim().is_empty() {
+                        break;
+                    }
+                    let item = Value::String(text);
+                    match tpl::eval::validate_list(
+                        name,
+                        question,
+                        &Value::Array(vec![item.clone()]),
+                    ) {
+                        Ok(()) => {
+                            items.push(item);
+                            index += 1;
+                        }
+                        // A typo costs one prompt, not every default that followed it.
+                        Err(error) => eprintln!("  {error}"),
+                    }
+                }
+                Ok(Value::Array(items))
+            }
+
             QuestionKind::Integer => {
                 let placeholder = default.map(ToString::to_string).unwrap_or_default();
                 loop {

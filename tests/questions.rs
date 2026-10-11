@@ -43,6 +43,59 @@ fn dynamic_world() -> World {
     World::with_template(DYNAMIC, &[("Cargo.toml.jinja", CARGO)])
 }
 
+fn list_world() -> World {
+    World::with_template(
+        "name = 'free-list'\n[questions.modules]\ntype = 'list'\ndefault = []\nitem_pattern = '^[a-z][a-z-]*$'\nitem_message = 'use lowercase module IDs'\n",
+        &[(
+            "modules.txt.jinja",
+            "{% for name in modules %}{{ name }}\n{% endfor %}",
+        )],
+    )
+}
+
+#[test]
+fn a_free_form_list_answer_is_recorded_as_an_ordered_array_not_comma_separated_text() {
+    let world = list_world();
+    world
+        .init(&["--answer", "modules=[\"jira\",\"confluence\"]"])
+        .success();
+    assert_eq!(world.project.read("modules.txt"), "jira\nconfluence\n");
+    let config = world.project.read(".config/git.tpl.toml");
+    let parsed = tpl::config::Config::parse(&config, "config").unwrap();
+    assert_eq!(
+        parsed.answers["modules"],
+        tpl::template::Value::from(vec!["jira", "confluence"])
+    );
+}
+
+#[test]
+fn an_empty_list_is_a_valid_recorded_answer() {
+    let world = list_world();
+    world.init(&[]).success();
+    assert!(world.project.read("modules.txt").is_empty());
+    assert!(
+        world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("modules = []")
+    );
+}
+
+#[test]
+fn a_list_refuses_non_string_and_malformed_or_empty_entries_before_rendering() {
+    for (answer, code) in [
+        ("modules=[\"jira\",123]", "tpl::eval::invalid_list"),
+        ("modules=[\"jira\",\"\"]", "tpl::eval::invalid_list"),
+        ("modules=[\"jira\",\" Bad\"]", "tpl::eval::invalid_list"),
+        ("modules=jira,confluence", "tpl::eval::invalid_list"),
+    ] {
+        let world = list_world();
+        let outcome = world.init(&["--json", "--answer", answer]).failure();
+        assert_eq!(outcome.error_code(), code, "{answer}");
+        assert!(!world.project.exists("modules.txt"));
+    }
+}
+
 #[test]
 fn a_dynamic_default_is_computed_from_an_earlier_answer() {
     let world = dynamic_world();

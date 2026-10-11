@@ -403,6 +403,13 @@ impl Value {
                     .filter(|v| !matches!(v, Value::String(s) if s.is_empty()))
                     .collect(),
             )),
+            // A free-form list has actual array syntax, unlike the existing comma-based multi-choice shorthand.
+            "a list" => serde_json::from_str::<Vec<String>>(input)
+                .map(|values| Value::Array(values.into_iter().map(Value::String).collect()))
+                .map_err(|_| ValueError::Parse {
+                    input: input.to_string(),
+                    expected: "a JSON array of strings",
+                }),
             _ => Ok(Value::String(input.to_string())),
         }
     }

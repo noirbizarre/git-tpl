@@ -98,6 +98,21 @@ pub fn revision(
     })
 }
 
+/// Child refs and full resolved commits, in manifest declaration order.
+pub fn composed(children: &[tpl::provenance::ComposedRevision]) -> Value {
+    Value::Array(
+        children
+            .iter()
+            .map(|child| {
+                json!({
+                    "from": child.from, "source": child.source,
+                    "ref": child.reference, "commit": child.revision.to_hex(),
+                })
+            })
+            .collect(),
+    )
+}
+
 /// The `merge` object, as `init` and `merge` report it.
 ///
 /// Tagged with `result`, so a caller switches on one field rather than probing

@@ -101,6 +101,23 @@ pub enum EvalError {
         reason: String,
     },
 
+    /// One entry of a free-form list is empty, not text, or violates its element pattern.
+    #[error("item {position} of `{question}` is invalid: {reason}")]
+    #[diagnostic(
+        code(tpl::eval::invalid_list),
+        help(
+            "supply a JSON array of nonempty strings; edit a recorded list in `.config/git.tpl.toml` if needed"
+        )
+    )]
+    InvalidList {
+        /// The question whose answer was refused.
+        question: String,
+        /// One-based position of the invalid item; zero indicates malformed array syntax.
+        position: usize,
+        /// Why this entry cannot be kept.
+        reason: String,
+    },
+
     /// A question needs an answer and there is no way to obtain one.
     #[error("no answer for `{question}`")]
     #[diagnostic(
@@ -340,6 +357,7 @@ pub fn resolve(
                 // the supplied branch too, which is where an answer replayed
                 // from `.config/git.tpl.toml` by `update` arrives.
                 validate_pattern(&node.key, question, &answer)?;
+                validate_list(&node.key, question, &answer)?;
                 context.set_answer(&node.key, answer);
             }
         }
@@ -421,6 +439,16 @@ fn resolve_default(
 fn coerce(name: &str, question: &Question, value: &Value) -> Result<Value, EvalError> {
     if question.kind.accepts(value) {
         return Ok(value.clone());
+    }
+
+    if question.kind == QuestionKind::List
+        && let Value::String(text) = value
+    {
+        return Value::parse_as(text, "a list").map_err(|_| EvalError::InvalidList {
+            question: name.to_string(),
+            position: 0,
+            reason: "expected a JSON array such as `[\"jira\",\"confluence\"]`".into(),
+        });
     }
 
     // A supplied answer may have arrived as a string from `--answer k=v`, in
@@ -527,6 +555,48 @@ pub fn validate_pattern(name: &str, question: &Question, answer: &Value) -> Resu
             .pattern_message()
             .unwrap_or_else(|| format!("must match `{pattern}`")),
     })
+}
+
+/// Validate every element of a free-form list, regardless of whether it came from a prompt or a recorded answer.
+pub fn validate_list(name: &str, question: &Question, answer: &Value) -> Result<(), EvalError> {
+    if question.kind != QuestionKind::List {
+        return Ok(());
+    }
+    let Value::Array(items) = answer else {
+        return Err(EvalError::WrongType {
+            question: name.to_string(),
+            expected: "a list".into(),
+            found: answer.type_name().into(),
+        });
+    };
+    // The manifest already compiled it at load time; compiling once per answer avoids multiplying the cost by the
+    // number of modules while checking the exact same rule for every entry.
+    let regex = question
+        .item_pattern
+        .as_deref()
+        .and_then(|pattern| regex_lite::Regex::new(pattern).ok());
+    for (index, item) in items.iter().enumerate() {
+        let reason = match item {
+            Value::String(text) if text.trim().is_empty() => Some("the item is empty".to_string()),
+            Value::String(text)
+                if regex
+                    .as_ref()
+                    .is_some_and(|pattern| !pattern.is_match(text)) =>
+            {
+                question.item_pattern_message()
+            }
+            Value::String(_) => None,
+            _ => Some(format!("expected a string, got {}", item.type_name())),
+        };
+        if let Some(reason) = reason {
+            return Err(EvalError::InvalidList {
+                question: name.to_string(),
+                position: index + 1,
+                reason,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The templates a `{% import %}` or `{% include %}` may resolve to.
@@ -689,13 +759,15 @@ pub fn environment_with(
     // hooks and `git diff`'s "\ No newline at end of file".
     env.set_keep_trailing_newline(true);
 
-    // The set of registered filters is closed, and `slugify` is the only member.
+    // The set of registered filters is closed; both filters are pure functions of their input.
     // A candidate qualifies only if it is pure, deterministic, and reaches
     // nothing outside its own argument. Anything that would reach outside the
     // context — reading a file, making a request, running a command — is not
     // available to templates, and will not be. There is no plugin point.
     // See docs/adr/003-minijinja-only.md and docs/concepts/determinism.md#security.
     env.add_filter("slugify", slugify_filter);
+    // A list question cannot take arbitrary user-defined names. Splitting its validated string lets a template
+    // iterate the same stable IDs its pinned child composition uses, without introducing a scripting runtime.
 
     // A loader, not an extension point. It resolves a name to bytes already
     // committed at the pinned template revision — it executes nothing and

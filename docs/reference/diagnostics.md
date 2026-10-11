@@ -35,6 +35,7 @@ Something is wrong with the template itself.
 | `tpl::manifest::conflicting_note` | Both `note` and `note_file` are declared. Keep one. |
 | `tpl::manifest::invalid_remote` | A `[remotes]` entry has no name, no URL, or a name Git will not accept. |
 | `tpl::manifest::invalid_extends` | An `[extends]` declaration has no `source`, no `rev`, or an empty `remove` path. |
+| `tpl::manifest::invalid_compose` | A `[[compose]]` declaration lacks `source`, `ref` or a unique `from` naming a list question. |
 | `tpl::manifest::extends_kind_collision` | A name is declared as a question by one layer of an `[extends]` chain and a computed value by another. |
 | `tpl::graph::invalid_expression` | An expression in the manifest does not parse. |
 | `tpl::graph::unknown_reference` | An expression names something the template never declares. Carries a suggestion. |
@@ -48,6 +49,11 @@ Something is wrong with the template itself.
 | `tpl::extends::remove_missing` | `[extends].remove` names a path the parent does not have. |
 | `tpl::extends::untrusted` | A remote `[extends]` ancestor was not authorised. Pass `--trust`, add the template to `[trust]`, or answer the confirmation interactively — unlike `tpl::data::untrusted`, a `git tpl test` case's own `trust` field never grants this; see [ADR-034](../adr/034-template-inheritance.md). |
 | `tpl::extends::cancelled` | The confirmation for a remote `[extends]` ancestor was cancelled. |
+| `tpl::compose::invalid` | The chosen module list is malformed, contains duplicates or exceeds the limit. |
+| `tpl::compose::untrusted` | A remote child was not authorised before its repository could be cloned. |
+| `tpl::compose::collision` | Two rendered templates would produce the same project path. |
+| `tpl::compose::child_failed` | A child repository could not be resolved or rendered; inspect its cause. |
+| `tpl::compose::nested` | A composed child also composes other children. Keep siblings in the parent. |
 
 ## Rendering
 
@@ -100,6 +106,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::eval::bad_choices` | `choices_from` did not resolve to an array. |
 | `tpl::eval::wrong_type` | An answer is not of the declared type. |
 | `tpl::eval::invalid_choice` | An answer is not one of the choices. |
+| `tpl::eval::invalid_list` | A free-form list contains a non-string, empty, or pattern-mismatching item, or its command-line answer is not a JSON array of strings. |
 | `tpl::eval::pattern_mismatch` | An answer does not match the question's `pattern`. |
 | `tpl::eval::unanswered` | A question has no default and no answer was supplied. Usual cause of a failing `--defaults` run. |
 | `tpl::eval::cancelled` | The user interrupted the questionnaire. |

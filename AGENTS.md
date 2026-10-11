@@ -75,6 +75,7 @@ src/
 │   ├── mod.rs       init, update, status, diff, merge, fetch, push, and the rest
 │   ├── resolve.rs   fetching a template to a revision, and its `[extends]` chain (ADR-034)
 │   ├── extends.rs   merging an `[extends]` chain's manifests into one (ADR-034)
+│   ├── compose.rs   rendering pinned sibling module templates without sharing their answer namespace (ADR-038)
 │   ├── backport.rs  the patch that carries a fix upstream (ADR-020)
 │   ├── hunks.rs     hunk selection, by prompt or by name (ADR-023, ADR-037)
 │   ├── unsubstitute.rs  reversing a substitution in a change (ADR-022)

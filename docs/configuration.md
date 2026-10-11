@@ -22,7 +22,7 @@ configuration otherwise.
 ## `.config/git.tpl.toml`
 
 Versioned with the project.
-It contains **only** the template reference and the answers used to render it.
+It contains the template reference, the answers used to render it and the exact commits of selected composed children.
 
 ```toml
 [template]
@@ -87,6 +87,24 @@ with a new rendering.
 That is how you change your mind about a choice you made at `init` time.
 
 Questions skipped by a `when` condition have no entry.
+
+### `[[composed]]`
+
+When a template uses `[[compose]]`, `init` and `update` record the resolved child source, requested `ref`,
+parent list question (`from`) and full `commit` SHA for every nonempty selection.
+For example:
+
+```toml
+[[composed]]
+from = "modules"
+source = "https://github.com/org/module-template"
+ref = "main"
+commit = "1122334455667788990011223344556677889900"
+```
+
+The ref can advance independently of the parent; `update` refreshes the commit, including when no files change.
+An empty selection removes its record without fetching the child.
+These entries record what was rendered, not whether it was merged into the project.
 
 ### What does *not* go here
 

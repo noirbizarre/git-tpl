@@ -79,6 +79,24 @@ pub struct Config {
     /// produce a diff on every `update`, and reviewing it would be pointless.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub answers: BTreeMap<String, Value>,
+
+    /// Exact child revisions that contributed to the current rendering; a branch `ref` is followed on the next update.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub composed: Vec<ComposedRef>,
+}
+
+/// One selected `[[compose]]` declaration and the commit it resolved to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComposedRef {
+    /// Parent list question naming this child; unique within a template.
+    pub from: String,
+    /// Resolved Git URL or local path, after expression evaluation.
+    pub source: String,
+    /// Branch, tag or commit the next update should follow.
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// Full 40-character Git commit used for this rendering.
+    pub commit: String,
 }
 
 /// The `[template]` table.
@@ -115,6 +133,7 @@ impl Config {
                 root: None,
             },
             answers: BTreeMap::new(),
+            composed: Vec::new(),
         }
     }
 
@@ -138,7 +157,7 @@ impl Config {
 
     /// Parse configuration text.
     pub fn parse(text: &str, name: &str) -> Result<Self, ConfigError> {
-        toml::from_str(text).map_err(|error| {
+        let config: Self = toml::from_str(text).map_err(|error| {
             // The span lets miette underline the offending line rather than
             // making the user count lines from a message.
             let span = error
@@ -151,7 +170,28 @@ impl Config {
                 src: NamedSource::new(name, text.to_string()),
                 span,
             }
-        })
+        })?;
+        let mut seen = std::collections::HashSet::new();
+        for child in &config.composed {
+            if child.from.is_empty()
+                || child.source.is_empty()
+                || child.reference.is_empty()
+                || crate::git::Oid::parse(&child.commit).is_none()
+                || !seen.insert(&child.from)
+            {
+                let start = text.find(&child.commit).unwrap_or(0);
+                return Err(ConfigError::Parse {
+                    name: name.to_string(),
+                    message: format!(
+                        "composed child `{}` needs a unique `from`, source, ref and full commit SHA",
+                        child.from
+                    ),
+                    src: NamedSource::new(name, text.to_string()),
+                    span: SourceSpan::from(start..start + child.commit.len()),
+                });
+            }
+        }
+        Ok(config)
     }
 
     /// Write the configuration to a project root, creating `.config/`.
@@ -274,6 +314,27 @@ mod tests {
         let reparsed = Config::parse(&text, "test.toml").unwrap();
 
         assert_eq!(original, reparsed);
+    }
+
+    #[test]
+    fn a_composed_branch_records_its_requested_ref_and_exact_commit_separately() {
+        let mut config = Config::new("../parent", None);
+        config.composed.push(ComposedRef {
+            from: "sources".into(),
+            source: "../source.tpl".into(),
+            reference: "main".into(),
+            commit: "1122334455667788990011223344556677889900".into(),
+        });
+        let text = config.to_toml().unwrap();
+        assert!(text.contains("ref = \"main\""));
+        assert_eq!(Config::parse(&text, "config").unwrap(), config);
+        assert!(
+            Config::parse(
+                &text.replace("1122334455667788990011223344556677889900", "bad"),
+                "config"
+            )
+            .is_err()
+        );
     }
 
     /// The file is hand-edited and reviewed in diffs, so a write that reordered
