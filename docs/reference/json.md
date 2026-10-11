@@ -342,8 +342,9 @@ the patch edits.
 `files[].rendered` is the path in the project.
 `added` marks a file the template did not previously produce.
 
-`skipped` carries paths that were considered and deliberately not backported, each with a `reason` — currently
-only files deleted locally, which would remove them from every project rendering the template.
+`skipped` carries paths that were considered and deliberately not backported, each with a `reason`.
+For patch output, these are files deleted locally, which would remove them from every project rendering the template.
+For `--list-hunks`, binary added or modified files also appear there because they have no text hunks to list.
 Files the template never produced are not listed: they are out of scope rather than skipped.
 
 `unsubstituted` names every line whose template expression was reversed — `path`, `source`, `line`, the
