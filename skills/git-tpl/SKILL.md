@@ -78,7 +78,7 @@ do not assume it is preinstalled.
    when present, is an internal rename commit the merge machinery needs; it is not something to inspect or act on.
    A migration always reports `"result": "updated"`, never `"upToDate"`, even if nothing else changed.
 6. **`git tpl status --json` exits `2`**, not `0` or `1`,
-   when a template update is pending (`"templateMoved": true` or `"merged": false`).
+    when a template update is pending (`"templateMoved": true`, `"composedMoved": true`, or `"merged": false`).
    Treat that as a normal branch, not a failure.
 7. **`"ok": true` describes the command, not the outcome**, for two commands specifically:
    `lint` (check `errors`/`denied` in its `diagnostics[]`, not just `ok`)
@@ -351,7 +351,7 @@ stderr carries human prose and warnings, which are never suppressed, even by `--
 |---|---|---|
 | `0` | Success | Continue. |
 | `1` | Failure | Read `error.code` from the JSON envelope, look it up in the diagnostics reference, and act on the `help` text. |
-| `2` | Only from `status`: an update is pending (`templateMoved` or not `merged`) | Not a failure — decide whether to `update`/`merge` now. |
+| `2` | Only from `status`: an update is pending (`templateMoved`, `composedMoved`, or not `merged`) | Not a failure — decide whether to `update`/`merge` now. |
 
 Diagnostic codes: <https://noirbizarre.github.io/git-tpl/reference/diagnostics/>.
 
