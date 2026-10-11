@@ -113,7 +113,10 @@ The practical consequence: once you have merged `G1`, merging `G2` is cheap and 
 did not touch, because `G1` is a genuine common ancestor.
 Rewriting `G1` would destroy that.
 
-If the rendered tree is byte-identical to the current tip, `update` makes no commit at all and says so.
+If the rendered tree is byte-identical to the current tip, `update` normally makes no commit at all and says so.
+A newly crossed migration still needs a commit to advance its provenance, and a changed
+[composed child revision](../templates/composition.md) can require a provenance-only commit so its pinned commit
+is recorded even when its rendered output is unchanged.
 
 Occasionally `update` adds two commits rather than one: a template [migration](../usage/update.md#migrations) that
 moves a file gets a content-identical rename commit first, so that a later `git merge` — plain, never one git-tpl
