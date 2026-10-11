@@ -69,6 +69,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             reference,
             revision,
             dirty,
+            answers_changed,
             composed_changed,
             ignored_answers,
             ignored,
@@ -79,6 +80,10 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ));
             report_ignored(&ctx.out, &ignored_answers);
             report_ignored_paths(&ctx.out, &ignored);
+            if answers_changed {
+                ctx.out
+                    .say("The recorded answers changed, so .config/git.tpl.toml was updated.");
+            }
             if composed_changed {
                 ctx.out
                     .say("The resolved child commits were corrected in .config/git.tpl.toml.");
@@ -93,6 +98,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "ref": ref_name,
                 "template": config.template.source,
                 "revision": crate::report::revision(Some(&reference), Some(revision), Some(dirty)),
+                "answersChanged": answers_changed,
                 "ignoredAnswers": ignored_answers,
             });
             if composed_changed {

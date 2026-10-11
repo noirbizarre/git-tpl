@@ -244,7 +244,7 @@ An empty array would claim the template renders nothing.
   "id": "rust", "ref": "refs/tpl/rust",
   "template": "https://github.com/noirbizarre/rust.tpl",
   "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
-  "ignoredAnswers": [] }
+  "answersChanged": false, "ignoredAnswers": [] }
 ```
 
 ```json
@@ -264,6 +264,8 @@ An empty array would claim the template renders nothing.
 
 Branch on `result`: `upToDate` or `updated`.
 It is the one thing the exit code does not say — both succeed.
+`answersChanged` may be true even for `upToDate`: newly resolved answers are saved to the project configuration
+without adding a rendered-ref commit.
 `result` is always `updated`, never `upToDate`, when `migrations` is non-empty: discovering a migration always
 produces a commit, so the same one is never discovered again on a later `update`.
 See [ADR-024](../adr/024-template-migrations.md).

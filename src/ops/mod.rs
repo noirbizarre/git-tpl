@@ -1497,6 +1497,8 @@ pub enum UpdateOutcome {
         revision: Oid,
         /// Whether an uncommitted working tree was rendered.
         dirty: bool,
+        /// Whether answers were recorded without creating a rendered-ref commit.
+        answers_changed: bool,
         /// Whether the child lock was corrected without needing a new rendered-ref commit.
         composed_changed: bool,
         /// Supplied answers that name no question in this template. Carried
@@ -1721,7 +1723,9 @@ pub fn update(
         .collect();
     let composed_changed = config.composed != composed;
     if migrations.is_empty() && identical && !child_changed {
-        if composed_changed {
+        let answers_changed = config.answers != *rendered.context.answers();
+        if composed_changed || answers_changed {
+            config.answers = rendered.context.answers().clone();
             config.composed = composed;
             config.template.r#ref = configured_reference;
             config.save(project_root)?;
@@ -1734,6 +1738,7 @@ pub fn update(
             reference: rendered.template.reference.clone(),
             revision: rendered.template.revision,
             dirty: rendered.template.dirty,
+            answers_changed,
             composed_changed,
             ignored_answers: rendered.ignored_answers,
             ignored: rendered.template.ignored,

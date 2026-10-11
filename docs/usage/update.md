@@ -190,7 +190,7 @@ then an error.
 | Option | Meaning |
 |---|---|
 | `--ref <ref>` | Render this revision instead of the configured one. Does not change the configuration. |
-| `--answer k=v` | Override an answer for this run and record it. Repeatable. |
+| `--answer k=v` | Override an answer for this run and record it, even if the rendered tree is unchanged. Repeatable. |
 | `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
 | `--defaults` | Accept defaults for unanswered questions instead of prompting. |
 | `--strict-answers` | Fail on an answer that names no question, rather than warning. |

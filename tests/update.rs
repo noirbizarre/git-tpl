@@ -898,3 +898,40 @@ fn strict_answers_keeps_obsolete_recorded_keys_lenient_in_real_and_dry_runs() {
         assert_eq!(result["ignoredAnswers"], serde_json::json!(["obsolete"]));
     }
 }
+
+#[test]
+fn an_unchanged_render_records_new_answers_without_advancing_the_ref() {
+    let world = World::new();
+    world.init(&[]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+    let head = world.project.rev_parse("HEAD");
+    let manifest = world.template.repo.read("template.toml");
+    world.template.repo.write(
+        "template.toml",
+        &format!("{manifest}\n[questions.new_answer]\ntype = \"string\"\ndefault = \"stored\"\n"),
+    );
+    world
+        .template
+        .repo
+        .commit_all("feat: add a question without output");
+
+    let result = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+    assert_eq!(result["result"], "upToDate");
+    assert_eq!(result["answersChanged"], true);
+    assert!(
+        world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("new_answer = \"stored\"")
+    );
+    assert_eq!(world.project.rev_parse(&world.ref_name()), before);
+    assert_eq!(world.project.rev_parse("HEAD"), head);
+    assert_eq!(
+        tpl(&world.project, &["--json", "update", "--defaults"])
+            .success()
+            .json()["answersChanged"],
+        false
+    );
+}
