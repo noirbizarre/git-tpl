@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0](https://github.com/noirbizarre/git-tpl/compare/0.13.0..0.14.0) - 2026-10-11
+
+### 💫 Features
+
+- **backport** Select hunks without a terminal - ([196207b](https://github.com/noirbizarre/git-tpl/commit/196207bed024dc1a06ef104329f4515008a56639))
+- **templates** Compose sibling templates with tracked refs and list answers ([#173](https://github.com/noirbizarre/git-tpl/issues/173)) - ([4442db8](https://github.com/noirbizarre/git-tpl/commit/4442db8c01bf2b78b9e4edd37afa99ad3436e4d0))
+
+### 🐛 Bug Fixes
+
+- **data** Reject project-local symlink escapes - ([e63d75a](https://github.com/noirbizarre/git-tpl/commit/e63d75a300c954c72abc3519f16c6ee43b6ed265))
+- **init** Preserve rendered ref ancestry on forced reattachment - ([a0e864c](https://github.com/noirbizarre/git-tpl/commit/a0e864ca744d459de2fda4f527a25fde2b73e567))
+- **update** Preview migration-only and configuration-only changes - ([a0ba7ae](https://github.com/noirbizarre/git-tpl/commit/a0ba7ae1e7df984fd575e8a99a9661ce2eed38e9))
+- **update** Record new answers on unchanged renders - ([960c8fe](https://github.com/noirbizarre/git-tpl/commit/960c8fed1adc28c0544c254b15e2ec4c056ae1b2))
+- **update** Exempt recorded answers from strict validation - ([bd20de5](https://github.com/noirbizarre/git-tpl/commit/bd20de50ec3d9e975777e4bd18dda3c11f3fc1fe))
+- **update** Apply invocation-only reference to real updates - ([7d1be0c](https://github.com/noirbizarre/git-tpl/commit/7d1be0c226c0398c7c5595bbb972c598163c563c))
+
+### 🔨 Refactor
+
+- **revision** Share formatting below operations - ([3bd4d58](https://github.com/noirbizarre/git-tpl/commit/3bd4d580bbd22a2b15e31756539bd2bec4101bb1))
+
+### 📚 Documentation
+
+- **adr** Annotate unmatched user defaults behavior - ([8a65e1c](https://github.com/noirbizarre/git-tpl/commit/8a65e1ce4ed5042408a376499af1782d2b3b565e))
+- **config** Include GitHub Actions environment variable - ([5ebe915](https://github.com/noirbizarre/git-tpl/commit/5ebe91547ac3f780c0f346f58355ac1ba68ac504))
+- **config** Tie new ref history to resolved template id - ([d5d1deb](https://github.com/noirbizarre/git-tpl/commit/d5d1deb59c6019dc0fde9a3dd008f0c9fcbf2c69))
+- **init** Describe expanded source in output - ([d7bb637](https://github.com/noirbizarre/git-tpl/commit/d7bb637a0a0e997a1675d23714916af8f1e70583))
+- **json** Describe binary files in backport skipped list - ([80ae1b0](https://github.com/noirbizarre/git-tpl/commit/80ae1b089b70aaa24f88d82875e9a9709ad25ba9))
+- **lint** Clarify remote template network access - ([c6d462e](https://github.com/noirbizarre/git-tpl/commit/c6d462e2c3d4c2cc16e5779e2285d9114a23bc8f))
+- **model** Qualify identical-tree no-commit rule - ([5d1b37e](https://github.com/noirbizarre/git-tpl/commit/5d1b37e35862cda0b2c4547e022689e8f28cdd61))
+- **push** Explain opt-in automatic template ref pushes - ([0b48727](https://github.com/noirbizarre/git-tpl/commit/0b48727e222dc59a76d1c45a32bd482c08580253))
+- **skill** Distinguish suppressed narration from warnings - ([a4353ae](https://github.com/noirbizarre/git-tpl/commit/a4353ae28d73a460a1d173e8248ca6079ccd7a09))
+- **skill** Use diff payload for change line counts - ([6279355](https://github.com/noirbizarre/git-tpl/commit/627935527ca7e8ca1a4bfd1d89231b2c036019af))
+- **skill** Add the synchronize workflow - ([0247600](https://github.com/noirbizarre/git-tpl/commit/02476007fb2aecb8cd45bf802c947785d84bbd9e))
+- **status** Include moved composed children in pending status - ([8ceeb2c](https://github.com/noirbizarre/git-tpl/commit/8ceeb2ccf2280675bc6cadc72e0db73683fc6ff1))
+- **templates** Use update for repeat scratch renders - ([843770f](https://github.com/noirbizarre/git-tpl/commit/843770ff9655c335c8650af65e13fa04082c2f63))
+- **test** Distinguish sandbox writes from update rendering - ([8bbc4eb](https://github.com/noirbizarre/git-tpl/commit/8bbc4ebcfd32413d3c7caa717c3dcc095bf63f7f))
+- **test** Make example assertions compatible - ([bb74a03](https://github.com/noirbizarre/git-tpl/commit/bb74a0386f64ff1f4c8ab72a77e0cb1df4223e2f))
+- **update** Clarify unstaged answer recording - ([bf7ec33](https://github.com/noirbizarre/git-tpl/commit/bf7ec3322c1c885e269886ca4f078351534171b3))
+
 ## [0.13.0](https://github.com/noirbizarre/git-tpl/compare/0.12.1..0.13.0) - 2026-09-06
 
 ### 💫 Features
