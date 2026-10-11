@@ -90,11 +90,13 @@ git diff HEAD refs/tpl/github-com-noirbizarre-rust-library-template
 git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
-**`git tpl update` never touches your branch.** Not the worktree, not the index,
-not `HEAD`. It writes a Git tree directly and moves one ref.
+**`git tpl update` never changes `HEAD`, the index, or rendered files in your worktree.**
+It writes a Git tree directly and moves one ref. When answers change, it also records them in
+`.config/git.tpl.toml` as an unstaged worktree edit.
 
-**Template refs are never pushed automatically.** `git push` and `git pull`
-ignore `refs/tpl/*`; `git tpl push` and `git tpl fetch` are explicit. A
+**Template refs are not pushed by default.** Ordinary `git push` and `git pull`
+ignore `refs/tpl/*`; `git tpl push` and `git tpl fetch` are explicit, while
+`tpl.autoPush` or `git tpl update --push` opts into pushing after an update. A
 contributor who clones the project and never runs git-tpl is unaffected by its
 existence.
 

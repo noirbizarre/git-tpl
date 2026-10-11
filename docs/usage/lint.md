@@ -1,6 +1,7 @@
 # `git tpl lint`
 
-Check a template without rendering it. No project, no network.
+Check a template without rendering it. A local template needs no project or network;
+a remote Git template may be cloned for inspection.
 
 ```sh
 git tpl lint .            # the template in this directory
@@ -20,7 +21,8 @@ When a particular template *has* decided it never means one of them, [`--deny`](
 
 Everything `init` would check before the first prompt: unknown references, cycles, incoherent question
 declarations.
-The difference is that this needs no repository and no network.
+The difference is that this needs no project repository or render-time data-source fetch.
+Resolving a remote template still requires network access.
 
 ### Every `.jinja` file parses
 

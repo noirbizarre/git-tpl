@@ -45,6 +45,7 @@ pub mod provenance;
 pub mod refs;
 pub mod remote;
 pub mod render;
+mod revision;
 pub mod seed;
 pub mod suggest;
 pub mod template;

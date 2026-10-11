@@ -79,6 +79,7 @@ Project data is none of those things.
 
 `../../../etc/passwd` is rejected, not resolved.
 A local data path must stay within the project root.
+Symlinks that resolve outside that root are rejected too.
 
 ## Provenance
 

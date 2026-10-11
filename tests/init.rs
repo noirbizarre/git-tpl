@@ -707,6 +707,35 @@ default = "a"
     output.says("tpl::data::escapes_root");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_project_local_data_source_may_not_follow_a_symlink_outside_the_project() {
+    let world = common::World::with_template(
+        r#"
+name = "nosy"
+
+[data.secrets]
+source = "./linked.toml"
+
+[questions.leak]
+type = "choice"
+choices_from = "data.secrets.values"
+default = "a"
+"#,
+        &[("out.txt.jinja", "{{ leak }}\n")],
+    );
+    let outside = world.dir.path().join("outside.toml");
+    std::fs::write(&outside, "values = [\"a\", \"b\"]\n").unwrap();
+    std::os::unix::fs::symlink(&outside, world.project.path.join("linked.toml")).unwrap();
+
+    tpl(
+        &world.project,
+        &["init", &world.template.source(), "--defaults"],
+    )
+    .failure()
+    .says("tpl::data::escapes_root");
+}
+
 /// Re-attaching was refused outright, so changing an answer meant editing
 /// `.config/git.tpl.toml` by hand or starting the repository over. The ref is
 /// append-only, so another rendering on it is exactly what `update` writes —
@@ -715,6 +744,7 @@ default = "a"
 fn force_re_renders_over_an_existing_attachment() {
     let world = World::new();
     world.init(&["--answer", "project_name=first"]).success();
+    let previous = world.project.rev_parse(&world.ref_name());
 
     world
         .init(&[])
@@ -735,6 +765,9 @@ fn force_re_renders_over_an_existing_attachment() {
     .success();
 
     assert!(world.project.read("README.md").contains("second"));
+    let current = world.project.rev_parse(&world.ref_name());
+    assert_ne!(previous, current);
+    assert_eq!(world.project.rev_parse(&format!("{current}^")), previous);
 }
 
 /// `update --dry-run` has always listed what would change. A flag meaning

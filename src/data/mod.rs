@@ -871,7 +871,7 @@ impl<'a> Loader<'a> {
                 fail(format!(
                     "no such file in {} at {}",
                     location.repo,
-                    crate::ops::describe_revision(&location.reference, revision)
+                    crate::revision::describe_revision(&location.reference, revision)
                 ))
             })?;
 
@@ -984,7 +984,7 @@ impl<'a> Loader<'a> {
                 kind: SourceKind::TemplateFile,
                 reason: format!(
                     "no such file in the template repository at {}",
-                    crate::ops::describe_revision(&template.reference, template.revision)
+                    crate::revision::describe_revision(&template.reference, template.revision)
                 ),
             })
     }
@@ -1014,6 +1014,27 @@ impl<'a> Loader<'a> {
             });
         }
 
+        // Lexical containment alone permits a project-local symlink to read
+        // untrusted files outside the project. Check the actual target too.
+        let resolved = std::fs::canonicalize(&candidate).map_err(|e| DataError::Load {
+            name: name.to_string(),
+            location: path.to_string(),
+            kind: SourceKind::LocalFile,
+            reason: e.to_string(),
+        })?;
+        let root = std::fs::canonicalize(project_root).map_err(|e| DataError::Load {
+            name: name.to_string(),
+            location: path.to_string(),
+            kind: SourceKind::LocalFile,
+            reason: e.to_string(),
+        })?;
+        if !resolved.starts_with(root) {
+            return Err(DataError::EscapesRoot {
+                name: name.to_string(),
+                location: path.to_string(),
+            });
+        }
+
         std::fs::read(&candidate).map_err(|e| DataError::Load {
             name: name.to_string(),
             location: path.to_string(),
@@ -1025,9 +1046,9 @@ impl<'a> Loader<'a> {
 
 /// Whether `candidate` stays within `root` once `..` segments are folded.
 ///
-/// Lexical rather than `canonicalize`, because the path need not exist yet and
-/// `canonicalize` would also follow symlinks — which is a different question
-/// than the one being asked.
+/// Lexical rather than `canonicalize`, so `..` is rejected even when resolving
+/// it happens to lead back inside the project. Symlink containment is checked
+/// separately before the file is read.
 fn within(root: &Path, candidate: &Path) -> bool {
     let mut depth: i32 = 0;
     for component in candidate

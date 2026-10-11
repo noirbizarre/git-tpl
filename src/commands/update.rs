@@ -44,6 +44,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let outcome = ops::update(
         &ctx.repo,
         &ctx.root,
+        args.r#ref.as_deref(),
         overrides,
         args.dirty,
         args.answers.strict_answers,
@@ -68,6 +69,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             reference,
             revision,
             dirty,
+            answers_changed,
             composed_changed,
             ignored_answers,
             ignored,
@@ -78,6 +80,10 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ));
             report_ignored(&ctx.out, &ignored_answers);
             report_ignored_paths(&ctx.out, &ignored);
+            if answers_changed {
+                ctx.out
+                    .say("The recorded answers changed, so .config/git.tpl.toml was updated.");
+            }
             if composed_changed {
                 ctx.out
                     .say("The resolved child commits were corrected in .config/git.tpl.toml.");
@@ -92,6 +98,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "ref": ref_name,
                 "template": config.template.source,
                 "revision": crate::report::revision(Some(&reference), Some(revision), Some(dirty)),
+                "answersChanged": answers_changed,
                 "ignoredAnswers": ignored_answers,
             });
             if composed_changed {
@@ -269,6 +276,7 @@ fn dry_run(
     overrides: std::collections::BTreeMap<String, tpl::template::Value>,
     interactive: bool,
 ) -> Result<serde_json::Value, OpError> {
+    let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let answers = ops::merge_answers(config.answers.clone(), overrides);
 
     // The same two helpers the real run uses. Reimplementing them here dropped
@@ -293,22 +301,38 @@ fn dry_run(
 
     enforce_strict_answers(
         &args.answers,
-        &rendered.ignored_answers,
+        &rendered
+            .ignored_answers
+            .iter()
+            .filter(|key| current_keys.contains(*key))
+            .cloned()
+            .collect::<Vec<_>>(),
         rendered.template.manifest.questions.keys().cloned(),
     )?;
     report_ignored(&ctx.out, &rendered.ignored_answers);
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
     let tip = ctx.repo.resolve_ref(&ref_name)?;
-    let previous_tree = match tip {
-        Some(oid) => Some(ctx.repo.commit(oid)?.tree),
-        None => None,
-    };
+    let previous = tip.map(|oid| ctx.repo.commit(oid)).transpose()?;
+    let previous_tree = previous.as_ref().map(|commit| commit.tree);
+    let recorded = previous
+        .as_ref()
+        .and_then(|commit| tpl::provenance::Provenance::parse(&commit.message));
+    let migrations = ops::discover_update_migrations(&rendered, recorded.as_ref())?;
+    let child_changed = recorded
+        .as_ref()
+        .is_some_and(|previous| previous.composed != rendered.provenance.composed);
     let revision_description =
         ops::describe_revision(&rendered.template.reference, rendered.template.revision);
 
-    if previous_tree == Some(rendered.tree) {
-        ctx.out.say("Already up to date. Nothing would change.");
+    if previous_tree == Some(rendered.tree) && migrations.is_empty() && !child_changed {
+        let answers_changed = config.answers != *rendered.context.answers();
+        if answers_changed {
+            ctx.out
+                .say("No rendered-ref commit would be made. Recorded answers would change.");
+        } else {
+            ctx.out.say("Already up to date. Nothing would change.");
+        }
         return Ok(serde_json::json!({
             "dryRun": true,
             "result": "upToDate",
@@ -321,6 +345,7 @@ fn dry_run(
                 Some(rendered.template.dirty),
             ),
             "changes": [],
+            "answersChanged": answers_changed,
             "ignoredAnswers": rendered.ignored_answers,
         }));
     }
@@ -354,6 +379,7 @@ fn dry_run(
             Some(rendered.template.dirty),
         ),
         "changes": crate::report::changes(&changes),
+        "migrations": crate::report::migrations(&migrations),
         "ignoredAnswers": rendered.ignored_answers,
     }))
 }

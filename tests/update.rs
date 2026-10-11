@@ -307,14 +307,20 @@ fn a_commit_sha_can_be_rendered() {
 #[test]
 fn ref_on_the_command_line_does_not_change_the_configuration() {
     let world = World::new();
-    world.init(&[]).success();
     let first = world.template.repo.rev_parse("HEAD");
     world.move_template();
+    world.init(&[]).success();
 
     tpl(&world.project, &["update", "--defaults", "--ref", &first]).success();
 
     let config = world.project.read(".config/git.tpl.toml");
     assert!(!config.contains(&first), "{config}");
+    let current = world.project.rev_parse(&world.ref_name());
+    let message = world.project.git(&["show", "-s", "--format=%B", &current]);
+    assert!(
+        message.contains(&format!("Template-Commit: {first}")),
+        "{message}"
+    );
 }
 
 /// A developer should never have to publish a template release to test a
@@ -642,6 +648,20 @@ fn a_message_only_migration_forces_a_commit() {
         "message = \"0.4 split config.rs into a module.\"\n",
     );
 
+    let preview = tpl(
+        &world.project,
+        &["--json", "update", "--defaults", "--dry-run"],
+    )
+    .success()
+    .json();
+    assert_eq!(preview["result"], "wouldUpdate");
+    assert_eq!(preview["changes"], serde_json::json!([]));
+    assert_eq!(
+        preview["migrations"][0]["message"],
+        "0.4 split config.rs into a module."
+    );
+    assert_eq!(world.project.rev_parse(&world.ref_name()), before);
+
     let json = tpl(&world.project, &["--json", "update", "--defaults"])
         .success()
         .json();
@@ -871,5 +891,76 @@ fn strict_answers_refuses_a_key_that_names_no_question() {
         world.project.rev_parse(&world.ref_name()),
         before,
         "a refused update must not advance the ref"
+    );
+}
+
+#[test]
+fn strict_answers_keeps_obsolete_recorded_keys_lenient_in_real_and_dry_runs() {
+    let world = World::new();
+    world.init(&[]).success();
+    let config = world.project.read(".config/git.tpl.toml");
+    world.project.write(
+        ".config/git.tpl.toml",
+        &format!("{config}obsolete = \"old\"\n"),
+    );
+
+    for extra in [vec!["--dry-run"], vec![]] {
+        let mut args = vec!["--json", "update", "--defaults", "--strict-answers"];
+        args.extend(extra);
+        let result = tpl(&world.project, &args).success().json();
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["ignoredAnswers"], serde_json::json!(["obsolete"]));
+    }
+}
+
+#[test]
+fn an_unchanged_render_records_new_answers_without_advancing_the_ref() {
+    let world = World::new();
+    world.init(&[]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+    let head = world.project.rev_parse("HEAD");
+    let manifest = world.template.repo.read("template.toml");
+    world.template.repo.write(
+        "template.toml",
+        &format!("{manifest}\n[questions.new_answer]\ntype = \"string\"\ndefault = \"stored\"\n"),
+    );
+    world
+        .template
+        .repo
+        .commit_all("feat: add a question without output");
+
+    let preview = tpl(
+        &world.project,
+        &["--json", "update", "--defaults", "--dry-run"],
+    )
+    .success()
+    .json();
+    assert_eq!(preview["result"], "upToDate");
+    assert_eq!(preview["answersChanged"], true);
+    assert!(
+        !world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("new_answer")
+    );
+
+    let result = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+    assert_eq!(result["result"], "upToDate");
+    assert_eq!(result["answersChanged"], true);
+    assert!(
+        world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("new_answer = \"stored\"")
+    );
+    assert_eq!(world.project.rev_parse(&world.ref_name()), before);
+    assert_eq!(world.project.rev_parse("HEAD"), head);
+    assert_eq!(
+        tpl(&world.project, &["--json", "update", "--defaults"])
+            .success()
+            .json()["answersChanged"],
+        false
     );
 }

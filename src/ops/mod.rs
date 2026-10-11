@@ -357,11 +357,7 @@ impl Answering<'_> {
 /// A branch name alone cannot tell you whether the template moved, which is the
 /// question every one of these lines exists to answer.
 pub fn describe_revision(reference: &str, revision: Oid) -> String {
-    if reference == crate::provenance::WORKTREE_REF {
-        format!("{} (+ uncommitted changes)", revision.short())
-    } else {
-        format!("{reference} ({})", revision.short())
-    }
+    crate::revision::describe_revision(reference, revision)
 }
 
 /// Make `dir` exist and be empty.
@@ -1154,12 +1150,22 @@ pub fn init(
     // commit in their repository to explain away.
     let note = template_note(&rendered)?;
 
-    // An orphan commit: the template has no history in this project before
-    // now, and inventing a parent would be a lie.
-    let commit = project.create_commit(rendered.tree, &[], &rendered.provenance.to_message())?;
+    // A forced reattachment to the same ref must descend from its tip: an
+    // orphan here destroys the merge base of every previous attachment.
+    // Only a genuinely new ref starts with an orphan rendering.
+    let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
+    let commit =
+        project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
     project.set_ref(&ref_name, commit, "tpl: initial render")?;
 
-    let changes = project.diff_trees(None, rendered.tree, &[])?;
+    let changes = project.diff_trees(
+        parents
+            .first()
+            .map(|parent| project.commit(*parent).map(|commit| commit.tree))
+            .transpose()?,
+        rendered.tree,
+        &[],
+    )?;
 
     // Written after rendering, so a template that fails to render leaves no
     // half-initialised project behind.
@@ -1400,6 +1406,37 @@ fn migration_message(
     Ok(Some(text))
 }
 
+/// Find migrations crossed by this render without moving any project ref.
+/// Dry-run must use the same discovery as update or a message-only migration
+/// is incorrectly reported as an unchanged rendering.
+pub fn discover_update_migrations(
+    rendered: &Render,
+    previous: Option<&Recorded>,
+) -> Result<Vec<AppliedMigration>, OpError> {
+    let mut migrations = Vec::new();
+    if let Some(old_commit) = previous.and_then(|recorded| recorded.revision) {
+        let old_tree = rendered.template.repo.commit_tree(old_commit)?;
+        let new_tree = rendered.template.tree;
+        if old_tree != new_tree {
+            let partials = rendered.template.partials()?;
+            for (path, bytes) in
+                migration::discover_new(rendered.template.repo.as_ref(), old_tree, new_tree)?
+            {
+                let text = String::from_utf8(bytes)
+                    .map_err(|_| OpError::MigrationFileNotUtf8 { path: path.clone() })?;
+                let parsed = migration::parse(&text, &path)?;
+                let message = migration_message(&parsed, rendered, &partials)?;
+                migrations.push(AppliedMigration {
+                    path,
+                    message,
+                    moves: parsed.moves,
+                });
+            }
+        }
+    }
+    Ok(migrations)
+}
+
 /// Add the remotes a template declares, reporting what happened to each.
 ///
 /// Never fetches and never pushes — ADR-019's closure rule admits the addition
@@ -1487,6 +1524,8 @@ pub enum UpdateOutcome {
         revision: Oid,
         /// Whether an uncommitted working tree was rendered.
         dirty: bool,
+        /// Whether answers were recorded without creating a rendered-ref commit.
+        answers_changed: bool,
         /// Whether the child lock was corrected without needing a new rendered-ref commit.
         composed_changed: bool,
         /// Supplied answers that name no question in this template. Carried
@@ -1594,6 +1633,7 @@ pub fn merge_answers(
 pub fn update(
     project: &dyn GitBackend,
     project_root: &Path,
+    reference: Option<&str>,
     overrides: BTreeMap<String, Value>,
     dirty: bool,
     strict_answers: bool,
@@ -1602,7 +1642,14 @@ pub fn update(
     trust: Trust<'_>,
 ) -> Result<UpdateOutcome, OpError> {
     let mut config = Config::load(project_root)?;
+    let configured_reference = config.template.r#ref.clone();
+    // `--ref` changes this invocation's render, not the attachment recorded
+    // on disk; the next update must still use the configured reference.
+    if let Some(reference) = reference {
+        config.template.r#ref = Some(reference.to_string());
+    }
 
+    let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let supplied = merge_answers(config.answers.clone(), overrides);
 
     let rendered = render(
@@ -1618,7 +1665,12 @@ pub fn update(
 
     enforce_strict_answers(
         strict_answers,
-        &rendered.ignored_answers,
+        &rendered
+            .ignored_answers
+            .iter()
+            .filter(|key| current_keys.contains(*key))
+            .cloned()
+            .collect::<Vec<_>>(),
         rendered.template.manifest.questions.keys().cloned(),
     )?;
 
@@ -1642,30 +1694,7 @@ pub fn update(
     // render): there is no coherent "old state" to migrate away from, so
     // migrations are skipped rather than firing every migration the template
     // has ever had.
-    let mut migrations: Vec<AppliedMigration> = Vec::new();
-    if let (Some(_), Some(old_commit)) = (
-        &previous,
-        recorded_previous.as_ref().and_then(|r| r.revision),
-    ) {
-        let old_tree = rendered.template.repo.commit_tree(old_commit)?;
-        let new_tree = rendered.template.tree;
-        if old_tree != new_tree {
-            let partials = rendered.template.partials()?;
-            for (path, bytes) in
-                migration::discover_new(rendered.template.repo.as_ref(), old_tree, new_tree)?
-            {
-                let text = String::from_utf8(bytes)
-                    .map_err(|_| OpError::MigrationFileNotUtf8 { path: path.clone() })?;
-                let parsed = migration::parse(&text, &path)?;
-                let message = migration_message(&parsed, &rendered, &partials)?;
-                migrations.push(AppliedMigration {
-                    path,
-                    message,
-                    moves: parsed.moves,
-                });
-            }
-        }
-    }
+    let migrations = discover_update_migrations(&rendered, recorded_previous.as_ref())?;
 
     // Every newly discovered migration's moves, in file order, applied
     // against the ref's current tip — never against `rendered.tree`, which
@@ -1698,8 +1727,11 @@ pub fn update(
         .collect();
     let composed_changed = config.composed != composed;
     if migrations.is_empty() && identical && !child_changed {
-        if composed_changed {
+        let answers_changed = config.answers != *rendered.context.answers();
+        if composed_changed || answers_changed {
+            config.answers = rendered.context.answers().clone();
             config.composed = composed;
+            config.template.r#ref = configured_reference;
             config.save(project_root)?;
         }
         return Ok(UpdateOutcome::UpToDate {
@@ -1710,6 +1742,7 @@ pub fn update(
             reference: rendered.template.reference.clone(),
             revision: rendered.template.revision,
             dirty: rendered.template.dirty,
+            answers_changed,
             composed_changed,
             ignored_answers: rendered.ignored_answers,
             ignored: rendered.template.ignored,
@@ -1759,6 +1792,7 @@ pub fn update(
     let answers_changed = config.answers != *rendered.context.answers();
     config.answers = rendered.context.answers().clone();
     config.composed = composed;
+    config.template.r#ref = configured_reference;
     config.save(project_root)?;
 
     Ok(UpdateOutcome::Updated {

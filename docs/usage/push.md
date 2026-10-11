@@ -14,7 +14,7 @@ refs/tpl/<id>:refs/tpl/<id>
 
 ## Why this is a separate command
 
-Rendered refs are never pushed implicitly.
+Rendered refs are not pushed by default; `tpl.autoPush` or `git tpl update --push` opts in.
 `git push` does not push them, and nothing git-tpl does changes what `git push` sends.
 
 The two modes this gives you are both first-class:

@@ -76,7 +76,7 @@ It is how an author checks a work-in-progress against a real project.
 |---|---|
 | `0` | Up to date and merged. |
 | `1` | An error. |
-| `2` | Something is pending — the template moved, or the ref is not merged. |
+| `2` | Something is pending — the template or a composed child moved, or the ref is not merged. |
 
 Useful in CI, where `--quiet` — a global flag — suppresses the report and leaves only the exit code:
 

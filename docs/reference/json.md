@@ -244,7 +244,7 @@ An empty array would claim the template renders nothing.
   "id": "rust", "ref": "refs/tpl/rust",
   "template": "https://github.com/noirbizarre/rust.tpl",
   "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
-  "ignoredAnswers": [] }
+  "answersChanged": false, "ignoredAnswers": [] }
 ```
 
 ```json
@@ -264,8 +264,12 @@ An empty array would claim the template renders nothing.
 
 Branch on `result`: `upToDate` or `updated`.
 It is the one thing the exit code does not say — both succeed.
+`answersChanged` may be true even for `upToDate`: newly resolved answers are saved to the project configuration
+without adding a rendered-ref commit.
 `result` is always `updated`, never `upToDate`, when `migrations` is non-empty: discovering a migration always
 produces a commit, so the same one is never discovered again on a later `update`.
+An `update --dry-run` that crosses such a migration reports `wouldUpdate` with its `migrations` and potentially
+empty `changes`, even when the rendered tree is identical.
 See [ADR-024](../adr/024-template-migrations.md).
 
 `migrations` lists every migration newly discovered by this update, in application order; empty on almost every
@@ -338,8 +342,9 @@ the patch edits.
 `files[].rendered` is the path in the project.
 `added` marks a file the template did not previously produce.
 
-`skipped` carries paths that were considered and deliberately not backported, each with a `reason` — currently
-only files deleted locally, which would remove them from every project rendering the template.
+`skipped` carries paths that were considered and deliberately not backported, each with a `reason`.
+For patch output, these are files deleted locally, which would remove them from every project rendering the template.
+For `--list-hunks`, binary added or modified files also appear there because they have no text hunks to list.
 Files the template never produced are not listed: they are out of scope rather than skipped.
 
 `unsubstituted` names every line whose template expression was reversed — `path`, `source`, `line`, the

@@ -52,7 +52,7 @@ mod keys {
 /// The `Template-Ref` value used when rendering an uncommitted working tree.
 ///
 /// Not a revision anyone can resolve later, which is exactly what it is saying.
-pub const WORKTREE_REF: &str = "<worktree>";
+pub const WORKTREE_REF: &str = crate::revision::WORKTREE_REF;
 
 /// What produced a rendered commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,14 +273,14 @@ pub struct Recorded {
 impl Recorded {
     /// How to describe the revision in output.
     ///
-    /// Delegates to [`crate::ops::describe_revision`] so that a revision read
+    /// Delegates to the shared revision formatter so that a revision read
     /// back from a commit and one just resolved are written identically —
     /// otherwise a `A → B` line would use two different formats either side of
     /// the arrow, which is exactly what it did before this was shared.
     pub fn describe_revision(&self) -> String {
         match (&self.reference, &self.revision) {
             (Some(reference), Some(revision)) => {
-                crate::ops::describe_revision(reference, *revision)
+                crate::revision::describe_revision(reference, *revision)
             }
             (Some(reference), None) => reference.clone(),
             (None, Some(revision)) => revision.short(),

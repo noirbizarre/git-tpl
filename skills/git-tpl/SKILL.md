@@ -26,9 +26,11 @@ there is no reconciliation engine, no patch replay, and no `.rej` file.
 template  →  rendered Git ref  →  normal Git merge  →  updated project
 ```
 
-`git tpl update` never touches `HEAD`, the index, or the worktree — only the ref moves.
+`git tpl update` never touches `HEAD`, the index, or rendered files in the worktree.
+It advances the ref and may record changed answers in `.config/git.tpl.toml` as an unstaged edit.
 Applying the result is always a separate, explicit `git tpl merge` (or a plain `git merge refs/tpl/<id>`).
-Template refs are never pushed or fetched automatically either — `git push`/`git pull` ignore `refs/tpl/*`.
+Ordinary `git push`/`git pull` ignore template refs; git-tpl does not push them by default.
+`tpl.autoPush` or `git tpl update --push` opts into pushing after an update; fetching remains explicit.
 
 Full model: <https://noirbizarre.github.io/git-tpl/concepts/git-model/>.
 
@@ -76,7 +78,7 @@ do not assume it is preinstalled.
    when present, is an internal rename commit the merge machinery needs; it is not something to inspect or act on.
    A migration always reports `"result": "updated"`, never `"upToDate"`, even if nothing else changed.
 6. **`git tpl status --json` exits `2`**, not `0` or `1`,
-   when a template update is pending (`"templateMoved": true` or `"merged": false`).
+   when a template update is pending (`"templateMoved": true`, `"composedMoved": true`, or `"merged": false`).
    Treat that as a normal branch, not a failure.
 7. **`"ok": true` describes the command, not the outcome**, for two commands specifically:
    `lint` (check `errors`/`denied` in its `diagnostics[]`, not just `ok`)
@@ -178,8 +180,8 @@ git tpl diff --json --stat     # preview the merge; "conflicts" array if any
 ```
 
 **Stop here and show the user the list of changes before running `merge`.**
-Build it from the `diff` payload (`changes[]{path,kind,insertions,deletions}`; the `update` payload's `changes[]`
-is the same rendering-to-rendering view), and present it grouped by purpose rather than as a flat file dump:
+Build it from the `diff` payload (`changes[]{path,kind,insertions,deletions}`); `update.changes[]` reports only
+rendering-to-rendering paths and kinds, without line counts. Present the preview grouped by purpose:
 
 - what the template changed, a one-line summary per group, with the files each touches and their `+`/`-` counts;
 - every `migrations[]` entry's `message`, verbatim (agent rule 5);
@@ -341,7 +343,8 @@ Every command's full flag set and payload shape: <https://noirbizarre.github.io/
 stdout carries the machine-readable payload — one JSON object under `--json`,
 or raw file bytes for `show`/`completion`/`man`
 (which have no JSON envelope at all, even under `--json`, because their stdout already *is* the payload).
-stderr carries human prose and warnings, which are never suppressed, even by `--json` or `--quiet`.
+stderr carries human prose, warnings, and errors. `--json` and `--quiet` suppress narration,
+but warnings and errors remain visible.
 
 ## Exit codes and error recovery
 
@@ -349,7 +352,7 @@ stderr carries human prose and warnings, which are never suppressed, even by `--
 |---|---|---|
 | `0` | Success | Continue. |
 | `1` | Failure | Read `error.code` from the JSON envelope, look it up in the diagnostics reference, and act on the `help` text. |
-| `2` | Only from `status`: an update is pending (`templateMoved` or not `merged`) | Not a failure — decide whether to `update`/`merge` now. |
+| `2` | Only from `status`: an update is pending (`templateMoved`, `composedMoved`, or not `merged`) | Not a failure — decide whether to `update`/`merge` now. |
 
 Diagnostic codes: <https://noirbizarre.github.io/git-tpl/reference/diagnostics/>.
 
