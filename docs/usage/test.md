@@ -125,9 +125,9 @@ Four lists, each run in a fresh, empty scratch directory created just for this c
 | `after` | After `expect` and the snapshot are checked. | The same merged sandbox. |
 | `finally` | Always, last, regardless of anything above. | Whatever state the sandbox is in. |
 
-The render is written **on top of** whatever `before` created, not into a directory cleared first — this is what
-lets a case simulate rendering into a project that already exists, the way `update` actually renders, which
-`--dirty`/`render` alone cannot exercise.
+The render is written **on top of** whatever `before` created, not into a directory cleared first.
+This lets a case test its output alongside files that already exist in a project, which `--dirty`/`render` alone
+cannot exercise. `update` itself builds a Git tree and never writes rendered files into the project worktree.
 
 `before` sees "nothing but what it creates itself" only when the case has no [`git`](#git-sandbox): a case that
 sets it finds a `.git` directory and one commit already there before `before` runs its first entry.
