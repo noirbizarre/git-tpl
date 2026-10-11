@@ -78,7 +78,7 @@ do not assume it is preinstalled.
    when present, is an internal rename commit the merge machinery needs; it is not something to inspect or act on.
    A migration always reports `"result": "updated"`, never `"upToDate"`, even if nothing else changed.
 6. **`git tpl status --json` exits `2`**, not `0` or `1`,
-    when a template update is pending (`"templateMoved": true`, `"composedMoved": true`, or `"merged": false`).
+   when a template update is pending (`"templateMoved": true`, `"composedMoved": true`, or `"merged": false`).
    Treat that as a normal branch, not a failure.
 7. **`"ok": true` describes the command, not the outcome**, for two commands specifically:
    `lint` (check `errors`/`denied` in its `diagnostics[]`, not just `ok`)
@@ -343,7 +343,8 @@ Every command's full flag set and payload shape: <https://noirbizarre.github.io/
 stdout carries the machine-readable payload — one JSON object under `--json`,
 or raw file bytes for `show`/`completion`/`man`
 (which have no JSON envelope at all, even under `--json`, because their stdout already *is* the payload).
-stderr carries human prose and warnings, which are never suppressed, even by `--json` or `--quiet`.
+stderr carries human prose, warnings, and errors. `--json` and `--quiet` suppress narration,
+but warnings and errors remain visible.
 
 ## Exit codes and error recovery
 
