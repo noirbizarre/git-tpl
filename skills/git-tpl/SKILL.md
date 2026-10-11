@@ -178,8 +178,8 @@ git tpl diff --json --stat     # preview the merge; "conflicts" array if any
 ```
 
 **Stop here and show the user the list of changes before running `merge`.**
-Build it from the `diff` payload (`changes[]{path,kind,insertions,deletions}`; the `update` payload's `changes[]`
-is the same rendering-to-rendering view), and present it grouped by purpose rather than as a flat file dump:
+Build it from the `diff` payload (`changes[]{path,kind,insertions,deletions}`); `update.changes[]` reports only
+rendering-to-rendering paths and kinds, without line counts. Present the preview grouped by purpose:
 
 - what the template changed, a one-line summary per group, with the files each touches and their `+`/`-` counts;
 - every `migrations[]` entry's `message`, verbatim (agent rule 5);
