@@ -1604,6 +1604,7 @@ pub fn merge_answers(
 pub fn update(
     project: &dyn GitBackend,
     project_root: &Path,
+    reference: Option<&str>,
     overrides: BTreeMap<String, Value>,
     dirty: bool,
     strict_answers: bool,
@@ -1612,6 +1613,12 @@ pub fn update(
     trust: Trust<'_>,
 ) -> Result<UpdateOutcome, OpError> {
     let mut config = Config::load(project_root)?;
+    let configured_reference = config.template.r#ref.clone();
+    // `--ref` changes this invocation's render, not the attachment recorded
+    // on disk; the next update must still use the configured reference.
+    if let Some(reference) = reference {
+        config.template.r#ref = Some(reference.to_string());
+    }
 
     let supplied = merge_answers(config.answers.clone(), overrides);
 
@@ -1710,6 +1717,7 @@ pub fn update(
     if migrations.is_empty() && identical && !child_changed {
         if composed_changed {
             config.composed = composed;
+            config.template.r#ref = configured_reference;
             config.save(project_root)?;
         }
         return Ok(UpdateOutcome::UpToDate {
@@ -1769,6 +1777,7 @@ pub fn update(
     let answers_changed = config.answers != *rendered.context.answers();
     config.answers = rendered.context.answers().clone();
     config.composed = composed;
+    config.template.r#ref = configured_reference;
     config.save(project_root)?;
 
     Ok(UpdateOutcome::Updated {

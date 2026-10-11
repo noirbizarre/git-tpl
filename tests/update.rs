@@ -307,14 +307,20 @@ fn a_commit_sha_can_be_rendered() {
 #[test]
 fn ref_on_the_command_line_does_not_change_the_configuration() {
     let world = World::new();
-    world.init(&[]).success();
     let first = world.template.repo.rev_parse("HEAD");
     world.move_template();
+    world.init(&[]).success();
 
     tpl(&world.project, &["update", "--defaults", "--ref", &first]).success();
 
     let config = world.project.read(".config/git.tpl.toml");
     assert!(!config.contains(&first), "{config}");
+    let current = world.project.rev_parse(&world.ref_name());
+    let message = world.project.git(&["show", "-s", "--format=%B", &current]);
+    assert!(
+        message.contains(&format!("Template-Commit: {first}")),
+        "{message}"
+    );
 }
 
 /// A developer should never have to publish a template release to test a

@@ -44,6 +44,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let outcome = ops::update(
         &ctx.repo,
         &ctx.root,
+        args.r#ref.as_deref(),
         overrides,
         args.dirty,
         args.answers.strict_answers,
