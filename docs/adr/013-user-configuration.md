@@ -95,6 +95,8 @@ Precedence, stated once:
 ```
 
 Keys naming no question are ignored and reported, exactly as for `--answers-from`.
+**Current behavior:** unmatched user `[defaults]` keys are ignored silently because they may be shared across
+templates; supplied `--answers-from` keys are still reported. See [configuration](../configuration.md#defaults).
 There is no per-template namespacing in v1; `[defaults."github.com/org/*"]` remains additive if it proves
 necessary.
 
