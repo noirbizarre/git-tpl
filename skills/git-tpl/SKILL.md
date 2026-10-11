@@ -26,7 +26,8 @@ there is no reconciliation engine, no patch replay, and no `.rej` file.
 template  →  rendered Git ref  →  normal Git merge  →  updated project
 ```
 
-`git tpl update` never touches `HEAD`, the index, or the worktree — only the ref moves.
+`git tpl update` never touches `HEAD`, the index, or rendered files in the worktree.
+It advances the ref and may record changed answers in `.config/git.tpl.toml` as an unstaged edit.
 Applying the result is always a separate, explicit `git tpl merge` (or a plain `git merge refs/tpl/<id>`).
 Template refs are never pushed or fetched automatically either — `git push`/`git pull` ignore `refs/tpl/*`.
 
