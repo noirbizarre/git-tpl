@@ -180,6 +180,11 @@ fn moving_a_child_branch_with_identical_output_records_a_new_commit_and_lock() {
     let status = tpl(&project, &["--json", "status"]).code(2).json();
     assert_eq!(status["composedMoved"], true);
     assert_eq!(status["availableComposed"][0]["commit"], new_sha);
+    tpl(&project, &["status"])
+        .code(2)
+        .says("Compose sources")
+        .says("child has moved")
+        .says("A composed child has moved. Run:");
     assert_eq!(
         status["renderedComposed"][0]["commit"],
         before.composed[0].commit
@@ -304,6 +309,7 @@ fn status_keeps_the_last_child_commit_visible_when_its_repository_is_unavailable
     assert_eq!(status["renderedComposed"][0]["commit"], recorded);
     assert!(status["availableComposed"].is_null());
     assert_eq!(status["composedMoved"], false);
+    tpl(&project, &["status"]).success().says("Compose sources");
 }
 
 #[test]
@@ -581,4 +587,112 @@ fn a_parent_may_compose_modules_from_a_question_inherited_from_a_pinned_base() {
         std::fs::read_to_string(output.join("modules/jira/module.txt")).unwrap(),
         "jira\n"
     );
+}
+
+#[test]
+fn a_composition_requires_a_distinct_list_question_and_a_complete_child_reference() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let original = parent.read("template.toml");
+    for (manifest, expected) in [
+        (
+            original.replace("ref = 'main'", "ref = ''"),
+            "needs source, ref and from",
+        ),
+        (
+            original.replace("from = 'sources'", "from = 'integrations'"),
+            "lists `integrations` twice",
+        ),
+        (
+            original.replace(
+                "[questions.sources]\ntype = 'list'",
+                "[questions.sources]\ntype = 'string'",
+            ),
+            "requires a list question `sources`",
+        ),
+        (
+            original.replace("from = 'sources'", "from = 'missing'"),
+            "requires a list question `missing`",
+        ),
+    ] {
+        parent.write("template.toml", &manifest);
+        let output = tpl(
+            &parent,
+            &["--json", "lint", parent.path.to_str().unwrap(), "--dirty"],
+        )
+        .failure();
+        assert_eq!(
+            output.error_code(),
+            "tpl::manifest::invalid_compose",
+            "{expected}: {}",
+            output.all()
+        );
+        assert!(output.all().contains(expected), "{}", output.all());
+    }
+}
+
+#[test]
+fn an_oversized_selection_is_refused_before_any_child_is_read() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "missing", "main");
+    let answer =
+        serde_json::to_string(&(0..33).map(|i| format!("module-{i}")).collect::<Vec<_>>()).unwrap();
+    let output = tempfile::tempdir().unwrap();
+    let destination = output.path().join("generated");
+    let failure = tpl(
+        &parent,
+        &[
+            "--json",
+            "render",
+            parent.path.to_str().unwrap(),
+            "-o",
+            destination.to_str().unwrap(),
+            "--answer",
+            &format!("sources={answer}"),
+            "--defaults",
+        ],
+    )
+    .failure();
+    assert_eq!(failure.error_code(), "tpl::compose::invalid");
+    assert!(
+        failure.all().contains("more than 32 modules"),
+        "{}",
+        failure.all()
+    );
+    assert!(!destination.exists());
+}
+
+#[test]
+fn a_child_cannot_compose_its_own_children() {
+    let source = child("source");
+    let integration = child("integration");
+    let nested = child("nested");
+    let nested_ref = nested.git(&["rev-parse", "HEAD"]);
+    source.write("template.toml", &format!("{}\n[questions.nested]\ntype = 'list'\ndefault = []\n[[compose]]\nsource = '{}'\nref = '{nested_ref}'\nfrom = 'nested'\n", source.read("template.toml"), nested.path.display())).commit_all("declare nested composition");
+    let parent = parent(&source, &integration, "main", "main");
+    let output = tempfile::tempdir().unwrap();
+    let destination = output.path().join("generated");
+    let failure = tpl(
+        &parent,
+        &[
+            "--json",
+            "render",
+            parent.path.to_str().unwrap(),
+            "-o",
+            destination.to_str().unwrap(),
+            "--answer",
+            "sources=[\"jira\"]",
+            "--defaults",
+        ],
+    )
+    .failure();
+    assert_eq!(
+        failure.error_code(),
+        "tpl::compose::nested",
+        "{}",
+        failure.all()
+    );
+    assert!(!destination.exists());
 }
