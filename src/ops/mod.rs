@@ -1410,6 +1410,37 @@ fn migration_message(
     Ok(Some(text))
 }
 
+/// Find migrations crossed by this render without moving any project ref.
+/// Dry-run must use the same discovery as update or a message-only migration
+/// is incorrectly reported as an unchanged rendering.
+pub fn discover_update_migrations(
+    rendered: &Render,
+    previous: Option<&Recorded>,
+) -> Result<Vec<AppliedMigration>, OpError> {
+    let mut migrations = Vec::new();
+    if let Some(old_commit) = previous.and_then(|recorded| recorded.revision) {
+        let old_tree = rendered.template.repo.commit_tree(old_commit)?;
+        let new_tree = rendered.template.tree;
+        if old_tree != new_tree {
+            let partials = rendered.template.partials()?;
+            for (path, bytes) in
+                migration::discover_new(rendered.template.repo.as_ref(), old_tree, new_tree)?
+            {
+                let text = String::from_utf8(bytes)
+                    .map_err(|_| OpError::MigrationFileNotUtf8 { path: path.clone() })?;
+                let parsed = migration::parse(&text, &path)?;
+                let message = migration_message(&parsed, rendered, &partials)?;
+                migrations.push(AppliedMigration {
+                    path,
+                    message,
+                    moves: parsed.moves,
+                });
+            }
+        }
+    }
+    Ok(migrations)
+}
+
 /// Add the remotes a template declares, reporting what happened to each.
 ///
 /// Never fetches and never pushes — ADR-019's closure rule admits the addition
@@ -1667,30 +1698,7 @@ pub fn update(
     // render): there is no coherent "old state" to migrate away from, so
     // migrations are skipped rather than firing every migration the template
     // has ever had.
-    let mut migrations: Vec<AppliedMigration> = Vec::new();
-    if let (Some(_), Some(old_commit)) = (
-        &previous,
-        recorded_previous.as_ref().and_then(|r| r.revision),
-    ) {
-        let old_tree = rendered.template.repo.commit_tree(old_commit)?;
-        let new_tree = rendered.template.tree;
-        if old_tree != new_tree {
-            let partials = rendered.template.partials()?;
-            for (path, bytes) in
-                migration::discover_new(rendered.template.repo.as_ref(), old_tree, new_tree)?
-            {
-                let text = String::from_utf8(bytes)
-                    .map_err(|_| OpError::MigrationFileNotUtf8 { path: path.clone() })?;
-                let parsed = migration::parse(&text, &path)?;
-                let message = migration_message(&parsed, &rendered, &partials)?;
-                migrations.push(AppliedMigration {
-                    path,
-                    message,
-                    moves: parsed.moves,
-                });
-            }
-        }
-    }
+    let migrations = discover_update_migrations(&rendered, recorded_previous.as_ref())?;
 
     // Every newly discovered migration's moves, in file order, applied
     // against the ref's current tip — never against `rendered.tree`, which

@@ -268,6 +268,8 @@ It is the one thing the exit code does not say — both succeed.
 without adding a rendered-ref commit.
 `result` is always `updated`, never `upToDate`, when `migrations` is non-empty: discovering a migration always
 produces a commit, so the same one is never discovered again on a later `update`.
+An `update --dry-run` that crosses such a migration reports `wouldUpdate` with its `migrations` and potentially
+empty `changes`, even when the rendered tree is identical.
 See [ADR-024](../adr/024-template-migrations.md).
 
 `migrations` lists every migration newly discovered by this update, in application order; empty on almost every

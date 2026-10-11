@@ -198,7 +198,7 @@ then an error.
 | `--dirty` | Render the template's working tree. Local templates only. |
 | `--push` | Push the ref afterwards. Same as `tpl.autoPush`. |
 | `--remote <name>` | The remote `--push` uses. Default `origin`, or `tpl.remote`. |
-| `--dry-run` | Report what would change; write nothing. |
+| `--dry-run` | Report what would change, including migration-only commits; write nothing. |
 
 `--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser.
 

@@ -648,6 +648,20 @@ fn a_message_only_migration_forces_a_commit() {
         "message = \"0.4 split config.rs into a module.\"\n",
     );
 
+    let preview = tpl(
+        &world.project,
+        &["--json", "update", "--defaults", "--dry-run"],
+    )
+    .success()
+    .json();
+    assert_eq!(preview["result"], "wouldUpdate");
+    assert_eq!(preview["changes"], serde_json::json!([]));
+    assert_eq!(
+        preview["migrations"][0]["message"],
+        "0.4 split config.rs into a module."
+    );
+    assert_eq!(world.project.rev_parse(&world.ref_name()), before);
+
     let json = tpl(&world.project, &["--json", "update", "--defaults"])
         .success()
         .json();
@@ -890,7 +904,7 @@ fn strict_answers_keeps_obsolete_recorded_keys_lenient_in_real_and_dry_runs() {
         &format!("{config}obsolete = \"old\"\n"),
     );
 
-    for extra in [vec![], vec!["--dry-run"]] {
+    for extra in [vec!["--dry-run"], vec![]] {
         let mut args = vec!["--json", "update", "--defaults", "--strict-answers"];
         args.extend(extra);
         let result = tpl(&world.project, &args).success().json();
@@ -914,6 +928,16 @@ fn an_unchanged_render_records_new_answers_without_advancing_the_ref() {
         .template
         .repo
         .commit_all("feat: add a question without output");
+
+    let preview = tpl(
+        &world.project,
+        &["--json", "update", "--defaults", "--dry-run"],
+    )
+    .success()
+    .json();
+    assert_eq!(preview["result"], "upToDate");
+    assert_eq!(preview["answersChanged"], true);
+    assert!(!world.project.read(".config/git.tpl.toml").contains("new_answer"));
 
     let result = tpl(&world.project, &["--json", "update", "--defaults"])
         .success()

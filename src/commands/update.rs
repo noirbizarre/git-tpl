@@ -313,15 +313,26 @@ fn dry_run(
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
     let tip = ctx.repo.resolve_ref(&ref_name)?;
-    let previous_tree = match tip {
-        Some(oid) => Some(ctx.repo.commit(oid)?.tree),
-        None => None,
-    };
+    let previous = tip.map(|oid| ctx.repo.commit(oid)).transpose()?;
+    let previous_tree = previous.as_ref().map(|commit| commit.tree);
+    let recorded = previous
+        .as_ref()
+        .and_then(|commit| tpl::provenance::Provenance::parse(&commit.message));
+    let migrations = ops::discover_update_migrations(&rendered, recorded.as_ref())?;
+    let child_changed = recorded
+        .as_ref()
+        .is_some_and(|previous| previous.composed != rendered.provenance.composed);
     let revision_description =
         ops::describe_revision(&rendered.template.reference, rendered.template.revision);
 
-    if previous_tree == Some(rendered.tree) {
-        ctx.out.say("Already up to date. Nothing would change.");
+    if previous_tree == Some(rendered.tree) && migrations.is_empty() && !child_changed {
+        let answers_changed = config.answers != *rendered.context.answers();
+        if answers_changed {
+            ctx.out
+                .say("No rendered-ref commit would be made. Recorded answers would change.");
+        } else {
+            ctx.out.say("Already up to date. Nothing would change.");
+        }
         return Ok(serde_json::json!({
             "dryRun": true,
             "result": "upToDate",
@@ -334,6 +345,7 @@ fn dry_run(
                 Some(rendered.template.dirty),
             ),
             "changes": [],
+            "answersChanged": answers_changed,
             "ignoredAnswers": rendered.ignored_answers,
         }));
     }
@@ -367,6 +379,7 @@ fn dry_run(
             Some(rendered.template.dirty),
         ),
         "changes": crate::report::changes(&changes),
+        "migrations": crate::report::migrations(&migrations),
         "ignoredAnswers": rendered.ignored_answers,
     }))
 }
