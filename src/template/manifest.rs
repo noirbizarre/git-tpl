@@ -239,7 +239,7 @@ pub struct ExtendsDecl {
     pub remove: Vec<String>,
 }
 
-/// Render a pinned child template once per ID in an answered comma-separated list.
+/// Render a child template once per ID in an ordered list answer.
 ///
 /// Unlike `[extends]`, composition adds independent module trees; it never overrides parent files or shares their
 /// question namespace. Each instance receives `module_name` and `module_path` explicitly and is rendered with its
@@ -248,9 +248,10 @@ pub struct ExtendsDecl {
 pub struct ComposeDecl {
     /// Template repository URL or local path.
     pub source: String,
-    /// A tag or commit pin, never a branch.
-    pub rev: String,
-    /// Name of a string answer listing module IDs, comma-separated; empty means no modules.
+    /// A branch, tag or commit; its resolved SHA is recorded with the project at each rendering.
+    #[serde(rename = "ref")]
+    pub reference: String,
+    /// Name of a list question containing module IDs; an empty list renders no children.
     pub from: String,
 }
 
@@ -456,23 +457,32 @@ impl Manifest {
             extends.validate()?;
         }
 
+        let mut composed = std::collections::HashSet::new();
         for entry in &self.compose {
             if entry.source.trim().is_empty()
-                || entry.rev.trim().is_empty()
+                || entry.reference.trim().is_empty()
                 || entry.from.trim().is_empty()
             {
                 return Err(ManifestError::InvalidCompose {
-                    reason: "a `[[compose]]` entry needs source, rev and from".into(),
+                    reason: "a `[[compose]]` entry needs source, ref and from".into(),
+                });
+            }
+            if !composed.insert(&entry.from) {
+                return Err(ManifestError::InvalidCompose {
+                    reason: format!(
+                        "`[[compose]]` lists `{}` twice; use a separate list question for each child",
+                        entry.from
+                    ),
                 });
             }
             if self
                 .questions
                 .get(&entry.from)
-                .is_some_and(|question| question.kind != super::QuestionKind::String)
+                .is_some_and(|question| question.kind != super::QuestionKind::List)
                 || (self.extends.is_none() && !self.questions.contains_key(&entry.from))
             {
                 return Err(ManifestError::InvalidCompose {
-                    reason: format!("`[[compose]]` requires a string question `{}`", entry.from),
+                    reason: format!("`[[compose]]` requires a list question `{}`", entry.from),
                 });
             }
         }
@@ -611,6 +621,27 @@ impl Manifest {
                 return Err(ManifestError::InvalidQuestion {
                     name: name.clone(),
                     reason: "`message` has no `pattern` to explain".into(),
+                });
+            }
+            if let Some(pattern) = &question.item_pattern {
+                if question.kind != super::QuestionKind::List {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: "`item_pattern` only applies to `list` questions".into(),
+                    });
+                }
+                if let Err(error) = regex_lite::Regex::new(pattern) {
+                    return Err(ManifestError::InvalidQuestion {
+                        name: name.clone(),
+                        reason: format!(
+                            "`item_pattern` is not a valid regular expression: {error}"
+                        ),
+                    });
+                }
+            } else if question.item_message.is_some() {
+                return Err(ManifestError::InvalidQuestion {
+                    name: name.clone(),
+                    reason: "`item_message` needs `item_pattern`".into(),
                 });
             }
         }
@@ -805,7 +836,7 @@ mod tests {
             }),
             compose: vec![ComposeDecl {
                 source: "https://example.invalid/child.git".into(),
-                rev: "v1.0.0".into(),
+                reference: "v1.0.0".into(),
                 from: "modules".into(),
             }],
         };

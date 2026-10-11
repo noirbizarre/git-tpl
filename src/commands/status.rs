@@ -82,6 +82,40 @@ fn print_text(ctx: &Session, status: &ops::Status) {
         ctx.out.say(field(&ctx.out.theme, "Extends", &described));
     }
 
+    if let Some(recorded) = &status.recorded {
+        for child in &recorded.composed {
+            let current = status
+                .available_composed
+                .as_ref()
+                .and_then(|available| available.iter().find(|item| item.from == child.from));
+            let rendered = format!(
+                "{} at {} ({})",
+                child.source,
+                child.reference,
+                child.revision.short()
+            );
+            let line = match current {
+                Some(latest) if latest.revision != child.revision => transition(
+                    &ctx.out.theme,
+                    &rendered,
+                    &format!(
+                        "{} at {} ({})",
+                        latest.source,
+                        latest.reference,
+                        latest.revision.short()
+                    ),
+                    Some("child has moved"),
+                ),
+                _ => rendered,
+            };
+            ctx.out.say(field(
+                &ctx.out.theme,
+                &format!("Compose {}", child.from),
+                &line,
+            ));
+        }
+    }
+
     ctx.out.say(field(
         &ctx.out.theme,
         "Merged",
@@ -113,9 +147,13 @@ fn print_text(ctx: &Session, status: &ops::Status) {
     ));
 
     // Say what to do next, rather than leaving the reader to infer it.
-    if status.template_moved {
+    if status.template_moved || status.composed_moved {
         ctx.out.blank();
-        ctx.out.say("The template has moved. Run:");
+        ctx.out.say(if status.composed_moved {
+            "A composed child has moved. Run:"
+        } else {
+            "The template has moved. Run:"
+        });
         ctx.out.say(command(&ctx.out.theme, "git tpl update"));
     } else if status.tip.is_some() && !status.merged {
         ctx.out.blank();
@@ -134,7 +172,7 @@ fn print_text(ctx: &Session, status: &ops::Status) {
 /// `Status`. Renaming a key here is a breaking change.
 fn json(status: &ops::Status) -> serde_json::Value {
     let recorded = status.recorded.as_ref();
-    serde_json::json!({
+    let mut result = serde_json::json!({
         "source": status.source,
         "id": status.id.as_str(),
         "ref": status.ref_name,
@@ -161,7 +199,23 @@ fn json(status: &ops::Status) -> serde_json::Value {
         })),
         "worktreeClean": status.worktree_clean,
         "pending": status.is_pending(),
-    })
+    });
+    let previous = recorded.map(|r| r.composed.as_slice()).unwrap_or(&[]);
+    if !previous.is_empty()
+        || status
+            .available_composed
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+    {
+        result["renderedComposed"] = crate::report::composed(previous);
+        result["availableComposed"] = status
+            .available_composed
+            .as_ref()
+            .map(|items| crate::report::composed(items))
+            .unwrap_or(serde_json::Value::Null);
+        result["composedMoved"] = status.composed_moved.into();
+    }
+    result
 }
 
 /// The ancestor chain the last rendering recorded, nearest parent first.

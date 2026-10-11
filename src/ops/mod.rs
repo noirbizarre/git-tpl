@@ -28,7 +28,7 @@ use crate::eval::{DefaultsOnly, EvalError, Evaluation, Partials, Prompter};
 use crate::git::{AheadBehind, Change, FileStat, GitBackend, GitError, MergeOutcome, Oid};
 use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
-use crate::provenance::{Provenance, Recorded};
+use crate::provenance::{ComposedRevision, Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
 use crate::render::{RenderError, Rendered, render_entries, render_layered_entries, write_tree};
 use crate::seed::SeedContext;
@@ -628,7 +628,21 @@ pub fn render_files(
     supplied: BTreeMap<String, Value>,
     user: &UserConfig,
     answering: Answering<'_>,
+    trust: Trust<'_>,
+) -> Result<RenderedFiles, OpError> {
+    render_files_with_composed(target, project, supplied, user, answering, trust, None)
+}
+
+/// Render the historical child commits named by a rendered ref instead of following their configured branches.
+#[allow(clippy::too_many_arguments)]
+pub fn render_files_with_composed(
+    target: Target<'_>,
+    project: Option<(&dyn GitBackend, &Path)>,
+    supplied: BTreeMap<String, Value>,
+    user: &UserConfig,
+    answering: Answering<'_>,
     mut trust: Trust<'_>,
+    composed: Option<&[ComposedRevision]>,
 ) -> Result<RenderedFiles, OpError> {
     // A reborrow, not a move: `resolve` confirms an `[extends]` ancestor's
     // source (if any), and `render_resolved` below still needs the same
@@ -645,7 +659,7 @@ pub fn render_files(
         &mut trust,
     )?;
 
-    let rendered = render_resolved(
+    let rendered = render_resolved_with_composed(
         &template,
         target.source,
         project,
@@ -653,6 +667,7 @@ pub fn render_files(
         user,
         answering,
         trust,
+        composed,
     )?;
 
     Ok(RenderedFiles {
@@ -676,8 +691,25 @@ pub fn render_resolved(
     project: Option<(&dyn GitBackend, &Path)>,
     supplied: BTreeMap<String, Value>,
     user: &UserConfig,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+) -> Result<RenderedOnce, OpError> {
+    render_resolved_with_composed(
+        template, source, project, supplied, user, answering, trust, None,
+    )
+}
+
+/// Re-render a prior commit's children from the SHAs its own provenance records.
+#[allow(clippy::too_many_arguments)]
+pub fn render_resolved_with_composed(
+    template: &Resolved,
+    source: &str,
+    project: Option<(&dyn GitBackend, &Path)>,
+    supplied: BTreeMap<String, Value>,
+    user: &UserConfig,
     mut answering: Answering<'_>,
     trust: Trust<'_>,
+    recorded_composed: Option<&[ComposedRevision]>,
 ) -> Result<RenderedOnce, OpError> {
     // Built and validated before anything is prompted: a cycle or a typo
     // discovered after six answered questions is the worst possible time.
@@ -798,7 +830,7 @@ pub fn render_resolved(
         )?
     };
 
-    if !template.manifest.compose.is_empty() {
+    let composed = if !template.manifest.compose.is_empty() {
         compose::render(
             &template.manifest.compose,
             &context,
@@ -806,8 +838,11 @@ pub fn render_resolved(
             user,
             &mut trust,
             &mut files,
-        )?;
-    }
+            recorded_composed,
+        )?
+    } else {
+        Vec::new()
+    };
 
     let provenance = Provenance {
         source: source.to_string(),
@@ -817,6 +852,7 @@ pub fn render_resolved(
         answers_digest: context.answers_digest(),
         data: loader.provenance().to_vec(),
         extends: template.extends_provenance(),
+        composed,
         version: crate::VERSION.to_string(),
         template_name: template.manifest.name.clone(),
     };
@@ -1128,6 +1164,12 @@ pub fn init(
     // Written after rendering, so a template that fails to render leaves no
     // half-initialised project behind.
     config.answers = rendered.context.answers().clone();
+    config.composed = rendered
+        .provenance
+        .composed
+        .iter()
+        .map(ComposedRevision::lock)
+        .collect();
     let config_path = config.save(project_root)?;
 
     // `.config/git.tpl.toml` is versioned with the project — a fresh clone must
@@ -1445,6 +1487,8 @@ pub enum UpdateOutcome {
         revision: Oid,
         /// Whether an uncommitted working tree was rendered.
         dirty: bool,
+        /// Whether the child lock was corrected without needing a new rendered-ref commit.
+        composed_changed: bool,
         /// Supplied answers that name no question in this template. Carried
         /// even here: a typo'd key is worth reporting whether or not the
         /// rendering changed.
@@ -1489,6 +1533,8 @@ pub enum UpdateOutcome {
         /// template adds a question. Worth telling the user, since it is the
         /// one file `update` does modify.
         answers_changed: bool,
+        /// Whether a composed child resolved to a different source, ref or commit.
+        composed_changed: bool,
         /// Whether the commit was written onto an empty ref, and so starts a
         /// history unrelated to anything the branch has merged.
         ///
@@ -1641,7 +1687,21 @@ pub fn update(
     // every later update — the one piece of state this design has no other
     // way to avoid needing.
     let identical = previous.as_ref().is_some_and(|p| p.tree == rendered.tree);
-    if migrations.is_empty() && identical {
+    let child_changed = recorded_previous
+        .as_ref()
+        .is_some_and(|previous| previous.composed != rendered.provenance.composed);
+    let composed: Vec<_> = rendered
+        .provenance
+        .composed
+        .iter()
+        .map(ComposedRevision::lock)
+        .collect();
+    let composed_changed = config.composed != composed;
+    if migrations.is_empty() && identical && !child_changed {
+        if composed_changed {
+            config.composed = composed;
+            config.save(project_root)?;
+        }
         return Ok(UpdateOutcome::UpToDate {
             revision_description: describe_revision(
                 &rendered.template.reference,
@@ -1650,6 +1710,7 @@ pub fn update(
             reference: rendered.template.reference.clone(),
             revision: rendered.template.revision,
             dirty: rendered.template.dirty,
+            composed_changed,
             ignored_answers: rendered.ignored_answers,
             ignored: rendered.template.ignored,
         });
@@ -1697,6 +1758,7 @@ pub fn update(
     // `git status` and commits it with whatever else they are doing.
     let answers_changed = config.answers != *rendered.context.answers();
     config.answers = rendered.context.answers().clone();
+    config.composed = composed;
     config.save(project_root)?;
 
     Ok(UpdateOutcome::Updated {
@@ -1715,6 +1777,7 @@ pub fn update(
         revision: rendered.template.revision,
         dirty: rendered.template.dirty,
         answers_changed,
+        composed_changed,
         started_new_history,
         migrations,
         moved_commit,
@@ -1742,6 +1805,10 @@ pub struct Status {
     pub available_commit: Option<Oid>,
     /// Whether the template has moved since the last rendering.
     pub template_moved: bool,
+    /// The selected children available now; `None` if their refs cannot be checked without consent/network.
+    pub available_composed: Option<Vec<ComposedRevision>>,
+    /// A child branch resolved to another commit since the last rendering.
+    pub composed_moved: bool,
     /// Whether the ref's tip is an ancestor of `HEAD`.
     pub merged: bool,
     /// How the local ref compares to the remote copy, if there is one.
@@ -1757,7 +1824,7 @@ impl Status {
     /// unmerged. Drives the exit code, so `git tpl status --quiet` is usable
     /// in CI as a drift check.
     pub fn is_pending(&self) -> bool {
-        self.template_moved || (self.tip.is_some() && !self.merged)
+        self.template_moved || self.composed_moved || (self.tip.is_some() && !self.merged)
     }
 }
 
@@ -1831,6 +1898,27 @@ pub fn status(
         _ => false,
     };
 
+    let available_composed = resolved.as_ref().and_then(|template| {
+        if template.manifest.compose.is_empty() {
+            return Some(Vec::new());
+        }
+        render_resolved(
+            template,
+            &config.template.source,
+            Some((project, project_root)),
+            config.answers.clone(),
+            user,
+            Answering::defaults(),
+            Trust::refuse(),
+        )
+        .ok()
+        .map(|rendered| rendered.provenance.composed)
+    });
+    let composed_moved = match (&available_composed, &recorded) {
+        (Some(available), Some(previous)) => available != &previous.composed,
+        _ => false,
+    };
+
     let head = project.head_commit()?;
     let merged = match (tip, head) {
         (Some(tip), Some(head)) => project.is_ancestor(tip, head)?,
@@ -1863,6 +1951,8 @@ pub fn status(
         available_reference_description,
         available_commit,
         template_moved,
+        available_composed,
+        composed_moved,
         merged,
         remote,
         worktree_clean: project.is_clean()?,
@@ -2529,6 +2619,8 @@ mod tests {
             available_reference_description: None,
             available_commit: None,
             template_moved: false,
+            available_composed: Some(Vec::new()),
+            composed_moved: false,
             merged: true,
             remote: None,
             worktree_clean: true,
@@ -2550,6 +2642,8 @@ mod tests {
             available_reference_description: None,
             available_commit: None,
             template_moved: false,
+            available_composed: Some(Vec::new()),
+            composed_moved: false,
             merged: true,
             remote: None,
             worktree_clean: true,

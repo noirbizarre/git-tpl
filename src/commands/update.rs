@@ -68,6 +68,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             reference,
             revision,
             dirty,
+            composed_changed,
             ignored_answers,
             ignored,
         } => {
@@ -77,18 +78,26 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ));
             report_ignored(&ctx.out, &ignored_answers);
             report_ignored_paths(&ctx.out, &ignored);
+            if composed_changed {
+                ctx.out
+                    .say("The resolved child commits were corrected in .config/git.tpl.toml.");
+            }
 
             // The id is not in the outcome, because nothing was created. It is
             // still what the caller asked about, so read it back off disk.
             let (id, ref_name) = ops::identify(&ctx.root)?;
-            serde_json::json!({
+            let mut result = serde_json::json!({
                 "result": "upToDate",
                 "id": id.as_str(),
                 "ref": ref_name,
                 "template": config.template.source,
                 "revision": crate::report::revision(Some(&reference), Some(revision), Some(dirty)),
                 "ignoredAnswers": ignored_answers,
-            })
+            });
+            if composed_changed {
+                result["composedChanged"] = true.into();
+            }
+            result
         }
 
         UpdateOutcome::Updated {
@@ -104,6 +113,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             revision,
             dirty,
             answers_changed,
+            composed_changed,
             started_new_history,
             migrations,
             moved_commit,
@@ -171,6 +181,12 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     "The recorded answers changed, so .config/git.tpl.toml was updated.",
                 ));
             }
+            if composed_changed {
+                ctx.out.say(muted(
+                    &ctx.out.theme,
+                    "The resolved child commits changed; .config/git.tpl.toml was updated.",
+                ));
+            }
 
             if started_new_history {
                 // Said rather than left to be discovered during a merge that
@@ -207,7 +223,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 None
             };
 
-            serde_json::json!({
+            let mut result = serde_json::json!({
                 "result": "updated",
                 "id": id.as_str(),
                 "ref": id.ref_name(),
@@ -226,7 +242,11 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "movedCommit": moved_commit.map(|oid| oid.to_hex()),
                 "ignoredAnswers": ignored_answers,
                 "pushed": pushed,
-            })
+            });
+            if composed_changed {
+                result["composedChanged"] = true.into();
+            }
+            result
         }
     };
 

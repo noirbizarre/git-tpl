@@ -70,32 +70,26 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     )?;
 
     if global.json {
-        println!(
-            "{}",
-            crate::report::success(serde_json::json!({
-                "template": {
-                    "name": rendered.template.manifest.name,
-                    "description": rendered.template.manifest.description,
-                },
-                "revision": crate::report::revision(
-                    Some(&rendered.template.reference),
-                    Some(rendered.template.revision),
-                    Some(rendered.template.dirty),
-                ),
-                "output": args.output,
-                "files": rendered.files.iter().map(|f| serde_json::json!({
-                    "path": f.path,
-                    "bytes": f.content.len(),
-                    "executable": f.executable,
-                    // Whether the file went through MiniJinja at all. This is
-                    // how an author confirms that a workflow full of `${{ }}`
-                    // really was copied byte-for-byte rather than rendered.
-                    "templated": f.templated,
-                })).collect::<Vec<_>>(),
-                "ignoredAnswers": rendered.ignored_answers,
-                "skippedByGitignore": rendered.template.ignored,
-            }))
-        );
+        let mut result = serde_json::json!({
+            "template": {
+                "name": rendered.template.manifest.name,
+                "description": rendered.template.manifest.description,
+            },
+            "revision": crate::report::revision(
+                Some(&rendered.template.reference), Some(rendered.template.revision), Some(rendered.template.dirty),
+            ),
+            "output": args.output,
+            "files": rendered.files.iter().map(|f| serde_json::json!({
+                "path": f.path, "bytes": f.content.len(), "executable": f.executable,
+                "templated": f.templated,
+            })).collect::<Vec<_>>(),
+            "ignoredAnswers": rendered.ignored_answers,
+            "skippedByGitignore": rendered.template.ignored,
+        });
+        if !rendered.provenance.composed.is_empty() {
+            result["composed"] = crate::report::composed(&rendered.provenance.composed);
+        }
+        println!("{}", crate::report::success(result));
         return Ok(crate::exit::SUCCESS);
     }
 

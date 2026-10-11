@@ -130,9 +130,9 @@ A `remote` *data source* under `[data]` is an unrelated thing — an HTTP URL th
 
 ### `[[compose]]`
 
-Render independent module trees from one or more sibling repositories, pinned to a tag or commit.
-Every declaration has `source` (local path or Git URL, optionally an expression), `rev` (a fixed tag/commit),
-and `from` (the parent string question that names zero or more comma-separated module IDs).
+Render independent module trees from one or more sibling repositories, tracking the exact commit resolved from a ref.
+Every declaration has `source` (local path or Git URL, optionally an expression), `ref` (branch, tag or commit),
+and `from` (the parent list question that names zero or more module IDs).
 The child declares `module_name` and `module_path` as its own questions; it never inherits the parent's answers.
 See [Composing module templates](composition.md) for the output layout, trust decisions and updating projects.
 

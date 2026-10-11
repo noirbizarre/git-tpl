@@ -1,7 +1,7 @@
 # Computed values
 
-The pure `split` filter turns a comma-separated answer into a list for rendering files that enumerate the
-same module IDs passed to [`[[compose]]`](composition.md), e.g. `modules | split(',')`.
+A list answer can be iterated directly in files that enumerate the same module IDs passed to
+[`[[compose]]`](composition.md), e.g. `{% raw %}{% for id in modules %}{% endfor %}{% endraw %}`.
 
 A computed value is derived from answers, data and other computed values.
 It is declared once and available everywhere, so a template does not repeat the same expression in twelve files.

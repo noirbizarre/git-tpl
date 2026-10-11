@@ -233,11 +233,11 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
         if !manifest
             .questions
             .get(&entry.from)
-            .is_some_and(|question| question.kind == crate::template::QuestionKind::String)
+            .is_some_and(|question| question.kind == crate::template::QuestionKind::List)
         {
             return Err(ManifestError::InvalidCompose {
                 reason: format!(
-                    "`[[compose]]` requires a string question `{}` across the inheritance chain",
+                    "`[[compose]]` requires a list question `{}` across the inheritance chain",
                     entry.from
                 ),
             }

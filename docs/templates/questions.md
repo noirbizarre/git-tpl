@@ -12,7 +12,7 @@ help = "Used for the package name and the README title"
 
 | Key | Type | Meaning |
 |---|---|---|
-| `type` | string | `string`, `boolean`, `integer`, `choice`, `multi_choice`. |
+| `type` | string | `string`, `boolean`, `integer`, `choice`, `multi_choice`, `list`. |
 | `prompt` | string | Shown to the user. Defaults to the question's name. |
 | `help` | string | A line of explanation under the prompt. |
 | `default` | any / expression | The pre-filled value. |
@@ -23,6 +23,8 @@ help = "Used for the package name and the README title"
 | `default_from` | string | Where the *prompt default* comes from. `git:<key>`, or an expression over `git`, `dir` and `remote`. |
 | `pattern` | string | A regular expression every answer must match. `string` only. |
 | `message` | string | What to say when `pattern` rejects an answer. |
+| `item_pattern` | string | A regular expression each string in a `list` answer must match. |
+| `item_message` | string | What to say when `item_pattern` rejects an item. |
 
 ## Types
 
@@ -74,6 +76,21 @@ help = "Used for the package name and the README title"
     ```
 
     The answer is a list, so `{% if 'serde' in features %}` works in templates.
+
+=== "list"
+
+    ```toml
+    [questions.modules]
+    type = "list"
+    prompt = "Module IDs"
+    default = []
+    item_pattern = "^[a-z0-9]+(-[a-z0-9]+)*$"
+    item_message = "use lowercase words and hyphens"
+    ```
+
+    The answer is an ordered array of strings, with no predefined choices.
+    Supply CLI answers as JSON arrays, e.g. `--answer 'modules=["jira","confluence"]'`.
+    An empty array is valid; each item is checked independently against `item_pattern`.
 
 Types are enforced.
 Supplying `--answer port=nope` for an `integer` question is an error naming the question, the value and the

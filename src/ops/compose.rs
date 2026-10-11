@@ -10,6 +10,7 @@ use super::{Answering, OpError, Request, Trust, render_resolved, resolve};
 use crate::context::Context;
 use crate::data::{Decision, REMOTE_LIMIT_BYTES, RemoteRequest, SourceKind};
 use crate::eval::{Partials, Undefined, render_string_with};
+use crate::provenance::ComposedRevision;
 use crate::render::Rendered;
 use crate::template::{ComposeDecl, Value};
 use crate::userconfig::UserConfig;
@@ -21,26 +22,13 @@ pub enum ComposeError {
     #[error("`[[compose]]` for `{from}`: {reason}")]
     #[diagnostic(
         code(tpl::compose::invalid),
-        help("use unique lowercase hyphenated module IDs, separated by commas")
+        help("use unique lowercase hyphenated module IDs in a list answer")
     )]
     Invalid {
         /// Parent question naming the module list.
         from: String,
         /// Why its value cannot be used.
         reason: String,
-    },
-
-    /// The child repository revision can move.
-    #[error("`[[compose]]` child `{origin}` is not pinned at `{reference}`")]
-    #[diagnostic(
-        code(tpl::compose::unpinned),
-        help("pin each composed template to a tag or commit SHA")
-    )]
-    Unpinned {
-        /// Child repository.
-        origin: String,
-        /// Reference requested by the parent.
-        reference: String,
     },
 
     /// A remote child was named by a template but never authorised by this caller.
@@ -98,7 +86,7 @@ fn valid_id(name: &str) -> bool {
         && !name.ends_with('-')
 }
 
-/// Render independent child repositories once per comma-separated module ID in the parent's recorded answer.
+/// Render independent child repositories once per module ID in the parent's ordered list answer.
 pub fn render(
     entries: &[ComposeDecl],
     context: &Context,
@@ -106,9 +94,11 @@ pub fn render(
     user: &UserConfig,
     trust: &mut Trust<'_>,
     parent: &mut Vec<Rendered>,
-) -> Result<(), ComposeError> {
+    recorded: Option<&[ComposedRevision]>,
+) -> Result<Vec<ComposedRevision>, ComposeError> {
     let mut paths: HashSet<String> = parent.iter().map(|file| file.path.clone()).collect();
     let mut module_ids = HashSet::new();
+    let mut revisions = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let source = render_string_with(
             &entry.source,
@@ -121,36 +111,49 @@ pub fn render(
             origin: entry.source.clone(),
             source: Box::new(error.into()),
         })?;
-        let Some(Value::String(list)) = context.answers().get(&entry.from) else {
+        let Some(Value::Array(items)) = context.answers().get(&entry.from) else {
             return Err(ComposeError::Invalid {
                 from: entry.from.clone(),
-                reason: "the answer must be a string".into(),
+                reason: "the answer must be a list of strings".into(),
             });
         };
         // Empty means an initially empty plugin; no child repository is cloned, fetched or read.
-        let ids: Vec<_> = if list.trim().is_empty() {
-            Vec::new()
-        } else {
-            list.split(',').map(str::trim).collect()
-        };
-        if ids.len() > 32 {
+        if items.len() > 32 {
             return Err(ComposeError::Invalid {
                 from: entry.from.clone(),
                 reason: "more than 32 modules; split the project or choose fewer".into(),
             });
         }
-        for id in &ids {
-            if !valid_id(id) || !module_ids.insert((*id).to_string()) {
+        let mut ids = Vec::new();
+        for item in items {
+            let Some(id) = item.as_str() else {
+                return Err(ComposeError::Invalid {
+                    from: entry.from.clone(),
+                    reason: "every module ID must be a string".into(),
+                });
+            };
+            if !valid_id(id) || !module_ids.insert(id.to_string()) {
                 return Err(ComposeError::Invalid {
                     from: entry.from.clone(),
                     reason: format!("`{id}` is invalid or duplicated"),
                 });
             }
+            ids.push(id);
         }
         if ids.is_empty() {
             continue;
         }
-        // Consent to a remote child is separate from trusting the parent. A tag/commit is checked *after* fetching.
+        let locked =
+            recorded.and_then(|children| children.iter().find(|child| child.from == entry.from));
+        if let Some(previous) = locked
+            && (previous.source != source || previous.reference != entry.reference)
+        {
+            return Err(ComposeError::Invalid {
+                from: entry.from.clone(),
+                reason: "the recorded child source or ref differs from this rendering".into(),
+            });
+        }
+        // Consent to a remote child is separate from trusting the parent. The resolved SHA is kept after fetching.
         if resolve::local_path(&source).is_none() && !user.trust.allows(&source) {
             let name = format!("compose:{index}");
             let requests = [RemoteRequest {
@@ -168,10 +171,11 @@ pub fn render(
                 return Err(ComposeError::Untrusted { origin: source });
             }
         }
+        let pin = locked.map(|child| child.revision.to_hex());
         let child = resolve::resolve(
             Request {
                 source: &source,
-                reference: Some(&entry.rev),
+                reference: pin.as_deref().or(Some(&entry.reference)),
                 root: None,
                 dirty: false,
             },
@@ -182,24 +186,17 @@ pub fn render(
             origin: source.clone(),
             source: Box::new(error.into()),
         })?;
-        let pinned =
-            super::extends::is_pinned(child.repo.as_ref(), &entry.rev).map_err(|error| {
-                ComposeError::Child {
-                    origin: source.clone(),
-                    source: Box::new(error.into()),
-                }
-            })?;
-        if !pinned {
-            return Err(ComposeError::Unpinned {
-                origin: source.clone(),
-                reference: entry.rev.clone(),
-            });
-        }
         if !child.manifest.compose.is_empty() {
             return Err(ComposeError::Nested {
                 origin: source.clone(),
             });
         }
+        revisions.push(ComposedRevision {
+            from: entry.from.clone(),
+            source: source.clone(),
+            reference: entry.reference.clone(),
+            revision: child.revision,
+        });
         for id in ids {
             let mut answers = BTreeMap::new();
             answers.insert("module_name".into(), Value::String(id.to_string()));
@@ -239,5 +236,5 @@ pub fn render(
         }
     }
     parent.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(())
+    Ok(revisions)
 }

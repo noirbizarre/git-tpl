@@ -1,4 +1,4 @@
-# ADR-038: Compose pinned sibling templates as independent module trees
+# ADR-038: Compose revision-tracked sibling templates as independent module trees
 
 **Status:** Accepted
 
@@ -11,23 +11,24 @@ Module projects need this while keeping their source and integration skeletons i
 ## Decision
 
 An optional `[[compose]]` declaration on a parent template names a child Git repository,
-a tag or commit revision and a parent string question holding comma-separated module IDs.
+a branch, tag or commit ref and a parent list question holding module IDs.
 An empty answer reads no child repository.
-Each ID renders the child from that same pinned revision with its own `module_name` and `module_path` answers.
+Each ID renders the child from that same resolved commit with its own `module_name` and `module_path` answers.
 The child may receive `version` and `memcastle` only when it declares those questions.
 No other question, data source or partial leaks across siblings.
-Duplicate IDs, invalid IDs, missing or non-string lists, branches and rendered path collisions are refusals.
+Duplicate IDs, invalid IDs, missing or non-list answers and rendered path collisions are refusals.
 
-The parent records the list and pins the child revisions in its manifest.
+The parent records the list; its manifest names child refs, while project config and rendered provenance record
+the exact child commits resolved at init or update.
+Historical backport uses those recorded commits even after a branch moves.
 Changing a selected list later runs the same append-only `update` and ordinary Git merge as any other answer change;
 no second attachment, executable post-render hook or custom merge strategy is introduced.
 A remote child requires its own explicit trust decision before cloning,
 as an `[extends]` ancestor already does.
 Nested composition is refused so the graph of fetches stays bounded and understandable.
 
-The pure `split` MiniJinja filter lets a parent's files iterate the same comma-separated answer
-without executing a script during rendering.
-The rendered tree remains deterministic for the recorded answers and pinned repositories.
+A parent's files can iterate its typed list without executing a script during rendering.
+The rendered tree remains deterministic for the recorded answers and child commits.
 
 ## Alternatives
 

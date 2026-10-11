@@ -26,7 +26,9 @@ use super::hunks::{self, Hunk, Picking, Selection};
 use super::unsubstitute::{
     self, LineContext, Proposal, Unsubstitute, Unsubstitution, Verdict, split_terminator,
 };
-use super::{Answering, OpError, Target, Trust, describe_revision, identify, render_files};
+use super::{
+    Answering, OpError, Target, Trust, describe_revision, identify, render_files_with_composed,
+};
 use std::sync::Arc;
 
 /// Why a backport could not be produced.
@@ -370,7 +372,7 @@ pub fn backport(
         .or_else(|| config.template.r#ref.clone());
     let revision = recorded.as_ref().and_then(|r| r.revision);
 
-    let rendered = render_files(
+    let rendered = render_files_with_composed(
         Target {
             source: &config.template.source,
             // A SHA if we have one: a branch name would follow the branch, and
@@ -387,6 +389,7 @@ pub fn backport(
         user,
         answering,
         trust,
+        recorded.as_ref().map(|r| r.composed.as_slice()),
     )?;
 
     // The proof depends on the rendering we hold matching the one the ref

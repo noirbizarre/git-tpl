@@ -18,6 +18,8 @@ pub enum QuestionKind {
     Choice,
     /// Any number of a fixed set. The answer is an array.
     MultiChoice,
+    /// Any ordered number of freely named string values.
+    List,
 }
 
 impl QuestionKind {
@@ -29,6 +31,7 @@ impl QuestionKind {
             QuestionKind::Integer => "an integer",
             QuestionKind::Choice => "a string",
             QuestionKind::MultiChoice => "an array",
+            QuestionKind::List => "a list",
         }
     }
 
@@ -48,6 +51,7 @@ impl QuestionKind {
             QuestionKind::Integer => "integer",
             QuestionKind::Choice => "choice",
             QuestionKind::MultiChoice => "multi_choice",
+            QuestionKind::List => "list",
         }
     }
 
@@ -63,6 +67,7 @@ impl QuestionKind {
             QuestionKind::Boolean => matches!(value, Value::Bool(_)),
             QuestionKind::Integer => matches!(value, Value::Integer(_)),
             QuestionKind::MultiChoice => matches!(value, Value::Array(_)),
+            QuestionKind::List => matches!(value, Value::Array(_)),
         }
     }
 }
@@ -155,6 +160,14 @@ pub struct Question {
     /// but rarely kind. Meaningless without `pattern`, and refused there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+
+    /// Regular expression checked against each entry of a free-form string list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_pattern: Option<String>,
+
+    /// Actionable reason for an item rejected by `item_pattern`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_message: Option<String>,
 }
 
 /// The shorthand form of `default_from`.
@@ -221,6 +234,16 @@ impl Question {
                 .unwrap_or_else(|| format!("must match `{pattern}`")),
         )
     }
+
+    /// The explanation for a rejected list item, with the declared expression as a fallback.
+    pub fn item_pattern_message(&self) -> Option<String> {
+        let pattern = self.item_pattern.as_deref()?;
+        Some(
+            self.item_message
+                .clone()
+                .unwrap_or_else(|| format!("must match `{pattern}`")),
+        )
+    }
 }
 
 /// Whether a string contains MiniJinja syntax.
@@ -246,6 +269,8 @@ mod tests {
     #[case(QuestionKind::Integer, Value::Float(1.0), false)]
     #[case(QuestionKind::MultiChoice, Value::Array(vec![]), true)]
     #[case(QuestionKind::MultiChoice, Value::String("a".into()), false)]
+    #[case(QuestionKind::List, Value::Array(vec![]), true)]
+    #[case(QuestionKind::List, Value::String("[\"a\"]".into()), false)]
     fn a_kind_accepts_only_its_own_type(
         #[case] kind: QuestionKind,
         #[case] value: Value,
@@ -262,6 +287,7 @@ mod tests {
     #[case(QuestionKind::Integer)]
     #[case(QuestionKind::Choice)]
     #[case(QuestionKind::MultiChoice)]
+    #[case(QuestionKind::List)]
     fn the_declared_name_is_the_serialised_name(#[case] kind: QuestionKind) {
         let serialised = serde_json::to_value(kind).expect("serialise");
         assert_eq!(serialised, serde_json::Value::from(kind.declared_name()));
@@ -292,6 +318,8 @@ mod tests {
             default_from: None,
             pattern: None,
             message: None,
+            item_pattern: None,
+            item_message: None,
         };
         assert_eq!(question.default_expression(), None);
     }
@@ -316,6 +344,8 @@ mod tests {
             default_from: default_from.map(str::to_string),
             pattern: None,
             message: None,
+            item_pattern: None,
+            item_message: None,
         };
         assert_eq!(question.git_config_key(), expected);
     }
@@ -341,6 +371,8 @@ mod tests {
             default_from: None,
             pattern: pattern.map(str::to_string),
             message: message.map(str::to_string),
+            item_pattern: None,
+            item_message: None,
         };
         assert_eq!(question.pattern_message().as_deref(), expected);
     }
