@@ -53,6 +53,7 @@ src/
 ├── gitconfig.rs     tpl.* preferences and their precedence
 ├── refs.rs          template id → refs/tpl/<id>
 ├── provenance.rs    commit trailers
+├── revision.rs      shared revision description formatting
 ├── template/        manifest, questions, the Value type
 ├── context.rs       the shared evaluation context
 ├── graph.rs         the dependency DAG

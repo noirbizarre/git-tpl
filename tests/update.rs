@@ -937,7 +937,12 @@ fn an_unchanged_render_records_new_answers_without_advancing_the_ref() {
     .json();
     assert_eq!(preview["result"], "upToDate");
     assert_eq!(preview["answersChanged"], true);
-    assert!(!world.project.read(".config/git.tpl.toml").contains("new_answer"));
+    assert!(
+        !world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("new_answer")
+    );
 
     let result = tpl(&world.project, &["--json", "update", "--defaults"])
         .success()

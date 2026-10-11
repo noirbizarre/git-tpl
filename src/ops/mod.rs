@@ -357,11 +357,7 @@ impl Answering<'_> {
 /// A branch name alone cannot tell you whether the template moved, which is the
 /// question every one of these lines exists to answer.
 pub fn describe_revision(reference: &str, revision: Oid) -> String {
-    if reference == crate::provenance::WORKTREE_REF {
-        format!("{} (+ uncommitted changes)", revision.short())
-    } else {
-        format!("{reference} ({})", revision.short())
-    }
+    crate::revision::describe_revision(reference, revision)
 }
 
 /// Make `dir` exist and be empty.

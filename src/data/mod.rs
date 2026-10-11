@@ -871,7 +871,7 @@ impl<'a> Loader<'a> {
                 fail(format!(
                     "no such file in {} at {}",
                     location.repo,
-                    crate::ops::describe_revision(&location.reference, revision)
+                    crate::revision::describe_revision(&location.reference, revision)
                 ))
             })?;
 
@@ -984,7 +984,7 @@ impl<'a> Loader<'a> {
                 kind: SourceKind::TemplateFile,
                 reason: format!(
                     "no such file in the template repository at {}",
-                    crate::ops::describe_revision(&template.reference, template.revision)
+                    crate::revision::describe_revision(&template.reference, template.revision)
                 ),
             })
     }
