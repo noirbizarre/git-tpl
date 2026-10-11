@@ -715,6 +715,7 @@ default = "a"
 fn force_re_renders_over_an_existing_attachment() {
     let world = World::new();
     world.init(&["--answer", "project_name=first"]).success();
+    let previous = world.project.rev_parse(&world.ref_name());
 
     world
         .init(&[])
@@ -735,6 +736,9 @@ fn force_re_renders_over_an_existing_attachment() {
     .success();
 
     assert!(world.project.read("README.md").contains("second"));
+    let current = world.project.rev_parse(&world.ref_name());
+    assert_ne!(previous, current);
+    assert_eq!(world.project.rev_parse(&format!("{current}^")), previous);
 }
 
 /// `update --dry-run` has always listed what would change. A flag meaning

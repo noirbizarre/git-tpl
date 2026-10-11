@@ -1154,12 +1154,22 @@ pub fn init(
     // commit in their repository to explain away.
     let note = template_note(&rendered)?;
 
-    // An orphan commit: the template has no history in this project before
-    // now, and inventing a parent would be a lie.
-    let commit = project.create_commit(rendered.tree, &[], &rendered.provenance.to_message())?;
+    // A forced reattachment to the same ref must descend from its tip: an
+    // orphan here destroys the merge base of every previous attachment.
+    // Only a genuinely new ref starts with an orphan rendering.
+    let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
+    let commit =
+        project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
     project.set_ref(&ref_name, commit, "tpl: initial render")?;
 
-    let changes = project.diff_trees(None, rendered.tree, &[])?;
+    let changes = project.diff_trees(
+        parents
+            .first()
+            .map(|parent| project.commit(*parent).map(|commit| commit.tree))
+            .transpose()?,
+        rendered.tree,
+        &[],
+    )?;
 
     // Written after rendering, so a template that fails to render leaves no
     // half-initialised project behind.

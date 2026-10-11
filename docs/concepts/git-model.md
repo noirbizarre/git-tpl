@@ -125,6 +125,8 @@ Both are ordinary commits on the same append-only history; see [ADR-024](../adr/
 
 `git tpl init` creates `G0` as an **orphan** commit — no parent, because the template has no history in your
 project before this moment — and then **merges it into your current branch**, allowing unrelated histories.
+With `init --force` on an existing template ref, the new rendering instead has that ref's tip as its parent;
+reattaching must not destroy the merge base established by the first attachment.
 
 ```
 main:  A ─── M
