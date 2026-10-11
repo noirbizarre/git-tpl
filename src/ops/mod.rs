@@ -1620,6 +1620,7 @@ pub fn update(
         config.template.r#ref = Some(reference.to_string());
     }
 
+    let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let supplied = merge_answers(config.answers.clone(), overrides);
 
     let rendered = render(
@@ -1635,7 +1636,12 @@ pub fn update(
 
     enforce_strict_answers(
         strict_answers,
-        &rendered.ignored_answers,
+        &rendered
+            .ignored_answers
+            .iter()
+            .filter(|key| current_keys.contains(*key))
+            .cloned()
+            .collect::<Vec<_>>(),
         rendered.template.manifest.questions.keys().cloned(),
     )?;
 

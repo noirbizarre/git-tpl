@@ -270,6 +270,7 @@ fn dry_run(
     overrides: std::collections::BTreeMap<String, tpl::template::Value>,
     interactive: bool,
 ) -> Result<serde_json::Value, OpError> {
+    let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let answers = ops::merge_answers(config.answers.clone(), overrides);
 
     // The same two helpers the real run uses. Reimplementing them here dropped
@@ -294,7 +295,12 @@ fn dry_run(
 
     enforce_strict_answers(
         &args.answers,
-        &rendered.ignored_answers,
+        &rendered
+            .ignored_answers
+            .iter()
+            .filter(|key| current_keys.contains(*key))
+            .cloned()
+            .collect::<Vec<_>>(),
         rendered.template.manifest.questions.keys().cloned(),
     )?;
     report_ignored(&ctx.out, &rendered.ignored_answers);

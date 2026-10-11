@@ -879,3 +879,22 @@ fn strict_answers_refuses_a_key_that_names_no_question() {
         "a refused update must not advance the ref"
     );
 }
+
+#[test]
+fn strict_answers_keeps_obsolete_recorded_keys_lenient_in_real_and_dry_runs() {
+    let world = World::new();
+    world.init(&[]).success();
+    let config = world.project.read(".config/git.tpl.toml");
+    world.project.write(
+        ".config/git.tpl.toml",
+        &format!("{config}obsolete = \"old\"\n"),
+    );
+
+    for extra in [vec![], vec!["--dry-run"]] {
+        let mut args = vec!["--json", "update", "--defaults", "--strict-answers"];
+        args.extend(extra);
+        let result = tpl(&world.project, &args).success().json();
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["ignoredAnswers"], serde_json::json!(["obsolete"]));
+    }
+}
