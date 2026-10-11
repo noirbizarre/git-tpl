@@ -70,8 +70,10 @@ the ref.
 Set it explicitly when the template moves address but is conceptually the same template — see
 [Pointing at a different template](templates/local-development.md#pointing-an-existing-project-at-a-different-template).
 
-Changing `id` or `source` changes the ref name, so the next `git tpl update` finds no ref to advance and writes an
+Changing the resolved `id` changes the ref name, so the next `git tpl update` finds no ref to advance and writes an
 orphan commit instead: a new history, sharing no merge base with what your branch already merged.
+Changing `source` only has this effect if it also changes the resolved `id`; an explicit `id` or equivalent source
+spellings can keep the same ref.
 That is usually what you want when you deliberately repoint a project, and it is never what you want when you
 have simply not fetched the ref yet.
 `update` says which one it thinks happened — see
