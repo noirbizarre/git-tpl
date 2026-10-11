@@ -337,7 +337,7 @@ what a URL prefix abbreviates, and which templates you have already agreed to le
 
 ## The environment
 
-git-tpl reads seven environment variables and writes none.
+git-tpl reads eight environment variables and writes none.
 Everything else it knows comes from a file you can point at.
 
 | Variable | Read for |
@@ -348,6 +348,7 @@ Everything else it knows comes from a file you can point at.
 | `NO_COLOR` | [no-color.org](https://no-color.org). Presence is the signal, whatever the value. |
 | `FORCE_COLOR` / `CLICOLOR_FORCE` | [force-color.org](https://force-color.org) and [bixense.com/clicolors](https://bixense.com/clicolors/) respectively — treated as aliases for the same signal, as the (now-deprecated) clicolors standard itself recommends. Either, with any value but `0`, forces colour. |
 | `TERM` | `dumb` means no colour. |
+| `GITHUB_ACTIONS` | `true` enables GitHub Actions annotations in `git tpl test`; see [test output](usage/test.md#under-github-actions). |
 
 Colour precedence, highest first — `--color` decides outright when it is not `auto`, and only then does the
 environment get a say:
