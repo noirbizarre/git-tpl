@@ -35,7 +35,7 @@ absent = [".github/workflows/ci.yml"]
 "pyproject.toml" = ['name = "thing"']
 
 [expect.lacks]
-".github/workflows/ci.yml" = ["deploy"]
+"pyproject.toml" = ["deploy"]
 ```
 
 | Key | Meaning |
