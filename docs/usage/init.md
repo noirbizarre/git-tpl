@@ -127,7 +127,7 @@ Merged into main.
 Answers recorded in .config/git.tpl.toml and committed.
 ```
 
-**Template** is the source exactly as you typed it, not the manifest's `name`: it is what
+**Template** is the recorded source after any shortcut expansion, not the manifest's `name`: it is what
 `.config/git.tpl.toml` will record, and what a later `--ref` or `--id` will be resolved against.
 
 ## Starting from nothing
