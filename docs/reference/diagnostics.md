@@ -151,6 +151,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::ops::missing_note_file` | `note_file` names nothing at the template revision. The path is relative to the repository root, not the render root. |
 | `tpl::ops::note_file_not_utf8` | `note_file` names a binary file. A note is text. |
 | `tpl::ops::migration_file_not_utf8` | A migration file discovered under `migrations/` is not valid UTF-8. |
+| `tpl::ops::missing_template_revision` | The previous template commit is unavailable from the resolved source, and the current template has migrations. Restore the commit under a fetchable branch or tag in the template repository so `update` can determine which migrations are new. |
 | `tpl::ops::missing_migration_message_file` | A migration's `message_file` names nothing at the template revision. |
 | `tpl::ops::migration_message_file_not_utf8` | A migration's `message_file` names a binary file. |
 | `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist yet. Run `init` or `update`. |

@@ -170,6 +170,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::ops::migration_message_file_not_utf8",
     "tpl::ops::missing_migration_message_file",
     "tpl::ops::missing_note_file",
+    "tpl::ops::missing_template_revision",
     "tpl::ops::no_rendered_ref",
     "tpl::ops::no_such_directory",
     "tpl::ops::no_such_path",

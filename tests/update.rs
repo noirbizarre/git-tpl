@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{World, tpl, tpl_colored};
+use common::{World, file_url, tpl, tpl_colored};
 
 /// The single most important test in the suite.
 #[test]
@@ -51,6 +51,149 @@ fn a_new_rendering_has_the_previous_one_as_its_parent() {
 
     let parent = world.project.rev_parse(&format!("{}^", world.ref_name()));
     assert_eq!(parent, first);
+}
+
+/// A squash merge does not retain the original branch commit in a fresh
+/// template clone, even though the project's rendered ref still records it.
+fn template_with_deleted_source_branch() -> (World, String) {
+    let world = World::new();
+    world.template.repo.git(&["switch", "-c", "ci/ship"]);
+    world.template.repo.write(
+        "template/README.md.jinja",
+        "# {{ project_name }}\n\nOn the old branch.\n",
+    );
+    world.template.repo.commit_all("feat: ship the template");
+    let old_revision = world.template.repo.rev_parse("HEAD");
+
+    tpl(
+        &world.project,
+        &[
+            "init",
+            &file_url(&world.template.repo.path),
+            "--id",
+            "template",
+            "--ref",
+            "ci/ship",
+            "--defaults",
+        ],
+    )
+    .success();
+
+    world.template.repo.git(&["switch", "main"]);
+    world.template.repo.git(&["merge", "--squash", "ci/ship"]);
+    world
+        .template
+        .repo
+        .commit_all("feat: squash ship into main");
+    world.template.repo.git(&["branch", "-D", "ci/ship"]);
+    (world, old_revision)
+}
+
+#[test]
+fn an_update_uses_the_local_rendered_history_after_the_source_branch_is_deleted() {
+    let (world, old_revision) = template_with_deleted_source_branch();
+    let before = world.project.rev_parse(&world.ref_name());
+    let before_state = world.project.working_state();
+    world.template.repo.write(
+        "template/README.md.jinja",
+        "# {{ project_name }}\n\nOn main after the squash.\n",
+    );
+    world.template.repo.commit_all("feat: advance main");
+    let latest_revision = world.template.repo.rev_parse("HEAD");
+
+    let preview = tpl(
+        &world.project,
+        &[
+            "--json",
+            "update",
+            "--ref",
+            "main",
+            "--defaults",
+            "--dry-run",
+        ],
+    )
+    .success()
+    .json();
+    assert_eq!(preview["result"], "wouldUpdate");
+    assert_eq!(world.project.rev_parse(&world.ref_name()), before);
+    assert_eq!(world.project.working_state(), before_state);
+
+    let result = tpl(
+        &world.project,
+        &["--json", "update", "--ref", "main", "--defaults"],
+    )
+    .success()
+    .json();
+    assert_eq!(result["result"], "updated");
+    assert_eq!(result["previousRevision"]["commit"], old_revision);
+    assert_eq!(result["revision"]["commit"], latest_revision);
+    assert_eq!(result["migrations"], serde_json::json!([]));
+    assert_eq!(world.project.working_state(), before_state);
+    assert_eq!(
+        world.project.rev_parse(&format!("{}^", world.ref_name())),
+        before,
+        "the old rendered commit remains the merge base"
+    );
+    assert!(
+        world
+            .project
+            .git(&["show", &format!("{}:README.md", world.ref_name())])
+            .contains("On main after the squash.")
+    );
+    assert!(
+        world
+            .project
+            .commit_message(&world.ref_name())
+            .contains(&latest_revision)
+    );
+}
+
+#[test]
+fn a_configured_main_update_succeeds_when_the_old_source_commit_is_gone() {
+    let (world, _) = template_with_deleted_source_branch();
+    let config = world.project.read(".config/git.tpl.toml");
+    world.project.write(
+        ".config/git.tpl.toml",
+        &config.replace("ref = \"ci/ship\"", "ref = \"main\""),
+    );
+    let before = world.project.rev_parse(&world.ref_name());
+
+    // The squash left the rendered output unchanged, so missing source
+    // history alone must not force a provenance-only commit.
+    let result = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+    assert_eq!(result["result"], "upToDate");
+    assert_eq!(world.project.rev_parse(&world.ref_name()), before);
+}
+
+#[test]
+fn missing_source_history_with_migrations_is_an_actionable_refusal() {
+    let (world, old_revision) = template_with_deleted_source_branch();
+    world.add_migration(
+        "000-move.toml",
+        "[[moves]]\nfrom = \"README.md\"\nto = \"docs/README.md\"\n",
+    );
+    let before = world.project.rev_parse(&world.ref_name());
+    let before_state = world.project.working_state();
+
+    for args in [
+        vec![
+            "--json",
+            "update",
+            "--ref",
+            "main",
+            "--defaults",
+            "--dry-run",
+        ],
+        vec!["--json", "update", "--ref", "main", "--defaults"],
+    ] {
+        let output = tpl(&world.project, &args).failure();
+        assert_eq!(output.error_code(), "tpl::ops::missing_template_revision");
+        assert!(output.stdout.contains(&old_revision), "{}", output.stdout);
+        assert_eq!(world.project.rev_parse(&world.ref_name()), before);
+        assert_eq!(world.project.working_state(), before_state);
+    }
 }
 
 /// The determinism guarantee, observed from outside: identical inputs produce

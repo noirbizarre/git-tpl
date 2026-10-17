@@ -147,6 +147,14 @@ crosses it, however many template commits separate the two renderings.
 See [ADR-024](../adr/024-template-migrations.md) for the full reasoning, including why a move is applied as its
 own commit rather than folded into the ordinary one.
 
+If the template branch used for the previous rendering was squash-merged and deleted, its recorded source commit
+may no longer be available in a fresh template clone. The local `refs/tpl/<id>` still holds the previous rendering,
+so `update` and `update --dry-run` can continue from it when the current template has no migration files.
+If the current template **does** contain migrations, `update` cannot tell which were already applied and stops with
+`tpl::ops::missing_template_revision` before changing the ref. Restore the recorded `Template-Commit` under a
+fetchable branch or tag in the template repository, then retry. Fetching it into the project repository alone does
+not help: migration discovery reads the *template* repository.
+
 A migration message is sanitised and framed exactly like a template's `init`-time note (see [`init`](init.md)):
 shown once, in an attributed block, never executed.
 Its `--json` field carries the raw text, since a `--json` consumer is not a terminal.
