@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.2](https://github.com/noirbizarre/git-tpl/compare/0.14.1..0.14.2) - 2026-10-17
+
+### 🐛 Bug Fixes
+
+- **compose** Allow shared module IDs across lists ([#181](https://github.com/noirbizarre/git-tpl/issues/181)) - ([8227e5f](https://github.com/noirbizarre/git-tpl/commit/8227e5fd619b72787eaf62d732eeebe5f1737301))
+
 ## [0.14.1](https://github.com/noirbizarre/git-tpl/compare/0.14.0..0.14.1) - 2026-10-17
 
 ### 🐛 Bug Fixes
