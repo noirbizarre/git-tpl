@@ -106,6 +106,31 @@ resolve `git tpl`.
     be named by its backend — `cargo:` or `github:`.
     Getting the short name is tracked in [issue #25](https://github.com/noirbizarre/git-tpl/issues/25).
 
+## In GitHub Actions
+
+Use this repository as an action to install a release binary on the runner's `PATH`:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: noirbizarre/git-tpl@main
+    with:
+      version: 0.14.3
+  - run: git tpl --version
+```
+
+`version` is optional.
+When omitted, the action installs the latest published release; when set, it must be the exact release tag (such as
+`0.14.3`, without a `v` prefix).
+The action ref (`@main` above) selects the installer code, while `version` selects the binary.
+For reproducible workflows, pin both to a commit or tag containing the action and an exact released version.
+
+The action supports Linux x86-64 and arm64, and macOS Intel and Apple silicon runners.
+The installer checks the archive against the release's `SHA256SUMS` before adding `git-tpl` to the `PATH` of later
+steps.
+Checkout is needed when the subsequent `git tpl` command operates on your repository; installation itself does
+not require it.
+
 ## From a release
 
 Download the archive for your platform from the [releases page](https://github.com/noirbizarre/git-tpl/releases),

@@ -47,6 +47,20 @@ entry for git-tpl* until you generate them; the other methods include both.
 The binary must be named `git-tpl` and be on your `PATH` — that is how Git
 resolves `git tpl`.
 
+In GitHub Actions, install it for subsequent steps:
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+  - uses: noirbizarre/git-tpl@main
+    with:
+      version: 0.14.3 # omit to install the latest release
+  - run: git tpl --version
+```
+
+See [Installation](https://noirbizarre.github.io/git-tpl/getting-started/installation/#in-github-actions)
+for supported runners and version pinning.
+
 ## Use
 
 ```sh
