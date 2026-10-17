@@ -49,7 +49,7 @@ Something is wrong with the template itself.
 | `tpl::extends::remove_missing` | `[extends].remove` names a path the parent does not have. |
 | `tpl::extends::untrusted` | A remote `[extends]` ancestor was not authorised. Pass `--trust`, add the template to `[trust]`, or answer the confirmation interactively — unlike `tpl::data::untrusted`, a `git tpl test` case's own `trust` field never grants this; see [ADR-034](../adr/034-template-inheritance.md). |
 | `tpl::extends::cancelled` | The confirmation for a remote `[extends]` ancestor was cancelled. |
-| `tpl::compose::invalid` | The chosen module list is malformed, contains duplicates or exceeds the limit. |
+| `tpl::compose::invalid` | A chosen module list is malformed, contains duplicates within that list or exceeds the limit. |
 | `tpl::compose::untrusted` | A remote child was not authorised before its repository could be cloned. |
 | `tpl::compose::collision` | Two rendered templates would produce the same project path. |
 | `tpl::compose::child_failed` | A child repository could not be resolved or rendered; inspect its cause. |

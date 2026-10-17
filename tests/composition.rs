@@ -17,6 +17,18 @@ fn child(name: &str) -> Repo {
     child
 }
 
+fn integration_with_own_file() -> Repo {
+    let integration = child("integration");
+    integration
+        .remove("template/{{ module_path }}/module.txt.jinja")
+        .write(
+            "template/{{ module_path }}/integration.txt.jinja",
+            "integration: {{ module_name }}\n",
+        )
+        .commit_all("give integrations a distinct output path");
+    integration
+}
+
 fn parent(source: &Repo, integration: &Repo, source_ref: &str, integration_ref: &str) -> Repo {
     let parent = Repo::init("parent");
     parent.write("template.toml", &format!(
@@ -414,6 +426,80 @@ fn changing_the_recorded_module_list_adds_a_child_on_update_without_another_atta
 }
 
 #[test]
+fn adding_an_integration_with_the_same_id_preserves_a_committed_project_overlay() {
+    let source = child("source");
+    let integration = integration_with_own_file();
+    let parent = parent(&source, &integration, "main", "main");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "--json",
+            "init",
+            parent.path.to_str().unwrap(),
+            "--answer",
+            "sources=[\"pi\"]",
+            "--defaults",
+        ],
+    )
+    .success();
+    // This file belongs to the project, not to either template: the new child must not erase it.
+    project
+        .write(
+            "modules/pi/overlaid-integration.txt",
+            "custom integration implementation\n",
+        )
+        .commit_all("overlay the integration by hand");
+    let config = project.read(".config/git.tpl.toml");
+    project.write(
+        ".config/git.tpl.toml",
+        &config.replace("integrations = []", "integrations = [\"pi\"]"),
+    );
+    project.commit_all("select the composed integration");
+    let original_ref = project.git(&["rev-parse", "refs/tpl/parent"]);
+    let original_head = project.git(&["rev-parse", "HEAD"]);
+    let updated = tpl(&project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+    assert_eq!(updated["changes"][0]["path"], "modules/pi/integration.txt");
+    assert_ne!(project.git(&["rev-parse", "refs/tpl/parent"]), original_ref);
+    assert_eq!(project.git(&["rev-parse", "HEAD"]), original_head);
+    assert!(!project.exists("modules/pi/integration.txt"));
+    assert_eq!(
+        project.read("modules/pi/overlaid-integration.txt"),
+        "custom integration implementation\n"
+    );
+    let preview = tpl(&project, &["--json", "diff"]).success().json();
+    assert_eq!(preview["changes"][0]["path"], "modules/pi/integration.txt");
+    assert_eq!(preview["conflicts"], serde_json::json!([]));
+    let config = tpl::config::Config::load(&project.path).unwrap();
+    assert_eq!(config.composed.len(), 2);
+    assert_eq!(
+        config.composed[0].commit,
+        source.git(&["rev-parse", "HEAD"])
+    );
+    assert_eq!(
+        config.composed[1].commit,
+        integration.git(&["rev-parse", "HEAD"])
+    );
+    let message = project.git(&["show", "-s", "--format=%B", "refs/tpl/parent"]);
+    let recorded = tpl::provenance::Provenance::parse(&message).unwrap();
+    assert_eq!(recorded.composed.len(), 2);
+    assert_eq!(recorded.composed[0].from, "sources");
+    assert_eq!(recorded.composed[1].from, "integrations");
+    tpl(&project, &["--json", "merge"]).success();
+    assert_eq!(project.read("modules/pi/module.txt"), "pi\n");
+    assert_eq!(
+        project.read("modules/pi/integration.txt"),
+        "integration: pi\n"
+    );
+    assert_eq!(
+        project.read("modules/pi/overlaid-integration.txt"),
+        "custom integration implementation\n"
+    );
+}
+
+#[test]
 fn a_child_changes_upstream_without_changing_a_pinned_parent_rendering() {
     let source = child("source");
     let integration = child("integration");
@@ -448,15 +534,15 @@ fn a_child_changes_upstream_without_changing_a_pinned_parent_rendering() {
 }
 
 #[test]
-fn one_module_id_cannot_be_both_a_source_and_an_integration() {
+fn a_source_and_an_integration_with_the_same_id_render_and_record_both_revisions() {
     let source = child("source");
-    let integration = child("integration");
+    let integration = integration_with_own_file();
     let source_ref = source.git(&["rev-parse", "HEAD"]);
     let integration_ref = integration.git(&["rev-parse", "HEAD"]);
     let parent = parent(&source, &integration, &source_ref, &integration_ref);
     let output = tempfile::tempdir().unwrap();
     let output = output.path().join("generated");
-    let failure = tpl(
+    let result = tpl(
         &parent,
         &[
             "--json",
@@ -465,15 +551,108 @@ fn one_module_id_cannot_be_both_a_source_and_an_integration() {
             "-o",
             output.to_str().unwrap(),
             "--answer",
-            "sources=[\"duplicate\"]",
+            "sources=[\"pi\"]",
             "--answer",
-            "integrations=[\"duplicate\"]",
+            "integrations=[\"pi\"]",
+            "--defaults",
+        ],
+    )
+    .success()
+    .json();
+    assert_eq!(
+        std::fs::read_to_string(output.join("modules/pi/module.txt")).unwrap(),
+        "pi\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(output.join("modules/pi/integration.txt")).unwrap(),
+        "integration: pi\n"
+    );
+    assert_eq!(result["composed"][0]["from"], "sources");
+    assert_eq!(result["composed"][0]["commit"], source_ref);
+    assert_eq!(result["composed"][1]["from"], "integrations");
+    assert_eq!(result["composed"][1]["commit"], integration_ref);
+
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "--json",
+            "init",
+            parent.path.to_str().unwrap(),
+            "--answer",
+            "sources=[\"pi\"]",
+            "--answer",
+            "integrations=[\"pi\"]",
+            "--defaults",
+        ],
+    )
+    .success();
+    let config = tpl::config::Config::load(&project.path).unwrap();
+    assert_eq!(config.composed.len(), 2);
+    assert_eq!(config.composed[0].from, "sources");
+    assert_eq!(config.composed[0].commit, source_ref);
+    assert_eq!(config.composed[1].from, "integrations");
+    assert_eq!(config.composed[1].commit, integration_ref);
+    let status = tpl(&project, &["--json", "status"]).success().json();
+    assert_eq!(status["renderedComposed"][0]["commit"], source_ref);
+    assert_eq!(status["renderedComposed"][1]["commit"], integration_ref);
+    let message = project.git(&["show", "-s", "--format=%B", "refs/tpl/parent"]);
+    let recorded = tpl::provenance::Provenance::parse(&message).unwrap();
+    assert_eq!(recorded.composed.len(), 2);
+    assert_eq!(recorded.composed[0].from, "sources");
+    assert_eq!(recorded.composed[1].from, "integrations");
+}
+
+#[test]
+fn repeating_a_module_id_within_one_list_is_invalid() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let output = tempfile::tempdir().unwrap();
+    let destination = output.path().join("generated");
+    let failure = tpl(
+        &parent,
+        &[
+            "--json",
+            "render",
+            parent.path.to_str().unwrap(),
+            "-o",
+            destination.to_str().unwrap(),
+            "--answer",
+            "sources=[\"pi\",\"pi\"]",
             "--defaults",
         ],
     )
     .failure();
     assert_eq!(failure.error_code(), "tpl::compose::invalid");
-    assert!(!output.exists());
+    assert!(!destination.exists());
+}
+
+#[test]
+fn two_children_with_the_same_id_cannot_replace_each_others_file() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let output = tempfile::tempdir().unwrap();
+    let destination = output.path().join("generated");
+    let failure = tpl(
+        &parent,
+        &[
+            "--json",
+            "render",
+            parent.path.to_str().unwrap(),
+            "-o",
+            destination.to_str().unwrap(),
+            "--answer",
+            "sources=[\"pi\"]",
+            "--answer",
+            "integrations=[\"pi\"]",
+            "--defaults",
+        ],
+    )
+    .failure();
+    assert_eq!(failure.error_code(), "tpl::compose::collision");
+    assert!(!destination.exists());
 }
 
 #[test]
