@@ -98,6 +98,139 @@ fn two_sources_and_an_integration_render_from_independent_revisions() {
 }
 
 #[test]
+fn typed_module_lists_can_render_the_same_id_under_distinct_roots() {
+    let source = child("source");
+    let integration = integration_with_own_file();
+    let source_ref = source.git(&["rev-parse", "HEAD"]);
+    let integration_ref = integration.git(&["rev-parse", "HEAD"]);
+    let parent = parent(&source, &integration, &source_ref, &integration_ref);
+    let manifest = std::fs::read_to_string(parent.path.join("template.toml")).unwrap();
+    parent
+        .write(
+            "template.toml",
+            &manifest
+                .replace("from = 'sources'", "from = 'sources'\npath = 'sources'")
+                .replace(
+                    "from = 'integrations'",
+                    "from = 'integrations'\npath = 'integrations'",
+                ),
+        )
+        .commit_all("separate typed module roots");
+    let output = tempfile::tempdir().unwrap();
+    let destination = output.path().join("generated");
+    tpl(
+        &parent,
+        &[
+            "--json",
+            "render",
+            parent.path.to_str().unwrap(),
+            "-o",
+            destination.to_str().unwrap(),
+            "--answer",
+            "sources=[\"pi\"]",
+            "--answer",
+            "integrations=[\"pi\"]",
+            "--defaults",
+        ],
+    )
+    .success();
+    assert_eq!(
+        std::fs::read_to_string(destination.join("sources/pi/module.txt")).unwrap(),
+        "pi\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(destination.join("integrations/pi/integration.txt")).unwrap(),
+        "integration: pi\n"
+    );
+    assert!(!destination.join("modules/pi").exists());
+}
+
+#[test]
+fn moving_a_composed_root_updates_the_rendered_ref_without_rewriting_history() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "--json",
+            "init",
+            parent.path.to_str().unwrap(),
+            "--answer",
+            "sources=[\"pi\"]",
+            "--defaults",
+        ],
+    )
+    .success();
+    let old_tip = project.git(&["rev-parse", "refs/tpl/parent"]);
+    assert!(project.path.join("modules/pi/module.txt").exists());
+    let manifest = std::fs::read_to_string(parent.path.join("template.toml")).unwrap();
+    parent
+        .write(
+            "template.toml",
+            &manifest.replace("from = 'sources'", "from = 'sources'\npath = 'sources'"),
+        )
+        .commit_all("move the source root");
+    tpl(&project, &["--json", "update", "--defaults"]).success();
+    let new_tip = project.git(&["rev-parse", "refs/tpl/parent"]);
+    assert_ne!(new_tip, old_tip);
+    assert_eq!(project.git(&["rev-parse", &format!("{new_tip}^")]), old_tip);
+    tpl(&project, &["--json", "merge"]).success();
+    assert!(!project.path.join("modules/pi/module.txt").exists());
+    assert_eq!(
+        std::fs::read_to_string(project.path.join("sources/pi/module.txt")).unwrap(),
+        "pi\n"
+    );
+}
+
+#[test]
+fn unsafe_composition_roots_are_rejected_before_rendering() {
+    let source = child("source");
+    let integration = child("integration");
+    for root in [
+        "../outside",
+        "/tmp",
+        "sources//nested",
+        "sources\\nested",
+        ".git",
+    ] {
+        let parent = parent(&source, &integration, "main", "main");
+        let manifest = std::fs::read_to_string(parent.path.join("template.toml")).unwrap();
+        parent
+            .write(
+                "template.toml",
+                &manifest.replace(
+                    "from = 'sources'",
+                    &format!("from = 'sources'\npath = '{root}'"),
+                ),
+            )
+            .commit_all("try an unsafe output root");
+        let destination = tempfile::tempdir().unwrap().path().join("generated");
+        let error = tpl(
+            &parent,
+            &[
+                "--json",
+                "render",
+                parent.path.to_str().unwrap(),
+                "-o",
+                destination.to_str().unwrap(),
+                "--answer",
+                "sources=[\"pi\"]",
+                "--defaults",
+            ],
+        )
+        .code(1)
+        .json();
+        assert_eq!(
+            error["error"]["code"], "tpl::manifest::invalid_compose",
+            "{root}"
+        );
+        assert!(!destination.exists());
+    }
+}
+
+#[test]
 fn a_child_branch_is_resolved_for_a_project_free_render() {
     let source = child("source");
     let integration = child("integration");
