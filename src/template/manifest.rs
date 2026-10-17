@@ -253,6 +253,21 @@ pub struct ComposeDecl {
     pub reference: String,
     /// Name of a list question containing module IDs; an empty list renders no children.
     pub from: String,
+    /// Repository-relative directory under which each child ID is rendered; defaults to `modules`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+fn valid_compose_path(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 240
+        && path.split('/').all(|segment| {
+            !segment.is_empty()
+                && !matches!(segment, "." | ".." | ".git")
+                && segment
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        })
 }
 
 impl ExtendsDecl {
@@ -471,6 +486,18 @@ impl Manifest {
                 return Err(ManifestError::InvalidCompose {
                     reason: format!(
                         "`[[compose]]` lists `{}` twice; use a separate list question for each child",
+                        entry.from
+                    ),
+                });
+            }
+            if entry
+                .path
+                .as_deref()
+                .is_some_and(|path| !valid_compose_path(path))
+            {
+                return Err(ManifestError::InvalidCompose {
+                    reason: format!(
+                        "`path` for `{}` must be a safe relative directory without empty, `.` or `..` segments",
                         entry.from
                     ),
                 });
@@ -838,6 +865,7 @@ mod tests {
                 source: "https://example.invalid/child.git".into(),
                 reference: "v1.0.0".into(),
                 from: "modules".into(),
+                path: None,
             }],
         };
 

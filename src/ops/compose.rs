@@ -201,7 +201,9 @@ pub fn render(
         for id in ids {
             let mut answers = BTreeMap::new();
             answers.insert("module_name".into(), Value::String(id.to_string()));
-            answers.insert("module_path".into(), Value::String(format!("modules/{id}")));
+            // A safe, literal root belongs to the parent; children only learn their final module_path.
+            let root = entry.path.as_deref().unwrap_or("modules");
+            answers.insert("module_path".into(), Value::String(format!("{root}/{id}")));
             for key in ["version", "memcastle"] {
                 if child.manifest.questions.contains_key(key)
                     && let Some(value) = context.answers().get(key)

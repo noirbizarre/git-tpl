@@ -17,11 +17,19 @@ default = "https://github.com/org/module-template"
 source = "{{ module_template }}"
 ref = "main"
 from = "modules"
+# Optional; defaults to "modules" so existing projects keep their paths.
+path = "modules"
 ```
 
 An empty answer produces no modules and never fetches the child.
 `modules = ["jira", "confluence"]` renders the child repository twice, with separate `module_name` answers
 and `module_path` answers `modules/jira` and `modules/confluence`.
+`path` names the directory beneath which each selected ID is rendered. A plugin with separate typed roots can use
+`path = "sources"` for its `sources` list and `path = "integrations"` for its `integrations` list;
+those render as `sources/pi` and `integrations/pi`, even if the IDs match.
+It is a literal repository-relative directory (nested safe names are allowed), not an expression;
+absolute paths, empty segments, `.`/`..`, `.git`, separators other than `/`, and control characters are rejected.
+Without it, `module_path` remains `modules/<id>` for backwards compatibility.
 The child must declare those two string questions.
 If it also declares `version` or `memcastle`, an answer of the same name in the parent is forwarded.
 All other child questions use their own defaults and do not pollute the parent's recorded answer namespace.
