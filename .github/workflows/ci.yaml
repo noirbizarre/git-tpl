@@ -191,6 +191,29 @@ jobs:
             exit 1
           fi
 
+  action:
+    name: 📥 Action installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./
+
+      # GITHUB_PATH becomes visible only after the action step has finished.
+      - name: Verify the installed Git subcommand
+        run: git tpl --version
+
+      - uses: ./
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          version: 0.14.3
+      - name: Verify an exact release tag can be installed
+        if: matrix.os == 'ubuntu-latest'
+        run: git tpl --version
+
   # gh-ship releases git-tpl. Its configuration and workflows must satisfy the
   # contract gh-ship enforces, or the release breaks at the worst moment.
   ship:

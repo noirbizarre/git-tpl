@@ -1,0 +1,68 @@
+name: Install git-tpl
+description: Install a git-tpl release so subsequent steps can run git tpl
+
+inputs:
+  version:
+    description: Exact release tag to install (for example, 0.14.3); defaults to the latest published release
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Install git-tpl
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        case "$RUNNER_OS/$RUNNER_ARCH" in
+          Linux/X64)   platform=linux-amd64 ;;
+          Linux/ARM64) platform=linux-arm64 ;;
+          macOS/X64)   platform=darwin-amd64 ;;
+          macOS/ARM64) platform=darwin-arm64 ;;
+          *) echo "No git-tpl release binary for $RUNNER_OS/$RUNNER_ARCH" >&2; exit 1 ;;
+        esac
+
+        directory=$(mktemp -d "$RUNNER_TEMP/git-tpl.XXXXXXXX")
+        install_dir="$directory/bin"
+        mkdir "$install_dir"
+        tag=()
+        if [[ -n "$INPUT_VERSION" ]]; then tag=("$INPUT_VERSION"); fi
+        gh release download "${tag[@]}" --repo noirbizarre/git-tpl \
+          --pattern "git-tpl_*_${platform}.tar.gz" --pattern SHA256SUMS --dir "$directory"
+
+        archives=("$directory"/git-tpl_*_"$platform".tar.gz)
+        if [[ ${#archives[@]} -ne 1 || ! -f "${archives[0]}" ]]; then
+          echo "Expected exactly one git-tpl release archive for $platform" >&2
+          exit 1
+        fi
+        archive="${archives[0]}"
+        asset="${archive##*/}"
+
+        expected=''
+        while read -r hash name; do
+          if [[ "${name#\*}" == "$asset" ]]; then
+            if [[ -n "$expected" ]]; then
+              echo "Duplicate checksum entries for $asset" >&2
+              exit 1
+            fi
+            expected="$hash"
+          fi
+        done < "$directory/SHA256SUMS"
+        if [[ -z "$expected" ]]; then
+          echo "No checksum entry for $asset in SHA256SUMS" >&2
+          exit 1
+        fi
+        actual=$(shasum -a 256 "$archive")
+        if [[ "${actual%% *}" != "$expected" ]]; then
+          echo "SHA256 mismatch for $asset" >&2
+          exit 1
+        fi
+
+        tar -xzf "$archive" -C "$install_dir"
+        test -x "$install_dir/git-tpl"
+        # GITHUB_PATH takes effect in subsequent steps, where Git finds git-tpl by name.
+        printf '%s\n' "$install_dir" >> "$GITHUB_PATH"
+        echo "Installed $asset"
