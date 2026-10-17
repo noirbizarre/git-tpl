@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.3](https://github.com/noirbizarre/git-tpl/compare/0.14.2..0.14.3) - 2026-10-17
+
+### 🐛 Bug Fixes
+
+- **compose** Support configurable module output roots ([#183](https://github.com/noirbizarre/git-tpl/issues/183)) - ([552f450](https://github.com/noirbizarre/git-tpl/commit/552f45084e4fc3c4c6067d3ae687087451f64d07))
+
 ## [0.14.2](https://github.com/noirbizarre/git-tpl/compare/0.14.1..0.14.2) - 2026-10-17
 
 ### 🐛 Bug Fixes
