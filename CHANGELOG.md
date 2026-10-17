@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0](https://github.com/noirbizarre/git-tpl/compare/0.14.3..0.15.0) - 2026-10-17
+
+### 💫 Features
+
+- **action** Install git-tpl in GitHub Actions ([#185](https://github.com/noirbizarre/git-tpl/issues/185)) - ([7b16cee](https://github.com/noirbizarre/git-tpl/commit/7b16ceeded895b40ca9a271630a74bf9f3c42994))
+
 ## [0.14.3](https://github.com/noirbizarre/git-tpl/compare/0.14.2..0.14.3) - 2026-10-17
 
 ### 🐛 Bug Fixes
