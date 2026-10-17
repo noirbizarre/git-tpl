@@ -644,6 +644,12 @@ pub trait GitBackend {
     /// The tree of a commit.
     fn commit_tree(&self, commit: Oid) -> Result<Oid, GitError>;
 
+    /// The tree of a commit, or `None` if the commit is not in this repository.
+    ///
+    /// An old template revision can disappear from a fresh clone after its
+    /// branch is squash-merged and deleted; other Git failures remain errors.
+    fn commit_tree_if_exists(&self, commit: Oid) -> Result<Option<Oid>, GitError>;
+
     /// Build a tree from the files in a directory, for `--dirty` renders.
     ///
     /// Reads a working tree rather than a commit, honouring `.gitignore`, so

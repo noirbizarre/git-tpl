@@ -77,6 +77,9 @@ do not assume it is preinstalled.
    entry's `message` before merging — it is meant to be shown once, the same as `init`'s `note`. `movedCommit`,
    when present, is an internal rename commit the merge machinery needs; it is not something to inspect or act on.
    A migration always reports `"result": "updated"`, never `"upToDate"`, even if nothing else changed.
+   If `update` reports `tpl::ops::missing_template_revision`, the recorded source commit has disappeared and the
+   current template has migrations. Restore that commit under a fetchable branch or tag in the template repository
+   before retrying. Fetching it into the project alone cannot recover migration discovery.
 6. **`git tpl status --json` exits `2`**, not `0` or `1`,
    when a template update is pending (`"templateMoved": true`, `"composedMoved": true`, or `"merged": false`).
    Treat that as a normal branch, not a failure.

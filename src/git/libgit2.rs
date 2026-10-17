@@ -992,6 +992,14 @@ impl GitBackend for LibGit2 {
         Ok(to_oid(commit.tree_id()))
     }
 
+    fn commit_tree_if_exists(&self, commit: Oid) -> Result<Option<Oid>, GitError> {
+        match self.repo.find_commit(from_oid(commit)) {
+            Ok(commit) => Ok(Some(to_oid(commit.tree_id()))),
+            Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
+            Err(error) => Err(backend("read the commit", &error)),
+        }
+    }
+
     fn tree_from_workdir(&self, root: &Path) -> Result<(Oid, Vec<String>), GitError> {
         // The rules in force above `root`. `root` is the template source, which
         // may sit below the working tree, and the outer rules still apply.

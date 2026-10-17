@@ -196,6 +196,23 @@ pub enum OpError {
         path: String,
     },
 
+    /// Migration discovery needs a template revision no longer in the clone.
+    #[error("cannot check migrations: template commit {revision} is unavailable in `{origin}`")]
+    #[diagnostic(
+        code(tpl::ops::missing_template_revision),
+        help(
+            "the current template contains migration files, but the previous template tree is needed to tell \
+             which are new. Restore commit {revision} under a fetchable branch or tag in `{origin}`, then retry \
+             `git tpl update`"
+        )
+    )]
+    MissingTemplateRevision {
+        /// The commit recorded in the previous rendered ref's provenance.
+        revision: Oid,
+        /// The source repository used by this update.
+        origin: String,
+    },
+
     /// A migration's `message_file` names nothing at the template revision.
     ///
     /// Fatal rather than silent, for the same reason `MissingNoteFile` is:
@@ -1415,8 +1432,25 @@ pub fn discover_update_migrations(
 ) -> Result<Vec<AppliedMigration>, OpError> {
     let mut migrations = Vec::new();
     if let Some(old_commit) = previous.and_then(|recorded| recorded.revision) {
-        let old_tree = rendered.template.repo.commit_tree(old_commit)?;
         let new_tree = rendered.template.tree;
+        let Some(old_tree) = rendered.template.repo.commit_tree_if_exists(old_commit)? else {
+            // The rendered ref stores output, not the source's migration files.
+            // With no migrations at the new revision there is nothing to miss;
+            // otherwise guessing would silently drop a move or repeat one.
+            if rendered
+                .template
+                .repo
+                .list_tree(new_tree)?
+                .iter()
+                .any(|entry| migration::is_migration_path(&entry.path))
+            {
+                return Err(OpError::MissingTemplateRevision {
+                    revision: old_commit,
+                    origin: rendered.provenance.source.clone(),
+                });
+            }
+            return Ok(migrations);
+        };
         if old_tree != new_tree {
             let partials = rendered.template.partials()?;
             for (path, bytes) in
