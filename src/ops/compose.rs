@@ -18,7 +18,7 @@ use crate::userconfig::UserConfig;
 /// Fail before writing a Git tree when a child cannot be pinned, rendered or placed safely.
 #[derive(Debug, Error, Diagnostic)]
 pub enum ComposeError {
-    /// An answered module list contains an unsafe or repeated ID.
+    /// An answered module list contains an unsafe or repeated ID within that list.
     #[error("`[[compose]]` for `{from}`: {reason}")]
     #[diagnostic(
         code(tpl::compose::invalid),
@@ -86,7 +86,7 @@ fn valid_id(name: &str) -> bool {
         && !name.ends_with('-')
 }
 
-/// Render independent child repositories once per module ID in the parent's ordered list answer.
+/// Render each child's ordered module list, allowing different lists to share an ID.
 pub fn render(
     entries: &[ComposeDecl],
     context: &Context,
@@ -97,7 +97,6 @@ pub fn render(
     recorded: Option<&[ComposedRevision]>,
 ) -> Result<Vec<ComposedRevision>, ComposeError> {
     let mut paths: HashSet<String> = parent.iter().map(|file| file.path.clone()).collect();
-    let mut module_ids = HashSet::new();
     let mut revisions = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let source = render_string_with(
@@ -124,6 +123,8 @@ pub fn render(
                 reason: "more than 32 modules; split the project or choose fewer".into(),
             });
         }
+        // Different child types can share a directory; only repeats within one list are ambiguous.
+        let mut module_ids = HashSet::new();
         let mut ids = Vec::new();
         for item in items {
             let Some(id) = item.as_str() else {

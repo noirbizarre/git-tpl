@@ -31,7 +31,10 @@ An expression can choose it from a parent question, which lets template tests us
 while normal projects use a published template URL.
 The `ref` may be a branch, tag or commit.
 Each child source requires its own network trust decision; trusting the parent does not trust the children.
-Repeated module IDs, unsafe IDs, missing answers, nested composition and output path collisions
+IDs must be unique within each list, but separate lists may use the same ID.
+For example, a source and an integration named `pi` may both write different files under `modules/pi/`.
+If they write the same file path, composition refuses the collision rather than choosing a winner.
+Repeated IDs within a list, unsafe IDs, missing answers, nested composition and output path collisions
 are errors before the rendered tree or the destination directory is written.
 
 Iterate the same list in a parent file:
@@ -51,3 +54,6 @@ review `git tpl diff`, and run `git tpl merge`.
 When a child branch advances without changing rendered files, `update` still records its commit and appends a
 provenance-only rendered-ref commit; removing all modules drops the child's recorded commit without fetching it.
 `update` still only moves `refs/tpl/*`; Git performs the merge into the worktree.
+For a project with a manually overlaid integration, add its ID to the `integrations` answer and update as usual.
+Git preserves project-specific files when the new child adds different paths; if both sides add the same path,
+resolve the ordinary merge conflict before committing.

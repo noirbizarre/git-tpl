@@ -16,7 +16,8 @@ An empty answer reads no child repository.
 Each ID renders the child from that same resolved commit with its own `module_name` and `module_path` answers.
 The child may receive `version` and `memcastle` only when it declares those questions.
 No other question, data source or partial leaks across siblings.
-Duplicate IDs, invalid IDs, missing or non-list answers and rendered path collisions are refusals.
+Duplicate IDs within one list, invalid IDs, missing or non-list answers and rendered path collisions are refusals.
+Different lists may share an ID and directory when their rendered file paths are distinct.
 
 The parent records the list; its manifest names child refs, while project config and rendered provenance record
 the exact child commits resolved at init or update.
