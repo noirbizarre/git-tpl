@@ -28,10 +28,16 @@ runs:
         directory=$(mktemp -d "$RUNNER_TEMP/git-tpl.XXXXXXXX")
         install_dir="$directory/bin"
         mkdir "$install_dir"
-        tag=()
-        if [[ -n "$INPUT_VERSION" ]]; then tag=("$INPUT_VERSION"); fi
-        gh release download "${tag[@]}" --repo noirbizarre/git-tpl \
-          --pattern "git-tpl_*_${platform}.tar.gz" --pattern SHA256SUMS --dir "$directory"
+        download() {
+          gh release download "$@" --repo noirbizarre/git-tpl \
+            --pattern "git-tpl_*_${platform}.tar.gz" --pattern SHA256SUMS --dir "$directory"
+        }
+        # Bash 3.2 on macOS treats an empty array expansion as unbound under set -u.
+        if [[ -n "$INPUT_VERSION" ]]; then
+          download "$INPUT_VERSION"
+        else
+          download
+        fi
 
         archives=("$directory"/git-tpl_*_"$platform".tar.gz)
         if [[ ${#archives[@]} -ne 1 || ! -f "${archives[0]}" ]]; then
