@@ -1170,6 +1170,67 @@ fn a_dry_run_against_a_destination_that_does_not_exist_creates_nothing() {
     assert!(!destination.exists(), "a dry run must create nothing");
 }
 
+#[test]
+fn defaults_dry_runs_propagate_render_failures_without_creating_the_destination() {
+    for (manifest, files, extra, code) in [
+        (
+            "name = 'required'\n[questions.input]\ntype = 'string'",
+            vec![("out", "ok")],
+            vec![],
+            "tpl::eval::unanswered",
+        ),
+        (
+            "name = 'syntax'",
+            vec![("out.jinja", "{% if %}")],
+            vec![],
+            "tpl::render::content",
+        ),
+        (
+            "name = 'collision'",
+            vec![("out", "plain"), ("out.jinja", "rendered")],
+            vec![],
+            "tpl::render::collision",
+        ),
+        (
+            "name = 'type'\n[questions.input]\ntype = 'integer'",
+            vec![("out", "ok")],
+            vec!["--answer", "input=no"],
+            "tpl::eval::wrong_type",
+        ),
+        (
+            "name = 'checksum'\n[data.options]\nsource = 'values.json'\nsha256 = '0000000000000000000000000000000000000000000000000000000000000000'",
+            vec![("out.jinja", "{{ data.options }}")],
+            vec![],
+            "tpl::data::checksum",
+        ),
+    ] {
+        let world = World::with_template(manifest, &files);
+        world
+            .template
+            .repo
+            .write("values.json", "[\"a\"]")
+            .commit_all("data");
+        let source = world.template.source();
+        let destination = world.dir.path().join("not-yet");
+        let mut args = vec![
+            "--json",
+            "init",
+            &source,
+            destination.to_str().unwrap(),
+            "--defaults",
+            "--dry-run",
+        ];
+        args.extend(extra);
+        assert_eq!(
+            tpl_outside(world.dir.path(), world.project.config_home(), &args)
+                .failure()
+                .error_code(),
+            code
+        );
+        assert!(!destination.exists());
+    }
+}
+
 /// `--init` with no destination argument: the existing single-directory form,
 /// which nothing in the suite exercised before this change.
 #[test]

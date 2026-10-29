@@ -93,6 +93,37 @@ fn the_trust_flag_authorises_the_ancestor_clone() {
     assert!(project.read("README.md").starts_with("from the base"));
 }
 
+#[test]
+fn dry_runs_honor_explicit_and_persistent_ancestor_trust() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = parent(dir.path());
+    let child = child(dir.path(), &file_url(&parent.path));
+    let project = project(dir.path());
+    let before = project.working_state();
+    assert_eq!(
+        init(&project, &child, &["--json", "--dry-run"])
+            .failure()
+            .error_code(),
+        "tpl::extends::untrusted"
+    );
+    let json = init(&project, &child, &["--json", "--dry-run", "--trust"])
+        .success()
+        .json();
+    assert!(
+        json["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path == "README.md")
+    );
+    project.user_config(&format!(
+        "[trust]\ntemplates = [\"{}\"]\n",
+        file_url(&parent.path)
+    ));
+    init(&project, &child, &["--dry-run"]).success();
+    assert_eq!(project.working_state(), before);
+}
+
 /// Trusting the *leaf* template does not extend to what it `[extends]` —
 /// each ancestor's own source is checked independently (ADR-034).
 #[test]

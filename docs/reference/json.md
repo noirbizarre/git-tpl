@@ -216,6 +216,10 @@ leave in the worktree.
 
 ### `init`
 
+For `init --dry-run`, `files` is null without `--defaults` because no rendering was attempted.
+With `--defaults`, success requires a completed rendering and `files` is its path array;
+missing answers, trust refusals and render failures produce the ordinary diagnostic failure envelope.
+
 ```json
 { "ok": true,
   "id": "rust", "ref": "refs/tpl/rust",

@@ -17,6 +17,9 @@ metadata:
 
 # git-tpl
 
+`init --dry-run` honors `--trust` for ancestors.
+With `--defaults`, rendering must succeed to return a file list; without it, JSON `files` is null (schema only).
+
 `questions` resolves static template-local choices using render-time formats, checksums and inherited origins.
 `choicesResolved` stays a string array; `choicesResolvedDetails` adds normalized value/label/help records.
 Invalid static data fails; dynamic, project-local and network data remain unresolved.

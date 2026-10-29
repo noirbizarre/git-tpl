@@ -315,13 +315,13 @@ fn dry_run(
     source: &str,
     answers: tpl::answers::SuppliedAnswers,
 ) -> Result<serde_json::Value, OpError> {
-    // This early resolve is a preview (question order, before `--defaults`
-    // decides anything) and has no interactive confirmer in scope at this
-    // point in the function — the one built further down (via the `trust()`
-    // helper, hence `preview_trust` here so as not to shadow it) is scoped to
-    // the `--defaults` branch. An `[extends]` ancestor outside `[trust]`
-    // refuses outright here, the same as `lint`/`questions`.
-    let mut preview_trust = ops::Trust::refuse();
+    // A preview never prompts for network consent, but explicit --trust must
+    // authorize ancestor resolution just as it does in a real invocation.
+    let mut preview_trust = if args.trust {
+        ops::Trust::always()
+    } else {
+        ops::Trust::refuse()
+    };
     let template = ops::resolve::resolve(
         ops::Request {
             source,
@@ -407,34 +407,31 @@ fn dry_run(
     // the whole questionnaire, which is precisely what a dry run is avoiding.
     let mut files = None;
     if args.answers.defaults {
-        let mut prompter = tpl::eval::DefaultsOnly;
         let mut confirmer = crate::prompt::Confirmer;
-        if let Ok(rendered) = ops::render_files(
-            ops::Target {
-                source,
-                reference: args.r#ref.as_deref(),
-                root: None,
-                dirty: args.dirty,
-            },
+        // Reuse the exact revision whose schema was listed. A second resolve
+        // could observe a moving branch, and swallowing errors would claim a
+        // broken or incomplete render was a successful preview.
+        let rendered = ops::render_resolved(
+            &template,
+            source,
             project,
-            answers.clone(),
+            answers,
             user,
-            tpl::ops::Answering::Interactive(&mut prompter),
+            tpl::ops::Answering::defaults(),
             trust(&args.answers, args.trust, false, &mut confirmer),
-        ) {
-            out.blank();
-            out.say(heading(&out.theme, "Files it would render"));
-            for file in &rendered.files {
-                out.say(muted(&out.theme, &format!("  {}", file.path)));
-            }
-            files = Some(
-                rendered
-                    .files
-                    .iter()
-                    .map(|file| file.path.clone())
-                    .collect::<Vec<_>>(),
-            );
+        )?;
+        out.blank();
+        out.say(heading(&out.theme, "Files it would render"));
+        for file in &rendered.files {
+            out.say(muted(&out.theme, &format!("  {}", file.path)));
         }
+        files = Some(
+            rendered
+                .files
+                .iter()
+                .map(|file| file.path.clone())
+                .collect::<Vec<_>>(),
+        );
     }
 
     out.blank();

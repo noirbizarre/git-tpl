@@ -181,6 +181,10 @@ Which is the cleanest possible history for a project generated from a template.
 
 ## An existing project
 
+Dry runs honor explicit `--trust` and persistent trust during ancestor resolution.
+With `--defaults`, a dry run renders the resolved revision and reports any render failure as an error.
+Without `--defaults`, it reports only the schema and JSON `files` is null.
+
 `init` also works on a project that already has files — one generated last year by another tool, or written by
 hand and since grown to resemble a template.
 There is no separate command, because there is no separate behaviour: the orphan commit is merged, and Git
