@@ -5,7 +5,7 @@ Render `files` entries retain `executable` (boolean) and add `mode`, an octal st
 For a symbolic link, `bytes` counts its opaque target bytes and `templated` is false.
 
 `--json` is global.
-Every command accepts it and every failure emits the same envelope — including the commands that have no success
+Every command accepts it and every runtime failure emits the same envelope — including commands with no success
 payload of their own.
 Almost every command emits its payload to **stdout**; the three whose stdout is already the payload are
 [`show`, `completion` and `man`](#show-completion-and-man).
@@ -35,7 +35,11 @@ With `--json`, diff bypasses Git's display tools and pager entirely.
 
 ## Failure
 
-One shape, from every command:
+Argument parsing happens before command dispatch and JSON reporting.
+Unknown options, missing arguments and conflicting flags produce the parser's plain-text diagnostic on stderr
+and exit `2`, even with `--json`; they have no JSON envelope or `error.code`.
+Successful `--help` and `--version` also retain their raw output.
+After successful parsing, runtime failures use one shape, from every command:
 
 ```json
 {

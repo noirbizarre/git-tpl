@@ -436,9 +436,13 @@ Explicit `--color=always|never` overrides Git's patch/stat colors; `auto` leaves
 |---|---|---|
 | `0` | Success | Continue. |
 | `1` | Failure | Read `error.code` from the JSON envelope, look it up in the diagnostics reference, and act on the `help` text. |
-| `2` | Only from `status`: an update is pending (`templateMoved`, `composedMoved`, or not `merged`) | Not a failure — decide whether to `update`/`merge` now. |
+| `2` | `status` pending, or pre-dispatch argument parsing failed | Check for a JSON status report; otherwise correct the arguments from the parser's stderr diagnostic. |
 
 Diagnostic codes: <https://noirbizarre.github.io/git-tpl/reference/diagnostics/>.
+
+Unknown flags, missing arguments and incompatible options fail before JSON reporting, even with `--json`.
+They exit `2` with plain-text stderr and no envelope or `error.code`.
+Successful help/version output is raw too.
 
 ## Known limitations
 
