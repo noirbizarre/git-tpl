@@ -348,7 +348,20 @@ rendering left could not supply one — an older trailer format, or a hand-edite
 `pushed` names the remote when [`tpl.autoPush`](../usage/push.md) pushed automatically, `null` otherwise — the
 push still happens under `--json`, only its prose is silenced.
 
-With `--dry-run`, the same shape plus `"dryRun": true`, and `result` is `upToDate` or `wouldUpdate`.
+With `--dry-run`, `result` is `upToDate` or `wouldUpdate`, and the payload has its own shape:
+
+```json
+{ "ok": true, "dryRun": true, "result": "wouldUpdate",
+  "id": "rust", "ref": "refs/tpl/rust", "template": "…",
+  "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
+  "changes": [{ "path": "Cargo.toml", "kind": "modified" }],
+  "migrations": [], "ignoredAnswers": [] }
+```
+
+`wouldUpdate` reports `id`, `ref`, `template`, `revision`, `changes`, `migrations` and `ignoredAnswers`.
+It does not report `commit`, `previousRevision`, `answersChanged`, `startedNewHistory`, `movedCommit` or `pushed`.
+A dry-run `upToDate` report instead includes `changes: []` and `answersChanged`, but no `migrations` field.
+Neither dry-run outcome writes configuration or publishes a ref.
 
 ### `merge`
 
