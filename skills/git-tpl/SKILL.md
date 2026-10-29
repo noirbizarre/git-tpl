@@ -17,6 +17,9 @@ metadata:
 
 # git-tpl
 
+Files and recorded answers preserve types: quoted booleans, integers or arrays remain strings and fail type checks.
+Only `--answer` text is coerced; correct old wrong-type configuration explicitly.
+
 Persistent trust in a composing parent covers its data only.
 Each child and ancestor needs matching trust or explicit invocation-wide `--trust`.
 Data aliases reuse bytes, but each declaration independently validates trust, checksum and format and records provenance.

@@ -385,7 +385,7 @@ pub fn backport(
             dirty: false,
         },
         Some((project, project_root)),
-        config.answers.clone(),
+        crate::answers::typed(config.answers.clone()),
         user,
         answering,
         trust,

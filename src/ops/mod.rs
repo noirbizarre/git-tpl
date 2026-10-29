@@ -655,7 +655,7 @@ pub fn enforce_strict_answers(
 pub fn render_files(
     target: Target<'_>,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
@@ -668,7 +668,7 @@ pub fn render_files(
 pub fn render_files_with_composed(
     target: Target<'_>,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     answering: Answering<'_>,
     mut trust: Trust<'_>,
@@ -719,7 +719,7 @@ pub fn render_resolved(
     template: &Resolved,
     source: &str,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
@@ -735,7 +735,7 @@ pub fn render_resolved_with_composed(
     template: &Resolved,
     source: &str,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     mut answering: Answering<'_>,
     mut trust: Trust<'_>,
@@ -905,7 +905,7 @@ pub fn render(
     project: &dyn GitBackend,
     project_root: &Path,
     config: &Config,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     dirty: bool,
     user: &UserConfig,
     answering: Answering<'_>,
@@ -1129,7 +1129,7 @@ pub fn init(
     source: &str,
     reference: Option<String>,
     explicit_id: Option<&str>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     dirty: bool,
     merge_after: bool,
     force: bool,
@@ -1682,9 +1682,9 @@ pub enum UpdateOutcome {
 /// actually are.
 pub fn merge_answers(
     recorded: BTreeMap<String, Value>,
-    overrides: BTreeMap<String, Value>,
-) -> BTreeMap<String, Value> {
-    let mut supplied = recorded;
+    overrides: crate::answers::SuppliedAnswers,
+) -> crate::answers::SuppliedAnswers {
+    let mut supplied = crate::answers::typed(recorded);
     supplied.extend(overrides);
     supplied
 }
@@ -1699,7 +1699,7 @@ pub fn update(
     project: &dyn GitBackend,
     project_root: &Path,
     reference: Option<&str>,
-    overrides: BTreeMap<String, Value>,
+    overrides: crate::answers::SuppliedAnswers,
     dirty: bool,
     strict_answers: bool,
     user: &UserConfig,
@@ -2006,7 +2006,7 @@ pub fn status(
             template,
             &config.template.source,
             Some((project, project_root)),
-            config.answers.clone(),
+            crate::answers::typed(config.answers.clone()),
             user,
             Answering::defaults(),
             Trust::refuse(),
@@ -2106,7 +2106,7 @@ pub struct Preview {
 pub fn render_preview(
     project: &dyn GitBackend,
     project_root: &Path,
-    overrides: BTreeMap<String, Value>,
+    overrides: crate::answers::SuppliedAnswers,
     dirty: bool,
     strict_answers: bool,
     user: &UserConfig,

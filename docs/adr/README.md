@@ -49,3 +49,4 @@ explains the code that existed.
 | [038](038-compose-pinned-sibling-templates.md) | Pinned sibling templates render independent module trees in one deterministic, append-only project ref |
 | [039](039-native-diff-presentation.md) | Native Git owns patch and diffstat presentation, including the configured pager |
 | [040](040-native-merge-abort.md) | Native Git owns explicit merge abort recovery |
+| [041](041-typed-supplied-answers.md) | Supplied answers preserve typed versus CLI origins |

@@ -20,6 +20,11 @@ CLI surface permanently.
 
 ## The file
 
+Strings in files and recorded configuration keep their type, even if they look like integers, booleans or arrays.
+Only `--answer` text is parsed as the question's declared type.
+Correct previously recorded wrong-type strings explicitly, or override them with `--answer`;
+failed validation does not migrate configuration.
+
 Either a flat table of `name = value`:
 
 ```toml

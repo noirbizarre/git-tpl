@@ -273,7 +273,7 @@ fn dry_run(
     ctx: &Session,
     config: &tpl::config::Config,
     args: &UpdateArgs,
-    overrides: std::collections::BTreeMap<String, tpl::template::Value>,
+    overrides: tpl::answers::SuppliedAnswers,
     interactive: bool,
 ) -> Result<serde_json::Value, OpError> {
     let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();

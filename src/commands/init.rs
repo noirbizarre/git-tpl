@@ -1,6 +1,5 @@
 //! `git tpl init`
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use tpl::git::libgit2::LibGit2;
@@ -314,7 +313,7 @@ fn dry_run(
     project: Option<(&dyn GitBackend, &Path)>,
     args: &InitArgs,
     source: &str,
-    answers: BTreeMap<String, tpl::template::Value>,
+    answers: tpl::answers::SuppliedAnswers,
 ) -> Result<serde_json::Value, OpError> {
     // This early resolve is a preview (question order, before `--defaults`
     // decides anything) and has no interactive confirmer in scope at this

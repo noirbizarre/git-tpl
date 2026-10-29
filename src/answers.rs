@@ -18,6 +18,26 @@ use thiserror::Error;
 use crate::data::format::{self, Format};
 use crate::template::Value;
 
+/// An input's origin determines whether textual CLI parsing is permitted.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SuppliedAnswer {
+    /// A file, recorded configuration or internal caller already chose a type.
+    Typed(Value),
+    /// Only `--answer` text may be parsed as the question's declared type.
+    Cli(String),
+}
+
+/// Unresolved inputs; resolved answers remain ordinary typed `Value` maps.
+pub type SuppliedAnswers = BTreeMap<String, SuppliedAnswer>;
+
+/// Preserve the types chosen by a structured input.
+pub fn typed(values: BTreeMap<String, Value>) -> SuppliedAnswers {
+    values
+        .into_iter()
+        .map(|(key, value)| (key, SuppliedAnswer::Typed(value)))
+        .collect()
+}
+
 /// The key whose table, when present, holds the answers.
 const ANSWERS_KEY: &str = "answers";
 

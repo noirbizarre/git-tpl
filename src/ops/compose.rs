@@ -221,7 +221,7 @@ pub fn render(
                 &child,
                 &source,
                 None,
-                answers,
+                crate::answers::typed(answers),
                 user,
                 Answering::defaults(),
                 child_trust,

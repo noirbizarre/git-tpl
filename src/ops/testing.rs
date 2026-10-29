@@ -1728,7 +1728,7 @@ fn run_case(
                 template,
                 source,
                 None,
-                case.answers.clone(),
+                crate::answers::typed(case.answers.clone()),
                 user,
                 Answering::defaults(),
                 // Replaying this case's own `trust` field, decided in `run`
@@ -1973,7 +1973,7 @@ fn run_case_plain(
         template,
         source,
         None,
-        case.answers.clone(),
+        crate::answers::typed(case.answers.clone()),
         user,
         Answering::defaults(),
         // Replaying this case's own `trust` field, decided in `run` without

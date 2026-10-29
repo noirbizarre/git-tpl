@@ -197,7 +197,7 @@ pub struct Evaluation<'a> {
     /// Its validated dependency graph.
     pub graph: &'a Graph,
     /// Answers already known, from `.config/git.tpl.toml` or `--answer`.
-    pub supplied: BTreeMap<String, Value>,
+    pub supplied: crate::answers::SuppliedAnswers,
     /// Prompt seeds, by question name, from `default_from`.
     ///
     /// Empty whenever nobody is being asked. A seed is a machine value — it
@@ -436,13 +436,22 @@ fn resolve_default(
 }
 
 /// Check a supplied answer against the question's declared type.
-fn coerce(name: &str, question: &Question, value: &Value) -> Result<Value, EvalError> {
-    if question.kind.accepts(value) {
+fn coerce(
+    name: &str,
+    question: &Question,
+    supplied: &crate::answers::SuppliedAnswer,
+) -> Result<Value, EvalError> {
+    use crate::answers::SuppliedAnswer;
+    let value = match supplied {
+        SuppliedAnswer::Typed(value) => value.clone(),
+        SuppliedAnswer::Cli(text) => Value::String(text.clone()),
+    };
+    if question.kind.accepts(&value) {
         return Ok(value.clone());
     }
 
     if question.kind == QuestionKind::List
-        && let Value::String(text) = value
+        && let SuppliedAnswer::Cli(text) = supplied
     {
         return Value::parse_as(text, "a list").map_err(|_| EvalError::InvalidList {
             question: name.to_string(),
@@ -455,7 +464,7 @@ fn coerce(name: &str, question: &Question, value: &Value) -> Result<Value, EvalE
     // which case parsing it as the declared type is correct. Anything else is a
     // genuine mismatch and must not be silently coerced — `--answer ci=maybe`
     // becoming the truthy string `"maybe"` would render the wrong template.
-    if let Value::String(text) = value
+    if let SuppliedAnswer::Cli(text) = supplied
         && let Ok(parsed) = Value::parse_as(text, question.kind.type_name())
         && question.kind.accepts(&parsed)
     {
@@ -1232,7 +1241,17 @@ mod tests {
                 graph: &graph,
                 supplied: supplied
                     .iter()
-                    .map(|(k, v)| ((*k).to_string(), v.clone()))
+                    .map(|(k, v)| {
+                        (
+                            (*k).to_string(),
+                            match v {
+                                Value::String(text) => {
+                                    crate::answers::SuppliedAnswer::Cli(text.clone())
+                                }
+                                value => crate::answers::SuppliedAnswer::Typed(value.clone()),
+                            },
+                        )
+                    })
                     .collect(),
                 seeds: &seeds,
                 partials: no_partials(),
