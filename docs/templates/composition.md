@@ -39,6 +39,8 @@ An expression can choose it from a parent question, which lets template tests us
 while normal projects use a published template URL.
 The `ref` may be a branch, tag or commit.
 Each child source requires its own network trust decision; trusting the parent does not trust the children.
+Persistent parent trust covers only the parent's data requests.
+Children and their ancestors need their own matching trust entries or explicit invocation-wide `--trust`.
 IDs must be unique within each list, but separate lists may use the same ID.
 For example, a source and an integration named `pi` may both write different files under `modules/pi/`.
 If they write the same file path, composition refuses the collision rather than choosing a winner.

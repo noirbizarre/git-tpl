@@ -831,6 +831,11 @@ fn a_remote_composed_child_is_refused_before_any_clone_without_consent() {
     parent
         .write("template.toml", &manifest)
         .commit_all("request remote child");
+    // Prior consent to the parent must not become invocation-wide --trust.
+    parent.user_config(&format!(
+        "[trust]\ntemplates = [\"{}\"]\n",
+        parent.path.display()
+    ));
     let output = tempfile::tempdir().unwrap();
     let output = output.path().join("generated");
     let failure = tpl(

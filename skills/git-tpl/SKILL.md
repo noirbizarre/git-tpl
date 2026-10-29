@@ -17,6 +17,9 @@ metadata:
 
 # git-tpl
 
+Persistent trust in a composing parent covers its data only.
+Each child and ancestor needs matching trust or explicit invocation-wide `--trust`.
+
 git-tpl renders a template into a dedicated Git ref (`refs/tpl/<id>`).
 Updating the template advances that ref with a normal commit.
 You incorporate the changes with an ordinary `git merge` —

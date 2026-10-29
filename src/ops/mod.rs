@@ -738,7 +738,7 @@ pub fn render_resolved_with_composed(
     supplied: BTreeMap<String, Value>,
     user: &UserConfig,
     mut answering: Answering<'_>,
-    trust: Trust<'_>,
+    mut trust: Trust<'_>,
     recorded_composed: Option<&[ComposedRevision]>,
 ) -> Result<RenderedOnce, OpError> {
     // Built and validated before anything is prompted: a cycle or a typo
@@ -779,14 +779,14 @@ pub fn render_resolved_with_composed(
     //
     // An *unmatched* template is untouched, and `Trust::Refuse` still refuses
     // it loudly. Nothing is granted by omission.
-    let mut trust = if user.trust.allows(source) {
-        Trust::always()
-    } else {
-        trust
-    };
-
     let decisions: BTreeMap<String, Decision> = if requests.is_empty() {
         BTreeMap::new()
+    } else if user.trust.allows(source) {
+        // Persistent consent covers this template's data, never a child's
+        // repository or ancestors. Preserve the invocation gate for composition.
+        Trust::always()
+            .gate()
+            .confirm(&requests, REMOTE_LIMIT_BYTES)?
     } else {
         trust.gate().confirm(&requests, REMOTE_LIMIT_BYTES)?
     };
