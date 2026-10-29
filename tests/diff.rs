@@ -27,7 +27,7 @@ fn strict_previews_ignore_history_but_reject_current_unknown_inputs() {
         tpl(&world.project, &args).success();
         for extra in [
             vec!["--answer", "obsolete=explicit"],
-            vec!["--answer", "project_nam=typo"],
+            vec!["--answer", "unknown_key=typo"],
             vec!["--answers-from", answers.to_str().unwrap()],
         ] {
             let mut supplied = args.clone();

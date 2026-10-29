@@ -15,7 +15,7 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use miette::{Diagnostic, NamedSource, SourceSpan};
 use serde::Deserialize;
@@ -117,6 +117,23 @@ pub struct Trust {
 }
 
 impl Trust {
+    /// Match a resolved local repository without making project-relative storage revoke prior consent.
+    pub fn allows_local_location(&self, location: &Path) -> bool {
+        if self.allows(&location.to_string_lossy()) {
+            return true;
+        }
+        // Exact path entries may use a symlink spelling. Canonicalise only local
+        // paths that exist; wildcard/remote patterns keep their ordinary matching.
+        let Ok(location) = location.canonicalize() else {
+            return false;
+        };
+        self.templates.iter().any(|pattern| {
+            crate::refs::local_path(pattern)
+                .and_then(|path| path.canonicalize().ok())
+                .is_some_and(|trusted| trusted == location)
+        })
+    }
+
     /// Whether a template source matches one of the patterns.
     ///
     /// The source is normalised first, so a single entry covers every way of

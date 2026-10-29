@@ -17,6 +17,10 @@ metadata:
 
 # git-tpl
 
+Init/update serialize through configuration persistence; `tpl::git::repository_busy` asks you to finish the other operation.
+Local-source trust also matches its resolved repository path, independently of project-relative storage.
+For `tpl::config::changed`, review configuration edited during prompting and retry; nothing was published or saved.
+
 For `tpl::compose::child_failed`, inspect JSON `error.causes` for nested stable codes and actionable help.
 Template test `expect.error` can match those inner codes.
 

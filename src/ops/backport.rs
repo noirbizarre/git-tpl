@@ -477,6 +477,12 @@ pub fn backport(
             continue;
         }
 
+        // Project-only files are opt-in, including links: an unrelated local link must not
+        // prevent backporting a template-owned edit merely because its mode is unsupported.
+        if change.kind == ChangeKind::Added && paths.is_empty() {
+            continue;
+        }
+
         // Refuse both a link target edit and a regular-file/link conversion before hunk selection.
         if workdir_modes.get(&change.path) == Some(&crate::git::FileMode::Link)
             || by_output
@@ -504,19 +510,6 @@ pub fn backport(
                 continue;
             }
             ChangeKind::Added => {
-                // Not template-owned. Only carried when the user named it, and
-                // `paths` being empty means they named nothing.
-                //
-                // Silently, unlike a deletion: every project has files the
-                // template never produced — its own source, its notes, its
-                // `.config/git.tpl.toml` — and listing them all as "skipped"
-                // would bury the one line that matters under the whole
-                // repository. `skipped` means "you might have expected this
-                // and did not get it", which a file the template has never
-                // seen is not.
-                if paths.is_empty() {
-                    continue;
-                }
                 let project_bytes = read_required(project, workdir_tree, &change.path)?;
                 if is_binary(&project_bytes) {
                     // A listing reports and moves on. Refusing here would make
@@ -570,24 +563,6 @@ pub fn backport(
                     .into());
                 };
 
-                // Check before reading leaf bytes or publishing a hunk: identical source paths
-                // in different repositories otherwise make a plausible patch against the wrong owner.
-                if file.origin != crate::render::Origin::Leaf {
-                    return Err(BackportError::NonLeaf {
-                        path: change.path.clone(),
-                    }
-                    .into());
-                }
-                let template_bytes = rendered
-                    .template
-                    .repo
-                    .read_path(rendered.template.root_tree, &file.source)?;
-                let Some(template_bytes) = template_bytes else {
-                    return Err(BackportError::UnknownPath {
-                        path: file.source.clone(),
-                    }
-                    .into());
-                };
                 let project_bytes = read_required(project, workdir_tree, &change.path)?;
 
                 // A change with no change to the content: `diff_trees` reports
@@ -604,6 +579,26 @@ pub fn backport(
                 if project_bytes == file.content {
                     continue;
                 }
+
+                // Mode-only changes above need no owner, but content changes must be checked
+                // before reading leaf bytes or publishing a hunk: identical source paths in
+                // different repositories otherwise produce a plausible patch against the wrong owner.
+                if file.origin != crate::render::Origin::Leaf {
+                    return Err(BackportError::NonLeaf {
+                        path: change.path.clone(),
+                    }
+                    .into());
+                }
+                let template_bytes = rendered
+                    .template
+                    .repo
+                    .read_path(rendered.template.root_tree, &file.source)?;
+                let Some(template_bytes) = template_bytes else {
+                    return Err(BackportError::UnknownPath {
+                        path: file.source.clone(),
+                    }
+                    .into());
+                };
 
                 if is_binary(&template_bytes)
                     || is_binary(&file.content)

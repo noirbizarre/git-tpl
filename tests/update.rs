@@ -27,7 +27,7 @@ fn concurrent_publication_refuses_stale_created_and_deleted_tips_without_saving_
             Ok(default.unwrap().clone())
         }
     }
-    for action in ["replace", "create", "delete", "init"] {
+    for action in ["replace", "create", "delete", "init", "identical"] {
         let world = World::new();
         if action != "init" {
             world.init(&[]).success();
@@ -36,7 +36,9 @@ fn concurrent_publication_refuses_stale_created_and_deleted_tips_without_saving_
         if action == "create" {
             world.project.git(&["update-ref", "-d", &ref_name]);
         }
-        world.move_template();
+        if action != "identical" {
+            world.move_template();
+        }
         world.template.repo.write(
             "template.toml",
             &format!(
@@ -122,6 +124,93 @@ fn configured_source_trust_uses_its_spelling_rather_than_its_absolute_location()
         config.template.source
     ));
     tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["backport"]).success();
+}
+
+#[test]
+fn configuration_edited_during_prompting_is_preserved_without_publishing_a_rendering() {
+    use tpl::eval::{EvalError, Prompter};
+    use tpl::git::LibGit2;
+    use tpl::ops::{Answering, OpError, Trust};
+    use tpl::template::{Choice, Question, Value};
+    struct EditDuringPrompt<'a>(&'a std::path::Path);
+    impl Prompter for EditDuringPrompt<'_> {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &Question,
+            default: Option<&Value>,
+            _: Option<&Value>,
+            _: Option<&[Choice]>,
+        ) -> Result<Value, EvalError> {
+            let mut config = tpl::config::Config::load(self.0).unwrap();
+            config
+                .answers
+                .insert("project_name".into(), Value::String("hand-edited".into()));
+            config.save(self.0).unwrap();
+            Ok(default.unwrap().clone())
+        }
+    }
+    let world = World::new();
+    world.init(&[]).success();
+    world.template.repo.write(
+        "template.toml",
+        &format!(
+            "{}\n[questions.new_answer]\ntype = 'string'\ndefault = 'new'\n",
+            world.template.repo.read("template.toml")
+        ),
+    );
+    world.template.repo.commit_all("add question");
+    let before = world.project.working_state();
+    let tip = world.project.rev_parse(&world.ref_name());
+    let backend = LibGit2::discover(&world.project.path).unwrap();
+    let mut prompter = EditDuringPrompt(&world.project.path);
+    let result = tpl::ops::update(
+        &backend,
+        &world.project.path,
+        None,
+        Default::default(),
+        false,
+        false,
+        &Default::default(),
+        Answering::Interactive(&mut prompter),
+        Trust::always(),
+    );
+    assert!(matches!(
+        result,
+        Err(OpError::Config(tpl::config::ConfigError::Changed { .. }))
+    ));
+    let after = world.project.working_state();
+    assert_eq!(before.head, after.head);
+    assert_eq!(before.index, after.index);
+    assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert_eq!(
+        config.answers["project_name"],
+        Value::String("hand-edited".into())
+    );
+    assert!(!config.answers.contains_key("new_answer"));
+}
+
+#[test]
+fn rebasing_a_local_source_preserves_absolute_path_trust() {
+    let server = common::TestServer::start(vec![("/data.json", 200, "{\"value\": 1}".into())]);
+    let world = World::with_template(
+        &format!(
+            "name = 'local'\n[data.remote]\nsource = '{}'\n",
+            server.url("/data.json")
+        ),
+        &[("out.jinja", "{{ data.remote.value }}\n")],
+    );
+    world.project.user_config(&format!(
+        "[trust]\ntemplates = ['{}']\n",
+        world.template.repo.path.display()
+    ));
+    world.init(&[]).success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert!(!std::path::Path::new(&config.template.source).is_absolute());
+    tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["update", "--defaults", "--dry-run"]).success();
     tpl(&world.project, &["backport"]).success();
 }
 

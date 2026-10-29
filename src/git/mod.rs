@@ -12,6 +12,7 @@ mod ignore;
 pub mod libgit2;
 
 use std::fmt;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use miette::Diagnostic;
@@ -287,12 +288,12 @@ pub enum GitError {
     )]
     DirtyIndex,
 
-    /// Attachment must not interfere with another Git operation's state.
+    /// Mutation must not interfere with another Git or template operation's state.
     #[error("another Git operation is in progress")]
     #[diagnostic(
         code(tpl::git::repository_busy),
         help(
-            "inspect `git status` and finish or abort the active operation before attaching a template"
+            "wait for the other git-tpl operation, or inspect `git status` and finish or abort the active Git operation"
         )
     )]
     RepositoryBusy,
@@ -533,6 +534,18 @@ pub struct HistoryEntry {
     pub committed_at: i64,
 }
 
+/// An owned, worktree-local template-operation lock.
+///
+/// Keep this alive from before reading project configuration until publication
+/// and configuration persistence finish. Closing the file releases its OS lock;
+/// the persistent lock file must never be removed, which would split waiters
+/// across different inodes.
+#[derive(Debug)]
+#[must_use = "dropping the guard releases the template-operation lock"]
+pub struct TemplateOperationGuard {
+    pub(crate) _file: File,
+}
+
 /// The operations git-tpl needs from a Git implementation.
 ///
 /// Every method takes and returns types defined in this module, never the
@@ -546,6 +559,10 @@ pub struct HistoryEntry {
 /// creating and cloning a repository are the exception, and stay inherent —
 /// they produce a backend rather than use one.
 pub trait GitBackend {
+    /// Serialize template operations in this worktree through configuration persistence.
+    /// Lock contention returns [`GitError::RepositoryBusy`] without waiting.
+    fn lock_template_operation(&self) -> Result<TemplateOperationGuard, GitError>;
+
     /// The repository's working directory.
     fn workdir(&self) -> Result<PathBuf, GitError>;
 
@@ -773,14 +790,21 @@ pub trait GitBackend {
     /// Stage a path, for `init` writing the configuration file.
     fn stage(&self, relative: &Path) -> Result<(), GitError>;
 
+    /// Commit only HEAD plus the worktree's `.config/git.tpl.toml`.
+    ///
+    /// Checks for staged changes and active operations while holding Git's index
+    /// lock, then publishes the attachment and matching index under that lock.
+    /// Call without staging the configuration first. Unrelated staged changes
+    /// are refused and preserved, including changes made during prompting.
+    fn commit_attachment(&self, message: &str) -> Result<Oid, GitError>;
+
     /// Commit whatever is staged, moving `HEAD`.
     ///
-    /// The one method here that does move `HEAD`. It exists for the
-    /// configuration file `init` writes, which is a change to the project and
-    /// not to the rendered ref; invariant 1 is about `update`.
+    /// A low-level index commit; init uses [`Self::commit_attachment`] instead
+    /// so unrelated staged files cannot be incorporated into its automatic commit.
     fn commit_index(&self, message: &str) -> Result<Oid, GitError>;
 
-    /// Reset the index and worktree to `HEAD`, discarding a failed merge.
+    /// Delegate explicit recovery of an active merge to native Git, preserving unrelated edits.
     fn abort_merge(&self) -> Result<(), GitError>;
 
     /// Set a configuration value in this repository.

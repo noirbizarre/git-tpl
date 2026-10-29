@@ -10,6 +10,8 @@ Resolve a CLI template path from the invocation directory, then record it relati
 Resolve configured paths and rendered `Template-Source` provenance from that project root in every consumer,
 including status, previews, log and backport.
 Keep the configured spelling, filesystem location and ref identity separate.
+Persistent trust also matches the resolved local repository location, so rebasing storage does not revoke consent.
+That match authorizes only the repository's own data, never a composed child or its ancestors.
 When rebasing changes the derived identity, persist the original identity in the existing `template.id` field.
 URLs and scp-style addresses are unchanged; manifest-authored dependencies retain their existing semantics.
 Missing local paths fail as local repository access, without remote fallback.

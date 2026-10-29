@@ -125,6 +125,37 @@ fn materialisation_rejects_link_prefixes_and_existing_symlink_ancestors_before_w
 
 #[cfg(unix)]
 #[test]
+fn filesystem_aliases_cannot_turn_a_rendered_link_into_an_output_directory() {
+    use tpl::git::FileMode;
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let failed = |_: &std::path::Path, _: &str, error: &std::io::Error| error.to_string();
+    let target = outside.path().as_os_str().as_encoded_bytes();
+    // On case-sensitive filesystems these names coexist; on case-insensitive
+    // filesystems the directory must block link creation without an outside write.
+    let result = tpl::ops::materialise(
+        root.path(),
+        [
+            ("A", target, FileMode::Link),
+            ("a/payload", b"inside".as_slice(), FileMode::Blob),
+        ],
+        &failed,
+    );
+    assert!(!outside.path().join("payload").exists());
+    assert_eq!(
+        std::fs::read(root.path().join("a/payload")).unwrap(),
+        b"inside"
+    );
+    if result.is_ok() {
+        assert_eq!(
+            std::fs::read_link(root.path().join("A")).unwrap(),
+            outside.path()
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn a_rendered_link_cannot_be_the_parent_directory_of_another_output() {
     let world = World::new();
     let source = world.template.repo.path.join("template/prefix.jinja");

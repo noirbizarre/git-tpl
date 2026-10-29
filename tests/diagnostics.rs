@@ -95,6 +95,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::compose::invalid",
     "tpl::compose::nested",
     "tpl::compose::untrusted",
+    "tpl::config::changed",
     "tpl::config::io",
     "tpl::config::missing",
     "tpl::config::parse",

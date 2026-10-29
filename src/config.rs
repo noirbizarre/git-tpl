@@ -23,6 +23,19 @@ pub const CONFIG_PATH: &str = ".config/git.tpl.toml";
 /// Errors from reading or writing the project configuration.
 #[derive(Debug, Error, Diagnostic)]
 pub enum ConfigError {
+    /// A user changed configuration while answers were being collected.
+    #[error("configuration changed while rendering: `{}`", path.display())]
+    #[diagnostic(
+        code(tpl::config::changed),
+        help(
+            "review the current configuration and rerun update; no rendered ref or configuration was changed"
+        )
+    )]
+    Changed {
+        /// Configuration that must be reviewed before retrying.
+        path: PathBuf,
+    },
+
     /// No configuration file at the expected path.
     #[error("no git-tpl configuration found at `{}`", path.display())]
     #[diagnostic(

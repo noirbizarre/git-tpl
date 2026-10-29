@@ -20,6 +20,8 @@ Dirty traversal reads link targets without following them, including dangling an
 Reject output prefix collisions before building trees or materialising files.
 Reject existing symlinks at destination paths and their ancestors before cleanup or writes.
 No output may be written through a rendered link.
+Materialise ordinary files before links and recheck destination ancestors for each write,
+because case folding or Unicode normalisation can alias distinct Git paths on the destination filesystem.
 Materialisation creates Unix links from target bytes and explicitly fails on unsupported platforms.
 Git-only rendering and snapshots do not require filesystem link creation.
 Backport rejects link changes and regular/link conversions because its text patch cannot carry link modes.

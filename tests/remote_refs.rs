@@ -182,7 +182,8 @@ fn a_fresh_clone_restores_original_ancestry_before_its_next_update() {
     assert!(!other.has_ref(&world.ref_name()));
 
     // Full merged history retains the original rendering even without sharing its ref.
-    let source = format!("^Template-Source: {}$", world.template.repo.path.display());
+    let recorded = tpl::config::Config::load(&world.project.path).unwrap();
+    let source = format!("^Template-Source: {}$", recorded.template.source);
     let historical = other.git(&[
         "log",
         "HEAD",

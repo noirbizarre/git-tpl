@@ -1,5 +1,8 @@
 # `git tpl update`
 
+Concurrent init/update operations in one worktree are refused until the first finishes saving configuration.
+A changed ref or configuration discovered after prompting is refused rather than overwriting the newer state.
+
 Publication compares the rendered ref's tip under a lock, including when the ref was absent.
 If another writer has changed it, `tpl::git::stale_ref` reports the expected and actual tips.
 Inspect the current ref before retrying; the failed publication does not save newly answered configuration.

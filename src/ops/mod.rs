@@ -427,7 +427,7 @@ pub fn materialise<'a, E>(
     files: impl IntoIterator<Item = (&'a str, &'a [u8], FileMode)>,
     failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
 ) -> Result<(), E> {
-    let files: Vec<_> = files.into_iter().collect();
+    let mut files: Vec<_> = files.into_iter().collect();
     let paths: std::collections::BTreeSet<_> = files.iter().map(|(path, _, _)| *path).collect();
     for (path, _, mode) in &files {
         let invalid = |reason| std::io::Error::new(std::io::ErrorKind::InvalidInput, reason);
@@ -471,8 +471,15 @@ pub fn materialise<'a, E>(
             ));
         }
     }
+    // Links go last: filesystem aliases (case folding or Unicode normalisation)
+    // must not let a newly created link become an ordinary output's ancestor.
+    files.sort_by_key(|(_, _, mode)| *mode == FileMode::Link);
     for (path, content, mode) in files {
         let target = root.join(path);
+        // Recheck after earlier writes too, since distinct Git names can alias
+        // on the destination filesystem even when lexical prefix checks pass.
+        reject_symlink_ancestors(&target)
+            .map_err(|error| failed(&target, "materialise", &error))?;
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|error| failed(parent, "create", &error))?;
         }
@@ -772,7 +779,7 @@ fn render_files_from_location(
     target: Target<'_>,
     location: &str,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     answering: Answering<'_>,
     mut trust: Trust<'_>,
@@ -885,7 +892,13 @@ pub fn render_resolved_with_composed(
     // it loudly. Nothing is granted by omission.
     let decisions: BTreeMap<String, Decision> = if requests.is_empty() {
         BTreeMap::new()
-    } else if user.trust.allows(source) {
+    } else if user.trust.allows(source)
+        || (crate::refs::local_path(source).is_some()
+            && template
+                .repo
+                .workdir()
+                .is_ok_and(|location| user.trust.allows_local_location(&location)))
+    {
         // Persistent consent covers this template's data, never a child's
         // repository or ancestors. Preserve the invocation gate for composition.
         Trust::always()
@@ -1250,6 +1263,9 @@ pub fn init(
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<InitOutcome, OpError> {
+    // Serialize cooperating initializers/updaters through configuration persistence,
+    // including the identical-tree path that has no new commit to publish.
+    let _operation = project.lock_template_operation()?;
     // `--force` re-asks the questions and renders onto the existing ref, which
     // is not a new operation: the ref is append-only, so another rendering on
     // it is exactly what `update` writes. The only thing `force` adds is
@@ -1314,6 +1330,15 @@ pub fn init(
     // at which saying so costs the user nothing: after the next line there is a
     // commit in their repository to explain away.
     let note = template_note(&rendered)?;
+
+    // Questions can leave the command waiting while another terminal stages
+    // changes. Refuse before publication rather than incorporating those edits.
+    if !project.is_normal_state() {
+        return Err(GitError::RepositoryBusy.into());
+    }
+    if !project.is_index_clean()? {
+        return Err(GitError::DirtyIndex.into());
+    }
 
     // A forced reattachment to the same ref must descend from its tip: an
     // orphan here destroys the merge base of every previous attachment.
@@ -1398,8 +1423,7 @@ pub fn init(
         // refuse to merge, and the failure would be about the index rather
         // than about anything the user did.
         _ => {
-            project.stage(Path::new(CONFIG_PATH))?;
-            project.commit_index(&format!(
+            project.commit_attachment(&format!(
                 "chore(tpl): attach the {} template\n\n\
                  Records the template source and the answers used to render it.\n\
                  See {CONFIG_PATH}.\n",
@@ -1826,7 +1850,9 @@ pub fn update(
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<UpdateOutcome, OpError> {
+    let _operation = project.lock_template_operation()?;
     let mut config = Config::load(project_root)?;
+    let initial_config = config.clone();
     let configured_reference = config.template.r#ref.clone();
     // `--ref` changes this invocation's render, not the attachment recorded
     // on disk; the next update must still use the configured reference.
@@ -1911,9 +1937,26 @@ pub fn update(
         .map(ComposedRevision::lock)
         .collect();
     let composed_changed = config.composed != composed;
+    // A hand edit during a prompt is not ours to overwrite, even when another
+    // git-tpl invocation is excluded by the operation lock.
+    if Config::load(project_root)? != initial_config {
+        return Err(ConfigError::Changed {
+            path: Config::path_in(project_root),
+        }
+        .into());
+    }
     if migrations.is_empty() && identical && !child_changed {
         let answers_changed = config.answers != *rendered.context.answers();
         if composed_changed || answers_changed {
+            if let Some(tip) = tip {
+                // Validate stale snapshots even when only answers/locks change.
+                project.compare_and_set_ref(
+                    &ref_name,
+                    Some(tip),
+                    tip,
+                    "tpl: validate unchanged render",
+                )?;
+            }
             config.answers = rendered.context.answers().clone();
             config.composed = composed;
             config.template.r#ref = configured_reference;

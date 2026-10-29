@@ -148,6 +148,7 @@ These two are about the flags rather than the template, so they are raised as er
 | Code | Meaning |
 |---|---|
 | `tpl::config::missing` | No `.config/git.tpl.toml`. The repository has no template attached. |
+| `tpl::config::changed` | Configuration changed during rendering; review it and rerun update. Nothing was published. |
 | `tpl::config::parse` | `.config/git.tpl.toml` is not valid TOML. |
 | `tpl::config::io` | It could not be read or written. |
 | `tpl::config::serialise` | It could not be written back. |
@@ -250,7 +251,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::git::stale_ref` | The rendered ref changed concurrently; inspect expected/actual tips and retry. No config is saved. |
 | `tpl::git::dirty_worktree` | The operation merges, and the worktree has uncommitted changes. |
 | `tpl::git::dirty_index` | Attachment would include staged user changes; commit or unstage them, even with `--no-merge`. |
-| `tpl::git::repository_busy` | Another Git operation is active; finish or abort it before attaching a template. |
+| `tpl::git::repository_busy` | Another Git/template operation is active; wait, finish or abort it before retrying. |
 | `tpl::git::diverged` | The remote template ref has diverged. Nothing is force-pushed. |
 | `tpl::git::jj_not_colocated` | The path is a Jujutsu workspace without a colocated `.git`. |
 | `tpl::git::no_identity` | Git has no `user.name` or `user.email` configured. |

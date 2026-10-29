@@ -3,6 +3,151 @@
 mod common;
 
 #[test]
+fn files_staged_during_the_questionnaire_never_enter_an_attachment_commit() {
+    use tpl::eval::{EvalError, Prompter};
+    use tpl::git::{GitError, LibGit2};
+    use tpl::ops::{Answering, OpError, Trust};
+    use tpl::template::{Choice, Question, Value};
+
+    struct StageDuringPrompt<'a>(&'a common::Repo);
+    impl Prompter for StageDuringPrompt<'_> {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &Question,
+            default: Option<&Value>,
+            _: Option<&Value>,
+            _: Option<&[Choice]>,
+        ) -> Result<Value, EvalError> {
+            self.0.write("user-staged", "staged while answering\n");
+            self.0.git(&["add", "user-staged"]);
+            Ok(default.unwrap().clone())
+        }
+    }
+
+    for merge_after in [false, true] {
+        let world = common::World::new();
+        let head = world.project.rev_parse("HEAD");
+        let backend = LibGit2::discover(&world.project.path).unwrap();
+        let mut prompter = StageDuringPrompt(&world.project);
+        let result = tpl::ops::init(
+            &backend,
+            &world.project.path,
+            world.template.repo.path.to_str().unwrap(),
+            None,
+            None,
+            Default::default(),
+            false,
+            merge_after,
+            false,
+            false,
+            &Default::default(),
+            Answering::Interactive(&mut prompter),
+            Trust::always(),
+        );
+        assert!(matches!(result, Err(OpError::Git(GitError::DirtyIndex))));
+        assert_eq!(world.project.rev_parse("HEAD"), head);
+        assert_eq!(
+            world.project.git(&["show", ":user-staged"]),
+            "staged while answering"
+        );
+        assert_eq!(
+            world.project.git(&["diff", "--cached", "--name-only"]),
+            "user-staged"
+        );
+    }
+}
+
+#[test]
+fn attachment_publication_rechecks_a_cached_index_and_preserves_new_staged_files() {
+    use tpl::git::{GitBackend, GitError, LibGit2};
+    let world = common::World::new();
+    let backend = LibGit2::discover(&world.project.path).unwrap();
+    assert!(backend.is_index_clean().unwrap());
+    world.project.write("user-staged", "do not commit me\n");
+    world.project.git(&["add", "user-staged"]);
+    world.project.write(".config/git.tpl.toml", "attachment\n");
+    let before = world.project.working_state();
+    assert!(matches!(
+        backend.commit_attachment("attach"),
+        Err(GitError::DirtyIndex)
+    ));
+    assert_eq!(world.project.working_state(), before);
+    assert!(!world.project.exists(".git/index.lock"));
+}
+
+#[test]
+fn attachment_publication_commits_only_config_and_leaves_unstaged_edits_alone() {
+    use tpl::git::{GitBackend, LibGit2};
+    for unborn in [false, true] {
+        let world = common::World::new();
+        if unborn {
+            world.project.git(&["update-ref", "-d", "refs/heads/main"]);
+            world.project.git(&["read-tree", "--empty"]);
+        } else {
+            world
+                .project
+                .git(&["update-index", "--assume-unchanged", "NOTES.md"]);
+        }
+        let notes_flags = world.project.git(&["ls-files", "-v", "NOTES.md"]);
+        let backend = LibGit2::discover(&world.project.path).unwrap();
+        world.project.write("NOTES.md", "unstaged\n");
+        world.project.write(".config/git.tpl.toml", "attachment\n");
+        backend.commit_attachment("attach").unwrap();
+        assert!(backend.is_index_clean().unwrap());
+        assert_eq!(
+            world.project.git(&["ls-files", "-v", "NOTES.md"]),
+            notes_flags
+        );
+        assert_eq!(world.project.read("NOTES.md"), "unstaged\n");
+        assert_eq!(
+            world.project.git(&["show", "HEAD:.config/git.tpl.toml"]),
+            "attachment"
+        );
+        assert_eq!(
+            world.project.git(&[
+                "diff-tree",
+                "--root",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                "HEAD"
+            ]),
+            ".config/git.tpl.toml"
+        );
+    }
+}
+
+#[test]
+fn attachment_publication_respects_native_git_index_locks() {
+    use tpl::git::{GitBackend, GitError, LibGit2};
+    let world = common::World::new();
+    world.project.write(".git/index.lock", "another writer\n");
+    let backend = LibGit2::discover(&world.project.path).unwrap();
+    assert!(matches!(
+        backend.commit_attachment("attach"),
+        Err(GitError::RepositoryBusy)
+    ));
+    assert_eq!(world.project.read(".git/index.lock"), "another writer\n");
+}
+
+#[test]
+fn template_operation_guards_exclude_other_handles_and_release_on_drop() {
+    use tpl::git::{GitBackend, GitError, LibGit2};
+    let world = common::World::new();
+    let backend = LibGit2::discover(&world.project.path).unwrap();
+    let other = LibGit2::discover(&world.project.path).unwrap();
+    let guard = backend.lock_template_operation().unwrap();
+    assert!(matches!(
+        other.lock_template_operation(),
+        Err(GitError::RepositoryBusy)
+    ));
+    assert!(world.project.exists(".git/tpl-operation.lock"));
+    drop(guard);
+    let _guard = other.lock_template_operation().unwrap();
+}
+
+#[test]
 fn every_attachment_refuses_staged_changes_before_writing_anything() {
     for unborn in [false, true] {
         for no_merge in [false, true] {
