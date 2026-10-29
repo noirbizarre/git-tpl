@@ -238,7 +238,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::git::not_a_repository` | The command needs a repository and there is none. |
 | `tpl::git::no_merge` | No merge is active; inspect `git status`. Local changes are preserved. |
 | `tpl::git::abort_failed` | Native Git could not abort; inspect its captured reason and preserve edits before retrying. |
-| `tpl::git::no_such_revision` | The requested branch, tag or SHA does not exist. |
+| `tpl::git::no_such_revision` | The requested revision is absent, or an inheritance object pin is ambiguous or noncommit. |
 | `tpl::git::auth` | Authentication failed. |
 | `tpl::git::network` | The remote could not be reached. The help text carries libgit2's own reason. |
 | `tpl::git::clone` | The remote answered, but the clone could not be written — usually no space or no permission on the temporary directory. |

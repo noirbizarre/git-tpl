@@ -97,6 +97,8 @@ do not assume it is preinstalled.
    On `tpl::git::stale_ref`, inspect expected/actual tips before retrying; failed publication saves no configuration.
    `init`, including `--no-merge`, requires a clean index and no active Git operation:
    handle `tpl::git::dirty_index` by committing/unstaging, and `tpl::git::repository_busy` by finishing/aborting it.
+   `[extends].rev` resolves exact tags or unique 7–40-character commit-object prefixes, never hexadecimal branches.
+   Ambiguous/noncommit object pins produce `tpl::git::no_such_revision`; tags win branch-name collisions.
 9. **`backport` never applies its own patch.** It only ever emits one, to stdout or `--output <file>`.
    Hand it to `git -C <template-clone> am` yourself (or give it to the human to review first).
    Under `--json`, `-p`/`--patch` (interactive hunk selection) is refused with `tpl::backport::not_interactive` —

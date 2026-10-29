@@ -1,5 +1,10 @@
 # Template format
 
+Inheritance pins resolve exact tags (including `refs/tags/<name>`) or unique commit-object SHA prefixes
+of 7–40 hexadecimal characters.
+Tags take precedence over same-named branches; hexadecimal branch names never provide a fallback.
+Ambiguous prefixes and noncommit objects fail with `tpl::git::no_such_revision`.
+
 A template is a normal Git repository.
 Nothing registers it, nothing packages it, and any Git URL that libgit2 can clone will do — including a local
 path.

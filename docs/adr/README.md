@@ -42,7 +42,7 @@ explains the code that existed.
 | [031](031-non-git-front-ends-are-incidental.md) | A Git front-end works by riding ADR-001 and ADR-011, not by being supported |
 | [032](032-write-only-writes.md) | `--write` only writes; it does not run a case's `[commands]` or `expect` |
 | [033](033-test-case-git-sandbox.md) | A test case may ask for an isolated Git sandbox |
-| [034](034-template-inheritance.md) | A template may extend one parent, pinned, merged by name |
+| [034](034-template-inheritance.md) | A template may extend one parent, pinned, merged by name; corrected to resolve actual pin objects |
 | [035](035-github-actions-progress-reporter.md) | `test` reports progress as GitHub Actions workflow commands, auto-detected |
 | [036](036-shard-and-record-durations.md) | `--shard` and `--record-durations` balance a test suite across a CI matrix |
 | [037](037-non-interactive-hunk-selection.md) | `backport` hunks can be listed and named in advance, so a script can select without a prompt |

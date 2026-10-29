@@ -1106,6 +1106,42 @@ impl GitBackend for LibGit2 {
             .is_ok())
     }
 
+    fn resolve_pin(&self, reference: &str, origin: &str) -> Result<Option<Oid>, GitError> {
+        let missing = || GitError::NoSuchRevision {
+            reference: reference.into(),
+            origin: origin.into(),
+        };
+        let tag = if reference.starts_with("refs/tags/") {
+            reference.to_string()
+        } else {
+            format!("refs/tags/{reference}")
+        };
+        // Exact ref lookup excludes revspec operators and gives tags precedence
+        // over same-named branches, without validating then resolving again.
+        match self.repo.find_reference(&tag) {
+            Ok(tag) => {
+                return tag
+                    .peel_to_commit()
+                    .map(|commit| Some(to_oid(commit.id())))
+                    .map_err(|_| missing());
+            }
+            Err(e) if e.code() == ErrorCode::NotFound || e.code() == ErrorCode::InvalidSpec => {}
+            Err(e) => return Err(backend("look up the pinned tag", &e)),
+        }
+        if !(7..=40).contains(&reference.len()) || !reference.bytes().all(|c| c.is_ascii_hexdigit())
+        {
+            return Ok(None);
+        }
+        // Look up objects, never names. Do not peel a blob/tree/tag object into
+        // a commit or filter ambiguity away by searching commits alone.
+        let object = self
+            .repo
+            .find_object_by_prefix(reference, None)
+            .map_err(|_| missing())?;
+        let commit = object.into_commit().map_err(|_| missing())?;
+        Ok(Some(to_oid(commit.id())))
+    }
+
     fn default_branch(&self) -> Result<String, GitError> {
         // `HEAD` in a bare clone points at whatever the remote said its default
         // branch was, which is the correct answer and needs no guessing between
@@ -2038,6 +2074,39 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn ambiguous_commit_object_prefixes_never_fall_back_to_a_branch() {
+        let (_dir, repo) = scratch();
+        let tree = repo.build_tree(&[]).unwrap();
+        let mut seen = HashMap::new();
+        // Birthday search hashes candidates in memory, writing only the two
+        // colliding real commits so the fixture stays small and deterministic.
+        for number in 0..1_000_000 {
+            let bytes = format!(
+                "tree {tree}\nauthor Test <test@example.invalid> 0 +0000\ncommitter Test <test@example.invalid> 0 +0000\n\ncandidate {number}\n"
+            );
+            let oid = git2::Oid::hash_object(ObjectType::Commit, bytes.as_bytes()).unwrap();
+            let prefix = to_oid(oid).to_hex()[..7].to_string();
+            if let Some(previous) = seen.insert(prefix.clone(), bytes.clone()) {
+                let odb = repo.repo.odb().unwrap();
+                odb.write(ObjectType::Commit, previous.as_bytes()).unwrap();
+                odb.write(ObjectType::Commit, bytes.as_bytes()).unwrap();
+                repo.set_ref(
+                    &format!("refs/heads/{prefix}"),
+                    to_oid(oid),
+                    "ambiguous branch",
+                )
+                .unwrap();
+                assert!(matches!(
+                    repo.resolve_pin(&prefix, "fixture"),
+                    Err(GitError::NoSuchRevision { .. })
+                ));
+                return;
+            }
+        }
+        panic!("deterministic fixture did not find a seven-character collision");
     }
 
     #[test]

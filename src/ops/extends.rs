@@ -127,17 +127,7 @@ pub enum ExtendsError {
 /// A tag and a branch can be spelled identically, so this has to ask the
 /// actual repository rather than guess from the string.
 pub fn is_pinned(repo: &dyn GitBackend, rev: &str) -> Result<bool, crate::git::GitError> {
-    Ok(looks_like_sha(rev) || repo.is_tag(rev)?)
-}
-
-/// A plausible abbreviated or full commit SHA.
-///
-/// Git accepts abbreviations down to 4 characters, but a 4-6 character hex
-/// string is also a very ordinary word or a licence identifier fragment; 7 is
-/// where Git's own `--short` output starts, and is used here as where treating
-/// a string as "obviously a SHA" stops being a guess.
-fn looks_like_sha(rev: &str) -> bool {
-    (7..=40).contains(&rev.len()) && rev.chars().all(|c| c.is_ascii_hexdigit())
+    Ok(repo.resolve_pin(rev, "the template repository")?.is_some())
 }
 
 /// The merged result of folding an `[extends]` chain.
@@ -285,20 +275,9 @@ fn check_kind_collisions(manifest: &Manifest) -> Result<(), ManifestError> {
 mod tests {
     use super::*;
     use crate::template::MANIFEST_NAME;
-    use rstest::rstest;
 
     fn manifest(toml: &str) -> Manifest {
         Manifest::parse(toml, MANIFEST_NAME).expect("manifest should parse")
-    }
-
-    #[rstest]
-    #[case("a1b2c3d", true)] // abbreviated SHA
-    #[case("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2", true)] // full SHA
-    #[case("v1.0.0", false)]
-    #[case("main", false)]
-    #[case("abc", false)] // too short to be treated as a SHA
-    fn sha_shaped_revs_are_recognised(#[case] rev: &str, #[case] expected: bool) {
-        assert_eq!(looks_like_sha(rev), expected);
     }
 
     #[test]

@@ -347,6 +347,7 @@ pub fn resolve(
         request.reference,
         request.root,
         request.dirty,
+        false,
     )?;
 
     // A template with no `[extends]` is a chain of one: its own manifest is
@@ -385,11 +386,13 @@ pub fn resolve(
 /// asked for) and each ancestor in an `[extends]` chain: only the source,
 /// reference and root differ between the two, and `dirty` is never true for
 /// an ancestor (only a local, directly-requested template can be `--dirty`).
+/// `pinned` selects actual tag/object lookup before reading any ancestor files.
 fn resolve_layer(
     source: &str,
     reference: Option<&str>,
     root_override: Option<&str>,
     dirty: bool,
+    pinned: bool,
 ) -> Result<Layer, ResolveError> {
     let local = local_path(source);
 
@@ -417,7 +420,15 @@ fn resolve_layer(
             Some(reference) => reference.to_string(),
             None => repo.default_branch()?,
         };
-        let revision = repo.resolve_revision(&reference, source)?;
+        let revision = if pinned {
+            repo.resolve_pin(&reference, source)?
+                .ok_or_else(|| ExtendsError::Unpinned {
+                    origin: source.into(),
+                    rev: reference.clone(),
+                })?
+        } else {
+            repo.resolve_revision(&reference, source)?
+        };
         let tree = repo.commit_tree(revision)?;
         (revision, tree, reference, false, Vec::new())
     };
@@ -545,15 +556,7 @@ fn resolve_ancestors(
         // is no way to list the whole chain before any of it is reached.
         confirm_ancestor(&declared.source, ancestors.len(), user, trust)?;
 
-        let layer = resolve_layer(&declared.source, Some(&declared.rev), None, false)?;
-
-        if !extends::is_pinned(layer.repo.as_ref(), &declared.rev)? {
-            return Err(ExtendsError::Unpinned {
-                origin: declared.source.clone(),
-                rev: declared.rev.clone(),
-            }
-            .into());
-        }
+        let layer = resolve_layer(&declared.source, Some(&declared.rev), None, false, true)?;
 
         let key = (declared.source.clone(), layer.revision);
         path.push(declared.source.clone());
