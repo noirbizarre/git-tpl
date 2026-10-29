@@ -135,7 +135,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::data::load` | A data source could not be read. |
 | `tpl::data::parse` | A data source is not valid in its declared format. |
 | `tpl::data::escapes_root` | A `local` path leaves the project root. |
-| `tpl::data::needs_project` | A `local` source was reached by a command with no project — `render`, `lint`, `context`. Use a `template` source, or run inside a project. |
+| `tpl::data::needs_project` | A `local` source was reached without a project during evaluation, such as `render` or `context`. Use a `template` source or a project-aware rendering. Lint checks declarations without loading values. |
 | `tpl::data::unknown_setting` | An unknown `kind` or `format`. |
 | `tpl::data::invalid_git_source` | A `git` source's `source`, `ref` and `path` do not name a file. Write all three keys, or a `<scheme>://<repo>@<ref>:<path>` source. |
 | `tpl::data::untrusted` | A network source — remote or `git` — was not authorised. Pass `--trust`, add the template to `[trust]`, or, in `git tpl test`, set `trust = true` on the case. |

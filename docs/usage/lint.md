@@ -221,15 +221,13 @@ A warning rather than an error, and reported regardless of whether a `when` is p
 is invisible either way, and adding a `when` to an already-declared name later would reopen the hole with no new
 warning to catch it.
 
-## No local data sources
+## Data declarations, not runtime loading
 
-A `local` data source is resolved relative to the project root, and `lint` has no project — it checks a template
-in isolation.
-It fails with `tpl::data::needs_project` rather than being resolved against the working directory — that would
-make the same template, the same answers and the same revision check differently depending on where the command
-was run.
-
-Use a `template` source for data that belongs to the template.
+`lint` checks data declarations and their graph dependencies without loading their values.
+A `local` declaration is accepted without a project; lint neither reads the project-local file nor reports
+`tpl::data::needs_project` merely because the declaration exists.
+File availability, formats, checksums and value-dependent failures are checked when a render reaches the source.
+Use a `template` source for data that belongs to the template and a render or test case to validate its contents.
 
 ## Options
 
