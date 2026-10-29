@@ -13,7 +13,7 @@ git tpl --json questions ./my-template
 |---|---|
 | `<template>` | The template — a Git URL or a path. Defaults to `.`. |
 | `--ref` | Branch, tag or commit to read the schema from. |
-| `--root` | Read the manifest for this subdirectory instead. |
+| `--root` | Override the manifest's render root with this subdirectory. Manifest discovery stays at the repository root. |
 | `--dirty` | Read the template's working tree rather than its `HEAD`. Local templates only. |
 | [`--json`](../reference/json.md#questions) | A global flag. The schema on stdout as one object. |
 
