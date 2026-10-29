@@ -19,14 +19,14 @@ defaults:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
-  # NOT `MISE_ACTION_VERSION`, however obvious that name looks: mise reads
-  # `MISE_<TOOL>_VERSION` from the environment, so that name would be
-  # interpreted as a request to install a tool called `action`.
-  PINNED_MISE_VERSION: 2026.7.18
+  # Shared caches cannot reuse Cargo's private incremental state.
+  CARGO_INCREMENTAL: "0"
+  # Windows ships lld-link; nextest links one executable per test target.
+  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: lld-link
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -40,17 +40,26 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: rui314/setup-mold@v1
 
       # Tool versions come from mise.toml + mise.lock, so CI runs exactly
       # what `mise run default` runs locally.
       - uses: jdx/mise-action@v5
         with:
-          version: ${{ env.PINNED_MISE_VERSION }}
           cache: true
+
+      # Includes Cargo downloads and outputs; do not duplicate rust-cache.
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: lint-v1
+          save-on-pull-request: true
 
       - name: Run hooks
         run: prek run --all-files --show-diff-on-failure
+
+      # Keep Clippy enforcement after removing its expensive commit hook.
+      - name: Lint Rust
+        run: mise run lint
 
   test:
     name: 🧪 Tests (${{ matrix.os.name }})
@@ -73,14 +82,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
+      - name: Install mold (faster Linux linker)
+        if: matrix.os.flag == 'linux'
+        uses: rui314/setup-mold@v1
 
       # nextest and llvm-cov are pinned by mise.lock rather than resolved
       # per-run, so a tool release cannot change CI behaviour on its own.
       - uses: jdx/mise-action@v5
         with:
-          version: ${{ env.PINNED_MISE_VERSION }}
           cache: true
+
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          cache-generation: tests-${{ matrix.os.flag }}-v1
+          save-on-pull-request: true
 
       # The integration tests create real Git repositories and commit to them.
       # libgit2 refuses to build a signature without a configured identity, so
@@ -138,9 +153,65 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: rui314/setup-mold@v1
+      # No mise activation here: invoke MBX explicitly to preserve the MSRV.
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          version: 1.28.0
+          cache-generation: msrv-v1
+          save-on-pull-request: true
       - name: Check
-        run: cargo check --all-targets
+        run: mbx check --all-targets
+
+  # Link every release target on PRs without paying release LTO costs.
+  build:
+    name: 🏗️ Build (${{ matrix.build.label }})
+    if: github.event_name == 'pull_request'
+    runs-on: ${{ matrix.build.runner }}
+    env:
+      RUSTFLAGS: -D warnings
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - { label: linux-amd64, target: x86_64-unknown-linux-gnu, runner: ubuntu-latest, cross: true }
+          - { label: linux-arm64, target: aarch64-unknown-linux-gnu, runner: ubuntu-latest, cross: true }
+          - { label: linux-amd64-musl, target: x86_64-unknown-linux-musl, runner: ubuntu-latest, cross: true }
+          - { label: darwin-amd64, target: x86_64-apple-darwin, runner: macos-15-intel }
+          - { label: darwin-arm64, target: aarch64-apple-darwin, runner: macos-latest }
+          - { label: windows-amd64, target: x86_64-pc-windows-msvc, runner: windows-latest }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.build.target }}
+      # This payload also retains outputs produced inside cross containers.
+      - uses: jdx/mr-boxington-action@v1
+        if: matrix.build.target != 'x86_64-apple-darwin'
+        with:
+          version: 1.28.0
+          cache-generation: pr-build-${{ matrix.build.target }}-v1
+          save-on-pull-request: true
+      - uses: taiki-e/install-action@cross
+        if: matrix.build.cross
+      - name: Statically link the MSVC C runtime
+        if: endsWith(matrix.build.target, 'windows-msvc')
+        run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "$GITHUB_ENV"
+      - name: Build
+        env:
+          TARGET: ${{ matrix.build.target }}
+          CROSS: ${{ matrix.build.cross }}
+        run: |
+          if [ "${CROSS:-}" = "true" ]; then
+            cross build --locked --target "$TARGET"
+          elif [ "$TARGET" = x86_64-apple-darwin ]; then
+            # MBX does not publish an Intel macOS executable.
+            cargo build --locked --target "$TARGET"
+          else
+            mbx build --locked --target "$TARGET"
+          fi
 
   # `git tpl` only works if the binary is named `git-tpl` and is on PATH. That
   # is not a stylistic choice — it is the mechanism Git uses to resolve
@@ -152,11 +223,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          version: 1.28.0
+          cache-generation: subcommand-v1
+          save-on-pull-request: true
 
       - name: Verify `git tpl` resolves to the built binary
         run: |
-          cargo build --release
+          mbx build --locked --release
           test -x target/release/git-tpl
           export PATH="$PWD/target/release:$PATH"
 
@@ -178,18 +253,10 @@ jobs:
             echo '::notice::man is not installed; skipping the git tpl --help check'
             git-tpl --help > /dev/null
           fi
-          # Reaching one of our own diagnostics proves Git dispatched to the
-          # binary and the binary ran. The repository has no template attached,
-          # so "no git-tpl configuration" is the expected outcome — and so is
-          # the non-zero exit that carries it, which is why the output is
-          # captured before it is matched rather than piped: under `pipefail`
-          # the pipeline would report that expected failure as this step's.
-          status=$(git tpl status 2>&1 || true)
-          if ! grep -q "no git-tpl configuration" <<<"$status"; then
-            echo "::error::git tpl status did not reach git-tpl"
-            echo "$status"
-            exit 1
-          fi
+          # Exercise command dispatch without contacting the attached template.
+          # Git's --help interception above is separate from CLI argument parsing.
+          git tpl status -h > "$RUNNER_TEMP/tpl-status-help"
+          grep -q 'git tpl status' "$RUNNER_TEMP/tpl-status-help"
 
   action:
     name: 📥 Action installer

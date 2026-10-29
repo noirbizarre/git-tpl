@@ -1,0 +1,58 @@
+name: 🔄 Template
+
+# Has the template this project was rendered from moved?
+#
+# Scheduled rather than a job in ♻️ CI, deliberately. A template moving is not
+# a fault in anyone's pull request, and failing their check for it would teach
+# people to ignore a red X that is not about their change. This runs on its own
+# clock and fails on its own terms.
+
+on:
+  schedule:
+    # Monday morning. Weekly is the right cadence for something whose remedy is
+    # "read a diff and decide", not "fix it now".
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: template
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: 🔄 Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Merged render commits are the baseline even when template refs
+          # have never been pushed; shallow history cannot recover that base.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # git-tpl comes from mise.toml, pinned and provenance-verified.
+      - uses: jdx/mise-action@v5
+        with:
+          cache: true
+
+      # A changed rendering needs a commit identity on a fresh runner.
+      - name: Configure Git identity
+        run: |
+          git config user.name 'git-tpl template check'
+          git config user.email 'git-tpl@users.noreply.github.com'
+
+      # The task first restores the absent ref from merged render history.
+      # Update may record newly answered defaults in project configuration;
+      # all changes stay on this disposable runner and nothing is pushed.
+      - name: Re-render the template
+        run: mise run tpl:update
+
+      - name: Report what merging it would change
+        run: git tpl diff --exit-code --stat

@@ -1,15 +1,15 @@
 name: 🍺 Homebrew
 
 # Updates the `git-tpl` formula in noirbizarre/homebrew-tap once a release is
-# public. The trigger is `release: published` rather than the completion of
+# public. The trigger is `release: released` rather than the completion of
 # 📦 Publish Release, because gh-ship only undrafts the release after that
-# workflow succeeds — so waiting for `published` means the URLs baked into the
+# workflow succeeds — so waiting for `released` means the stable URLs baked into the
 # formula already resolve when it lands in the tap.
 run-name: 🍺 Homebrew ${{ inputs.tag || github.event.release.tag_name }}
 
 on:
   release:
-    types: [published]
+    types: [released]
 
   workflow_dispatch:
     inputs:
@@ -96,7 +96,7 @@ jobs:
           cp ../build/git-tpl.rb Formula/git-tpl.rb
 
           git config user.name 'git-tpl release bot'
-          git config user.email 'noirbizarre@gmail.com'
+          git config user.email 'noirbizarre@users.noreply.github.com'
 
           # Compare the index, not the worktree: `git diff` alone ignores
           # untracked files, so the very first import would look like a no-op.

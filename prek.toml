@@ -26,36 +26,40 @@ additional_dependencies = ["@commitlint/config-conventional"]
 # cannot judge whether a break under that ceiling is semantic or columnar —
 # that half of the convention is a review concern, not a lint one.
 #
-# Scoped to the docs this convention actually covers — the same set
-# `mise run lint:md` checks: docs/, the agent skill (a second, independent
-# CLI description — see AGENTS.md's "When you touch..."), and this file.
-# Left unscoped it also reaches CHANGELOG.md (git-cliff's output, not ours
-# to reformat) and README.md (not part of this convention).
+# Include the README and contributor guide as well as docs and skills.
+# CHANGELOG.md remains excluded because git-cliff owns its formatting.
 [[repos]]
 repo = "https://github.com/DavidAnson/markdownlint-cli2"
 rev = "v0.23.2"
 hooks = [
-  { id = "markdownlint-cli2", files = "^(docs/.*\\.md|skills/.*\\.md|AGENTS\\.md)$" },
+  { id = "markdownlint-cli2", files = "^(docs/.*\\.md|skills/.*\\.md|AGENTS\\.md|CONTRIBUTING\\.md|README\\.md)$", additional_dependencies = ["markdownlint-cli2-formatter-pretty"] },
 ]
 
 [[repos]]
-repo = "local"
+repo = "https://github.com/rhysd/actionlint"
+rev = "v1.7.12"
 
 # Suppressions are configured in .github/actionlint.yml, not here: the same
 # file serves `mise run lint:actions`, so the two cannot disagree.
 [[repos.hooks]]
-id = "actionlint"
-name = "actionlint"
-language = "system"
-entry = "actionlint"
-files = "^\\.github/workflows/.*\\.ya?ml$"
+id = "actionlint-system"
+
+[[repos]]
+repo = "https://github.com/crate-ci/typos"
+rev = "v1.47.1"
 
 [[repos.hooks]]
 id = "typos"
-name = "typos"
-language = "system"
-entry = "typos"
-pass_filenames = false
+
+# Reject message misspellings before they become release notes; never rewrite.
+[[repos.hooks]]
+id = "typos"
+alias = "typos-commit-msg"
+args = ["--force-exclude"]
+stages = ["commit-msg"]
+
+[[repos]]
+repo = "local"
 
 [[repos.hooks]]
 id = "fmt"
@@ -65,13 +69,7 @@ entry = "cargo fmt --all -- --check"
 files = "\\.rs$"
 pass_filenames = false
 
-[[repos.hooks]]
-id = "clippy"
-name = "cargo clippy"
-language = "system"
-entry = "cargo clippy --all-targets --all-features -- -D warnings"
-files = "\\.rs$"
-pass_filenames = false
+# Clippy runs explicitly in CI and `mise run ci`, keeping commits lightweight.
 
 # The Git backend is replaceable only for as long as `git2` types never reach
 # the domain (ADR-011). The `GitBackend` trait alone does not enforce that: one

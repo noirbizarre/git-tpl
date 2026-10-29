@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - [Rust](https://rustup.rs) — the channel is pinned by `rust-toolchain.toml`
-- [mise](https://mise.jdx.dev) — everything else installs itself
+- [mise](https://mise.jdx.dev) 2026.9.2+ — installs tools and enables native Cargo caching
 
 ```sh
 git clone https://github.com/noirbizarre/git-tpl
@@ -15,17 +15,27 @@ prek install
 `mise install` reads `mise.toml` and `mise.lock`, so you get the same tool versions CI does. `prek install` wires
 up the Git hooks.
 
-Rust itself is deliberately not managed by mise: CI needs per-job components (`rustfmt`, `clippy`,
-`llvm-tools-preview`) and cross-compilation targets, which `dtolnay/rust-toolchain` handles better.
-`rust-toolchain.toml` pins the channel for both.
+Rustup supplies toolchains; mise declares stable Rust to enable native [Mr Boxington](https://mr-boxington.jdx.dev/)
+Cargo caching and compilation scheduling.
+`rust-toolchain.toml` and the mise Rust entry use the same channel.
+An explicit `RUSTUP_TOOLCHAIN` wins; in CI, the runtime follows the rustup default selected by
+`dtolnay/rust-toolchain`, preserving per-job components and targets.
+Intel Macs use plain Cargo because MBX 1.28 has no Intel macOS executable.
+
+Use `mise exec -- cargo ...` or mise tasks to exercise the wrapper;
+a direct rustup Cargo proxy bypasses it.
+`mise exec -- mbx doctor` checks the setup, and MBX build summaries distinguish cache hits from Cargo freshness.
+Automatic cache collection and managed target relocation are disabled to preserve existing local outputs.
+CI uses MBX's target payload for shared build caches and local-only caches for publication.
+See [CONTRIBUTING.md](https://github.com/noirbizarre/git-tpl/blob/main/CONTRIBUTING.md) for cache details.
 
 ## Tasks
 
 ```sh
-mise run              # fmt, lint, lint:actions, build, test — the default
+mise run              # format, lint, lint:actions, lint:md, build, test — the default
 mise run build
 mise run test         # accepts nextest selectors: mise run test render
-mise run fmt
+mise run format
 mise run lint
 mise run spell
 mise run cover
@@ -34,7 +44,7 @@ mise run ci           # check + docs:build
 ```
 
 ```sh
-mise run tpl -- status        # run git-tpl from source
+mise run cli -- status        # run git-tpl from source
 mise run setup                # cargo install --path . --force
 ```
 
@@ -44,6 +54,30 @@ mise run docs:build
 ```
 
 `mise tasks` lists them all.
+`mise run fmt`, `mise run fmt:check` and `mise run tpl` remain supported as aliases.
+Clippy runs explicitly in CI and `mise run ci`, rather than during every commit.
+Hooks check both source spelling and commit-message spelling without rewriting the message.
+
+## Maintaining the project's template
+
+This repository is attached to [rust.tpl](https://github.com/noirbizarre/rust.tpl).
+`.config/git.tpl.toml` records its answers and tracks `main`; the rendered ref is merged into project history.
+
+```sh
+mise run tpl:update    # restore a missing baseline, then update the rendered ref
+mise run tpl:diff      # preview the merge
+git tpl merge         # apply it with an ordinary Git merge
+```
+
+`mise run tpl:check` updates first, then exits nonzero if merging would change files.
+Updating never changes HEAD, the index or rendered worktree files;
+newly answered questions may be recorded in `.config/git.tpl.toml`, unstaged.
+The tasks restore a missing local template ref from merged rendering provenance, so fresh clones need full history.
+The weekly/manual template workflow does the same and reports drift without pushing or merging anything.
+
+The initial adoption preserves this project's public library name, release inputs, archive layouts,
+runtime man/completion generation, both AUR packages, and architecture guards.
+Git's merge base preserves those customizations on later updates; marker comments are not protected regions.
 
 ## Layout
 

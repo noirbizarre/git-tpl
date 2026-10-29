@@ -55,10 +55,17 @@ body = """
     {% endfor -%}
 {% endfor -%}
 {%- if github -%}
-{% if github.contributors | filter(attribute="is_first_time", value=true) | length != 0 %}
+{# API contributors include bots and null usernames, even when their commits are filtered out. -#}
+{% set_global newcomers = [] -%}
+{% for contributor in github.contributors | filter(attribute="is_first_time", value=true) -%}
+{% if contributor.username is string and not contributor.username is ending_with("[bot]") -%}
+{% set_global newcomers = newcomers | concat(with=contributor) -%}
+{% endif -%}
+{% endfor -%}
+{% if newcomers | length != 0 %}
   ## ❤️ New Contributors
 {% endif %}\
-{% for contributor in github.contributors | filter(attribute="is_first_time", value=true) %}
+{% for contributor in newcomers %}
   * @{{ contributor.username }} made their first contribution
     {%- if contributor.pr_number %} in \
       [#{{ contributor.pr_number }}]({{ self::remote_url() }}/pull/{{ contributor.pr_number }}) \
@@ -87,7 +94,6 @@ tag_pattern = "^[0-9]+\\.[0-9]+\\.[0-9]+"
 
 commit_preprocessors = [
   { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](<REPO>/issues/${2}))" },
-  { pattern = ".*", replace_command = "typos --write-changes -" },
   { pattern = '<!--', replace = "&lt;!--" },
   { pattern = '-->', replace = "--&gt;" },
 ]

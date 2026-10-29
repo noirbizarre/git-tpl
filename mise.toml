@@ -10,27 +10,30 @@
 # here: cargo-binstall has no prebuilt artifact for resvg, usvg or cargo-insta,
 # so a global entry would make every CI job compile all three from source.
 #
-# Rust itself is intentionally not managed here: CI needs per-job components
-# (rustfmt, clippy, llvm-tools-preview) and cross-compilation targets, which
-# `dtolnay/rust-toolchain` handles better. `rust-toolchain.toml` pins the
-# channel for both.
+# Rustup still owns toolchains. Mise's native MBX integration wraps Cargo,
+# while the environment below preserves explicit and CI-selected toolchains.
 
 [settings]
 # Resolve tools through mise.lock and keep it updated. Without this, the
 # lockfile is ignored and `latest` really means latest.
 lockfile = true
 
-# Do not let mise adopt `rust-toolchain.toml`. Rust is installed by rustup
-# locally and by `dtolnay/rust-toolchain` in CI, which handle per-job
-# components and cross-compilation targets that mise does not. Leaving both
-# in charge would have mise shadow the toolchain CI just installed.
+# Avoid a second install request from the version file: runtime selection
+# below preserves the toolchain and extra components installed by CI.
 idiomatic_version_file_enable_tools = []
 
 [tools]
+# MBX 1.28 has no Intel macOS binary; keep rustup-only Cargo there.
+rust = [
+  { version = "stable", components = ["rustfmt", "clippy"], mr_boxington = true, os = ["linux", "macos/arm64", "windows"] },
+  { version = "stable", components = ["rustfmt", "clippy"], os = ["macos/x64"] },
+]
+mr-boxington = { version = "1.28.0", os = ["linux", "macos/arm64", "windows"] }
 actionlint = "latest"
 # actionlint silently skips its shellcheck integration when the binary is
 # absent, so without this a local run is NOT the CI run. Runners ship it.
-shellcheck = "latest"
+# The implicit asdf backend has no download URLs for locked installations.
+"aqua:koalaman/shellcheck" = "latest"
 prek = "latest"
 typos = "latest"
 uv = "latest"
@@ -38,14 +41,33 @@ git-cliff = "latest"
 cargo-binstall = "latest"
 "cargo:cargo-nextest" = "latest"
 "cargo:cargo-llvm-cov" = "latest"
+# Use a release to maintain the template even before this checkout builds.
+# The cargo backend uses binstall metadata and supports locked installation.
+"cargo:git-tpl" = "0.14.3"
 # cargo-insta, usvg and resvg are declared on the tasks that use them instead
 # of here — see the note in the header.
+
+[env]
+# dtolnay selects a rustup default, not RUSTUP_TOOLCHAIN. Preserve that
+# selection in Actions (especially MSRV) and explicit overrides everywhere.
+RUSTUP_TOOLCHAIN = """
+{%- if env.RUSTUP_TOOLCHAIN | default(value='', boolean=true) -%}
+{{ env.RUSTUP_TOOLCHAIN }}
+{%- elif env.GITHUB_ACTIONS | default(value='') == 'true' -%}
+{{ exec(command='rustup default') | trim | split(pat=' ') | first }}
+{%- else -%}
+stable
+{%- endif -%}
+"""
+# Do not collect existing caches or relocate the project's target outputs.
+MBX_GC_AUTO = "0"
+MBX_TARGET_VIEWS = "0"
 
 # --- Everyday ---------------------------------------------------------------
 
 [tasks.default]
-description = "Run fmt, lint, build and test"
-depends = ["fmt", "lint", "lint:actions", "build", "test"]
+description = "Run format, lint, build and test"
+depends = ["format", "lint", "lint:actions", "lint:md", "build", "test"]
 
 [tasks.build]
 description = "Build the binary"
@@ -60,13 +82,22 @@ run = "cargo nextest run"
 description = "Run tests with coverage"
 run = "cargo llvm-cov nextest"
 
-[tasks.fmt]
+[tasks.format]
 description = "Format the code"
 run = "cargo fmt --all"
 
-[tasks."fmt:check"]
+[tasks."format:check"]
 description = "Check the formatting without rewriting"
 run = "cargo fmt --all -- --check"
+
+# Keep the old explicit task invocations working; `mise fmt` is a builtin.
+[tasks.fmt]
+description = "Alias for format (use mise run fmt)"
+depends = ["format"]
+
+[tasks."fmt:check"]
+description = "Alias for format:check"
+depends = ["format:check"]
 
 [tasks.lint]
 description = "Lint the code"
@@ -84,8 +115,8 @@ run = "actionlint .github/workflows/*.yaml"
 
 [tasks."lint:md"]
 description = "Lint the documentation Markdown"
-tools = { "npm:markdownlint-cli2" = "latest" }
-run = 'markdownlint-cli2 --config .markdownlint-cli2.yaml "docs/**/*.md" "skills/**/*.md" AGENTS.md'
+# Both packages must share an npm environment so the formatter can resolve.
+run = 'npx -y -p markdownlint-cli2 -p markdownlint-cli2-formatter-pretty -- markdownlint-cli2 "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/**/*.md" "skills/**/*.md"'
 
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"
@@ -94,7 +125,7 @@ run = "cargo insta review"
 
 [tasks.check]
 description = "Run every check that does not modify the working tree"
-depends = ["fmt:check", "lint", "lint:actions", "lint:md", "spell", "test"]
+depends = ["format:check", "lint", "lint:actions", "lint:md", "spell", "test"]
 
 [tasks.ci]
 description = "Everything CI runs, locally"
@@ -102,8 +133,14 @@ depends = ["check", "docs:build"]
 
 # --- git-tpl itself ---------------------------------------------------------
 
-[tasks.tpl]
+[tasks.cli]
 description = "Run git-tpl from source"
+raw_args = true
+run = "cargo run --bin git-tpl --"
+
+# Retain raw argument forwarding for existing developer scripts.
+[tasks.tpl]
+description = "Run git-tpl from source (alias for cli)"
 raw_args = true
 run = "cargo run --bin git-tpl --"
 
@@ -133,6 +170,55 @@ description = "Show the version the next release would take"
 # This task exists to answer 'what would ship next?' without opening CI.
 run = "git cliff --bumped-version"
 
+[tasks."ship:validate"]
+description = "Validate the gh-ship release contract"
+run = "gh ship validate"
+
+# --- Template ---------------------------------------------------------------
+# Update advances the rendered ref, not HEAD or the index. Newly answered
+# questions can also be recorded in .config/git.tpl.toml, unstaged.
+[tasks."tpl:update"]
+description = "Update the rendered template ref"
+depends = ["tpl:baseline"]
+raw_args = true
+run = "git tpl update --defaults"
+
+[tasks."tpl:diff"]
+description = "Preview merging the rendered template"
+raw_args = true
+run = "git tpl diff"
+
+[tasks."tpl:check"]
+description = "Update the template ref and fail if its merge would change files"
+depends = ["tpl:baseline"]
+# Update before diff so this checks upstream rather than a stale local ref.
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+git tpl update --defaults
+git tpl diff --exit-code --stat
+"""
+
+[tasks."tpl:baseline"]
+description = "Restore a missing template ref from merged render history"
+# Fresh clones have the rendered commits through merge ancestry, but no
+# refs/tpl/*. An orphan re-render would lose the base and report false drift.
+# Only create an absent ref; never rewind an existing append-only history.
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+ref=refs/tpl/github-com-noirbizarre-rust-tpl
+if ! git show-ref --verify --quiet "$ref"; then
+  baseline=$(git log HEAD --topo-order -1 --format=%H \
+    --grep='^Template-Source: https://github.com/noirbizarre/rust.tpl$')
+  if [ -z "$baseline" ]; then
+    echo 'No merged template rendering found; fetch the full project history first.' >&2
+    exit 1
+  fi
+  git update-ref "$ref" "$baseline" 0000000000000000000000000000000000000000
+fi
+"""
+
 # --- Artwork ----------------------------------------------------------------
 #
 # Neither of these joins `default`: they rewrite committed files, so a routine
@@ -155,6 +241,7 @@ description = "Flatten the wordmark source into docs/images/logo.svg"
 # see the note in the header.
 tools = { "cargo:usvg" = "latest" }
 run = """
+#!/usr/bin/env bash
 set -euo pipefail
 
 # logo.src.svg copies icon.svg's paths rather than referencing the file, because

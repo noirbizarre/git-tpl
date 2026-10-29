@@ -1,9 +1,9 @@
 name: 📦 AUR
 
 # Publishes the two AUR packages once a release is public. The trigger is
-# `release: published` rather than the completion of 📦 Publish Release,
+# `release: released` rather than the completion of 📦 Publish Release,
 # because gh-ship only undrafts the release after that workflow succeeds — so
-# waiting for `published` means the URLs baked into the PKGBUILDs already
+# waiting for `released` means stable assets baked into the PKGBUILDs already
 # resolve when the packages land.
 #
 # The AUR creates a pkgbase on its first push, so this workflow imports both
@@ -12,7 +12,7 @@ run-name: 📦 AUR ${{ inputs.tag || github.event.release.tag_name }}
 
 on:
   release:
-    types: [published]
+    types: [released]
 
   workflow_dispatch:
     inputs:
@@ -126,15 +126,13 @@ jobs:
       # Proves the PKGBUILD actually builds, and that the checksums verify,
       # before it reaches users.
       #
-      # `--nocheck` because check() re-runs, in release mode, the very suite
-      # ♻️ CI already ran on this commit. The PKGBUILD keeps its check(), so
-      # users and packagers still run it.
+      # Run source-package checks too: the packaged source must work outside CI.
       - name: Build the package
         working-directory: build
         run: |
           set -euo pipefail
           chown -R builder .
-          sudo -u builder makepkg --syncdeps --noconfirm --clean --nocheck
+          sudo -u builder makepkg --syncdeps --noconfirm --clean
 
       # namcap exits 0 whatever it reports, errors included, so a bare call
       # here would log a broken package and go green. Only `E:` fails the job:
@@ -191,7 +189,7 @@ jobs:
 
           cd aur
           git config user.name 'git-tpl release bot'
-          git config user.email 'noirbizarre@gmail.com'
+          git config user.email 'noirbizarre@users.noreply.github.com'
 
           # Compare the index, not the worktree: `git diff` alone ignores
           # untracked files, so a re-run on an unchanged package would be
