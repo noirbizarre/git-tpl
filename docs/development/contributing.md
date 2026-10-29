@@ -83,7 +83,9 @@ a template needs twelve cases, twelve files say so honestly.
 **Runtime values in the render context.** `now()`, `git.user`, environment access.
 [ADR-006](../adr/006-no-runtime-context.md).
 
-**Automatic pushing or fetching of template refs.** They are explicit by design.
+**Implicit or default pushing or fetching of template refs.** Sharing is opt-in by design.
+Explicit `tpl.autoPush` configuration or `git tpl update --push` consents to pushing after updates;
+fetching remains an explicit command.
 
 **Copier or Cruft compatibility.** A useful reference, not a goal.
 

@@ -223,7 +223,9 @@ See [development setup](docs/development/setup.md) for tooling and cache details
 ## Things that will be declined
 
 With reasons, in `docs/development/contributing.md`. Briefly: custom merge logic, a second template engine, code
-execution from templates, runtime values in the render context, automatic ref push/fetch, Copier compatibility.
+execution from templates, runtime values in the render context, implicit/default ref pushing or fetching,
+Copier compatibility.
+Explicit `tpl.autoPush` or `update --push` consent is supported; fetching remains explicit.
 
 If you think one of these is wrong, the way to change it is an ADR that supersedes the existing one — not a PR that
 quietly works around it.
