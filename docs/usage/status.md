@@ -67,11 +67,13 @@ Only shown when a remote copy exists.
 
 | Option | Meaning |
 |---|---|
-| `--dirty` | Compare against the template's working tree rather than the revision its `ref` resolves to. Local templates only. |
+| `--dirty` | Resolve the template's working tree and conservatively mark it as needing a re-render. Local templates only. |
 | [`--json`](../reference/json.md) | A global flag. The report on stdout as one object; everything else on stderr. |
 
-`--dirty` answers "does my uncommitted template edit change anything here?" without committing it first.
-It is how an author checks a work-in-progress against a real project.
+`--dirty` conservatively reports `templateMoved: true` whenever dirty input resolves,
+even if the working tree is clean or its rendered content would be unchanged.
+Status does not compare the newly rendered tree with the previous rendering to decide this flag.
+Use `git tpl diff --dirty` for a content-sensitive merge preview without committing the template first.
 
 ## Exit codes
 
@@ -121,6 +123,7 @@ git tpl --json status
 
 `remote` is `null` when no remote copy exists.
 `dirty` records whether the rendering on the ref was produced from a template working tree rather than a commit.
+It describes the recorded rendering, not whether `status --dirty` found a content change.
 `renderedExtends` is the [`[extends]`](../templates/format.md#extends) chain the last rendering recorded, nearest
 parent first, as `{source, revision}` objects — `[]`, not `null`, for a template with no chain, read from the
 `Template-Extends` trailers rather than re-resolved, so it still answers correctly when the template cannot be

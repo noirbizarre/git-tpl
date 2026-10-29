@@ -229,6 +229,9 @@ so every later `update` is a small diff against a real merge base.
 
 ### Check for and apply a template update
 
+`status --dirty` conservatively reports `templateMoved: true` for resolved working-tree input,
+even when its content is unchanged; use `diff --dirty` to inspect the actual merge effect.
+
 In a fresh clone, restore an absent `refs/tpl/<id>` before updating.
 `git tpl fetch` retrieves only `refs/remotes/<remote>/tpl/<id>`; review its provenance and ancestry,
 or locate the original rendering (not its project merge commit) in full merged project history.
