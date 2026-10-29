@@ -161,9 +161,11 @@ destination that does not exist yet or is not a Git repository.
 Re-running `init` is refused with `tpl::ops::already_initialised`, because it would silently discard the recorded
 answers.
 To take a newer template revision with the answers you already gave, run `git tpl update`.
-To *change* those answers, run `git tpl init --force`, which re-asks every question and re-renders over the
-existing attachment — `update` cannot do that, since it re-renders with the recorded answers and there is
-otherwise no way to change them short of editing the config by hand.
+To re-run the full questionnaire, run `git tpl init <template> --force`, which re-asks every question
+and re-renders over the existing attachment.
+For targeted changes, use `git tpl update --answer key=value` or `--answers-from answers.toml`;
+these override the selected recorded answers and save them while preserving the others.
+Editing `[answers]` in `.config/git.tpl.toml` and running `update` works too.
 
 **A clean worktree**, because step 10 is a merge.
 Uncommitted changes are refused with the same message Git would give you.
