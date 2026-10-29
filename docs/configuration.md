@@ -292,6 +292,7 @@ All keys are under `tpl.`.
 | `tpl.autoPush` | bool | `false` | Push the rendered ref after a successful `update`. |
 | `tpl.interactive` | bool | `true` | Prompt for unanswered questions. `false` behaves as `--defaults`. |
 | `tpl.testCommands` | bool | `true` | Run a `git tpl test` case's `[commands]`. `false` implies `--skip-commands`. |
+| `tpl.log.relativeDate` | bool | `true` | Relative commit ages in `log`; `false` shows UTC dates and times to the minute. |
 
 ```sh
 git config tpl.remote upstream

@@ -59,6 +59,8 @@ Every payload carries `"ok": true`, so a caller can check one field without firs
 
 ### `render`
 
+See also [`log`](#log) for source commits without rendering.
+
 ```json
 { "ok": true,
   "template": { "name": "rust", "description": "…" },
@@ -81,6 +83,39 @@ A path that could never have been rendered is not reported, however it is ignore
 It is a report, not an error: the render succeeded, and a caller comparing the file list against its expectations
 needs to know why one is absent.
 See [the authoring loop](../usage/render.md#the-authoring-loop).
+
+### `log`
+
+```json
+{ "ok": true,
+  "source": "https://github.com/org/template", "id": "github-com-org-template",
+  "ref": "refs/tpl/github-com-org-template", "appliedRendering": "8b3e7d1…",
+  "applied": { "reference": "v1.0.0", "commit": "a17b0b2…", "dirty": false },
+  "target": { "reference": "main", "commit": "4f2c1a9…", "dirty": false },
+  "mode": "range", "targetDescendsFromApplied": true, "maxCount": 20,
+  "entries": [{ "commit": "4f2c1a9…", "subject": "feat(ci): add a release workflow",
+                "committedAt": 1793284542,
+                "conventional": { "type": "feat", "scope": "ci", "breaking": false } }] }
+```
+
+[`log`](../usage/log.md) uses `mode: "applied"` without a target reference and `mode: "range"` with one.
+In applied mode, `target` equals `applied`.
+`appliedRendering` is a project-side commit; the revision objects and entries identify source-side commits.
+All commit IDs are full hexadecimal strings; the examples abbreviate them for readability.
+The applied reference can be `null` when old provenance records only a source commit.
+`source` comes from that applied rendering's provenance, not a subsequently edited attachment.
+
+`entries` is always an ordered array, empty when there are no selected commits.
+`maxCount` is the effective count limit, or `null` with `--all`.
+`targetDescendsFromApplied` indicates whether the target includes the applied commit in its ancestry.
+Ranges use target reachability minus applied reachability, even when this field is false.
+
+`committedAt` is the signed Unix committer timestamp in seconds.
+Relative/absolute date preferences do not affect JSON.
+`subject` preserves decoded source text; non-UTF-8 messages are decoded lossily.
+`conventional` is `null` for unrecognized subjects; otherwise it contains the original type,
+an optional scope (`null` when absent), and whether the subject carries `!`.
+Breaking-change footers in the body are not parsed.
 
 ### `lint`
 

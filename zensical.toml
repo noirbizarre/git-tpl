@@ -36,6 +36,7 @@ nav = [
     { "context" = "usage/context.md" },
     { "Answers from a file" = "usage/answers.md" },
     { "status" = "usage/status.md" },
+    { "log" = "usage/log.md" },
     { "diff" = "usage/diff.md" },
     { "show" = "usage/show.md" },
     { "merge" = "usage/merge.md" },

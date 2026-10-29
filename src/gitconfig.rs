@@ -17,6 +17,7 @@ mod keys {
     pub const AUTO_PUSH: &str = "tpl.autoPush";
     pub const INTERACTIVE: &str = "tpl.interactive";
     pub const TEST_COMMANDS: &str = "tpl.testCommands";
+    pub const LOG_RELATIVE_DATE: &str = "tpl.log.relativeDate";
 }
 
 /// Read an arbitrary Git configuration value, to seed a prompt.
@@ -46,6 +47,8 @@ pub struct Preferences {
     pub interactive: bool,
     /// Whether `git tpl test` runs a case's `[commands]` at all. See ADR-027.
     pub test_commands: bool,
+    /// Whether log dates are relative rather than absolute UTC dates.
+    pub log_relative_date: bool,
 }
 
 impl Default for Preferences {
@@ -61,6 +64,7 @@ impl Default for Preferences {
             // never ran would report false confidence, which is worse than
             // the machine it happens to run on having no sandboxing story.
             test_commands: true,
+            log_relative_date: true,
         }
     }
 }
@@ -87,6 +91,9 @@ impl Preferences {
             test_commands: repo
                 .config_bool(keys::TEST_COMMANDS)?
                 .unwrap_or(defaults.test_commands),
+            log_relative_date: repo
+                .config_bool(keys::LOG_RELATIVE_DATE)?
+                .unwrap_or(defaults.log_relative_date),
         })
     }
 
@@ -172,6 +179,7 @@ mod tests {
         assert!(!preferences.auto_push, "pushing must be opt-in");
         assert!(preferences.interactive);
         assert!(preferences.test_commands, "commands run unless disabled");
+        assert!(preferences.log_relative_date);
     }
 
     #[test]
@@ -181,6 +189,7 @@ mod tests {
         repo.set_config_bool("tpl.autoPush", true).unwrap();
         repo.set_config_bool("tpl.interactive", false).unwrap();
         repo.set_config_bool("tpl.testCommands", false).unwrap();
+        repo.set_config_bool("tpl.log.relativeDate", false).unwrap();
 
         let preferences = Preferences::load(&repo).unwrap();
 
@@ -188,6 +197,7 @@ mod tests {
         assert!(preferences.auto_push);
         assert!(!preferences.interactive);
         assert!(!preferences.test_commands);
+        assert!(!preferences.log_relative_date);
     }
 
     /// `--skip-commands` can turn `[commands]` off; nothing can force it back

@@ -275,6 +275,27 @@ impl Repo {
         self
     }
 
+    /// Fixed author and committer times keep history-order and date assertions reproducible.
+    pub fn commit_all_at(&self, message: &str, date: &str) -> &Self {
+        self.git(&["add", "-A"]);
+        let mut command = Command::new("git");
+        command
+            .args(["commit", "-q", "--allow-empty", "-m", message])
+            .current_dir(&self.path);
+        scrub_git_env(&mut command, self.config_home());
+        let output = command
+            .env("GIT_AUTHOR_DATE", date)
+            .env("GIT_COMMITTER_DATE", date)
+            .output()
+            .expect("commit at fixed time");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        self
+    }
+
     /// Run a Git command, asserting it succeeded.
     pub fn git(&self, args: &[&str]) -> String {
         let mut command = Command::new("git");

@@ -95,6 +95,7 @@ fn each_visible_command_gets_its_own_page() {
         "questions",
         "context",
         "status",
+        "log",
         "diff",
         "show",
         "merge",

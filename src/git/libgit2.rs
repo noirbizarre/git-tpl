@@ -19,7 +19,7 @@ use git2::{
 use super::ignore::IgnoreStack;
 use super::{
     AheadBehind, Change, ChangeKind, Commit, FileMode, FileStat, GitBackend, GitError,
-    MergeOutcome, MergePreview, Oid, TreeEntry,
+    HistoryEntry, MergeOutcome, MergePreview, Oid, TreeEntry,
 };
 
 /// A repository opened through libgit2.
@@ -295,6 +295,43 @@ impl GitBackend for LibGit2 {
             parents: commit.parent_ids().map(to_oid).collect(),
             message: commit.message().unwrap_or_default().to_string(),
         })
+    }
+
+    fn history(
+        &self,
+        tip: Oid,
+        hide: Option<Oid>,
+        max_count: Option<usize>,
+    ) -> Result<Vec<HistoryEntry>, GitError> {
+        let mut walk = self
+            .repo
+            .revwalk()
+            .map_err(|e| backend("prepare history", &e))?;
+        // Topology wins over clock skew: a parent must not appear ahead of its child.
+        walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)
+            .map_err(|e| backend("order history", &e))?;
+        walk.push(from_oid(tip))
+            .map_err(|e| backend("start history", &e))?;
+        if let Some(hide) = hide {
+            walk.hide(from_oid(hide))
+                .map_err(|e| backend("exclude applied history", &e))?;
+        }
+        walk.take(max_count.unwrap_or(usize::MAX))
+            .map(|oid| {
+                let oid = oid.map_err(|e| backend("walk history", &e))?;
+                let commit = self
+                    .repo
+                    .find_commit(oid)
+                    .map_err(|e| backend("read history commit", &e))?;
+                // A bad encoding must not hide a commit from a changelog.
+                let message = String::from_utf8_lossy(commit.message_bytes());
+                Ok(HistoryEntry {
+                    oid: to_oid(oid),
+                    subject: message.lines().next().unwrap_or_default().to_string(),
+                    committed_at: commit.time().seconds(),
+                })
+            })
+            .collect()
     }
 
     fn list_tree(&self, tree: Oid) -> Result<Vec<TreeEntry>, GitError> {

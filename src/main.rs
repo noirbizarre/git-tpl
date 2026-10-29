@@ -40,6 +40,7 @@ fn main() -> ExitCode {
         Command::Questions(args) => commands::questions(args, &cli.global),
         Command::Context(args) => commands::context(args, &cli.global),
         Command::Status(args) => commands::status(args, &cli.global),
+        Command::Log(args) => commands::log(args, &cli.global),
         Command::Diff(args) => commands::diff(args, &cli.global),
         Command::Show(args) => commands::show(args, &cli.global),
         Command::Merge(args) => commands::merge(args, &cli.global),

@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: transcript
+---
+exit: 0
+--- stdout ---
+<empty>
+--- stderr ---
+
+Template:  [tmp]/template
+Applied:   main ([short])
+
+  [short]  feat(cli)!: inspect source history  (2026-10-29 14:35 UTC)

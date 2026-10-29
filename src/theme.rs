@@ -135,6 +135,127 @@ pub fn decide(
 
 // --- line helpers -----------------------------------------------------------
 
+/// A compact source-history row. Only our styles may reach the terminal.
+pub fn log_entry(
+    theme: &Theme,
+    entry: &tpl::git::HistoryEntry,
+    now: i64,
+    relative: bool,
+) -> String {
+    let subject = tpl::note::plain_line(&entry.subject);
+    let subject = match tpl::ops::log::conventional(&subject) {
+        Some(prefix) => format!(
+            "{}{}",
+            theme.heading.apply_to(&subject[..prefix.prefix_len]),
+            &subject[prefix.prefix_len..]
+        ),
+        None => subject,
+    };
+    format!(
+        "  {}  {}  {}",
+        theme.modified.apply_to(entry.oid.short()),
+        subject,
+        theme.muted.apply_to(format!(
+            "({})",
+            commit_date(entry.committed_at, now, relative)
+        ))
+    )
+}
+
+/// Dates are presentation only; a fixed clock makes relative output testable.
+pub fn commit_date(timestamp: i64, now: i64, relative: bool) -> String {
+    if !relative {
+        return match time::OffsetDateTime::from_unix_timestamp(timestamp) {
+            Ok(date) => format!(
+                "{:04}-{:02}-{:02} {:02}:{:02} UTC",
+                date.year(),
+                date.month() as u8,
+                date.day(),
+                date.hour(),
+                date.minute()
+            ),
+            // Git accepts timestamps beyond the calendar library's range; do not panic on source input.
+            Err(_) => format!("{timestamp} Unix seconds"),
+        };
+    }
+    let seconds = now.abs_diff(timestamp);
+    let (count, unit) = [
+        (31_536_000, "year"),
+        (2_592_000, "month"),
+        (604_800, "week"),
+        (86_400, "day"),
+        (3_600, "hour"),
+        (60, "minute"),
+        (1, "second"),
+    ]
+    .into_iter()
+    .find_map(|(size, unit)| (seconds >= size).then_some((seconds / size, unit)))
+    .unwrap_or((0, "second"));
+    let duration = format!("{count} {unit}{}", if count == 1 { "" } else { "s" });
+    if timestamp > now {
+        format!("in {duration}")
+    } else {
+        format!("{duration} ago")
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+
+    #[test]
+    fn relative_dates_handle_unit_boundaries_and_future_clocks() {
+        for (elapsed, expected) in [
+            (0, "0 seconds ago"),
+            (1, "1 second ago"),
+            (59, "59 seconds ago"),
+            (60, "1 minute ago"),
+            (3_599, "59 minutes ago"),
+            (3_600, "1 hour ago"),
+            (86_400, "1 day ago"),
+            (604_800, "1 week ago"),
+            (2_592_000, "1 month ago"),
+            (31_536_000, "1 year ago"),
+        ] {
+            assert_eq!(commit_date(0, elapsed, true), expected);
+        }
+        assert_eq!(commit_date(120, 0, true), "in 2 minutes");
+        // Malicious or corrupt Git timestamps cannot overflow relative arithmetic.
+        assert!(!commit_date(i64::MIN, i64::MAX, true).is_empty());
+    }
+
+    #[test]
+    fn absolute_dates_use_utc_and_truncate_seconds_to_the_minute() {
+        assert_eq!(commit_date(0, 0, false), "1970-01-01 00:00 UTC");
+        assert_eq!(commit_date(-1, 0, false), "1969-12-31 23:59 UTC");
+        assert_eq!(commit_date(951_868_799, 0, false), "2000-02-29 23:59 UTC");
+        assert_eq!(
+            commit_date(i64::MAX, 0, false),
+            format!("{} Unix seconds", i64::MAX)
+        );
+    }
+
+    #[test]
+    fn history_rows_keep_plain_subjects_and_style_only_conventional_prefixes() {
+        let entry = tpl::git::HistoryEntry {
+            oid: tpl::git::Oid::from_bytes([0; 20]),
+            subject: "feat(cli)!: show history".into(),
+            committed_at: 0,
+        };
+        assert_eq!(
+            log_entry(&Theme::plain(), &entry, 120, true),
+            "  0000000  feat(cli)!: show history  (2 minutes ago)"
+        );
+        let colored = log_entry(&Theme::colored(), &entry, 120, true);
+        assert!(colored.contains("feat(cli)!: \x1b[0mshow history"));
+        let plain = tpl::git::HistoryEntry {
+            subject: "Merge feature branch".into(),
+            ..entry
+        };
+        assert!(log_entry(&Theme::plain(), &plain, 0, true).contains("Merge feature branch"));
+    }
+}
+
 /// A `key: value` line, aligned to a common column.
 pub fn field(theme: &Theme, key: &str, value: &str) -> String {
     format!("{:<10} {value}", theme.muted.apply_to(format!("{key}:")))

@@ -8,6 +8,7 @@ pub mod backport;
 pub mod compose;
 pub mod extends;
 pub mod hunks;
+pub mod log;
 pub mod resolve;
 pub mod testing;
 pub mod unsubstitute;
@@ -47,6 +48,11 @@ pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Ve
 /// Errors from any operation.
 #[derive(Debug, Error, Diagnostic)]
 pub enum OpError {
+    /// The applied template's source history cannot be determined.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Log(#[from] log::LogError),
+
     /// Native Git could not display a merge preview.
     #[error("could not display the diff with Git: {reason}")]
     #[diagnostic(

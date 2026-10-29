@@ -1,0 +1,40 @@
+---
+source: tests/snapshots.rs
+expression: transcript
+---
+exit: 0
+--- stdout ---
+{
+  "source": "[tmp]/template",
+  "id": "template",
+  "ref": "refs/tpl/template",
+  "appliedRendering": "[sha]",
+  "applied": {
+    "reference": "main",
+    "commit": "[sha]",
+    "dirty": false
+  },
+  "target": {
+    "reference": "main",
+    "commit": "[sha]",
+    "dirty": false
+  },
+  "mode": "applied",
+  "targetDescendsFromApplied": true,
+  "maxCount": 1,
+  "entries": [
+    {
+      "commit": "[sha]",
+      "subject": "feat(cli)!: inspect source history",
+      "committedAt": 1793284542,
+      "conventional": {
+        "type": "feat",
+        "scope": "cli",
+        "breaking": true
+      }
+    }
+  ],
+  "ok": true
+}
+--- stderr ---
+<empty>
