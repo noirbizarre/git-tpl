@@ -61,6 +61,7 @@ pub enum ComposeError {
         origin: String,
         /// Original typed diagnostic.
         #[source]
+        #[diagnostic_source]
         source: Box<OpError>,
     },
 
@@ -74,6 +75,15 @@ pub enum ComposeError {
         /// Child repository with a recursive declaration.
         origin: String,
     },
+}
+
+// miette's diagnostic_source derive borrows the field as a trait object.
+// Keep the concrete box (it breaks the recursive OpError/ComposeError size)
+// while exposing its typed diagnostic instead of erasing it to Error::source.
+impl std::borrow::Borrow<dyn Diagnostic> for Box<OpError> {
+    fn borrow(&self) -> &(dyn Diagnostic + 'static) {
+        self.as_ref()
+    }
 }
 
 fn valid_id(name: &str) -> bool {

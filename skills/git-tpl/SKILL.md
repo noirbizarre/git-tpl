@@ -17,6 +17,9 @@ metadata:
 
 # git-tpl
 
+For `tpl::compose::child_failed`, inspect JSON `error.causes` for nested stable codes and actionable help.
+Template test `expect.error` can match those inner codes.
+
 `lint` compiles effective inherited output and all retained partial declarations, including shadowed/unimported ones.
 Removed/overridden output and binary payloads are excluded; other static rules keep their existing scope.
 

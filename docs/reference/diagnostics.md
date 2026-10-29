@@ -19,6 +19,8 @@ $ git tpl --json render ./template --output ./out --defaults
 ```
 
 `causes` is where the actionable detail lives.
+Composed child failures retain their nested diagnostic codes and help in this chain.
+Template tests may match an inner code with `expect.error`, including errors wrapped by `tpl::compose::child_failed`.
 The outer error names the file; the one beneath it names the expression and the reason.
 Branch on the outer code to decide *what kind* of failure it is, and read the innermost one to say *why*.
 
