@@ -922,7 +922,7 @@ fn a_remote_composed_child_is_refused_before_any_clone_without_consent() {
         .commit_all("request remote child");
     // Prior consent to the parent must not become invocation-wide --trust.
     parent.user_config(&format!(
-        "[trust]\ntemplates = [\"{}\"]\n",
+        "[trust]\ntemplates = ['{}']\n",
         parent.path.display()
     ));
     let output = tempfile::tempdir().unwrap();
