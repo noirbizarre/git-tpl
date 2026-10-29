@@ -19,6 +19,7 @@ metadata:
 
 Persistent trust in a composing parent covers its data only.
 Each child and ancestor needs matching trust or explicit invocation-wide `--trust`.
+Data aliases reuse bytes, but each declaration independently validates trust, checksum and format and records provenance.
 
 git-tpl renders a template into a dedicated Git ref (`refs/tpl/<id>`).
 Updating the template advances that ref with a normal commit.

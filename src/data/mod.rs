@@ -539,6 +539,14 @@ impl<'r> Rendered<'r> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum ResourceKey {
+    Template(usize, String),
+    Local(String),
+    Remote(String),
+    Git(String, String, String),
+}
+
 /// Loads and caches data sources.
 ///
 /// Caching is keyed by the *resolved* source string, so several questions
@@ -562,7 +570,9 @@ pub struct Loader<'a> {
     // resolving it against the process's working directory would make the same
     // template render differently depending on where the command was run.
     project_root: Option<PathBuf>,
-    cache: BTreeMap<String, Value>,
+    // Cache resources, never declaration policy or parsed values. Aliases may
+    // disagree about format, checksum and consent even when their bytes match.
+    cache: BTreeMap<ResourceKey, (Vec<u8>, Option<Oid>)>,
     provenance: Vec<Provenance>,
     decisions: BTreeMap<String, Decision>,
     // Built on the first fetch and reused, so a template with several remote
@@ -574,7 +584,7 @@ pub struct Loader<'a> {
     // Nothing is kept between runs, for the reason `ops::resolve` gives: a
     // stale cache silently rendering old data is a far worse failure than a
     // slow clone.
-    clones: BTreeMap<String, GitClone>,
+    clones: BTreeMap<(String, String), GitClone>,
 }
 
 impl<'a> Loader<'a> {
@@ -705,26 +715,42 @@ impl<'a> Loader<'a> {
             None => Format::infer(for_format),
         };
 
-        // The cache key includes the kind, because `data/x.toml` means
-        // different files depending on whether it is a template or local path.
-        let cache_key = format!("{}:{location}", kind.label());
-        if let Some(cached) = self.cache.get(&cache_key) {
-            return Ok(cached.clone());
+        // Consent is declaration-specific and must precede even a cache hit.
+        if kind.is_network() {
+            self.authorised(name, &location)?;
         }
+        let cache_key = match kind {
+            SourceKind::TemplateFile => ResourceKey::Template(
+                self.data_origin
+                    .get(name)
+                    .map_or(0, |ancestor| ancestor + 1),
+                location.clone(),
+            ),
+            SourceKind::LocalFile => ResourceKey::Local(location.clone()),
+            SourceKind::Remote => ResourceKey::Remote(location.clone()),
+            SourceKind::Git => {
+                let git = git.as_ref().expect("a git source has a location");
+                ResourceKey::Git(git.repo.clone(), git.reference.clone(), git.path.clone())
+            }
+        };
 
         // Set by the git arm alone: the commit the file was actually read at,
         // which is what makes a git source's trailer answer "which bytes?".
-        let mut git_revision = None;
-        let bytes = match kind {
-            SourceKind::TemplateFile => self.read_template_file(name, rendered.source)?,
-            SourceKind::LocalFile => self.read_local_file(name, rendered.source)?,
-            SourceKind::Remote => self.fetch(name, rendered.source)?,
-            SourceKind::Git => {
-                let location = git.as_ref().expect("a git source has a location");
-                let (bytes, revision) = self.read_git_file(name, location)?;
-                git_revision = Some(revision);
-                bytes
-            }
+        let (bytes, git_revision) = if let Some(resource) = self.cache.get(&cache_key) {
+            resource.clone()
+        } else {
+            let resource = match kind {
+                SourceKind::TemplateFile => (self.read_template_file(name, rendered.source)?, None),
+                SourceKind::LocalFile => (self.read_local_file(name, rendered.source)?, None),
+                SourceKind::Remote => (self.fetch(name, rendered.source)?, None),
+                SourceKind::Git => {
+                    let location = git.as_ref().expect("a git source has a location");
+                    let (bytes, revision) = self.read_git_file(name, location)?;
+                    (bytes, Some(revision))
+                }
+            };
+            self.cache.insert(cache_key, resource.clone());
+            resource
         };
 
         // Computed for every remote source, pinned or not, because the digest
@@ -748,7 +774,6 @@ impl<'a> Loader<'a> {
 
         let value = parse(name, &location, format, &bytes)?;
 
-        self.cache.insert(cache_key, value.clone());
         self.provenance.push(Provenance {
             name: name.to_string(),
             kind,
@@ -831,7 +856,7 @@ impl<'a> Loader<'a> {
 
         // Keyed by the reference as written, not by the resolved oid: resolving
         // first would require the clone this key decides whether to make.
-        let key = format!("{}@{}", location.repo, location.reference);
+        let key = (location.repo.clone(), location.reference.clone());
         if !self.clones.contains_key(&key) {
             // `contains_key` then `insert` rather than `entry`, whose closure
             // cannot be fallible — and both of these steps can fail.
