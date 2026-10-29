@@ -288,6 +288,36 @@ impl GitBackend for LibGit2 {
         Ok(statuses.is_empty())
     }
 
+    fn is_index_clean(&self) -> Result<bool, GitError> {
+        let index = self
+            .repo
+            .index()
+            .map_err(|e| backend("read the attachment index", &e))?;
+        if index.has_conflicts() {
+            return Ok(false);
+        }
+        let head = self
+            .head_commit()?
+            .map(|oid| {
+                self.repo
+                    .find_commit(from_oid(oid))
+                    .and_then(|commit| commit.tree())
+            })
+            .transpose()
+            .map_err(|e| backend("read the attachment baseline", &e))?;
+        // A tree/index diff ignores unstaged worktree edits and compares an
+        // unborn index against emptiness rather than declaring it clean.
+        let diff = self
+            .repo
+            .diff_tree_to_index(head.as_ref(), Some(&index), None)
+            .map_err(|e| backend("compare the attachment index to HEAD", &e))?;
+        Ok(diff.deltas().len() == 0)
+    }
+
+    fn is_normal_state(&self) -> bool {
+        self.repo.state() == git2::RepositoryState::Clean
+    }
+
     fn head_commit(&self) -> Result<Option<Oid>, GitError> {
         match self.repo.head() {
             Ok(head) => {

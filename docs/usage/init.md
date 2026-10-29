@@ -6,6 +6,10 @@ The failed publication does not save the attachment configuration.
 
 Attach a template to a repository, render it, and merge the result.
 
+All attachments require an index matching HEAD (empty on an unborn branch) and no active Git operation.
+This includes `--no-merge`, which still creates an attachment configuration commit.
+Commit or unstage staged changes first; `--no-merge` preserves unrelated unstaged edits.
+
 ```sh
 git tpl init <template> [<dir>] [--ref <ref>] [--answer k=v]... [options]
 ```

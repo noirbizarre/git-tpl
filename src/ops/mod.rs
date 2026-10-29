@@ -1146,8 +1146,15 @@ pub fn init(
         return Err(OpError::AlreadyInitialised);
     }
 
-    // A merge needs a clean worktree, and so does this. Checked before doing
-    // any work rather than after the questionnaire.
+    // Every attachment writes a commit, even --no-merge (ADR-021). Refuse
+    // before rendering or saving so staged user changes cannot ride in it.
+    if !project.is_normal_state() {
+        return Err(GitError::RepositoryBusy.into());
+    }
+    if !project.is_index_clean()? {
+        return Err(GitError::DirtyIndex.into());
+    }
+    // Merging also needs the worktree clean; --no-merge may preserve unstaged edits.
     if merge_after && !project.is_empty()? && !project.is_clean()? {
         return Err(GitError::DirtyWorktree.into());
     }

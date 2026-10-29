@@ -2,6 +2,70 @@
 
 mod common;
 
+#[test]
+fn every_attachment_refuses_staged_changes_before_writing_anything() {
+    for unborn in [false, true] {
+        for no_merge in [false, true] {
+            let world = common::World::new();
+            if unborn {
+                world.project.git(&["update-ref", "-d", "refs/heads/main"]);
+            }
+            world.project.write("user-staged", "my staged file\n");
+            world.project.git(&["add", "user-staged"]);
+            let index = world.project.git(&["write-tree"]);
+            let status = world.project.status();
+            let output = if no_merge {
+                world.init(&["--no-merge", "--json"])
+            } else {
+                world.init(&["--json"])
+            }
+            .failure();
+            assert_eq!(output.json()["error"]["code"], "tpl::git::dirty_index");
+            assert_eq!(world.project.git(&["write-tree"]), index);
+            assert_eq!(world.project.status(), status);
+            assert!(!world.project.exists(".config/git.tpl.toml"));
+            let backend = tpl::git::LibGit2::discover(&world.project.path).unwrap();
+            assert_eq!(
+                tpl::git::GitBackend::resolve_ref(&backend, &world.ref_name()).unwrap(),
+                None
+            );
+        }
+    }
+}
+
+#[test]
+fn no_merge_preserves_unstaged_edits_and_commits_only_the_attachment() {
+    let world = common::World::new();
+    world.project.write("NOTES.md", "unstaged\n");
+    world.init(&["--no-merge"]).success();
+    assert_eq!(world.project.read("NOTES.md"), "unstaged\n");
+    assert_eq!(
+        world
+            .project
+            .git(&["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])
+            .trim(),
+        ".config/git.tpl.toml"
+    );
+}
+
+#[test]
+fn attachment_refuses_active_git_operations_even_with_a_clean_index() {
+    for state in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
+        let world = common::World::new();
+        world.project.write(
+            &format!(".git/{state}"),
+            &format!("{}\n", world.project.rev_parse("HEAD")),
+        );
+        let before = world.project.working_state();
+        assert_eq!(
+            world.init(&["--no-merge", "--json"]).failure().json()["error"]["code"],
+            "tpl::git::repository_busy"
+        );
+        assert_eq!(world.project.working_state(), before);
+        assert!(world.project.exists(&format!(".git/{state}")));
+    }
+}
+
 use common::{World, global_identity, tpl, tpl_outside};
 
 #[test]

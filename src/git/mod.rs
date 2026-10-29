@@ -278,6 +278,25 @@ pub struct Commit {
 /// Errors from Git operations.
 #[derive(Debug, Error, Diagnostic)]
 pub enum GitError {
+    /// An attachment commit would include someone else's staged files.
+    #[error("the index has staged changes")]
+    #[diagnostic(
+        code(tpl::git::dirty_index),
+        help(
+            "commit or unstage your changes before attaching a template, including with --no-merge"
+        )
+    )]
+    DirtyIndex,
+
+    /// Attachment must not interfere with another Git operation's state.
+    #[error("another Git operation is in progress")]
+    #[diagnostic(
+        code(tpl::git::repository_busy),
+        help(
+            "inspect `git status` and finish or abort the active operation before attaching a template"
+        )
+    )]
+    RepositoryBusy,
     /// A rendering was based on a tip that another writer replaced.
     #[error("ref `{name}` changed concurrently (expected {}, actual {})",
         expected.map(Oid::to_hex).unwrap_or_else(|| "absent".into()),
@@ -537,6 +556,12 @@ pub trait GitBackend {
 
     /// Whether the working tree and index are clean.
     fn is_clean(&self) -> Result<bool, GitError>;
+
+    /// Whether the index matches HEAD (or the empty tree on an unborn branch).
+    fn is_index_clean(&self) -> Result<bool, GitError>;
+
+    /// Whether no merge, rebase, cherry-pick or other operation is active.
+    fn is_normal_state(&self) -> bool;
 
     /// The commit `HEAD` points at, if any.
     fn head_commit(&self) -> Result<Option<Oid>, GitError>;
