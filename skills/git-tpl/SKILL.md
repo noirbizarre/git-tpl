@@ -125,9 +125,11 @@ do not assume it is preinstalled.
 6. **`git tpl status --json` exits `2`**, not `0` or `1`,
    when a template update is pending (`"templateMoved": true`, `"composedMoved": true`, or `"merged": false`).
    Treat that as a normal branch, not a failure.
-7. **`"ok": true` describes the command, not the outcome**, for two commands specifically:
-   `lint` (check `errors`/`denied` in its `diagnostics[]`, not just `ok`)
-   and `test` (check `summary.failed`).
+7. **`"ok": true` can accompany a nonzero exit status.**
+   `diff --exit-code` exits `1` for a nonempty comparison; inspect `changes[]`.
+   `lint` exits `1` for errors or denied warnings; inspect top-level `errors`/`denied` and `diagnostics[]`.
+   `test` exits `1` for failed cases; inspect `summary.failed` and each case's `failures[]`.
+   These are successful reports, not diagnostic failures with an `error` object.
 8. **Conflicts are resolved with plain Git, never invented tooling:**
    `git status`, `git tpl show <path>` (the template's/"theirs" side, without checking out the ref),
    edit, `git add`, `git commit`.
@@ -438,7 +440,7 @@ Explicit `--color=always|never` overrides Git's patch/stat colors; `auto` leaves
 | Code | Meaning | Agent action |
 |---|---|---|
 | `0` | Success | Continue. |
-| `1` | Failure | Read `error.code` from the JSON envelope, look it up in the diagnostics reference, and act on the `help` text. |
+| `1` | Diagnostic failure, or a successful diff/lint/test report with a negative outcome | Check `ok` first: inspect report fields when true; otherwise use `error.code` and `help`. |
 | `2` | `status` pending, or pre-dispatch argument parsing failed | Check for a JSON status report; otherwise correct the arguments from the parser's stderr diagnostic. |
 
 Diagnostic codes: <https://noirbizarre.github.io/git-tpl/reference/diagnostics/>.
