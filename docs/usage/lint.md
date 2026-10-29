@@ -112,9 +112,13 @@ default = "blue"
 accent: {{ docs_accent }}
 ```
 
-`accent: blue` today, whatever `docs` is — until `strict = true` is set, or until `strict` becomes the default.
-Then it fails only when `docs` is false, and nothing warned beforehand, because `docs_accent` is a name the
-manifest does declare.
+With `docs = true`, the output is `accent: blue`.
+With `docs = false`, `docs_accent` is absent despite its declared default,
+so lenient rendering produces `accent:` followed by a space, with no value.
+With `strict = true`, that skipped-question read fails instead.
+The manifest declares the name, so `undeclared` cannot warn about this answer-dependent absence.
+Set `default_when_skipped = true` if the default should remain available when `when` is false;
+otherwise guard the read as below.
 
 The fix is the same idiom `undeclared` already recommends for an optional name:
 
