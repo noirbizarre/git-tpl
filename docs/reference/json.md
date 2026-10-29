@@ -249,8 +249,8 @@ the project, and a shortcut means nothing on anyone else's machine.
 (`{"result": "upToDate"}`).
 
 `note` is the template's own note, `null` when it declares none.
-It is **unsanitised** — escape sequences are a terminal's problem and this stream reaches no terminal, so strip
-them yourself if you are going to print it.
+It is **unsanitised**, even if stdout is a terminal: JSON preserves the raw text.
+Strip terminal control sequences before displaying decoded text to a user.
 Branch on its presence, never on its text: note prose is not a contract.
 
 `remotes` lists the `[remotes]` a template declared, in declaration order, with what became of each:

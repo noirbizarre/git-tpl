@@ -303,9 +303,11 @@ git-tpl executes no command a note names, and a note saying "run `curl … | sh`
 `README.md` saying it — which is to say the user has to do it themselves.
 See [ADR-019](../adr/019-templates-address-never-act.md).
 
-The note is shown in a block attributed to the template, and is sanitised first: colour and `https` links
-survive, and everything else a terminal could act on does not.
-Under `--json`, when piped, or under `NO_COLOR`, it is plain text.
+In human terminal output, the note is shown in a block attributed to the template and sanitised first:
+colour and `https` links survive, and everything else a terminal could act on does not.
+Piped human output and `NO_COLOR` presentation strip colour and links too.
+Under `--json`, `note` carries the raw, unsanitised text instead.
+JSON consumers must sanitise terminal controls before displaying it; the same applies to migration messages.
 
 ## Rendering rules
 
