@@ -278,6 +278,24 @@ pub struct Commit {
 /// Errors from Git operations.
 #[derive(Debug, Error, Diagnostic)]
 pub enum GitError {
+    /// A rendering was based on a tip that another writer replaced.
+    #[error("ref `{name}` changed concurrently (expected {}, actual {})",
+        expected.map(Oid::to_hex).unwrap_or_else(|| "absent".into()),
+        actual.map(Oid::to_hex).unwrap_or_else(|| "absent".into()))]
+    #[diagnostic(
+        code(tpl::git::stale_ref),
+        help(
+            "inspect the ref and retry the operation against its current tip; no configuration was saved"
+        )
+    )]
+    StaleRef {
+        /// Destination ref.
+        name: String,
+        /// Tip used as the render's parent, or expected absence.
+        expected: Option<Oid>,
+        /// Tip observed under the lock, or actual absence.
+        actual: Option<Oid>,
+    },
     /// Aborting outside a merge must never touch local changes.
     #[error("there is no merge in progress")]
     #[diagnostic(
@@ -562,6 +580,15 @@ pub trait GitBackend {
 
     /// Point a ref at a commit.
     fn set_ref(&self, name: &str, oid: Oid, reflog_message: &str) -> Result<(), GitError>;
+
+    /// Publish only if the locked ref still has `expected`, including absence.
+    fn compare_and_set_ref(
+        &self,
+        name: &str,
+        expected: Option<Oid>,
+        target: Oid,
+        message: &str,
+    ) -> Result<(), GitError>;
 
     /// The differences between two trees, in path order.
     ///

@@ -1,5 +1,9 @@
 # `git tpl init`
 
+Rendered-ref publication is conditional on its original tip, including expected absence.
+A concurrent writer produces `tpl::git::stale_ref`; inspect the current ref and retry.
+The failed publication does not save the attachment configuration.
+
 Attach a template to a repository, render it, and merge the result.
 
 ```sh

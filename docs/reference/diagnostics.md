@@ -243,6 +243,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::git::network` | The remote could not be reached. The help text carries libgit2's own reason. |
 | `tpl::git::clone` | The remote answered, but the clone could not be written — usually no space or no permission on the temporary directory. |
 | `tpl::git::remote_exists` | A remote of that name already exists. git-tpl never repoints one. |
+| `tpl::git::stale_ref` | The rendered ref changed concurrently; inspect expected/actual tips and retry. No config is saved. |
 | `tpl::git::dirty_worktree` | The operation merges, and the worktree has uncommitted changes. |
 | `tpl::git::diverged` | The remote template ref has diverged. Nothing is force-pushed. |
 | `tpl::git::jj_not_colocated` | The path is a Jujutsu workspace without a colocated `.git`. |

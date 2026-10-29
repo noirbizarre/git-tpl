@@ -1,5 +1,9 @@
 # `git tpl update`
 
+Publication compares the rendered ref's tip under a lock, including when the ref was absent.
+If another writer has changed it, `tpl::git::stale_ref` reports the expected and actual tips.
+Inspect the current ref before retrying; the failed publication does not save newly answered configuration.
+
 Re-render the template and advance `refs/tpl/<id>`.
 
 Read source commit messages before updating with [`git tpl log <ref>`](log.md),

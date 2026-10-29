@@ -7,6 +7,105 @@ mod common;
 
 use common::{World, file_url, tpl, tpl_colored};
 
+#[test]
+fn concurrent_publication_refuses_stale_created_and_deleted_tips_without_saving_answers() {
+    use std::collections::BTreeMap;
+    use tpl::eval::{EvalError, Prompter};
+    use tpl::git::{GitBackend, GitError, LibGit2, Oid};
+    use tpl::ops::{Answering, OpError, Trust};
+    use tpl::template::{Choice, Question, Value};
+    struct DuringPrompt<F>(F);
+    impl<F: FnMut()> Prompter for DuringPrompt<F> {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &Question,
+            default: Option<&Value>,
+            _: Option<&Value>,
+            _: Option<&[Choice]>,
+        ) -> Result<Value, EvalError> {
+            (self.0)();
+            Ok(default.unwrap().clone())
+        }
+    }
+    for action in ["replace", "create", "delete", "init"] {
+        let world = World::new();
+        if action != "init" {
+            world.init(&[]).success();
+        }
+        let ref_name = world.ref_name();
+        if action == "create" {
+            world.project.git(&["update-ref", "-d", &ref_name]);
+        }
+        world.move_template();
+        world.template.repo.write(
+            "template.toml",
+            &format!(
+                "{}\n[questions.new_answer]\ntype = \"string\"\ndefault = \"new\"\n",
+                world.template.repo.read("template.toml")
+            ),
+        );
+        world.template.repo.commit_all("add question");
+        let before = world.project.working_state();
+        let backend = LibGit2::discover(&world.project.path).unwrap();
+        let other = LibGit2::discover(&world.project.path).unwrap();
+        let concurrent = Oid::parse(&world.project.rev_parse("HEAD")).unwrap();
+        let mut prompter = DuringPrompt(|| {
+            if action == "delete" {
+                world.project.git(&["update-ref", "-d", &ref_name]);
+            } else {
+                other
+                    .set_ref(&ref_name, concurrent, "concurrent render")
+                    .unwrap();
+            }
+        });
+        let result = if action == "init" {
+            tpl::ops::init(
+                &backend,
+                &world.project.path,
+                world.template.repo.path.to_str().unwrap(),
+                None,
+                None,
+                BTreeMap::new(),
+                false,
+                false,
+                false,
+                false,
+                &Default::default(),
+                Answering::Interactive(&mut prompter),
+                Trust::always(),
+            )
+            .map(|_| ())
+        } else {
+            tpl::ops::update(
+                &backend,
+                &world.project.path,
+                None,
+                BTreeMap::new(),
+                false,
+                false,
+                &Default::default(),
+                Answering::Interactive(&mut prompter),
+                Trust::always(),
+            )
+            .map(|_| ())
+        };
+        assert!(
+            matches!(result, Err(OpError::Git(GitError::StaleRef { .. }))),
+            "{action}: {result:?}"
+        );
+        assert_eq!(world.project.working_state(), before, "{action}");
+        assert_eq!(
+            backend.resolve_ref(&ref_name).unwrap(),
+            if action == "delete" {
+                None
+            } else {
+                Some(concurrent)
+            }
+        );
+    }
+}
+
 /// The single most important test in the suite.
 #[test]
 fn update_does_not_touch_head_the_index_or_the_worktree() {

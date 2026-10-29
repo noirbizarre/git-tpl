@@ -93,6 +93,8 @@ do not assume it is preinstalled.
    `git tpl merge --abort` delegates to native Git; `tpl::git::no_merge` means no merge is active,
    and `tpl::git::abort_failed` retains Git's reason and recovery state for manual inspection.
    Fast-forward checkout refuses tracked edits or untracked/ignored obstructions before moving the branch.
+   `init`/`update` publish rendered refs conditionally under a lock.
+   On `tpl::git::stale_ref`, inspect expected/actual tips before retrying; failed publication saves no configuration.
 9. **`backport` never applies its own patch.** It only ever emits one, to stdout or `--output <file>`.
    Hand it to `git -C <template-clone> am` yourself (or give it to the human to review first).
    Under `--json`, `-p`/`--patch` (interactive hunk selection) is refused with `tpl::backport::not_interactive` —

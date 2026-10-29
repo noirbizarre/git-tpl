@@ -494,6 +494,51 @@ impl GitBackend for LibGit2 {
         Ok(())
     }
 
+    fn compare_and_set_ref(
+        &self,
+        name: &str,
+        expected: Option<Oid>,
+        target: Oid,
+        message: &str,
+    ) -> Result<(), GitError> {
+        let mut transaction = self
+            .repo
+            .transaction()
+            .map_err(|e| backend("begin ref publication", &e))?;
+        // Absence must be checked under the same lock as publication: checking
+        // first and then creating a ref can overwrite a concurrent first render.
+        transaction
+            .lock_ref(name)
+            .map_err(|e| backend("lock the rendered ref", &e))?;
+        let actual = match self.repo.find_reference(name) {
+            Ok(reference) => {
+                // Rendered refs are direct. Following a symbolic ref here would
+                // let a writer replace another destination without locking it.
+                Some(to_oid(reference.target().ok_or_else(|| {
+                    GitError::Backend {
+                        context: "publish the rendered ref".into(),
+                        reason: format!("`{name}` must be a direct ref"),
+                    }
+                })?))
+            }
+            Err(e) if e.code() == ErrorCode::NotFound => None,
+            Err(e) => return Err(backend("read the locked ref", &e)),
+        };
+        if actual != expected {
+            return Err(GitError::StaleRef {
+                name: name.into(),
+                expected,
+                actual,
+            });
+        }
+        transaction
+            .set_target(name, from_oid(target), None, message)
+            .map_err(|e| backend("prepare ref publication", &e))?;
+        transaction
+            .commit()
+            .map_err(|e| backend("publish the rendered ref", &e))
+    }
+
     fn diff_trees(
         &self,
         from: Option<Oid>,
@@ -1936,6 +1981,33 @@ mod tests {
 
         assert_eq!(repo.resolve_ref("refs/tpl/demo").unwrap(), Some(commit));
         assert_eq!(repo.resolve_ref("refs/tpl/absent").unwrap(), None);
+    }
+
+    #[test]
+    fn expected_absence_is_locked_against_another_real_backend() {
+        let (_dir, repo) = scratch();
+        let other = LibGit2::discover(repo.repo.path()).unwrap();
+        let target = commit_files(&repo, &[], &[("f", "content")]);
+        let mut transaction = repo.repo.transaction().unwrap();
+        transaction.lock_ref("refs/tpl/new").unwrap();
+        assert!(
+            other
+                .compare_and_set_ref("refs/tpl/new", None, target, "competing writer")
+                .is_err()
+        );
+        assert_eq!(repo.resolve_ref("refs/tpl/new").unwrap(), None);
+        drop(transaction);
+        other
+            .compare_and_set_ref("refs/tpl/new", None, target, "first writer")
+            .unwrap();
+        assert!(matches!(
+            repo.compare_and_set_ref("refs/tpl/new", None, target, "stale writer"),
+            Err(GitError::StaleRef {
+                expected: None,
+                actual: Some(_),
+                ..
+            })
+        ));
     }
 
     #[test]

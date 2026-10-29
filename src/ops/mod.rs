@@ -1155,6 +1155,12 @@ pub fn init(
     let mut config = Config::new(source, reference);
     config.template.id = explicit_id.map(str::to_string);
 
+    let id = TemplateId::resolve(source, explicit_id)?;
+    let ref_name = id.ref_name();
+    // Capture before prompting: another renderer may publish while answers are
+    // being collected, and must not silently become this invocation's parent.
+    let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
+
     let rendered = render(
         project,
         project_root,
@@ -1175,9 +1181,6 @@ pub fn init(
         rendered.template.manifest.questions.keys().cloned(),
     )?;
 
-    let id = TemplateId::resolve(source, explicit_id)?;
-    let ref_name = id.ref_name();
-
     // Before the ref, before the configuration, before the merge. A `note_file`
     // that names nothing is an authoring mistake, and this is the last moment
     // at which saying so costs the user nothing: after the next line there is a
@@ -1187,10 +1190,14 @@ pub fn init(
     // A forced reattachment to the same ref must descend from its tip: an
     // orphan here destroys the merge base of every previous attachment.
     // Only a genuinely new ref starts with an orphan rendering.
-    let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
     let commit =
         project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
-    project.set_ref(&ref_name, commit, "tpl: initial render")?;
+    project.compare_and_set_ref(
+        &ref_name,
+        parents.first().copied(),
+        commit,
+        "tpl: initial render",
+    )?;
 
     let changes = project.diff_trees(
         parents
@@ -1703,6 +1710,10 @@ pub fn update(
     let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let supplied = merge_answers(config.answers.clone(), overrides);
 
+    let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
+    let ref_name = id.ref_name();
+    let tip = project.resolve_ref(&ref_name)?;
+
     let rendered = render(
         project,
         project_root,
@@ -1724,10 +1735,6 @@ pub fn update(
             .collect::<Vec<_>>(),
         rendered.template.manifest.questions.keys().cloned(),
     )?;
-
-    let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
-    let ref_name = id.ref_name();
-    let tip = project.resolve_ref(&ref_name)?;
 
     let previous = tip.map(|oid| project.commit(oid)).transpose()?;
     let recorded_previous = previous
@@ -1829,7 +1836,8 @@ pub fn update(
     let started_new_history = parents.is_empty();
     let commit =
         project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
-    project.set_ref(&ref_name, commit, "tpl: update")?;
+    // Compare the original published tip, not an unpublished migration parent.
+    project.compare_and_set_ref(&ref_name, tip, commit, "tpl: update")?;
 
     let changes = project.diff_trees(previous.as_ref().map(|c| c.tree), rendered.tree, &[])?;
 
