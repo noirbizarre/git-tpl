@@ -1,5 +1,11 @@
 # `git tpl backport`
 
+Only files owned by the attached leaf template can be backported.
+Changes owned by inherited or composed repositories fail with `tpl::backport::non_leaf`,
+including during `--list-hunks`, even if the leaf has a source with the same path.
+Edit the owning repository directly or exclude the path.
+A leaf override of an inherited source is leaf-owned and can be backported normally.
+
 Emit a patch that carries a local fix back to the template it came from.
 
 ```sh

@@ -240,7 +240,9 @@ pub fn render(
                 origin: source.clone(),
                 source: Box::new(error),
             })?;
-            for file in rendered.files {
+            for mut file in rendered.files {
+                // The same pre-render path can exist in parent and child; the path is not ownership.
+                file.origin = crate::render::Origin::Composed(source.clone());
                 if !paths.insert(file.path.clone()) {
                     return Err(ComposeError::Collision { path: file.path });
                 }

@@ -152,6 +152,17 @@ pub fn collect_partials(
     Ok(Partials::new(out))
 }
 
+/// Repository ownership, independent of a source path that multiple repositories may share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    /// The directly requested repository owns the source.
+    Leaf,
+    /// An ancestor owns it; the index is relative to the resolved inheritance chain.
+    Inherited(usize),
+    /// A separately rendered module owns it, regardless of its own inheritance.
+    Composed(String),
+}
+
 /// A rendered file, before it becomes a tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rendered {
@@ -167,6 +178,8 @@ pub struct Rendered {
     /// which source a name came from. `backport` needs to name the `.jinja`
     /// its patch edits, so the mapping is kept rather than rediscovered.
     pub source: String,
+    /// Source ownership cannot be recovered from a path shared by multiple repositories.
+    pub origin: Origin,
     /// The output bytes.
     pub content: Vec<u8>,
     /// Whether the executable bit is set.
@@ -355,6 +368,11 @@ fn render_indexed(
         out.push(Rendered {
             path,
             source: entry.path.clone(),
+            origin: if origin == 0 {
+                Origin::Leaf
+            } else {
+                Origin::Inherited(origin)
+            },
             content,
             templated,
             // Git records nothing about permissions except the executable bit,

@@ -189,6 +189,7 @@ The reasoning is [ADR-020](../adr/020-backport-is-a-patch.md).
 | `tpl::backport::binary` | A changed file is binary, and a text patch cannot carry it. |
 | `tpl::backport::stale_rendering` | The recorded answers no longer reproduce `refs/tpl/<id>`, so every line of the patch would be measured against the wrong file. Run `update` first. |
 | `tpl::backport::unknown_path` | A named path is neither produced by the template nor present in the project. |
+| `tpl::backport::non_leaf` | A modified output belongs to an inherited or composed repository. Edit its owning repository directly or exclude the path. |
 | `tpl::backport::output_write` | The patch could not be written to `--output`. |
 | `tpl::backport::hunk_refused` | One of the hunks selected with `-p` or `--hunk` cannot be backported. The refusal underneath keeps its own code and its own advice; this names the hunk. Run again and leave that hunk out. See [Choosing hunks](../usage/backport.md#choosing-hunks). |
 | `tpl::backport::cancelled` | The hunk picker was cancelled. No patch was produced and nothing was written. |

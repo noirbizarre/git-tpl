@@ -4,6 +4,43 @@ mod common;
 
 use common::{Repo, tpl};
 
+#[test]
+fn a_child_with_the_same_source_path_as_its_parent_cannot_backport_into_the_parent() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let manifest = parent.read("template.toml");
+    parent.write("template.toml", &format!("{manifest}\n[questions.module_path]\ntype = 'string'\ndefault = 'leaf'\n[questions.module_name]\ntype = 'string'\ndefault = 'leaf'\n"));
+    parent.write(
+        "template/{{ module_path }}/module.txt.jinja",
+        "{{ module_name }}\n",
+    );
+    parent.commit_all("add overlapping source path");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "init",
+            parent.path.to_str().unwrap(),
+            "--defaults",
+            "--answer",
+            "sources=[\"jira\"]",
+        ],
+    )
+    .success();
+    project.write("modules/jira/module.txt", "jira\nnew literal line\n");
+    for extra in [vec![], vec!["--list-hunks"]] {
+        let mut args = vec!["backport", "--json", "modules/jira/module.txt"];
+        args.extend(extra);
+        let output = tpl(&project, &args).failure();
+        assert!(
+            output.stdout.contains("tpl::backport::non_leaf"),
+            "{}",
+            output.stdout
+        );
+    }
+}
+
 fn child(name: &str) -> Repo {
     let child = Repo::init(name);
     child.write("template.toml", &format!(
@@ -514,7 +551,7 @@ fn backport_never_mistakes_a_child_generated_file_for_a_parent_template_file() {
         "child files must not be backported to the parent: {}",
         output.all()
     );
-    assert_eq!(output.error_code(), "tpl::backport::unknown_path");
+    assert_eq!(output.error_code(), "tpl::backport::non_leaf");
 }
 
 #[test]

@@ -38,6 +38,16 @@ use std::sync::Arc;
 /// floor no refusal can fall below. See ADR-020.
 #[derive(Debug, Error, Diagnostic)]
 pub enum BackportError {
+    /// A patch against the leaf repository cannot edit a different repository's source.
+    #[error("`{path}` is owned by an inherited or composed template")]
+    #[diagnostic(
+        code(tpl::backport::non_leaf),
+        help("edit the owning template repository directly, or exclude `{path}` with --exclude")
+    )]
+    NonLeaf {
+        /// Output whose owner is outside the leaf repository.
+        path: String,
+    },
     /// A change lands on a line that rendering substituted into.
     ///
     /// The expected refusal, and the one users will meet most. Reversing the
@@ -532,6 +542,14 @@ pub fn backport(
                     .into());
                 };
 
+                // Check before reading leaf bytes or publishing a hunk: identical source paths
+                // in different repositories otherwise make a plausible patch against the wrong owner.
+                if file.origin != crate::render::Origin::Leaf {
+                    return Err(BackportError::NonLeaf {
+                        path: change.path.clone(),
+                    }
+                    .into());
+                }
                 let template_bytes = rendered
                     .template
                     .repo

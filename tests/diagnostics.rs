@@ -81,6 +81,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::backport::binary",
     "tpl::backport::cancelled",
     "tpl::backport::hunk_refused",
+    "tpl::backport::non_leaf",
     "tpl::backport::not_interactive",
     "tpl::backport::output_write",
     "tpl::backport::round_trip",

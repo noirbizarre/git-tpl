@@ -7,6 +7,50 @@
 
 mod common;
 
+#[test]
+fn inherited_sources_are_refused_but_leaf_overrides_can_be_backported() {
+    use common::{Repo, tpl};
+    let parent = Repo::init("base");
+    parent.write("template.toml", "name = 'base'\n");
+    parent.write("template/shared.txt", "original\n");
+    parent.commit_all("base template");
+    let leaf = Repo::init("leaf");
+    leaf.write(
+        "template.toml",
+        &format!(
+            "name = 'leaf'\n[extends]\nsource = '{}'\nrev = '{}'\n",
+            parent.path.display(),
+            parent.rev_parse("HEAD")
+        ),
+    );
+    leaf.commit_all("inherit base");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &["init", leaf.path.to_str().unwrap(), "--defaults"],
+    )
+    .success();
+    project.write("shared.txt", "changed\n");
+    for extra in [vec![], vec!["--list-hunks"]] {
+        let mut args = vec!["backport", "--json", "shared.txt"];
+        args.extend(extra);
+        let output = tpl(&project, &args).failure();
+        assert!(
+            output.stdout.contains("tpl::backport::non_leaf"),
+            "{}",
+            output.stdout
+        );
+    }
+    project.git(&["restore", "shared.txt"]);
+    leaf.write("template/shared.txt", "leaf original\n");
+    leaf.commit_all("override base");
+    tpl(&project, &["update", "--defaults"]).success();
+    tpl(&project, &["merge"]).success();
+    project.write("shared.txt", "leaf fixed\n");
+    let output = tpl(&project, &["backport", "shared.txt"]).success();
+    assert!(output.stdout.contains("+leaf fixed"), "{}", output.stdout);
+}
+
 use common::{Repo, World, tpl};
 
 /// A template whose `README.md.jinja` has one substituted line and several

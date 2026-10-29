@@ -38,6 +38,9 @@ Persistent trust in a composing parent covers its data only.
 Each child and ancestor needs matching trust or explicit invocation-wide `--trust`.
 Data aliases reuse bytes, but each declaration independently validates trust, checksum and format and records provenance.
 
+Backport refuses inherited/composed outputs with `tpl::backport::non_leaf`, including hunk listings.
+Use the owning repository directly or exclude the output; a matching leaf source path does not establish ownership.
+
 Configured local template sources are relative to the project root, including for log and backport.
 CLI init paths are relative to the invocation directory and are rebased when recorded.
 Keep the existing template ID when repairing an old cwd-relative source; set `template.id` explicitly.
