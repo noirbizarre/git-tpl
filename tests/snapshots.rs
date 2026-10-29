@@ -97,6 +97,33 @@ fn a_redaction_stops_where_the_path_does() {
 
 // --- human output -----------------------------------------------------------
 
+#[test]
+fn log_displays_compact_conventional_subjects_and_absolute_dates() {
+    let world = World::new();
+    world
+        .template
+        .repo
+        .commit_all_at("feat(cli)!: inspect source history", "2026-10-29T14:35:42Z");
+    world.init(&[]).success();
+    snapshot(
+        "log_absolute",
+        &world,
+        &tpl(&world.project, &["log", "-n", "1", "--no-relative-date"]).success(),
+    );
+    let mut colored =
+        common::tpl_colored(&world.project, &["log", "-n", "1", "--no-relative-date"]).success();
+    // An ANSI SGR's final `m` prevents the shared word-boundary hash filter from matching.
+    colored.stderr = colored
+        .stderr
+        .replace(&world.template.repo.rev_parse("HEAD")[..7], "[short]");
+    snapshot("log_colored", &world, &colored);
+    snapshot(
+        "log_json",
+        &world,
+        &tpl(&world.project, &["--json", "log", "-n", "1"]).success(),
+    );
+}
+
 /// `docs/usage/status.md` — before anything is rendered.
 #[test]
 fn status_says_when_nothing_has_been_rendered_yet() {

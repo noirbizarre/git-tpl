@@ -399,25 +399,7 @@ fn resolve_layer(
         });
     }
 
-    let (repo, cache) = match &local {
-        // A local template is opened in place. Cloning it would cost a copy
-        // and, worse, would hide uncommitted changes that `--dirty` needs.
-        Some(path) => (Box::new(LibGit2::open(path)?) as Box<dyn GitBackend>, None),
-        None => {
-            // A fresh temporary clone per run. Caching between runs would be
-            // faster, but a stale cache silently rendering an old template is a
-            // far worse failure than a slow fetch — and the alternative is a
-            // cache-invalidation problem nobody wants in a tool whose entire
-            // premise is reproducibility. An `[extends]` chain multiplies this
-            // cost by its depth; see docs/adr/034-template-inheritance.md.
-            let dir = tempfile::tempdir().map_err(|source| ResolveError::Cache {
-                path: std::env::temp_dir(),
-                source,
-            })?;
-            let repo = LibGit2::clone_bare(source, dir.path())?;
-            (Box::new(repo) as Box<dyn GitBackend>, Some(dir))
-        }
-    };
+    let OpenedRepository { repo, cache } = open_repository(source)?;
 
     let (revision, tree, reference, dirty, ignored) = if dirty {
         let path = local.as_ref().expect("checked above");
@@ -484,6 +466,35 @@ fn resolve_layer(
         ignored,
         _cache: cache,
     })
+}
+
+/// Keeps a temporary clone alive without requiring a valid template manifest.
+pub(crate) struct OpenedRepository {
+    pub(crate) repo: Box<dyn GitBackend>,
+    pub(crate) cache: Option<tempfile::TempDir>,
+}
+
+/// Open source history independently of rendering, inheritance and data loading.
+pub(crate) fn open_repository(source: &str) -> Result<OpenedRepository, ResolveError> {
+    match local_path(source) {
+        // Opening in place preserves local branches and uncommitted input for dirty rendering.
+        Some(path) => Ok(OpenedRepository {
+            repo: Box::new(LibGit2::open(&path)?),
+            cache: None,
+        }),
+        None => {
+            // A fresh clone avoids silently inspecting or rendering a stale cached revision.
+            let dir = tempfile::tempdir().map_err(|source| ResolveError::Cache {
+                path: std::env::temp_dir(),
+                source,
+            })?;
+            let repo = LibGit2::clone_bare(source, dir.path())?;
+            Ok(OpenedRepository {
+                repo: Box::new(repo),
+                cache: Some(dir),
+            })
+        }
+    }
 }
 
 /// An ancestor chain, folded into one effective manifest — what

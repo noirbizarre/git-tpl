@@ -81,6 +81,12 @@ fn truncate(raw: &str) -> (&str, bool) {
     (&raw[..end], true)
 }
 
+/// Terminal-safe, single-line text for source commit subjects and labels.
+/// Unlike notes, history rows must not inject extra lines or inherit author-provided styles.
+pub fn plain_line(raw: &str) -> String {
+    clean(raw, Formatting::Stripped)
+}
+
 /// The sequence that ends a hyperlink: OSC 8 with an empty URI.
 const LINK_CLOSE: &str = "\x1b]8;;\x1b\\";
 

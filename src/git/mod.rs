@@ -467,6 +467,17 @@ pub enum GitError {
     },
 }
 
+/// A source-history entry, separate from the tree-oriented [`Commit`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HistoryEntry {
+    /// The full source commit identity.
+    pub oid: Oid,
+    /// The first message line, lossily decoded if it is not UTF-8.
+    pub subject: String,
+    /// Committer time as signed Unix seconds, independent of display preferences.
+    pub committed_at: i64,
+}
+
 /// The operations git-tpl needs from a Git implementation.
 ///
 /// Every method takes and returns types defined in this module, never the
@@ -500,6 +511,15 @@ pub trait GitBackend {
 
     /// Read a commit.
     fn commit(&self, oid: Oid) -> Result<Commit, GitError>;
+
+    /// Descendants before ancestors, with time priority, excluding `hide` and its ancestry.
+    /// `None` for the count means unbounded, not all repository refs.
+    fn history(
+        &self,
+        tip: Oid,
+        hide: Option<Oid>,
+        max_count: Option<usize>,
+    ) -> Result<Vec<HistoryEntry>, GitError>;
 
     /// List a tree, recursively, in Git's canonical (sorted) order.
     ///

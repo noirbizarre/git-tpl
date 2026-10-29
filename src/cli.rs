@@ -92,6 +92,9 @@ pub enum Command {
     /// Show the template, the rendered ref, and what is pending
     Status(StatusArgs),
 
+    /// Show the applied template's source history, or changes toward a template ref
+    Log(LogArgs),
+
     /// Show what merging the template would change
     Diff(DiffArgs),
     /// Print the template's version of a file
@@ -120,6 +123,26 @@ pub enum Command {
     // writes are there to make work.
     #[command(hide = true)]
     Man(ManArgs),
+}
+
+/// `git tpl log`
+#[derive(Debug, clap::Args)]
+pub struct LogArgs {
+    /// Target branch, tag or commit in the template repository (shows applied..REF)
+    #[arg(value_name = "REF")]
+    pub reference: Option<String>,
+
+    /// Maximum commits to show (20 by default)
+    #[arg(short = 'n', long, value_name = "COUNT", conflicts_with = "all")]
+    pub max_count: Option<usize>,
+
+    /// Show the complete selected history, without a count limit
+    #[arg(long)]
+    pub all: bool,
+
+    /// Show absolute UTC dates and times instead of relative commit ages
+    #[arg(long)]
+    pub no_relative_date: bool,
 }
 
 /// `git tpl init`

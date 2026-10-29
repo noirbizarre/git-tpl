@@ -1,0 +1,13 @@
+---
+source: tests/snapshots.rs
+expression: transcript
+---
+exit: 0
+--- stdout ---
+<empty>
+--- stderr ---
+
+[2mTemplate: [0m [tmp]/template
+[2mApplied:  [0m main ([short])
+
+  [33m[short][0m  [36m[1mfeat(cli)!: [0minspect source history  [2m(2026-10-29 14:35 UTC)[0m

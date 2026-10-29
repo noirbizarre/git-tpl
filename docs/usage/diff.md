@@ -2,6 +2,8 @@
 
 What merging the template would change.
 
+For the template's source commit messages, use [`git tpl log [REF]`](log.md).
+
 ```sh
 git tpl diff [--stat] [--name-only] [--reverse] [--exit-code] [--dirty] [-- <path>...]
 ```

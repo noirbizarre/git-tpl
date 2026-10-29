@@ -55,6 +55,19 @@ Something is wrong with the template itself.
 | `tpl::compose::child_failed` | A child repository could not be resolved or rendered; inspect its cause. |
 | `tpl::compose::nested` | A composed child also composes other children. Keep siblings in the parent. |
 
+## Log
+
+[`git tpl log`](../usage/log.md) needs an exact applied source-history boundary.
+
+| Code | Meaning |
+|---|---|
+| `tpl::log::dirty` | Applied input was uncommitted. Commit the template, update and merge a clean rendering. |
+| `tpl::log::missing_commit` | The historical source commit is unavailable. Restore it or unshallow the source clone. |
+| `tpl::log::not_applied` | No rendering is reachable from `HEAD`. Merge the rendered ref first. |
+| `tpl::log::provenance` | Unusable applied provenance. Restore original history or merge a new valid rendering. |
+
+A missing rendered ref uses `tpl::ops::no_rendered_ref`; invalid target references use `tpl::git::no_such_revision`.
+
 ## Rendering
 
 | Code | Meaning |
