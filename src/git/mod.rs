@@ -483,10 +483,9 @@ pub enum GitError {
     #[diagnostic(
         code(tpl::git::diverged),
         help(
-            "local is {ahead} ahead and {behind} behind. Both were rendered independently; reconcile them:\n  \
-             git tpl fetch\n  \
-             git merge {remote_ref}\n  \
-             git tpl push"
+            "local is {ahead} ahead and {behind} behind. Preserve both histories: \
+             no automatic rendered-ref reconciliation is available. Merging {remote_ref} into the project \
+             does not advance {ref_name}; do not force or reset either history"
         )
     )]
     Diverged {

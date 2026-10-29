@@ -33,18 +33,16 @@ From github.com:acme/my-project
 
 The remote copy is 2 commit(s) ahead of your local ref.
 
-Adopt it, or render your own:
-  git merge refs/remotes/origin/tpl/github-com-noirbizarre-rust-library-template
-  git tpl update
+Review its provenance and ancestry before conditionally fast-forwarding the local rendered ref.
 ```
 
 Fetching **never** moves your local `refs/tpl/<id>`.
 It brings the remote copy into a remote-tracking ref and tells you how they relate.
 What to do about it is your decision:
 
-- **The remote is ahead** — someone else rendered a newer state. `git merge` the remote-tracking ref to adopt it,
-  or run `git tpl update` to render it yourself. Both are valid; rendering yourself is safest if you do not trust
-  the other party's answers.
+- **The remote is ahead** — someone else rendered a newer state.
+  Review it before [conditionally fast-forwarding your local rendered ref](#fast-forwarding-an-existing-local-ref).
+  Merging into your project branch alone does not advance the rendered ref used by update and push.
 - **The remote is behind** — you have renderings they do not. `git tpl push`.
 - **Diverged** — you both rendered independently. See [`git tpl push`](push.md#divergence).
 
@@ -88,6 +86,24 @@ If it fails, inspect the existing ref before proceeding.
 Re-rendering an equal tree cannot recreate the original commit or merge ancestry.
 If you already created an orphan rendering, this absent-only procedure does not reconcile it;
 preserve both histories and see [divergence](push.md#divergence).
+
+## Fast-forwarding an existing local ref
+
+After reviewing the remote rendering's provenance and answers, capture both tips and require ancestry:
+
+```sh
+ref=refs/tpl/<id>
+old=$(git rev-parse "$ref^{commit}")
+candidate=$(git rev-parse 'refs/remotes/origin/tpl/<id>^{commit}')
+git merge-base --is-ancestor "$old" "$candidate" &&
+  git update-ref "$ref" "$candidate" "$old"
+```
+
+The ancestry check permits only a fast-forward; the expected old tip rejects concurrent local movement.
+If either command fails, stop and inspect both histories.
+Use the [absent-only procedure](#restoring-an-absent-local-ref) when no local ref exists.
+For genuine divergence, preserve both histories: [no automatic reconciliation is available](push.md#divergence).
+After adoption, `git tpl diff` and `git tpl merge` preview and apply the rendering to your project branch.
 
 ## Options
 

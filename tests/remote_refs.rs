@@ -305,7 +305,7 @@ fn status_json_reports_the_remote_relation() {
 /// A rendered ref is history others may have merged from; overwriting it
 /// destroys the merge base their next update depends on.
 #[test]
-fn push_refuses_a_diverged_ref_and_says_how_to_reconcile() {
+fn push_refuses_a_diverged_ref_and_explains_the_reconciliation_limitation() {
     let world = World::new();
     world.init(&[]).success();
     let _remote = with_remote(&world);
@@ -354,10 +354,15 @@ fn push_refuses_a_diverged_ref_and_says_how_to_reconcile() {
     assert_eq!(json["remotePresent"], true);
     assert_eq!(json["state"], "diverged");
     assert_eq!(json["relation"]["diverged"], true);
+    tpl(&world.project, &["fetch"])
+        .success()
+        .says("No automatic rendered-ref reconciliation")
+        .silent_about("git merge refs/remotes");
     tpl(&world.project, &["push"])
         .failure()
         .says("diverged")
-        .says("git tpl fetch");
+        .says("Preserve both histories")
+        .silent_about("git tpl push");
 }
 
 /// The default. Nothing has to be configured for it to work, and the

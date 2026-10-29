@@ -60,20 +60,22 @@ Cannot push refs/tpl/github-com-noirbizarre-rust-library-template: the remote co
   local   4f2c1a9  (2 commits not on the remote)
   remote  9a8b7c6  (1 commit not local)
 
-Both were rendered independently. Reconcile them first:
-
-  git tpl fetch
-  git merge refs/remotes/origin/tpl/github-com-noirbizarre-rust-library-template
-  git tpl push
+Preserve both histories. No automatic reconciliation operation is available.
 ```
 
 There is no `--force`.
 A rendered ref is history that others may have merged from, and overwriting it destroys the merge base their
 branch depends on — which turns their next update into a whole-file conflict.
 
-Reconciling is a merge, like everything else here.
-The rendered tree is deterministic, so two renderings of the same template revision with the same answers merge
-without conflict; if they *do* conflict, the answers genuinely differ and that is worth seeing.
+Genuinely divergent rendered refs currently have no automatic reconciliation operation.
+Merging a remote-tracking rendering into your project branch changes that branch, not the local rendered ref
+that `git tpl push` publishes; it cannot repair the rejected push.
+Preserve both histories for inspection. Do not force, reset, or fabricate a rendered-ref merge commit.
+Equal rendered trees do not imply shared commit ancestry.
+
+An absent local ref or one strictly behind the remote is different:
+see [absent restoration](fetch.md#restoring-an-absent-local-ref)
+and [conditional fast-forward adoption](fetch.md#fast-forwarding-an-existing-local-ref).
 
 ## Options
 

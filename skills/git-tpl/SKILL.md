@@ -147,8 +147,11 @@ do not assume it is preinstalled.
    Once any `--hunk` is given, a file with no `--hunk` of its own sends nothing.
    Narrowing by whole file is still `<pathspec>` / `--exclude`.
 10. **Sharing renderings across a team is explicit.**
-    `git tpl fetch` and `git tpl push` move `refs/tpl/*`; nothing else does.
-    `push` never forces — a diverged remote must be fetched and merged first, same as any ref.
+    `git tpl fetch` retrieves remote-tracking refs; `git tpl push` publishes the local rendered ref.
+    `push` never forces. Genuine rendered-ref divergence has no automatic reconciliation operation.
+    Preserve both histories; merging into the project branch does not advance the ref being pushed.
+    Only adopt an absent ref or fast-forward an ancestor, with conditional `git update-ref`;
+    see <https://noirbizarre.github.io/git-tpl/usage/fetch/>.
 11. **Never amend, rebase, or force anything onto `refs/tpl/*`.**
     It is append-only by design; treat it as a read-only history you inspect and merge from, not one you rewrite.
 12. **Templates cannot execute code.**

@@ -40,7 +40,7 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // The arms are ordered, not independent: `is_diverged` is `ahead > 0 &&
     // behind > 0`, so it has to be tested before the plain `behind > 0` arm
     // below, which would otherwise swallow it and tell a diverged user to
-    // simply merge.
+    // fast-forward a genuinely divergent ref.
     //
     // `state` comes out of the *same* match for that reason. Deriving it a
     // second time somewhere else is how the JSON and the prose come to
@@ -77,12 +77,10 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ctx.out
                 .say(format!("{ref_name} has {}.", relation.describe()));
             ctx.out.blank();
-            ctx.out
-                .say("Both were rendered independently. Reconcile them:");
-            ctx.out.say(command(
-                &ctx.out.theme,
-                &format!("git merge refs/remotes/{}/tpl/...", preferences.remote),
-            ));
+            ctx.out.say(
+                "Preserve both histories. No automatic rendered-ref reconciliation is available.",
+            );
+            ctx.out.say("A project merge does not advance the rendered ref; do not force or reset either history.");
             "diverged"
         }
         Some(relation) if relation.behind > 0 => {
@@ -95,16 +93,8 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             // Fetching never moves the local ref. What to do about a newer
             // remote copy is a decision, and adopting someone else's rendering
             // silently would be a surprising thing for a fetch to do.
-            ctx.out.say("Adopt it, or render your own:");
-            ctx.out.say(command(
-                &ctx.out.theme,
-                &format!(
-                    "git merge refs/remotes/{}/tpl/{}",
-                    preferences.remote,
-                    ref_name.trim_start_matches("refs/tpl/")
-                ),
-            ));
-            ctx.out.say(command(&ctx.out.theme, "git tpl update"));
+            ctx.out.say("Review its provenance and ancestry before conditionally fast-forwarding the local rendered ref.");
+            ctx.out.say("See https://noirbizarre.github.io/git-tpl/usage/fetch/#fast-forwarding-an-existing-local-ref");
             "behind"
         }
         Some(relation) => {
