@@ -7,7 +7,7 @@ exit: 0
 <empty>
 --- stderr ---
 
-Template:  [tmp]/template
+Template:  ../template
 Applied:   main ([short])
 
   [short]  feat(cli)!: inspect source history  (2026-10-29 14:35 UTC)

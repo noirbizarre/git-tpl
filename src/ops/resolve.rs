@@ -7,7 +7,7 @@
 //! (`ops::extends::merge_chain`). See `docs/adr/034-template-inheritance.md`.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use miette::Diagnostic;

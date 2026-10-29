@@ -1,13 +1,13 @@
 ---
 source: tests/snapshots.rs
-expression: output.transcript()
+expression: transcript
 ---
 exit: 0
 --- stdout ---
 <empty>
 --- stderr ---
 
-Template:  [tmp]/template
+Template:  ../template
 Revision:  main ([short]) → main ([short])
 
 Updated refs/tpl/template

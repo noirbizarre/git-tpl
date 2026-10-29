@@ -5,6 +5,12 @@ of 7–40 hexadecimal characters.
 Tags take precedence over same-named branches; hexadecimal branch names never provide a fallback.
 Ambiguous prefixes and noncommit objects fail with `tpl::git::no_such_revision`.
 
+Rendered files retain Git modes `100644`, `100755` and `120000`.
+Symbolic-link targets are opaque bytes, never template expressions, even for links named `.jinja`.
+Output names still follow path rendering and suffix removal.
+Dirty traversal reads target bytes and never descends through a directory link.
+No output may be a descendant of another output, including a link.
+
 A template is a normal Git repository.
 Nothing registers it, nothing packages it, and any Git URL that libgit2 can clone will do — including a local
 path.

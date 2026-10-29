@@ -8,7 +8,7 @@ exit: 0
   "result": "updated",
   "id": "template",
   "ref": "refs/tpl/template",
-  "template": "[tmp]/template",
+  "template": "../template",
   "commit": "[sha]",
   "previousRevision": {
     "reference": "main",

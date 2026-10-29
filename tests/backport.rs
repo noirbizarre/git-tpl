@@ -7,6 +7,36 @@
 
 mod common;
 
+#[cfg(unix)]
+#[test]
+fn link_target_changes_and_file_to_link_conversions_are_refused_before_listing_hunks() {
+    let world = common::World::new();
+    let path = world.template.repo.path.join("template/link");
+    if std::os::unix::fs::symlink("old", &path).is_err() {
+        return;
+    }
+    world.template.repo.commit_all("add link");
+    world.init(&[]).success();
+    std::fs::remove_file(world.project.path.join("link")).unwrap();
+    std::os::unix::fs::symlink("new", world.project.path.join("link")).unwrap();
+    for extra in [vec![], vec!["--list-hunks"]] {
+        let mut args = vec!["--json", "backport", "link"];
+        args.extend(extra);
+        assert_eq!(
+            common::tpl(&world.project, &args).failure().error_code(),
+            "tpl::backport::symlink"
+        );
+    }
+    std::fs::remove_file(world.project.path.join("README.md")).unwrap();
+    std::os::unix::fs::symlink("new", world.project.path.join("README.md")).unwrap();
+    assert_eq!(
+        common::tpl(&world.project, &["--json", "backport", "README.md"])
+            .failure()
+            .error_code(),
+        "tpl::backport::symlink"
+    );
+}
+
 #[test]
 fn inherited_sources_are_refused_but_leaf_overrides_can_be_backported() {
     use common::{Repo, tpl};

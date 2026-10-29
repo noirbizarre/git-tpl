@@ -38,6 +38,16 @@ use std::sync::Arc;
 /// floor no refusal can fall below. See ADR-020.
 #[derive(Debug, Error, Diagnostic)]
 pub enum BackportError {
+    /// Text patches cannot carry link modes or link target changes.
+    #[error("`{path}` is a symbolic link on one side of the change")]
+    #[diagnostic(
+        code(tpl::backport::symlink),
+        help("edit the link in its owning template directly, or exclude `{path}` with --exclude")
+    )]
+    Symlink {
+        /// Output whose mode cannot be backported.
+        path: String,
+    },
     /// A patch against the leaf repository cannot edit a different repository's source.
     #[error("`{path}` is owned by an inherited or composed template")]
     #[diagnostic(
@@ -422,6 +432,11 @@ pub fn backport(
     // reimplementing Git's pathspec rules is the kind of thing that is subtly
     // wrong for years.
     let changes = project.diff_trees(Some(rendered_tree), workdir_tree, paths)?;
+    let workdir_modes: BTreeMap<_, _> = project
+        .list_tree(workdir_tree)?
+        .into_iter()
+        .map(|entry| (entry.path, entry.mode))
+        .collect();
 
     let by_output: BTreeMap<&str, &Rendered> = rendered
         .files
@@ -459,6 +474,18 @@ pub fn backport(
     for change in changes {
         if excluded(&change.path, exclude) {
             continue;
+        }
+
+        // Refuse both a link target edit and a regular-file/link conversion before hunk selection.
+        if workdir_modes.get(&change.path) == Some(&crate::git::FileMode::Link)
+            || by_output
+                .get(change.path.as_str())
+                .is_some_and(|file| file.mode == crate::git::FileMode::Link)
+        {
+            return Err(BackportError::Symlink {
+                path: change.path.clone(),
+            }
+            .into());
         }
 
         match change.kind {

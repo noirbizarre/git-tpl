@@ -1,5 +1,9 @@
 # JSON output
 
+Render `files` entries retain `executable` (boolean) and add `mode`, an octal string:
+`"100644"`, `"100755"` or `"120000"`.
+For a symbolic link, `bytes` counts its opaque target bytes and `templated` is false.
+
 `--json` is global.
 Every command accepts it and every failure emits the same envelope — including the commands that have no success
 payload of their own.

@@ -8,6 +8,149 @@ mod common;
 
 use common::{Template, World, tpl_outside};
 
+#[cfg(unix)]
+#[test]
+fn committed_and_dirty_symlinks_preserve_modes_and_opaque_targets() {
+    use common::tpl;
+    use std::os::unix::fs::symlink;
+    let world = World::new();
+    let root = world.template.repo.path.join("template");
+    // A dangling expression target proves neither rendering nor traversal dereferences it.
+    if symlink("{{ untouched }}.jinja", root.join("link.jinja")).is_err() {
+        return;
+    }
+    symlink("..", root.join("directory-link")).unwrap();
+    world.template.repo.commit_all("add symbolic links");
+    world.init(&[]).success();
+    let tree = world
+        .project
+        .git(&["ls-tree", &world.ref_name(), "link", "directory-link"]);
+    assert_eq!(tree.matches("120000 blob").count(), 2, "{tree}");
+    assert_eq!(
+        world
+            .project
+            .git(&["show", &format!("{}:link", world.ref_name())]),
+        "{{ untouched }}.jinja"
+    );
+    let scratch = Scratch::new();
+    for dirty in [false, true] {
+        let output = scratch
+            .dir
+            .path()
+            .join(if dirty { "dirty" } else { "committed" });
+        let mut args = vec![
+            "render",
+            world.template.repo.path.to_str().unwrap(),
+            "-o",
+            output.to_str().unwrap(),
+            "--defaults",
+            "--json",
+        ];
+        if dirty {
+            args.push("--dirty");
+        }
+        let result = scratch.run(&args).success().json();
+        assert_eq!(
+            std::fs::read_link(output.join("link")).unwrap(),
+            std::path::Path::new("{{ untouched }}.jinja")
+        );
+        assert_eq!(
+            std::fs::read_link(output.join("directory-link")).unwrap(),
+            std::path::Path::new("..")
+        );
+        let link = result["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|file| file["path"] == "link")
+            .unwrap();
+        assert_eq!(link["mode"], "120000");
+        assert_eq!(link["executable"], false);
+        assert_eq!(link["templated"], false);
+    }
+    // An uncommitted link-target change also reaches the rendered ref as target bytes.
+    std::fs::remove_file(root.join("link.jinja")).unwrap();
+    symlink("new-target", root.join("link.jinja")).unwrap();
+    tpl(&world.project, &["update", "--dirty", "--defaults"]).success();
+    assert_eq!(
+        world
+            .project
+            .git(&["show", &format!("{}:link", world.ref_name())]),
+        "new-target"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn materialisation_rejects_link_prefixes_and_existing_symlink_ancestors_before_writing() {
+    use std::os::unix::fs::symlink;
+    use tpl::git::FileMode;
+    let root = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    if symlink(outside.path(), root.path().join("existing")).is_err() {
+        return;
+    }
+    let failed = |_: &std::path::Path, _: &str, error: &std::io::Error| error.to_string();
+    assert!(
+        tpl::ops::materialise(
+            root.path(),
+            [
+                ("new-link", b"../outside".as_slice(), FileMode::Link),
+                ("new-link/escaped", b"bad".as_slice(), FileMode::Blob),
+            ],
+            &failed
+        )
+        .is_err()
+    );
+    assert!(!root.path().join("new-link").exists());
+    assert!(
+        tpl::ops::materialise(
+            root.path(),
+            [("existing/escaped", b"bad".as_slice(), FileMode::Blob),],
+            &failed
+        )
+        .is_err()
+    );
+    assert!(!outside.path().join("escaped").exists());
+    assert!(tpl::ops::clear_directory(&root.path().join("existing"), &failed).is_err());
+    assert!(
+        tpl::ops::materialise(
+            root.path(),
+            [("existing", b"bad".as_slice(), FileMode::Blob),],
+            &failed
+        )
+        .is_err()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_rendered_link_cannot_be_the_parent_directory_of_another_output() {
+    let world = World::new();
+    let source = world.template.repo.path.join("template/prefix.jinja");
+    if std::os::unix::fs::symlink("../outside", source).is_err() {
+        return;
+    }
+    world
+        .template
+        .repo
+        .write("template/prefix/escaped", "must not be written\n");
+    world.template.repo.commit_all("add prefix collision");
+    let scratch = Scratch::new();
+    let output = scratch
+        .run(&[
+            "render",
+            world.template.repo.path.to_str().unwrap(),
+            "-o",
+            scratch.out().to_str().unwrap(),
+            "--defaults",
+            "--json",
+        ])
+        .failure();
+    assert_eq!(output.error_code(), "tpl::render::collision");
+    assert!(!scratch.out().exists());
+}
+
 /// A scratch directory that is deliberately not a repository.
 struct Scratch {
     dir: tempfile::TempDir,

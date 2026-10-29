@@ -1,6 +1,8 @@
 # `git tpl backport`
 
 Only files owned by the attached leaf template can be backported.
+Symbolic-link target changes and file/link conversions fail with `tpl::backport::symlink`, including hunk listings.
+Change links directly in their owning template.
 Changes owned by inherited or composed repositories fail with `tpl::backport::non_leaf`,
 including during `--list-hunks`, even if the leaf has a source with the same path.
 Edit the owning repository directly or exclude the path.

@@ -52,3 +52,4 @@ explains the code that existed.
 | [041](041-typed-supplied-answers.md) | Supplied answers preserve typed versus CLI origins |
 | [042](042-explicit-lint-syntax.md) | Lint compiles effective inherited output and every retained partial declaration |
 | [043](043-project-relative-sources.md) | Configured local sources are rooted at the project, independently of ref identity |
+| [044](044-symlink-artifacts.md) | Rendered artifacts and snapshot manifests preserve symbolic-link modes and opaque targets |

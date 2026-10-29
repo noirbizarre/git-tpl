@@ -38,6 +38,11 @@ Persistent trust in a composing parent covers its data only.
 Each child and ancestor needs matching trust or explicit invocation-wide `--trust`.
 Data aliases reuse bytes, but each declaration independently validates trust, checksum and format and records provenance.
 
+Rendering preserves symlink modes and opaque target bytes; render JSON adds octal-string `mode` beside `executable`.
+Materialisation refuses output-prefix collisions and existing symlink ancestors and creates real links only on Unix.
+Snapshots store link targets as ordinary payload files with manifest mode `120000`.
+Backport rejects links and file/link conversions with `tpl::backport::symlink`, including hunk listings.
+
 Backport refuses inherited/composed outputs with `tpl::backport::non_leaf`, including hunk listings.
 Use the owning repository directly or exclude the output; a matching leaf source path does not establish ownership.
 

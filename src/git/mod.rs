@@ -63,8 +63,7 @@ impl fmt::Display for Oid {
 
 /// A file's mode, as Git records it.
 ///
-/// Git stores nothing else about a file's permissions, which is why the
-/// executable bit is the only thing rendering preserves.
+/// Rendering preserves regular/executable files and symbolic links, including their opaque target bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileMode {
     /// A regular file, `100644`.

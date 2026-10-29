@@ -65,7 +65,7 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         rendered
             .files
             .iter()
-            .map(|file| (file.path.as_str(), file.content.as_slice(), file.executable)),
+            .map(|file| (file.path.as_str(), file.content.as_slice(), file.mode)),
         &io,
     )?;
 
@@ -80,7 +80,8 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ),
             "output": args.output,
             "files": rendered.files.iter().map(|f| serde_json::json!({
-                "path": f.path, "bytes": f.content.len(), "executable": f.executable,
+                "path": f.path, "bytes": f.content.len(), "executable": f.mode == tpl::git::FileMode::BlobExecutable,
+                "mode": format!("{:06o}", f.mode.as_u32()),
                 "templated": f.templated,
             })).collect::<Vec<_>>(),
             "ignoredAnswers": rendered.ignored_answers,
@@ -130,6 +131,7 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 /// did not say could be replaced. Clearing it, once permitted, is the shared
 /// operation.
 fn prepare_output(output: &Path, force: bool) -> Result<(), OpError> {
+    ops::reject_symlink_ancestors(output).map_err(|error| io(output, "prepare", &error))?;
     match std::fs::read_dir(output) {
         Ok(mut entries) => {
             if entries.next().is_some() {

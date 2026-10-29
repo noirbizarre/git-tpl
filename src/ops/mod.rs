@@ -26,7 +26,9 @@ use crate::data::{
     declared_remotes,
 };
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Partials, Prompter};
-use crate::git::{AheadBehind, Change, FileStat, GitBackend, GitError, MergeOutcome, Oid};
+use crate::git::{
+    AheadBehind, Change, FileMode, FileStat, GitBackend, GitError, MergeOutcome, Oid,
+};
 use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
 use crate::provenance::{ComposedRevision, Provenance, Recorded};
@@ -407,6 +409,7 @@ pub fn clear_directory<E>(
     dir: &Path,
     failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
 ) -> Result<(), E> {
+    reject_symlink_ancestors(dir).map_err(|error| failed(dir, "clear", &error))?;
     match std::fs::remove_dir_all(dir) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -417,30 +420,113 @@ pub fn clear_directory<E>(
 
 /// Write a rendered tree onto the filesystem under `root`.
 ///
-/// The one place that turns rendered bytes into files, so that the executable
-/// bit is applied identically wherever a tree lands on disk. It had two
-/// implementations and they had already diverged: one set the bit and never
-/// cleared it, so a non-executable file written over an executable one kept a
-/// mode the rendering does not have.
-///
-/// Safe to join `root` with each path: every rendered path was validated by
-/// `render_path`, which rejects `.`, `..`, absolute segments and separators
-/// inside a segment. Joining is safe because of that check, not in spite of it.
+/// Validate the complete output set before writing, so a rendered link can never
+/// become the directory through which another output is written.
 pub fn materialise<'a, E>(
     root: &Path,
-    files: impl IntoIterator<Item = (&'a str, &'a [u8], bool)>,
+    files: impl IntoIterator<Item = (&'a str, &'a [u8], FileMode)>,
     failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
 ) -> Result<(), E> {
-    for (path, content, executable) in files {
+    let files: Vec<_> = files.into_iter().collect();
+    let paths: std::collections::BTreeSet<_> = files.iter().map(|(path, _, _)| *path).collect();
+    for (path, _, mode) in &files {
+        let invalid = |reason| std::io::Error::new(std::io::ErrorKind::InvalidInput, reason);
+        if path.is_empty()
+            || paths.len() != files.len()
+            || path.contains('\\')
+            || Path::new(path)
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+            || path
+                .match_indices('/')
+                .any(|(index, _)| paths.contains(&path[..index]))
+        {
+            return Err(failed(
+                &root.join(path),
+                "materialise",
+                &invalid("output path escapes or overlaps another output"),
+            ));
+        }
+        if !matches!(
+            mode,
+            FileMode::Blob | FileMode::BlobExecutable | FileMode::Link
+        ) {
+            return Err(failed(
+                &root.join(path),
+                "materialise",
+                &invalid("unsupported output mode"),
+            ));
+        }
+        reject_symlink_ancestors(&root.join(path))
+            .map_err(|error| failed(&root.join(path), "materialise", &error))?;
+        #[cfg(not(unix))]
+        if *mode == FileMode::Link {
+            return Err(failed(
+                &root.join(path),
+                "materialise",
+                &std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "materialising symbolic links is unsupported on this platform",
+                ),
+            ));
+        }
+    }
+    for (path, content, mode) in files {
         let target = root.join(path);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|error| failed(parent, "create", &error))?;
         }
-        std::fs::write(&target, content).map_err(|error| failed(&target, "write", &error))?;
-        set_executable(&target, executable)
-            .map_err(|error| failed(&target, "set the permissions of", &error))?;
+        if mode == FileMode::Link {
+            if target.exists() {
+                std::fs::remove_file(&target)
+                    .map_err(|error| failed(&target, "replace", &error))?;
+            }
+            create_symlink(content, &target)
+                .map_err(|error| failed(&target, "create a symlink at", &error))?;
+        } else {
+            std::fs::write(&target, content).map_err(|error| failed(&target, "write", &error))?;
+            set_executable(&target, mode == FileMode::BlobExecutable)
+                .map_err(|error| failed(&target, "set the permissions of", &error))?;
+        }
     }
     Ok(())
+}
+
+/// Refuse existing links before directory cleanup or writes can follow them.
+pub fn reject_symlink_ancestors(path: &Path) -> std::io::Result<()> {
+    // Absolute spelling makes relative `..` paths check every traversed ancestor too.
+    let absolute = std::path::absolute(path)?;
+    for ancestor in absolute.ancestors() {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("refusing symlink `{}`", ancestor.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn create_symlink(content: &[u8], target: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        // Git's target is opaque bytes, not text to interpolate or a path to resolve.
+        std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(content), target)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (content, target);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "materialising symbolic links is unsupported on this platform",
+        ))
+    }
 }
 
 /// Apply the executable bit, on the platforms that have one.
@@ -874,6 +960,7 @@ pub fn render_resolved_with_composed(
         Vec::new()
     };
 
+    crate::render::validate_paths(&files)?;
     let provenance = Provenance {
         source: source.to_string(),
         reference: template.reference.clone(),

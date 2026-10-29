@@ -239,25 +239,27 @@ impl LibGit2 {
     /// Turn `collect_workdir`'s output into blobs and a tree.
     ///
     /// Shared by `tree_from_workdir` and `tree_from_directory`: both walk a
-    /// directory into the same `(relative path, absolute path, executable)`
+    /// directory into the same `(relative path, absolute path, mode)`
     /// shape, and differ only in whether that walk consulted an `IgnoreStack`.
-    fn tree_from_entries(&self, entries: Vec<(String, PathBuf, bool)>) -> Result<Oid, GitError> {
+    fn tree_from_entries(
+        &self,
+        entries: Vec<(String, PathBuf, FileMode)>,
+    ) -> Result<Oid, GitError> {
         let mut blobs = Vec::new();
-        for (path, absolute, executable) in entries {
-            let content = std::fs::read(&absolute).map_err(|e| GitError::Backend {
+        for (path, absolute, mode) in entries {
+            // read_link never follows a dangling link or a directory link into another tree.
+            let content = if mode == FileMode::Link {
+                std::fs::read_link(&absolute)
+                    .map(|target| target.into_os_string().into_encoded_bytes())
+            } else {
+                std::fs::read(&absolute)
+            }
+            .map_err(|e| GitError::Backend {
                 context: format!("read `{}`", absolute.display()),
                 reason: e.to_string(),
             })?;
             let oid = self.write_blob(&content)?;
-            blobs.push(TreeEntry {
-                path,
-                oid,
-                mode: if executable {
-                    FileMode::BlobExecutable
-                } else {
-                    FileMode::Blob
-                },
-            });
+            blobs.push(TreeEntry { path, oid, mode });
         }
 
         self.build_tree(&blobs)
@@ -1596,7 +1598,7 @@ fn collect_workdir(
     root: &Path,
     dir: &Path,
     stack: Option<&IgnoreStack>,
-    out: &mut Vec<(String, PathBuf, bool)>,
+    out: &mut Vec<(String, PathBuf, FileMode)>,
     ignored: &mut Vec<String>,
 ) -> Result<(), GitError> {
     let entered = stack.map(|stack| stack.entering(dir));
@@ -1653,9 +1655,16 @@ fn collect_workdir(
 
         if file_type.is_dir() {
             collect_workdir(root, &path, stack, out, ignored)?;
-        } else if file_type.is_file() {
+        } else if file_type.is_file() || file_type.is_symlink() {
             let relative_str = relative.to_string_lossy().replace('\\', "/");
-            out.push((relative_str, path.clone(), is_executable(&path)));
+            let mode = if file_type.is_symlink() {
+                FileMode::Link
+            } else if is_executable(&path) {
+                FileMode::BlobExecutable
+            } else {
+                FileMode::Blob
+            };
+            out.push((relative_str, path.clone(), mode));
         }
     }
 
