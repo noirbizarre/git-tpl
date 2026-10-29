@@ -46,9 +46,11 @@ brew install noirbizarre/tap/git-tpl   # or: cargo install git-tpl
 
 Also on the AUR, from a release archive, and via mise —
 [Installation](https://noirbizarre.github.io/git-tpl/getting-started/installation/) has
-all of them. `cargo install` places only the binary, so the man page and the
-shell completions are not installed and `git tpl --help` reports *No manual
-entry for git-tpl* until you generate them; the other methods include both.
+all of them. Homebrew and AUR packages install the man page and completions;
+release archives contain them for manual installation.
+`cargo install` and `cargo binstall` place only the binary, so `git tpl --help`
+reports *No manual entry for git-tpl* until you generate and install the man page.
+Mise's cargo backend has the same binary-only behavior.
 
 The binary must be named `git-tpl` and be on your `PATH` — that is how Git
 resolves `git tpl`.
