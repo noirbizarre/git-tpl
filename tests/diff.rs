@@ -8,6 +8,42 @@ mod common;
 use common::{World, tpl};
 
 #[test]
+fn strict_previews_ignore_history_but_reject_current_unknown_inputs() {
+    let world = World::new();
+    world.init(&[]).success();
+    let mut config = tpl::config::Config::load(&world.project.path).unwrap();
+    config
+        .answers
+        .insert("obsolete".into(), tpl::Value::String("old".into()));
+    config.save(&world.project.path).unwrap();
+    let before = world.project.working_state();
+    let tip = world.project.git(&["rev-parse", &world.ref_name()]);
+    let config_before = world.project.read(".config/git.tpl.toml");
+    let answers = world.dir.path().join("obsolete.toml");
+    std::fs::write(&answers, "obsolete = 'explicit'\n").unwrap();
+    for command in [vec!["--json", "diff"], vec!["--json", "show", "README.md"]] {
+        let mut args = command.clone();
+        args.extend(["--dirty", "--defaults", "--strict-answers"]);
+        tpl(&world.project, &args).success();
+        for extra in [
+            vec!["--answer", "obsolete=explicit"],
+            vec!["--answer", "project_nam=typo"],
+            vec!["--answers-from", answers.to_str().unwrap()],
+        ] {
+            let mut supplied = args.clone();
+            supplied.extend(extra);
+            assert_eq!(
+                tpl(&world.project, &supplied).failure().error_code(),
+                "tpl::answers::unknown_key"
+            );
+        }
+    }
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.git(&["rev-parse", &world.ref_name()]), tip);
+    assert_eq!(world.project.read(".config/git.tpl.toml"), config_before);
+}
+
+#[test]
 fn patch_and_stat_honor_git_color_and_explicit_overrides() {
     let world = pending();
     for args in [vec!["diff"], vec!["diff", "--stat"]] {

@@ -2119,6 +2119,8 @@ pub fn render_preview(
     // the project already answered, which for a non-interactive caller means
     // hanging and for an interactive one means answering the questionnaire
     // again to look at a diff.
+    // Obsolete recorded keys are historical state, not this invocation's typos.
+    let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let supplied = merge_answers(config.answers.clone(), overrides);
 
     let rendered = render(
@@ -2134,7 +2136,12 @@ pub fn render_preview(
 
     enforce_strict_answers(
         strict_answers,
-        &rendered.ignored_answers,
+        &rendered
+            .ignored_answers
+            .iter()
+            .filter(|key| current_keys.contains(*key))
+            .cloned()
+            .collect::<Vec<_>>(),
         rendered.template.manifest.questions.keys().cloned(),
     )?;
 
