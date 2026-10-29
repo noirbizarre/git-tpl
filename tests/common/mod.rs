@@ -370,8 +370,8 @@ impl Repo {
 
     /// A fingerprint of `HEAD`, the index and the worktree.
     ///
-    /// The invariant `git tpl update` exists to protect is that none of the
-    /// three moves. Comparing all three at once makes a violation impossible to
+    /// Update preserves all three unless semantic answer/lock changes edit config.
+    /// Comparing all three at once makes an unexpected violation impossible to
     /// miss and impossible to explain away.
     pub fn working_state(&self) -> WorkingState {
         WorkingState {

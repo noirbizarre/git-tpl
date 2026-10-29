@@ -71,7 +71,7 @@ git tpl merge         # apply it with an ordinary Git merge
 
 `mise run tpl:check` updates first, then exits nonzero if merging would change files.
 Updating never changes HEAD, the index or rendered worktree files;
-newly answered questions may be recorded in `.config/git.tpl.toml`, unstaged.
+semantically changed answers and composed child locks are recorded in `.config/git.tpl.toml`, unstaged.
 The tasks restore a missing local template ref from merged rendering provenance, so fresh clones need full history.
 The weekly/manual template workflow does the same and reports drift without pushing or merging anything.
 

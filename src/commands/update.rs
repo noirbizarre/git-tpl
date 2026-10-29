@@ -175,10 +175,11 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
             // Stated every time. It is the single most surprising property of
             // the tool, and a user who does not believe it will not use it.
-            ctx.out.say("Your working tree was not modified.");
+            ctx.out
+                .say("Your rendered worktree files were not modified.");
 
             if answers_changed {
-                // The one exception, so it must be said rather than discovered
+                // Configuration edits must be said rather than discovered
                 // in `git status`. Not always a new question: `--answer`
                 // overriding an already-recorded answer changes the same
                 // file for the same reason, and the message must not claim a

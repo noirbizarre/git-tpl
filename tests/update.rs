@@ -1,7 +1,6 @@
 //! `git tpl update` — re-rendering and advancing the ref.
 //!
-//! The invariant these tests exist to protect: **update changes one ref and
-//! nothing else.**
+//! Update isolates HEAD, the index and rendered worktree files; semantic answer/lock changes alone may edit config.
 
 mod common;
 
@@ -103,6 +102,94 @@ fn concurrent_publication_refuses_stale_created_and_deleted_tips_without_saving_
                 Some(concurrent)
             }
         );
+    }
+}
+
+#[test]
+fn configured_source_trust_uses_its_spelling_rather_than_its_absolute_location() {
+    let server = common::TestServer::start(vec![("/data.json", 200, "{\"value\": 1}".into())]);
+    let world = World::with_template(
+        &format!(
+            "name = 'local'\n[data.remote]\nsource = '{}'\n",
+            server.url("/data.json")
+        ),
+        &[("out.jinja", "{{ data.remote.value }}\n")],
+    );
+    world.init(&["--trust"]).success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    world.project.user_config(&format!(
+        "[trust]\ntemplates = ['{}']\n",
+        config.template.source
+    ));
+    tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["backport"]).success();
+}
+
+#[test]
+fn a_changed_rendering_preserves_exact_configuration_bytes_when_answers_and_locks_are_unchanged() {
+    let world = World::new();
+    world.init(&[]).success();
+    let config_path = ".config/git.tpl.toml";
+    let custom = format!(
+        "# A hand-written annotation that must survive.\n{}\n# Keep this trailing comment too.\n",
+        world
+            .project
+            .read(config_path)
+            .replace("[answers]", "[answers] # custom formatting")
+    );
+    world.project.write(config_path, &custom);
+    world.project.commit_all("annotate project configuration");
+    world.move_template();
+    let before = world.project.working_state();
+    let result = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+    assert_eq!(result["result"], "updated");
+    assert_eq!(result["answersChanged"], false);
+    assert_eq!(world.project.read(config_path), custom);
+    assert_eq!(world.project.working_state(), before);
+}
+
+#[test]
+fn answer_overrides_are_saved_on_changed_and_identical_renderings() {
+    for changes_output in [false, true] {
+        let world = World::with_template(
+            "name = 'answers'\n[questions.choice]\ntype = 'string'\ndefault = 'old'\n",
+            &[(
+                "value.txt.jinja",
+                if changes_output {
+                    "{{ choice }}\n"
+                } else {
+                    "constant\n"
+                },
+            )],
+        );
+        world.init(&[]).success();
+        let before = world.project.working_state();
+        let result = tpl(
+            &world.project,
+            &["--json", "update", "--defaults", "--answer", "choice=new"],
+        )
+        .success()
+        .json();
+        assert_eq!(result["answersChanged"], true);
+        assert_eq!(
+            result["result"],
+            if changes_output {
+                "updated"
+            } else {
+                "upToDate"
+            }
+        );
+        let config = tpl::config::Config::load(&world.project.path).unwrap();
+        assert_eq!(
+            config.answers["choice"],
+            tpl::template::Value::String("new".into())
+        );
+        let after = world.project.working_state();
+        assert_eq!(before.head, after.head);
+        assert_eq!(before.index, after.index);
+        assert_eq!(world.project.status(), "M .config/git.tpl.toml");
     }
 }
 
@@ -379,7 +466,7 @@ fn update_reports_what_changed() {
         .success()
         .says("added     .github/workflows/release.yml")
         .says("modified  README.md")
-        .says("Your working tree was not modified.");
+        .says("Your rendered worktree files were not modified.");
 }
 
 #[test]
@@ -465,7 +552,7 @@ fn a_file_added_to_the_template_appears_in_the_rendering() {
 /// A question added since the last render has no recorded answer, so it is
 /// asked — or, with `--defaults`, takes its default — and written back.
 ///
-/// This is the one case where recording an answer is expected to change the
+/// Recording a changed answer is expected to change the
 /// worktree (AGENTS.md invariant 1): `.config/git.tpl.toml` moves, unstaged,
 /// and nothing else does. Earlier revisions of this test only checked the
 /// file's new contents, so a change reaching `HEAD` or the index — or a

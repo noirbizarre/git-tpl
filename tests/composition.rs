@@ -5,6 +5,58 @@ mod common;
 use common::{Repo, tpl};
 
 #[test]
+fn missing_child_locks_are_saved_on_changed_and_identical_renderings() {
+    for changes_output in [false, true] {
+        let source = child("source");
+        let integration = child("integration");
+        let parent = parent(&source, &integration, "main", "main");
+        let project = Repo::init("project");
+        tpl(
+            &project,
+            &[
+                "init",
+                parent.path.to_str().unwrap(),
+                "--defaults",
+                "--answer",
+                "sources=[\"jira\"]",
+            ],
+        )
+        .success();
+        let mut config = tpl::config::Config::load(&project.path).unwrap();
+        let expected = config.composed.clone();
+        config.composed.clear();
+        config.save(&project.path).unwrap();
+        project.commit_all("remove recorded child lock");
+        if changes_output {
+            parent.write("template/README.md", "changed parent\n");
+            parent.commit_all("change parent output");
+        }
+        let before = project.working_state();
+        let result = tpl(&project, &["--json", "update", "--defaults"])
+            .success()
+            .json();
+        assert_eq!(
+            result["result"],
+            if changes_output {
+                "updated"
+            } else {
+                "upToDate"
+            }
+        );
+        assert_eq!(result["composedChanged"], true);
+        assert_eq!(result["answersChanged"], false);
+        assert_eq!(
+            tpl::config::Config::load(&project.path).unwrap().composed,
+            expected
+        );
+        let after = project.working_state();
+        assert_eq!(before.head, after.head);
+        assert_eq!(before.index, after.index);
+        assert_eq!(project.status(), "M .config/git.tpl.toml");
+    }
+}
+
+#[test]
 fn a_child_with_the_same_source_path_as_its_parent_cannot_backport_into_the_parent() {
     let source = child("source");
     let integration = child("integration");

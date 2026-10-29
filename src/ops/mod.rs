@@ -757,6 +757,24 @@ pub fn render_files_with_composed(
     supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     answering: Answering<'_>,
+    trust: Trust<'_>,
+    composed: Option<&[ComposedRevision]>,
+) -> Result<RenderedFiles, OpError> {
+    let location = target.source;
+    render_files_from_location(
+        target, location, project, supplied, user, answering, trust, composed,
+    )
+}
+
+/// Keep configured identity (trust, defaults and provenance) separate from filesystem access.
+#[allow(clippy::too_many_arguments)]
+fn render_files_from_location(
+    target: Target<'_>,
+    location: &str,
+    project: Option<(&dyn GitBackend, &Path)>,
+    supplied: BTreeMap<String, Value>,
+    user: &UserConfig,
+    answering: Answering<'_>,
     mut trust: Trust<'_>,
     composed: Option<&[ComposedRevision]>,
 ) -> Result<RenderedFiles, OpError> {
@@ -766,7 +784,7 @@ pub fn render_files_with_composed(
     // over the same invocation's `Trust`, not one shared decision.
     let template = resolve::resolve(
         Request {
-            source: target.source,
+            source: location,
             reference: target.reference,
             root: target.root,
             dirty: target.dirty,
@@ -999,20 +1017,21 @@ pub fn render(
     trust: Trust<'_>,
 ) -> Result<Render, OpError> {
     let location = crate::config::source_location(&config.template.source, project_root);
-    let mut rendered = render_files(
-        Target {
-            source: &location,
-            ..Target::from_config(config, dirty)
-        },
+    let rendered = render_files_from_location(
+        Target::from_config(config, dirty),
+        &location,
         Some((project, project_root)),
         supplied,
         user,
         answering,
         trust,
+        None,
     )?;
-    // Provenance records a portable configured source, never its machine-specific location.
-    rendered.provenance.source = config.template.source.clone();
 
+    rendered_tree(project, rendered)
+}
+
+fn rendered_tree(project: &dyn GitBackend, rendered: RenderedFiles) -> Result<Render, OpError> {
     // Blobs are read from the template repository — often a temporary clone —
     // and written into the project, which is where the ref will point.
     let tree = write_tree(project, &rendered.files)?;
@@ -1262,16 +1281,24 @@ pub fn init(
     // being collected, and must not silently become this invocation's parent.
     let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
 
-    let rendered = render(
-        project,
-        project_root,
-        &config,
+    let location = crate::config::source_location(&config.template.source, project_root);
+    // Init's consent/default lookup belongs to the source the caller supplied; later
+    // operations use the configured spelling. Rebasing is a storage decision, not new consent.
+    let files = render_files_from_location(
+        Target {
+            source,
+            ..Target::from_config(&config, dirty)
+        },
+        &location,
+        Some((project, project_root)),
         supplied,
-        dirty,
         user,
         answering,
         trust,
+        None,
     )?;
+    let mut rendered = rendered_tree(project, files)?;
+    rendered.provenance.source = config.template.source.clone();
 
     // Before the ref is created, not after: `--force` re-renders onto an
     // existing ref, and a refusal that arrived once the commit already
@@ -1785,9 +1812,8 @@ pub fn merge_answers(
 
 /// Re-render and advance the rendered ref.
 ///
-/// Never touches `HEAD`, the index or the worktree. That is structural: the
-/// tree is built as a Git object and one ref is moved. There is no code path
-/// here that writes a file into the project.
+/// Never touches `HEAD`, the index or rendered worktree files: the tree is built
+/// as a Git object. Changed answers and child locks are saved unstaged in project configuration.
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     project: &dyn GitBackend,
@@ -1946,14 +1972,15 @@ pub fn update(
     // recorded rather than asked again on every update.
     //
     // Deliberately NOT staged or committed. `update` touching the index would
-    // break the guarantee the whole design rests on — that it changes one ref
-    // and nothing else. When the answers change, the user sees the edit in
-    // `git status` and commits it with whatever else they are doing.
+    // break HEAD/index isolation. Save only semantic answer/lock changes: serialising
+    // an otherwise unchanged config would discard the user's comments and formatting.
     let answers_changed = config.answers != *rendered.context.answers();
-    config.answers = rendered.context.answers().clone();
-    config.composed = composed;
-    config.template.r#ref = configured_reference;
-    config.save(project_root)?;
+    if answers_changed || composed_changed {
+        config.answers = rendered.context.answers().clone();
+        config.composed = composed;
+        config.template.r#ref = configured_reference;
+        config.save(project_root)?;
+    }
 
     Ok(UpdateOutcome::Updated {
         id,

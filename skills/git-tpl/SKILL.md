@@ -64,7 +64,9 @@ template  →  rendered Git ref  →  normal Git merge  →  updated project
 ```
 
 `git tpl update` never touches `HEAD`, the index, or rendered files in the worktree.
-It advances the ref and may record changed answers in `.config/git.tpl.toml` as an unstaged edit.
+It advances the ref and saves `.config/git.tpl.toml` only for semantic answer or composed-child-lock changes,
+as an unstaged edit, on both updated and up-to-date outcomes.
+Otherwise it preserves the file's exact bytes, comments and formatting, even when rendered output changes.
 Applying the result is always a separate, explicit `git tpl merge` (or a plain `git merge refs/tpl/<id>`).
 Ordinary `git push`/`git pull` ignore template refs; git-tpl does not push them by default.
 `tpl.autoPush` or `git tpl update --push` opts into pushing after an update; fetching remains explicit.

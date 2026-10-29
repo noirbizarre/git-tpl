@@ -1,7 +1,7 @@
 //! Rendering a template tree into a Git tree.
 //!
 //! The output is written straight into Git objects, never to the filesystem.
-//! That is what makes "`update` does not touch your working tree" structural
+//! That is what makes "`update` never writes rendered worktree files" structural
 //! rather than a promise: there is no code path here that opens a file for
 //! writing in the project.
 //!

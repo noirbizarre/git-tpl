@@ -69,6 +69,32 @@ fn attachment_refuses_active_git_operations_even_with_a_clean_index() {
 use common::{World, global_identity, tpl, tpl_outside};
 
 #[test]
+fn rebasing_a_hostname_like_local_path_records_the_original_id_explicitly() {
+    let world = World::new();
+    let nested = world.dir.path().join("sources.local");
+    std::fs::create_dir(&nested).unwrap();
+    std::fs::rename(&world.template.repo.path, nested.join("template")).unwrap();
+    let source = "sources.local/template";
+    let original = tpl::refs::TemplateId::derive(source).unwrap();
+    tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        &["init", source, "project", "--defaults"],
+    )
+    .success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert_eq!(config.template.source, "../sources.local/template");
+    assert_ne!(
+        tpl::refs::TemplateId::derive(&config.template.source).unwrap(),
+        original
+    );
+    assert_eq!(config.template.id.as_deref(), Some(original.as_str()));
+    assert!(world.project.has_ref(&original.ref_name()));
+    tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["log"]).success();
+}
+
+#[test]
 fn a_cli_source_is_rebased_to_the_project_and_works_from_subdirectories() {
     let world = World::new();
     let source = world

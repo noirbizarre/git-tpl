@@ -22,9 +22,13 @@ This is structural rather than a promise: the rendered tree is built directly as
 moved. There is no code path that opens a rendered file for writing.
 
 The one file `update` does write on disk is `.config/git.tpl.toml` itself — project configuration, not render
-output. If a template added a question since your last render, `update` records the new answer back into that
-file (see [New questions](#new-questions) below), unstaged, exactly as a hand edit would. Nothing else in the
-worktree moves.
+output.
+It saves that file only when resolved answers or composed child locks change semantically,
+including answer overrides and [new questions](#new-questions), unstaged, exactly as a hand edit would.
+This applies whether a new rendered commit is made or the output is already up to date.
+When answers and locks are unchanged, the configuration keeps its exact bytes, comments and formatting,
+even if the rendered output changed.
+Nothing else in the worktree moves.
 
 ```console
 $ git tpl update
@@ -87,7 +91,7 @@ Updated refs/tpl/github-com-noirbizarre-rust-library-template
   with it.
 ────────────────────────────────────────────────────────────
 
-Your working tree was not modified.
+Your rendered worktree files were not modified.
 
 Run:
   git tpl diff

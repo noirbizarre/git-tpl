@@ -27,7 +27,7 @@ use super::unsubstitute::{
     self, LineContext, Proposal, Unsubstitute, Unsubstitution, Verdict, split_terminator,
 };
 use super::{
-    Answering, OpError, Target, Trust, describe_revision, identify, render_files_with_composed,
+    Answering, OpError, Target, Trust, describe_revision, identify, render_files_from_location,
 };
 use std::sync::Arc;
 
@@ -393,9 +393,9 @@ pub fn backport(
     let revision = recorded.as_ref().and_then(|r| r.revision);
 
     let location = crate::config::source_location(&config.template.source, project_root);
-    let rendered = render_files_with_composed(
+    let rendered = render_files_from_location(
         Target {
-            source: &location,
+            source: &config.template.source,
             // A SHA if we have one: a branch name would follow the branch, and
             // the whole point is to reproduce what the user actually has.
             reference: revision
@@ -405,6 +405,7 @@ pub fn backport(
             root: config.template.root.as_deref(),
             dirty: false,
         },
+        &location,
         Some((project, project_root)),
         crate::answers::typed(config.answers.clone()),
         user,
