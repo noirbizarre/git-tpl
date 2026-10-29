@@ -32,3 +32,5 @@ config:
 noBanner: true
 noProgress: true
 showFound: false
+outputFormatters:
+  - ["markdownlint-cli2-formatter-pretty"]

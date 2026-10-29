@@ -91,7 +91,7 @@ Neither writes anything.
 | `.github/workflows/homebrew.yaml` | The Homebrew tap formula |
 | `.github/workflows/aur.yaml` | The two AUR packages |
 
-CI validates the setup on every run:
+CI's lint job validates the setup on every run:
 
 ```sh
 gh ship validate
@@ -112,15 +112,23 @@ Six targets, named `git-tpl_<tag>_<platform>.<ext>`:
 | `aarch64-apple-darwin` | `darwin-arm64.tar.gz` |
 | `x86_64-pc-windows-msvc` | `windows-amd64.zip` |
 
-Plus `SHA256SUMS`, which covers the archives.
+Each target also has a raw executable named `git-tpl_<tag>_<platform>` (with `.exe` on Windows).
+`SHA256SUMS` covers both the archives and raw executables.
+Existing archive URLs and cargo-binstall metadata remain unchanged.
 
-Each archive holds one entry at its root: `git-tpl`, or `git-tpl.exe` on Windows.
+Each archive holds the executable at its root: `git-tpl`, or `git-tpl.exe` on Windows,
+alongside runtime-generated pages in `man/man1/` and shell completions in `completions/`.
 That plain name is the point of archiving at all — a bare versioned asset forces every packaging format that
 consumes a release to rename the file it downloaded, and Git only resolves `git tpl` through an executable called
 exactly `git-tpl`.
 
 libgit2 is vendored and built from source on every target, so each binary is self-contained and every platform
 gets identical Git semantics.
+Windows releases statically link the MSVC runtime, matching the PR target build.
+Unix archive metadata and gzip headers are normalized without changing the installed layout;
+this does not imply byte-reproducible Rust binaries.
+Release builds use `--locked`, deny warnings and use local-only MBX caches, with plain Cargo on Intel macOS.
+The existing `publish=false` input still runs the build matrix without uploading or publishing anything.
 
 ## crates.io
 
@@ -138,6 +146,7 @@ Re-running is safe.
 The job checks whether the version is already on crates.io and skips if it is, so a re-run after a partial
 failure is a no-op rather than an `already exists` error — which would otherwise leave the GitHub release stuck
 as a draft, because gh-ship only undrafts when this workflow succeeds.
+Only HTTP 404 is treated as an absent crates.io version; other lookup errors fail before publication.
 
 ### Configuration
 
@@ -168,8 +177,8 @@ never hand-edited.
 `packaging/homebrew/git-tpl.rb` is the template; `@VERSION@` and the three `@SHA256_*@` placeholders are
 substituted by `.github/workflows/homebrew.yaml`, which then commits the result to the tap.
 
-It triggers on `release: published`, not on the publish workflow finishing.
-gh-ship only undrafts the release once 📦 Publish Release has succeeded, so `published` is the first moment at
+It triggers on `release: released`, not on the publish workflow finishing or prerelease publication.
+gh-ship only undrafts the release once 📦 Publish Release has succeeded, so `released` is the first moment at
 which the download URLs baked into the formula actually resolve.
 Publishing earlier would put a formula in the tap that 404s.
 
@@ -198,7 +207,7 @@ The AUR repository is a **mirror**: nothing is ever read back out of it, so an e
 lost at the next release.
 That is the point — one source of truth, and it is this repository.
 
-The trigger and the checksum handling are the same as Homebrew's, for the same reasons: `release: published` is
+The trigger and the checksum handling are the same as Homebrew's, for the same reasons: `release: released` is
 the first moment the URLs baked into a PKGBUILD resolve, the checksums are computed from the assets rather than
 read out of `SHA256SUMS`, and a leftover placeholder fails the job.
 That last one matters more here than in a formula: an empty `sha256sums` entry does not fail a makepkg build, it
@@ -214,8 +223,8 @@ checked through `git tpl --version` — not `git-tpl --version`.
 Git resolves `git tpl` only via an executable named exactly `git-tpl` on `PATH`, and a rename inside the archive
 is the one failure that would otherwise pass unnoticed.
 
-`--nocheck` on the build: `check()` would re-run, in release mode, the suite ♻️ CI already ran on this commit.
-The PKGBUILD keeps its `check()` so users and packagers still run it.
+The source package's `check()` runs the suite in release mode against the packaged source before publication.
+This complements CI by checking the source archive as an Arch packager builds it.
 
 !!! warning "namcap exits 0 whatever it reports"
 

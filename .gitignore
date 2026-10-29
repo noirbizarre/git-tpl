@@ -12,6 +12,15 @@ site/
 
 # Coverage output
 lcov.info
+# Generated test/compiler outputs, never template inputs.
+junit.xml
+*.profraw
+*.snap.new
+**/*.rs.bk
+*.pdb
+/dist
+node_modules/
+/ship.release.json
 
 # --- mise ---------------------------------------------------------------
 #

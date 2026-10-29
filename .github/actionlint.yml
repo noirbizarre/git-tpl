@@ -6,6 +6,11 @@
 # later upgrade can retire it. Nothing else is silenced: an unexpected key we
 # did not anticipate is still an error.
 
+# Misspelled repository variables otherwise silently become empty strings.
+config-variables:
+  - APP_CLIENT_ID
+  - PRERELEASE_NAME
+
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:

@@ -207,6 +207,16 @@ mise run ci
 
 Formatting, Clippy, spelling, workflow and documentation linting, tests and the documentation build. Same as CI.
 
+## Maintaining this project's template
+
+This repository is attached to [rust.tpl](https://github.com/noirbizarre/rust.tpl), tracking `main`.
+Use `mise run tpl:update`, `mise run tpl:diff`, then an ordinary `git tpl merge` to apply an update.
+The tasks recover a missing local template ref from merged render history; fresh clones need full history.
+`mise run tpl:check` updates that ref before checking drift and can record newly answered defaults in project config.
+Preserve the project's library name `tpl`, release inputs and archive layouts, runtime man/completion generation,
+both AUR packages, and the invariants above when reconciling template changes.
+See [development setup](docs/development/setup.md) for tooling and cache details.
+
 ## Things that will be declined
 
 With reasons, in `docs/development/contributing.md`. Briefly: custom merge logic, a second template engine, code
