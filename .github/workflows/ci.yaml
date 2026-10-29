@@ -61,6 +61,17 @@ jobs:
       - name: Lint Rust
         run: mise run lint
 
+      # Validate the release contract alongside the other configuration checks.
+      - name: Install gh-ship
+        run: gh extension install noirbizarre/gh-ship
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate the release setup
+        run: gh ship validate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   test:
     name: 🧪 Tests (${{ matrix.os.name }})
     runs-on: ${{ matrix.os.runner }}
@@ -276,19 +287,3 @@ jobs:
           version: ${{ env.PINNED_TPL_VERSION }}
       - name: Verify an exact release tag can be installed
         run: test "$(git tpl --version)" = "git-tpl $PINNED_TPL_VERSION"
-
-  # gh-ship releases git-tpl. Its configuration and workflows must satisfy the
-  # contract gh-ship enforces, or the release breaks at the worst moment.
-  ship:
-    name: 🚢 Ship setup
-    runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install gh-ship
-        run: gh extension install noirbizarre/gh-ship
-
-      - name: Validate the release setup
-        run: gh ship validate

@@ -91,7 +91,7 @@ Neither writes anything.
 | `.github/workflows/homebrew.yaml` | The Homebrew tap formula |
 | `.github/workflows/aur.yaml` | The two AUR packages |
 
-CI validates the setup on every run:
+CI's lint job validates the setup on every run:
 
 ```sh
 gh ship validate
