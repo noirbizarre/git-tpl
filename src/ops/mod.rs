@@ -911,14 +911,20 @@ pub fn render(
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<Render, OpError> {
-    let rendered = render_files(
-        Target::from_config(config, dirty),
+    let location = crate::config::source_location(&config.template.source, project_root);
+    let mut rendered = render_files(
+        Target {
+            source: &location,
+            ..Target::from_config(config, dirty)
+        },
         Some((project, project_root)),
         supplied,
         user,
         answering,
         trust,
     )?;
+    // Provenance records a portable configured source, never its machine-specific location.
+    rendered.provenance.source = config.template.source.clone();
 
     // Blobs are read from the template repository — often a temporary clone —
     // and written into the project, which is where the ref will point.
@@ -1161,6 +1167,7 @@ pub fn init(
 
     let mut config = Config::new(source, reference);
     config.template.id = explicit_id.map(str::to_string);
+    config.template.rebase_local(project_root)?;
 
     let id = TemplateId::resolve(source, explicit_id)?;
     let ref_name = id.ref_name();
@@ -1965,9 +1972,10 @@ pub fn status(
     // ancestor outside `[trust]` then degrades exactly like any other resolve
     // failure here — the "available" side is already best-effort.
     let mut trust = Trust::refuse();
+    let location = crate::config::source_location(&config.template.source, project_root);
     let resolved = resolve::resolve(
         Request {
-            source: &config.template.source,
+            source: &location,
             reference: config.template.r#ref.as_deref(),
             root: config.template.root.as_deref(),
             dirty,

@@ -4,6 +4,7 @@
 //! Nothing generated, no sync state, no local preferences. See
 //! `docs/adr/010-config-location.md`.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -120,6 +121,64 @@ pub struct TemplateRef {
     /// Override the manifest's rendered subdirectory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+}
+
+/// Locate a configured source without changing its spelling or template identity.
+pub fn source_location<'a>(source: &'a str, project_root: &Path) -> Cow<'a, str> {
+    match crate::refs::local_path(source) {
+        Some(path) if path.is_relative() => {
+            Cow::Owned(project_root.join(path).to_string_lossy().into_owned())
+        }
+        _ => Cow::Borrowed(source),
+    }
+}
+
+impl TemplateRef {
+    /// Record a CLI path relative to the destination, keeping the invocation's ref identity.
+    pub fn rebase_local(&mut self, project_root: &Path) -> Result<(), ConfigError> {
+        let Some(path) = crate::refs::local_path(&self.source) else {
+            return Ok(());
+        };
+        let canonical = |path: &Path| {
+            path.canonicalize().map_err(|source| ConfigError::Io {
+                path: path.to_path_buf(),
+                source,
+            })
+        };
+        let location = canonical(&path)?;
+        let root = canonical(project_root)?;
+        let from: Vec<_> = root.components().collect();
+        let to: Vec<_> = location.components().collect();
+        let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+        // Different Windows volumes cannot be expressed as a relative path.
+        let relative = if common == 0 {
+            location
+        } else {
+            let mut relative = PathBuf::new();
+            for _ in common..from.len() {
+                relative.push("..");
+            }
+            for component in &to[common..] {
+                relative.push(component.as_os_str());
+            }
+            if relative.as_os_str().is_empty() {
+                relative.push(".");
+            }
+            relative
+        };
+        let spelling = relative.to_string_lossy().replace('\\', "/");
+        // Rebasing must not silently create another rendered ref.
+        if self.id.is_none()
+            && crate::refs::TemplateId::derive(&self.source).ok()
+                != crate::refs::TemplateId::derive(&spelling).ok()
+        {
+            self.id = crate::refs::TemplateId::derive(&self.source)
+                .ok()
+                .map(|id| id.to_string());
+        }
+        self.source = spelling;
+        Ok(())
+    }
 }
 
 impl Config {

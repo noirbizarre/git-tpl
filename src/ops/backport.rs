@@ -372,9 +372,10 @@ pub fn backport(
         .or_else(|| config.template.r#ref.clone());
     let revision = recorded.as_ref().and_then(|r| r.revision);
 
+    let location = crate::config::source_location(&config.template.source, project_root);
     let rendered = render_files_with_composed(
         Target {
-            source: &config.template.source,
+            source: &location,
             // A SHA if we have one: a branch name would follow the branch, and
             // the whole point is to reproduce what the user actually has.
             reference: revision
@@ -1381,7 +1382,8 @@ fn rfc2822(seconds: i64) -> String {
 /// would send the user to apply their patch into a directory that is about to
 /// be deleted.
 fn apply_command(source: &str, project_root: &Path) -> String {
-    let target = match super::resolve::local_path(source) {
+    let location = crate::config::source_location(source, project_root);
+    let target = match super::resolve::local_path(&location) {
         Some(path) => relative_to(&path, project_root),
         // A URL has no local clone to name, so the placeholder says so rather
         // than pretending to know.

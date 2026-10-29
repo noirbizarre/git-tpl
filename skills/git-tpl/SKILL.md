@@ -38,6 +38,10 @@ Persistent trust in a composing parent covers its data only.
 Each child and ancestor needs matching trust or explicit invocation-wide `--trust`.
 Data aliases reuse bytes, but each declaration independently validates trust, checksum and format and records provenance.
 
+Configured local template sources are relative to the project root, including for log and backport.
+CLI init paths are relative to the invocation directory and are rebased when recorded.
+Keep the existing template ID when repairing an old cwd-relative source; set `template.id` explicitly.
+
 git-tpl renders a template into a dedicated Git ref (`refs/tpl/<id>`).
 Updating the template advances that ref with a normal commit.
 You incorporate the changes with an ordinary `git merge` —

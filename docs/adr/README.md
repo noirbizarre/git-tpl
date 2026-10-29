@@ -51,3 +51,4 @@ explains the code that existed.
 | [040](040-native-merge-abort.md) | Native Git owns explicit merge abort recovery |
 | [041](041-typed-supplied-answers.md) | Supplied answers preserve typed versus CLI origins |
 | [042](042-explicit-lint-syntax.md) | Lint compiles effective inherited output and every retained partial declaration |
+| [043](043-project-relative-sources.md) | Configured local sources are rooted at the project, independently of ref identity |

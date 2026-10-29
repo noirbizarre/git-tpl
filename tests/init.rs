@@ -69,6 +69,89 @@ fn attachment_refuses_active_git_operations_even_with_a_clean_index() {
 use common::{World, global_identity, tpl, tpl_outside};
 
 #[test]
+fn a_cli_source_is_rebased_to_the_project_and_works_from_subdirectories() {
+    let world = World::new();
+    let source = world
+        .template
+        .repo
+        .path
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    tpl_outside(
+        world.dir.path(),
+        world.project._config_dir.path(),
+        &["init", source, "project", "--defaults"],
+    )
+    .success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert_eq!(config.template.source, format!("../{source}"));
+    let id = tpl::refs::TemplateId::derive(source).unwrap();
+    assert_eq!(
+        tpl::refs::TemplateId::resolve(&config.template.source, config.template.id.as_deref())
+            .unwrap(),
+        id
+    );
+    world.move_template();
+    std::fs::create_dir_all(world.project.path.join("nested/deeper")).unwrap();
+    tpl_outside(
+        &world.project.path.join("nested/deeper"),
+        world.project._config_dir.path(),
+        &["update", "--defaults"],
+    )
+    .success();
+    tpl_outside(
+        &world.project.path.join("nested"),
+        world.project._config_dir.path(),
+        &["log", "--json"],
+    )
+    .success();
+    tpl(&world.project, &["diff", "--defaults"]).success();
+}
+
+#[test]
+fn rebasing_an_absolute_source_preserves_its_original_derived_id() {
+    let world = World::new();
+    let source = world.template.repo.path.to_str().unwrap();
+    let expected = tpl::refs::TemplateId::derive(source).unwrap();
+    tpl(&world.project, &["init", source, "--defaults"]).success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert!(!std::path::Path::new(&config.template.source).is_absolute());
+    assert_eq!(
+        tpl::refs::TemplateId::resolve(&config.template.source, config.template.id.as_deref())
+            .unwrap(),
+        expected
+    );
+    assert!(world.project.has_ref(&expected.ref_name()));
+    tpl(&world.project, &["update", "--defaults"]).success();
+}
+
+#[test]
+fn a_rebased_source_keeps_an_explicit_id_and_missing_sources_fail_locally() {
+    let world = World::new();
+    tpl(
+        &world.project,
+        &[
+            "init",
+            world.template.repo.path.to_str().unwrap(),
+            "--id",
+            "stable",
+            "--defaults",
+        ],
+    )
+    .success();
+    let mut config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert_eq!(config.template.id.as_deref(), Some("stable"));
+    config.template.source = "../missing-template".into();
+    config.save(&world.project.path).unwrap();
+    let before = world.project.working_state();
+    let output = tpl(&world.project, &["update", "--defaults", "--json"]).failure();
+    assert!(!output.stdout.contains("tpl::git::clone"));
+    assert_eq!(before, world.project.working_state());
+}
+
+#[test]
 fn init_renders_the_template_and_merges_it_into_the_branch() {
     let world = World::new();
 

@@ -164,7 +164,8 @@ pub fn log(
         .ok_or_else(invalid)?;
     let applied_revision = recorded.revision.ok_or_else(invalid)?;
     // History remains useful before template.toml existed, or while its latest version is invalid.
-    let opened = resolve::open_repository(&source)?;
+    let location = crate::config::source_location(&source, project_root);
+    let opened = resolve::open_repository(&location)?;
     let repo = &opened.repo;
     repo.commit(applied_revision)
         .map_err(|error| LogError::MissingCommit {

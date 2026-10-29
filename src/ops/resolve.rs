@@ -718,19 +718,7 @@ fn declares(path: &str, location: &str) -> bool {
 /// no working tree must be refused before the first case renders. Two locality
 /// rules would mean the two flags disagreeing about what "local" means.
 pub fn local_path(source: &str) -> Option<PathBuf> {
-    if source.contains("://") {
-        // `file://` is a URL form of a local path, but treating it as remote
-        // means it is cloned rather than opened — which is the safer reading of
-        // an explicit URL, and keeps `--dirty` honest about needing a path.
-        return None;
-    }
-    // `git@host:path` is scp-style, not a path containing a colon.
-    if source.contains('@') && source.contains(':') {
-        return None;
-    }
-
-    let path = Path::new(source);
-    path.is_dir().then(|| path.to_path_buf())
+    crate::refs::local_path(source)
 }
 
 #[cfg(test)]
@@ -755,8 +743,11 @@ mod tests {
     }
 
     #[test]
-    fn a_path_that_does_not_exist_is_not_a_local_path() {
-        assert_eq!(local_path("/definitely/not/here/at/all"), None);
+    fn a_missing_path_is_still_local() {
+        assert_eq!(
+            local_path("/definitely/not/here/at/all"),
+            Some(PathBuf::from("/definitely/not/here/at/all"))
+        );
     }
 
     /// There is no working tree to read on a remote, so the error must say so
