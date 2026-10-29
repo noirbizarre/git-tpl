@@ -4,6 +4,62 @@ mod common;
 
 use common::{Repo, World, scrub_git_env, tpl};
 
+#[test]
+fn fetch_distinguishes_all_presence_combinations_without_adopting_the_local_ref() {
+    for local_present in [false, true] {
+        for remote_present in [false, true] {
+            let world = World::new();
+            world.init(&[]).success();
+            let _remote = with_remote(&world);
+            if remote_present {
+                tpl(&world.project, &["push"]).success();
+            }
+            let original_tip = world.project.rev_parse(&world.ref_name());
+            if !local_present {
+                world.project.git(&["update-ref", "-d", &world.ref_name()]);
+            }
+            let before = world.project.working_state();
+            let output = tpl(&world.project, &["--json", "fetch"]).success();
+            let json = output.json();
+            assert_eq!(json["localPresent"], local_present);
+            assert_eq!(json["remotePresent"], remote_present);
+            assert_eq!(
+                json["state"],
+                if local_present && remote_present {
+                    "synced"
+                } else {
+                    "absent"
+                }
+            );
+            assert_eq!(
+                json["relation"].is_null(),
+                !local_present || !remote_present
+            );
+            assert_eq!(world.project.has_ref(&world.ref_name()), local_present);
+            if local_present {
+                assert_eq!(world.project.rev_parse(&world.ref_name()), original_tip);
+            }
+            assert_eq!(before, world.project.working_state());
+            if !local_present && remote_present {
+                let output = tpl(&world.project, &["fetch"]).success();
+                assert!(
+                    output.stderr.contains("a shared copy is available"),
+                    "{}",
+                    output.stderr
+                );
+                assert!(!output.stderr.contains("No shared copy"));
+            }
+            // The existing library entry point retains its tuple/relation contract.
+            let backend = tpl::git::libgit2::LibGit2::open(&world.project.path).unwrap();
+            let preferences = tpl::gitconfig::Preferences::load(&backend).unwrap();
+            let (name, relation) =
+                tpl::ops::fetch(&backend, &world.project.path, &preferences).unwrap();
+            assert_eq!(name, world.ref_name());
+            assert_eq!(relation.is_some(), local_present && remote_present);
+        }
+    }
+}
+
 /// Give a world a bare remote and publish `main` to it.
 fn with_remote(world: &World) -> Repo {
     let remote_path = world.dir.path().join("remote.git");
@@ -238,7 +294,11 @@ fn push_refuses_a_diverged_ref_and_says_how_to_reconcile() {
     world.template.repo.commit_all("feat: add a file");
     tpl(&world.project, &["update", "--defaults"]).success();
 
-    tpl(&world.project, &["fetch"]).success();
+    let json = tpl(&world.project, &["--json", "fetch"]).success().json();
+    assert_eq!(json["localPresent"], true);
+    assert_eq!(json["remotePresent"], true);
+    assert_eq!(json["state"], "diverged");
+    assert_eq!(json["relation"]["diverged"], true);
     tpl(&world.project, &["push"])
         .failure()
         .says("diverged")
@@ -353,6 +413,8 @@ fn fetch_reports_the_relation_as_json() {
     tpl(&world.project, &["push"]).success();
     let json = tpl(&world.project, &["--json", "fetch"]).success().json();
     assert_eq!(json["state"], "synced");
+    assert_eq!(json["localPresent"], true);
+    assert_eq!(json["remotePresent"], true);
     assert_eq!(json["relation"]["ahead"], 0);
     assert_eq!(json["relation"]["behind"], 0);
     assert_eq!(json["relation"]["synced"], true);
@@ -363,6 +425,8 @@ fn fetch_reports_the_relation_as_json() {
     tpl(&world.project, &["update", "--defaults"]).success();
     let json = tpl(&world.project, &["--json", "fetch"]).success().json();
     assert_eq!(json["state"], "ahead");
+    assert_eq!(json["localPresent"], true);
+    assert_eq!(json["remotePresent"], true);
     assert_eq!(json["relation"]["ahead"], 1);
 }
 
@@ -426,6 +490,8 @@ fn fetch_reports_being_behind_the_remote_as_json() {
     let json = tpl(&world.project, &["--json", "fetch"]).success().json();
 
     assert_eq!(json["state"], "behind");
+    assert_eq!(json["localPresent"], true);
+    assert_eq!(json["remotePresent"], true);
     assert_eq!(json["relation"]["behind"], 1);
     assert_eq!(json["relation"]["ahead"], 0);
     assert_eq!(json["relation"]["diverged"], false);

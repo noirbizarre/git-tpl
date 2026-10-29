@@ -38,6 +38,10 @@ Persistent trust in a composing parent covers its data only.
 Each child and ancestor needs matching trust or explicit invocation-wide `--trust`.
 Data aliases reuse bytes, but each declaration independently validates trust, checksum and format and records provenance.
 
+Fetch JSON adds `localPresent` and `remotePresent`; `state: "absent"` means either or both are missing.
+`relation` is null unless both compared refs exist.
+A fetched remote-tracking copy never creates or moves the local rendered ref.
+
 Rendering preserves symlink modes and opaque target bytes; render JSON adds octal-string `mode` beside `executable`.
 Materialisation refuses output-prefix collisions and existing symlink ancestors and creates real links only on Unix.
 Snapshots store link targets as ordinary payload files with manifest mode `120000`.

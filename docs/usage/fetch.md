@@ -57,5 +57,12 @@ What to do about it is your decision:
 
 ## Machine-readable output
 
+`state: "absent"` means one or both compared refs are missing.
+`localPresent` and `remotePresent` distinguish all presence combinations;
+`relation` is null unless both the local ref and fetched remote-tracking copy exist.
+When the local ref is missing but a shared copy was fetched, fetch reports that copy as available
+and leaves the local ref absent.
+The other states remain `synced`, `ahead`, `behind` and `diverged`.
+
 `git tpl --json fetch` emits its outcome on stdout as a single JSON object, with the prose on stderr.
 The payload is described in [JSON output](../reference/json.md#fetch).

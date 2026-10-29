@@ -439,11 +439,14 @@ Branch on the code: `substituted_region` is routine and means "edit the template
 ```json
 { "ok": true, "remote": "origin", "ref": "refs/tpl/rust",
   "state": "behind",
+  "localPresent": true, "remotePresent": true,
   "relation": { "ahead": 0, "behind": 2, "synced": false, "diverged": false } }
 ```
 
-`state` is one of `absent`, `synced`, `diverged`, `behind` or `ahead`, and `relation` is `null` exactly when
-`state` is `absent` — the remote has no copy of the ref, which is a different thing from a copy level with yours.
+`state` is one of `absent`, `synced`, `diverged`, `behind` or `ahead`.
+`localPresent` and `remotePresent` are booleans identifying the presence of the local ref and fetched remote-tracking copy.
+`relation` is `null` exactly when `state` is `absent`: one or both compared tips are missing.
+An available shared copy does not restore an absent local ref.
 
 Fetching never moves the local ref, so `behind` is a report, not an action.
 

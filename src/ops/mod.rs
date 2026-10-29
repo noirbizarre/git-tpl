@@ -2729,19 +2729,45 @@ pub fn fetch(
     project_root: &Path,
     preferences: &Preferences,
 ) -> Result<(String, Option<AheadBehind>), OpError> {
+    let report = fetch_report(project, project_root, preferences)?;
+    Ok((report.ref_name, report.relation))
+}
+
+/// Presence and ancestry are independent: no relation does not identify which ref is absent.
+pub struct FetchReport {
+    /// Local rendered ref that was compared.
+    pub ref_name: String,
+    /// Existing local tip; fetching never creates or moves it.
+    pub local_tip: Option<Oid>,
+    /// Tip in the fetched remote-tracking namespace.
+    pub remote_tip: Option<Oid>,
+    /// Ancestry comparison, available only when both tips exist.
+    pub relation: Option<AheadBehind>,
+}
+
+/// Fetch without adopting a local ref and retain both presence facts for reporting.
+pub fn fetch_report(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    preferences: &Preferences,
+) -> Result<FetchReport, OpError> {
     let (id, ref_name) = identify(project_root)?;
 
     project.fetch_refspec(&preferences.remote, &preferences.fetch_refspec())?;
 
     let remote_ref = id.remote_ref_name(&preferences.remote);
-    let relation = match (
-        project.resolve_ref(&ref_name)?,
-        project.resolve_ref(&remote_ref)?,
-    ) {
+    let local_tip = project.resolve_ref(&ref_name)?;
+    let remote_tip = project.resolve_ref(&remote_ref)?;
+    let relation = match (local_tip, remote_tip) {
         (Some(local), Some(remote)) => Some(project.ahead_behind(local, remote)?),
         _ => None,
     };
-    Ok((ref_name, relation))
+    Ok(FetchReport {
+        ref_name,
+        local_tip,
+        remote_tip,
+        relation,
+    })
 }
 
 /// Push the rendered ref to a remote.
