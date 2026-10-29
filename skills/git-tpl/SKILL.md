@@ -349,6 +349,12 @@ or raw file bytes for `show`/`completion`/`man`
 stderr carries human prose, warnings, and errors. `--json` and `--quiet` suppress narration,
 but warnings and errors remain visible.
 
+Without `--json`, `diff` patches and `--stat` output are displayed on stdout by native Git,
+honoring its pager (including delta), colors, diff drivers and textconv filters.
+Git must be on PATH for these display modes; `tpl::ops::diff_display` reports a display failure.
+Explicit `--color=always|never` overrides Git's patch/stat colors; `auto` leaves Git's settings in control.
+`--name-only` stays plain paths and `--json` stays structured data; neither launches Git's display tools or pager.
+
 ## Exit codes and error recovery
 
 | Code | Meaning | Agent action |

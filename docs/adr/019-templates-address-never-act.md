@@ -2,6 +2,8 @@
 
 **Status:** accepted
 
+**Amended by:** [ADR-039](039-native-diff-presentation.md) for user-invoked native Git diff presentation.
+
 **Relates to:** [ADR-003](003-minijinja-only.md), [ADR-006](006-no-runtime-context.md),
 [ADR-016](016-template-tests-are-data.md)
 

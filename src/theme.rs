@@ -150,25 +150,6 @@ pub fn change(theme: &Theme, kind: tpl::git::ChangeKind, path: &str) -> String {
     format!("  {}  {path}", style.apply_to(kind.label()))
 }
 
-/// One entry in a diffstat: `  modified  README.md   +9  -3`.
-///
-/// `path_width` is the longest path in the list being printed. The helper
-/// cannot know it — it sees one line — and without it the count columns are
-/// ragged, which is the whole reason a diffstat is read as a column.
-pub fn change_stat(theme: &Theme, stat: &tpl::git::FileStat, path_width: usize) -> String {
-    let head = change(theme, stat.kind, &format!("{:<path_width$}", stat.path));
-    if stat.binary {
-        // No counts rather than two zeroes: `+0 -0` reads as "nothing changed",
-        // which for a replaced image is exactly wrong.
-        return format!("{head}  {}", muted(theme, "Bin"));
-    }
-    format!(
-        "{head}  {:>5} {:>5}",
-        theme.added.apply_to(format!("+{}", stat.insertions)),
-        theme.deleted.apply_to(format!("-{}", stat.deletions)),
-    )
-}
-
 /// `3 files changed, 57 insertions(+), 15 deletions(-)`.
 ///
 /// Git's own wording, singular where Git is singular, and a zero term omitted
@@ -604,51 +585,6 @@ mod tests {
         ];
         let columns: Vec<_> = lines.iter().map(|l| l.rfind(' ').unwrap()).collect();
         assert!(columns.windows(2).all(|w| w[0] == w[1]), "{lines:?}");
-    }
-
-    fn stat(kind: tpl::git::ChangeKind, path: &str, ins: usize, del: usize) -> tpl::git::FileStat {
-        tpl::git::FileStat {
-            kind,
-            path: path.to_string(),
-            insertions: ins,
-            deletions: del,
-            binary: false,
-        }
-    }
-
-    /// A diffstat is read as a column. Paths of different lengths must not
-    /// stagger the counts beside them.
-    #[test]
-    fn diffstat_lines_align_their_counts() {
-        let theme = Theme::plain();
-        let stats = [
-            stat(tpl::git::ChangeKind::Added, "a", 1, 0),
-            stat(
-                tpl::git::ChangeKind::Modified,
-                "a/much/longer/path",
-                20,
-                300,
-            ),
-            stat(tpl::git::ChangeKind::Deleted, "mid.rs", 0, 4),
-        ];
-        let width = stats.iter().map(|s| s.path.len()).max().unwrap();
-        let lines: Vec<_> = stats
-            .iter()
-            .map(|s| change_stat(&theme, s, width))
-            .collect();
-        // Right-aligned counts, so every line ends in the same column whatever
-        // the path's length or the count's magnitude.
-        let widths: Vec<_> = lines.iter().map(|l| l.chars().count()).collect();
-        assert!(widths.windows(2).all(|w| w[0] == w[1]), "{lines:?}");
-    }
-
-    #[test]
-    fn a_binary_file_shows_no_counts() {
-        let theme = Theme::plain();
-        let mut s = stat(tpl::git::ChangeKind::Modified, "logo.png", 0, 0);
-        s.binary = true;
-        let line = change_stat(&theme, &s, 8);
-        assert_eq!(line, "  modified  logo.png  Bin");
     }
 
     #[rstest]

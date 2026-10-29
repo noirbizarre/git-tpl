@@ -1,11 +1,14 @@
 //! `git tpl diff`
 
+use std::process::Command;
+
+use tpl::git::GitBackend;
 use tpl::ops::{self, OpError};
 
 use super::{Session, answering, report_ignored_paths, supplied, trust};
-use crate::cli::{DiffArgs, GlobalArgs};
+use crate::cli::{ColorChoice, DiffArgs, GlobalArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change_stat, diff_summary, muted, warning};
+use crate::theme::{muted, warning};
 
 /// Announce the paths a merge could not resolve on its own.
 ///
@@ -95,41 +98,70 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         return Ok(code(true));
     }
 
-    if args.stat {
-        let preview = ops::diff_stat(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
-        let stats = &preview.changes;
-        if stats.is_empty() {
-            ctx.out.say(muted(&ctx.out.theme, "No differences."));
-            return Ok(code(false));
-        }
-
-        report_conflicts(&ctx, &preview.conflicts);
-
-        let width = stats.iter().map(|s| s.path.len()).max().unwrap_or(0);
-        for s in stats {
-            ctx.out.say(change_stat(&ctx.out.theme, s, width));
-        }
-
-        let insertions = stats.iter().map(|s| s.insertions).sum();
-        let deletions = stats.iter().map(|s| s.deletions).sum();
-        ctx.out.blank();
-        ctx.out.say(muted(
-            &ctx.out.theme,
-            &diff_summary(stats.len(), insertions, deletions),
-        ));
-        return Ok(code(true));
-    }
-
-    let preview = ops::diff(&ctx.repo, &ctx.root, &args.paths, args.reverse, against)?;
-    let changed = !preview.changes.is_empty();
+    let preview = ops::diff_preview(&ctx.repo, &ctx.root, args.reverse, against)?;
+    // Difference is a property of the trees, not of a pager or diff driver's
+    // output/status. In particular, quitting a pager must not change CI's answer.
+    let changed = !ctx
+        .repo
+        .diff_trees(Some(preview.from), preview.to, &args.paths)?
+        .is_empty();
     if changed {
         report_conflicts(&ctx, &preview.conflicts);
-        // A patch is data. It goes to stdout so it can be piped into `git apply`.
-        print!("{}", preview.changes);
+        display(&ctx, &preview, &args, global.color)?;
     } else {
         ctx.out.say(muted(&ctx.out.theme, "No differences."));
     }
     Ok(code(changed))
+}
+
+/// Git owns presentation, including pager precedence and terminal detection.
+fn display(
+    ctx: &Session,
+    preview: &ops::DiffEndpoints,
+    args: &DiffArgs,
+    color: ColorChoice,
+) -> Result<(), OpError> {
+    let mut command = Command::new("git");
+    command.current_dir(&ctx.root).arg("diff");
+    if args.stat {
+        command.arg("--stat");
+    }
+    // Passing --color=auto would override color.diff=always/never. Only an
+    // explicit policy should supersede the user's native Git configuration.
+    match color {
+        ColorChoice::Always => {
+            command.arg("--color=always");
+        }
+        ColorChoice::Never => {
+            command.arg("--color=never");
+        }
+        ColorChoice::Auto => {}
+    }
+    command
+        .arg(preview.from.to_string())
+        .arg(preview.to.to_string())
+        .arg("--")
+        .args(&args.paths);
+    // Inherited stdout is essential: capturing then printing would make Git
+    // see a pipe and bypass delta (and every other configured pager).
+    let status = command.status().map_err(|error| OpError::DiffDisplay {
+        reason: error.to_string(),
+    })?;
+    if status.success() {
+        return Ok(());
+    }
+    // Git normally handles a pager closing its pipe itself. On Unix it may
+    // instead terminate with SIGPIPE when the user quits a long diff early.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if status.signal() == Some(13) {
+            return Ok(());
+        }
+    }
+    Err(OpError::DiffDisplay {
+        reason: status.to_string(),
+    })
 }
 
 /// Render the template now, when `--dirty` asks for a preview of it.

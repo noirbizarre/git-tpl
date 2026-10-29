@@ -1,8 +1,9 @@
 # Installation
 
-git-tpl is a single binary with no runtime dependencies.
-libgit2 is compiled into it — with its HTTPS and SSH transports, and, on Linux, its own OpenSSL — so there is
-nothing to install alongside.
+git-tpl is a single binary with libgit2 compiled into it, including its HTTPS and SSH transports
+and, on Linux, its own OpenSSL.
+Git must be on PATH for `git tpl` invocation and for native patch/stat display in [`diff`](../usage/diff.md).
+Rendering and repository operations otherwise use the bundled backend.
 
 ## With Homebrew
 

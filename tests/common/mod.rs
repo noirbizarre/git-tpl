@@ -442,6 +442,11 @@ pub fn tpl_colored(repo: &Repo, args: &[&str]) -> Output {
     run_tpl(&repo.path, repo.config_home(), args, "always", &[])
 }
 
+/// Leave patch/stat color to Git's configuration and stdout detection.
+pub fn tpl_auto(repo: &Repo, args: &[&str]) -> Output {
+    run_tpl(&repo.path, repo.config_home(), args, "auto", &[])
+}
+
 /// The same as [`tpl`], but with extra environment variables set on the
 /// child — for anything that reads the environment directly rather than a
 /// flag, e.g. `GITHUB_ACTIONS`.

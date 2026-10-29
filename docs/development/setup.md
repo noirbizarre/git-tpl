@@ -120,6 +120,9 @@ template ref would destroy the merge base a user's branch depends on.
 **No code execution from templates.** No subprocess, no shell, no eval, no HTTP data-source access outside
 `src/data/`; git-backed network access (cloning or fetching a template) is confined to `src/git/libgit2.rs` by the
 `git2`-isolation invariant above.
+The deliberate process-execution exceptions are the test harness's `[commands]` (ADR-027)
+and native Git display of a completed diff preview in `src/commands/diff.rs` (ADR-039).
+Neither is available to a template render.
 
 ## Tests
 

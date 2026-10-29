@@ -148,6 +148,7 @@ These two are about the flags rather than the template, so they are raised as er
 |---|---|
 | `tpl::ops::already_initialised` | A template is already attached. Use `update`, or `init --force` to re-ask. |
 | `tpl::ops::invalid_argument` | An argument is not usable — see the message. |
+| `tpl::ops::diff_display` | Native Git could not display a diff. Ensure `git` is on PATH and check Git's diff and pager configuration. |
 | `tpl::ops::missing_note_file` | `note_file` names nothing at the template revision. The path is relative to the repository root, not the render root. |
 | `tpl::ops::note_file_not_utf8` | `note_file` names a binary file. A note is text. |
 | `tpl::ops::migration_file_not_utf8` | A migration file discovered under `migrations/` is not valid UTF-8. |

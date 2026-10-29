@@ -12,17 +12,47 @@ What you see is what `git tpl merge` would do, before you do it.
 
 ```console
 $ git tpl diff --stat
-  added     .github/workflows/release.yml    +48    -0
-  deleted   .travis.yml                       +0   -12
-  modified  README.md                         +9    -3
-  modified  docs/logo.png                    Bin
-
-4 files changed, 57 insertions(+), 15 deletions(-)
+ .github/workflows/release.yml | 48 ++++++++++++++++++++++++++++++++++++++++++++++++
+ .travis.yml                  | 12 ------------
+ README.md                    | 12 +++++++++---
+ docs/logo.png                | Bin 0 -> 128 bytes
+ 4 files changed, 57 insertions(+), 15 deletions(-)
 ```
 
-The counts are `git diff --stat`'s counts — the same libgit2 diff, walked hunk by hunk — so the summary line
-matches what the plain-Git equivalent below prints.
-A binary file shows `Bin`: two zeroes would read as "nothing changed".
+Patches and diffstats are displayed by native `git diff`, on stdout.
+A binary file shows `Bin` and byte sizes rather than misleading zero line counts.
+
+## Your Git display settings
+
+Git selects its own pager and colors, exactly as for `git diff`.
+If you already use delta through `core.pager`, `pager.diff` or `GIT_PAGER`, it is used here too.
+No additional git-tpl configuration is needed.
+For example, to use an installed delta for Git diffs:
+
+```sh
+git config --global pager.diff delta
+```
+
+Git's configured diff drivers and textconv filters also apply as they would to `git diff`.
+This display step requires `git` on PATH.
+It runs after the preview is computed, including any `--dirty` rendering.
+
+When stdout is a terminal, Git may open its pager; quitting it normally does not fail the command.
+`pager.diff=false` disables pagination.
+Redirected or piped stdout does not automatically open a pager:
+
+```sh
+git tpl diff > template-update.patch
+git tpl diff --stat | cat
+```
+
+By default, Git's `color.diff` and `color.ui` settings determine patch/stat color.
+`git tpl diff --color=always` and `--color=never` override those settings.
+Git-tpl's environment-based color rules still apply to its own warnings, not to Git's display.
+If Git is configured to always emit colors, use `--color=never` to produce a plain patch.
+
+`--name-only` remains a plain path list and `--json` remains structured data.
+Neither starts Git's display tools or pager.
 
 ## The plain Git equivalent
 
@@ -58,9 +88,8 @@ $ git tpl diff --stat
 warning: 1 file would conflict; shown with conflict markers
          README.md
 
-  modified  README.md                        +12    -3
-
-1 file changed, 12 insertions(+), 3 deletions(-)
+ README.md | 15 ++++++++++++---
+ 1 file changed, 12 insertions(+), 3 deletions(-)
 ```
 
 The exit code is still `0`.

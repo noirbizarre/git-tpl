@@ -40,7 +40,10 @@ project.
    `src/git/libgit2.rs` by invariant 4. Template repositories and remote data are untrusted input. The one narrow,
    deliberate exception is `git tpl test`'s `[commands]` (ADR-027): the test *harness* — never a render — may spawn
    a process, because running `test` at all is the same consent as cloning a repository and running its own test
-   suite. `src/ops/testing.rs` is the only place in `src/` that spawns one.
+   suite. `src/ops/testing.rs` owns that execution.
+   The other narrow exception is diff presentation (ADR-039): `src/commands/diff.rs` may run native `git diff`
+   over the completed preview's two trees, inheriting the user's pager, diff drivers and textconv configuration.
+   This is display after rendering, never a template hook or a capability available to a render.
 
 ## Layout
 
