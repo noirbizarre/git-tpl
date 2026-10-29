@@ -223,6 +223,14 @@ so every later `update` is a small diff against a real merge base.
 
 ### Check for and apply a template update
 
+In a fresh clone, restore an absent `refs/tpl/<id>` before updating.
+`git tpl fetch` retrieves only `refs/remotes/<remote>/tpl/<id>`; review its provenance and ancestry,
+or locate the original rendering (not its project merge commit) in full merged project history.
+Create only an absent ref with `git update-ref "$ref" "$candidate" ''`.
+The empty expected old value prevents overwriting an existing or concurrently created ref.
+Equal rendered trees do not recreate the original merge ancestry.
+See <https://noirbizarre.github.io/git-tpl/usage/fetch/#restoring-an-absent-local-ref>.
+
 ```sh
 git tpl status --json          # exit 2 / "templateMoved": true → work to do
 git tpl log main --json        # source commits in applied..main (main is a TEMPLATE ref)

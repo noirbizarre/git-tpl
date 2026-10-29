@@ -74,8 +74,8 @@ See [`answers`](answers.md) for how they combine.
     `show` never clones, never fetches and never contacts the network.
     It reads the rendering that `git tpl update` already committed, so it works offline and in the middle of a
     merge.
-    If the ref is not there, run `git tpl update` — or `git tpl fetch`, if the template ref is shared, since
-    template refs are never pushed automatically.
+    If the ref is not there, [restore the original rendering](fetch.md#restoring-an-absent-local-ref)
+    before updating. Fetching alone only retrieves a remote-tracking candidate.
 
     `--dirty` is the one exception: it reads the local template directory, and a template with a network data
     source may prompt for trust before it renders.
@@ -84,6 +84,6 @@ See [`answers`](answers.md) for how they combine.
 
 | Code | Meaning |
 |---|---|
-| `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist. Run `git tpl update` or `git tpl fetch`. |
+| `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist. Restore the original rendered ref before updating. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. `git tpl diff --name-only` lists what is. |
 | `tpl::ops::invalid_argument` | The path was absolute, or left the rendering with `..`. |

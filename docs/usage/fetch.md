@@ -48,6 +48,47 @@ What to do about it is your decision:
 - **The remote is behind** — you have renderings they do not. `git tpl push`.
 - **Diverged** — you both rendered independently. See [`git tpl push`](push.md#divergence).
 
+## Restoring an absent local ref
+
+Fetching does not restore `refs/tpl/<id>`: it only retrieves a remote-tracking candidate.
+Before the first update in a fresh clone, restore the original rendering so the next commit keeps its ancestry.
+Use full project history (`git fetch --unshallow` for a shallow clone).
+
+For a shared rendering, fetch and select its candidate:
+
+```sh
+git tpl fetch
+ref=refs/tpl/<id>
+candidate=$(git rev-parse 'refs/remotes/origin/tpl/<id>^{commit}')
+git show --no-patch --format=full "$candidate"
+git log --oneline "$candidate"
+```
+
+Review the `Template-Source`, `Template-Commit` and `Answers-Digest` trailers against your attachment.
+Check which rendering is already merged with `git merge-base --is-ancestor "$candidate" HEAD`;
+a newer shared candidate may legitimately not yet be merged, so inspect its ancestry back to the applied rendering.
+If the ref was local-only, find the original rendered commit in merged history instead:
+
+```sh
+git log HEAD --topo-order --format=full --grep='^Template-Source: <configured-source>$'
+# Set candidate to the reviewed original rendered commit, not the project merge commit.
+candidate=<original-rendered-commit>
+git merge-base --is-ancestor "$candidate" HEAD
+```
+
+After reviewing the candidate, create the local ref only if it is still absent:
+
+```sh
+git update-ref "$ref" "$candidate" ''
+git tpl update --defaults
+```
+
+The empty expected old value rejects an existing ref, including one created concurrently.
+If it fails, inspect the existing ref before proceeding.
+Re-rendering an equal tree cannot recreate the original commit or merge ancestry.
+If you already created an orphan rendering, this absent-only procedure does not reconcile it;
+preserve both histories and see [divergence](push.md#divergence).
+
 ## Options
 
 | Option | Meaning |

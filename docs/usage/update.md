@@ -189,8 +189,9 @@ merge base, `git tpl merge` can conflict on every file.
 
 Two things cause it, and both are legitimate, which is why this is a warning and not a refusal:
 
-- **You cloned a project and never fetched the ref.** `refs/tpl/*` is not fetched by default. Run
-  [`git tpl fetch`](fetch.md) first, and the update continues the history everyone else has.
+- **You cloned a project without the local ref.** `refs/tpl/*` is not fetched by default.
+  Before updating, [restore the original rendered ref](fetch.md#restoring-an-absent-local-ref).
+  Fetching alone does not adopt it; an equal re-render cannot recover its ancestry.
 - **You edited `source` or `id` in `.config/git.tpl.toml`.** The ref name is derived from them, so a new one means
   a new ref. That is the documented way to
   [point a project at a different template](../templates/local-development.md#pointing-an-existing-project-at-a-different-template),

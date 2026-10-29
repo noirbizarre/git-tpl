@@ -163,6 +163,61 @@ fn fetch_retrieves_a_shared_ref_into_the_remote_namespace() {
     );
 }
 
+#[test]
+fn a_fresh_clone_restores_original_ancestry_before_its_next_update() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+    let original = world.project.rev_parse(&world.ref_name());
+    let other = Repo::init_in(world.dir.path(), "restored");
+    other.git(&[
+        "remote",
+        "add",
+        "origin",
+        &world.dir.path().join("remote.git").to_string_lossy(),
+    ]);
+    other.git(&["fetch", "-q", "origin"]);
+    other.git(&["checkout", "-q", "-b", "main", "origin/main"]);
+    assert!(!other.has_ref(&world.ref_name()));
+
+    // Full merged history retains the original rendering even without sharing its ref.
+    let source = format!("^Template-Source: {}$", world.template.repo.path.display());
+    let historical = other.git(&[
+        "log",
+        "HEAD",
+        "--topo-order",
+        "-1",
+        "--format=%H",
+        &format!("--grep={source}"),
+    ]);
+    assert_eq!(historical, original);
+    other.git(&["merge-base", "--is-ancestor", &historical, "HEAD"]);
+
+    tpl(&other, &["fetch"]).success();
+    assert!(!other.has_ref(&world.ref_name()));
+    let candidate = other.rev_parse("refs/remotes/origin/tpl/template");
+    assert_eq!(candidate, historical);
+    other.git(&["update-ref", &world.ref_name(), &candidate, ""]);
+    // The documented absent-only write must refuse even the same existing tip.
+    let mut command = std::process::Command::new("git");
+    command
+        .current_dir(&other.path)
+        .args(["update-ref", &world.ref_name(), &candidate, ""]);
+    scrub_git_env(&mut command, other.config_home());
+    assert!(
+        !command
+            .output()
+            .expect("conditional ref creation")
+            .status
+            .success()
+    );
+
+    world.move_template();
+    tpl(&other, &["update", "--defaults"]).success();
+    assert_eq!(other.rev_parse(&format!("{}^", world.ref_name())), original);
+}
+
 /// Fetching never moves the local ref. What to do about a newer remote copy is
 /// a decision, and adopting someone else's rendering silently would be a
 /// surprising thing for a fetch to do.
