@@ -50,3 +50,4 @@ explains the code that existed.
 | [039](039-native-diff-presentation.md) | Native Git owns patch and diffstat presentation, including the configured pager |
 | [040](040-native-merge-abort.md) | Native Git owns explicit merge abort recovery |
 | [041](041-typed-supplied-answers.md) | Supplied answers preserve typed versus CLI origins |
+| [042](042-explicit-lint-syntax.md) | Lint compiles effective inherited output and every retained partial declaration |

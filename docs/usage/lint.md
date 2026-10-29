@@ -27,6 +27,10 @@ Resolving a remote template still requires network access.
 ### Every `.jinja` file parses
 
 Including branches no answer set reaches.
+Syntax is explicitly compiled for effective inherited outputs and every retained partial declaration,
+including unimported, unreachable and shadowed partials.
+Removed or overridden inherited outputs are excluded, as are binary output payloads.
+Other static rules retain their existing leaf-only scope; lint does not load runtime data for these checks.
 Otherwise a syntax error in a rarely taken conditional is found by the first person who answers their way into
 it.
 

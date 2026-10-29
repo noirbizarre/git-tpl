@@ -687,6 +687,21 @@ impl Partials {
         self.0.keys().map(String::as_str)
     }
 
+    /// Every retained declaration, including shadowed and unimported sources.
+    /// Syntax lint must not depend on which imports a particular render reaches.
+    pub fn declarations(&self) -> impl Iterator<Item = (String, &str)> {
+        self.0.iter().flat_map(|(name, declarations)| {
+            declarations.iter().enumerate().map(move |(index, source)| {
+                let path = match index {
+                    0 => name.clone(),
+                    1 => format!("parent:{name}"),
+                    n => format!("ancestor[{n}]:{name}"),
+                };
+                (path, source.as_str())
+            })
+        })
+    }
+
     /// Drop this layer's own declaration of each name in `excluded`, if any.
     ///
     /// For an ancestor's own `[extends].remove` (ADR-034): applied to that

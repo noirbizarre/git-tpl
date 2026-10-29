@@ -17,6 +17,9 @@ metadata:
 
 # git-tpl
 
+`lint` compiles effective inherited output and all retained partial declarations, including shadowed/unimported ones.
+Removed/overridden output and binary payloads are excluded; other static rules keep their existing scope.
+
 `init --dry-run` honors `--trust` for ancestors.
 With `--defaults`, rendering must succeed to return a file list; without it, JSON `files` is null (schema only).
 

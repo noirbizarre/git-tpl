@@ -173,12 +173,8 @@ impl Resolved {
     /// This template's own rendered-subtree entries, ignoring any `[extends]`
     /// chain entirely.
     ///
-    /// `git tpl lint` uses this rather than [`Resolved::entries`]: static
-    /// analysis of an inherited file, in a repository lint has no reason to
-    /// clone a second time just to check syntax it cannot act on, is left for
-    /// a future ADR. Every other consumer of a template's files —
-    /// rendering, provenance — needs the full merge and uses `entries`
-    /// instead.
+    /// `git tpl lint` uses this for leaf-only analysis rules and also uses
+    /// [`Resolved::entries`] for effective inherited output syntax (ADR-042).
     pub fn own_entries(&self) -> Result<Vec<TreeEntry>, GitError> {
         self.repo.list_tree(self.root_tree)
     }

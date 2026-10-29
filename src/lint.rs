@@ -677,7 +677,11 @@ fn segment_name(segment: &str) -> String {
 ///
 /// Otherwise a syntax error in a conditional nobody has answered their way into
 /// is found by the first person who does.
-fn check_syntax(path: &str, text: &str, partials: &std::sync::Arc<Partials>) -> Vec<Finding> {
+pub(crate) fn check_syntax(
+    path: &str,
+    text: &str,
+    partials: &std::sync::Arc<Partials>,
+) -> Vec<Finding> {
     let env = environment(partials);
     match env.template_from_str(text) {
         Ok(_) => Vec::new(),

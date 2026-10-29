@@ -2191,10 +2191,8 @@ pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> 
     let mut trust = Trust::refuse();
     let template = resolve::resolve(request, user, &mut trust)?;
 
-    // This template's own files only, even when it extends another: static
-    // analysis of an inherited file in a repository lint has no reason to
-    // clone a second time just to check syntax it cannot act on is left for a
-    // future ADR (`Resolved::own_entries`'s own doc comment says the same).
+    // Other static rules retain their leaf-only scope. Syntax additionally
+    // checks effective inherited output and every retained partial (ADR-042).
     let entries = template.own_entries()?;
     // The whole repository, not just the render root: a `note_file` names a
     // path beside the manifest, in the same namespace a partial lives in.
@@ -2212,7 +2210,7 @@ pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> 
         .unwrap_or_default();
     let manifest_text = String::from_utf8_lossy(&manifest_bytes);
 
-    let findings = crate::lint::lint(
+    let mut findings = crate::lint::lint(
         template.repo.as_ref(),
         &template.manifest,
         &manifest_text,
@@ -2220,6 +2218,34 @@ pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> 
         &repo_entries,
         &partials,
     )?;
+
+    // The leaf pass already reports its output syntax. Only surviving ancestor
+    // entries are added, so overridden/removed source cannot fail the lint.
+    for layered in template
+        .entries()?
+        .into_iter()
+        .filter(|entry| entry.origin != 0)
+    {
+        let entry = &layered.entry;
+        if !entry.mode.is_blob() || !entry.path.ends_with(crate::render::TEMPLATE_SUFFIX) {
+            continue;
+        }
+        let bytes = template.read_blob(layered.origin, entry.oid)?;
+        // Match rendering's binary exemption rather than interpreting payloads.
+        if bytes.iter().take(8192).any(|byte| *byte == 0) {
+            continue;
+        }
+        findings.extend(crate::lint::check_syntax(
+            &entry.path,
+            &String::from_utf8_lossy(&bytes),
+            &partials,
+        ));
+    }
+    // MiniJinja's loader is lazy: registering a partial does not compile it.
+    // Compile each declaration itself even when no reachable import uses it.
+    for (path, source) in partials.declarations() {
+        findings.extend(crate::lint::check_syntax(&path, source, &partials));
+    }
 
     Ok(Linted { template, findings })
 }
