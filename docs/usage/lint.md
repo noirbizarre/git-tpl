@@ -309,7 +309,7 @@ With prek, in the template repository's own `prek.toml`:
 ```toml
 [[repos]]
 repo = "https://github.com/noirbizarre/git-tpl"
-rev = "v0.12.1"
+rev = "0.14.3"
 hooks = [{ id = "git-tpl-lint" }]
 ```
 
@@ -318,7 +318,7 @@ With pre-commit, in `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/noirbizarre/git-tpl
-    rev: v0.12.1
+    rev: 0.14.3
     hooks:
       - id: git-tpl-lint
 ```
@@ -340,9 +340,9 @@ environment before running `entry` — no separate install step, and nothing add
 ```toml
 [[repos]]
 repo = "https://github.com/noirbizarre/git-tpl"
-rev = "v0.12.1"
+rev = "0.14.3"
 hooks = [
-  { id = "git-tpl-lint", language = "mise", additional_dependencies = ["github:noirbizarre/git-tpl@0.12.1"] },
+  { id = "git-tpl-lint", language = "mise", additional_dependencies = ["github:noirbizarre/git-tpl@0.14.3"] },
 ]
 ```
 
