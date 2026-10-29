@@ -7,7 +7,7 @@
 //! (`ops::extends::merge_chain`). See `docs/adr/034-template-inheritance.md`.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use miette::Diagnostic;
@@ -173,12 +173,8 @@ impl Resolved {
     /// This template's own rendered-subtree entries, ignoring any `[extends]`
     /// chain entirely.
     ///
-    /// `git tpl lint` uses this rather than [`Resolved::entries`]: static
-    /// analysis of an inherited file, in a repository lint has no reason to
-    /// clone a second time just to check syntax it cannot act on, is left for
-    /// a future ADR. Every other consumer of a template's files —
-    /// rendering, provenance — needs the full merge and uses `entries`
-    /// instead.
+    /// `git tpl lint` uses this for leaf-only analysis rules and also uses
+    /// [`Resolved::entries`] for effective inherited output syntax (ADR-042).
     pub fn own_entries(&self) -> Result<Vec<TreeEntry>, GitError> {
         self.repo.list_tree(self.root_tree)
     }
@@ -347,6 +343,7 @@ pub fn resolve(
         request.reference,
         request.root,
         request.dirty,
+        false,
     )?;
 
     // A template with no `[extends]` is a chain of one: its own manifest is
@@ -385,11 +382,13 @@ pub fn resolve(
 /// asked for) and each ancestor in an `[extends]` chain: only the source,
 /// reference and root differ between the two, and `dirty` is never true for
 /// an ancestor (only a local, directly-requested template can be `--dirty`).
+/// `pinned` selects actual tag/object lookup before reading any ancestor files.
 fn resolve_layer(
     source: &str,
     reference: Option<&str>,
     root_override: Option<&str>,
     dirty: bool,
+    pinned: bool,
 ) -> Result<Layer, ResolveError> {
     let local = local_path(source);
 
@@ -417,7 +416,15 @@ fn resolve_layer(
             Some(reference) => reference.to_string(),
             None => repo.default_branch()?,
         };
-        let revision = repo.resolve_revision(&reference, source)?;
+        let revision = if pinned {
+            repo.resolve_pin(&reference, source)?
+                .ok_or_else(|| ExtendsError::Unpinned {
+                    origin: source.into(),
+                    rev: reference.clone(),
+                })?
+        } else {
+            repo.resolve_revision(&reference, source)?
+        };
         let tree = repo.commit_tree(revision)?;
         (revision, tree, reference, false, Vec::new())
     };
@@ -545,15 +552,7 @@ fn resolve_ancestors(
         // is no way to list the whole chain before any of it is reached.
         confirm_ancestor(&declared.source, ancestors.len(), user, trust)?;
 
-        let layer = resolve_layer(&declared.source, Some(&declared.rev), None, false)?;
-
-        if !extends::is_pinned(layer.repo.as_ref(), &declared.rev)? {
-            return Err(ExtendsError::Unpinned {
-                origin: declared.source.clone(),
-                rev: declared.rev.clone(),
-            }
-            .into());
-        }
+        let layer = resolve_layer(&declared.source, Some(&declared.rev), None, false, true)?;
 
         let key = (declared.source.clone(), layer.revision);
         path.push(declared.source.clone());
@@ -719,19 +718,7 @@ fn declares(path: &str, location: &str) -> bool {
 /// no working tree must be refused before the first case renders. Two locality
 /// rules would mean the two flags disagreeing about what "local" means.
 pub fn local_path(source: &str) -> Option<PathBuf> {
-    if source.contains("://") {
-        // `file://` is a URL form of a local path, but treating it as remote
-        // means it is cloned rather than opened — which is the safer reading of
-        // an explicit URL, and keeps `--dirty` honest about needing a path.
-        return None;
-    }
-    // `git@host:path` is scp-style, not a path containing a colon.
-    if source.contains('@') && source.contains(':') {
-        return None;
-    }
-
-    let path = Path::new(source);
-    path.is_dir().then(|| path.to_path_buf())
+    crate::refs::local_path(source)
 }
 
 #[cfg(test)]
@@ -756,8 +743,11 @@ mod tests {
     }
 
     #[test]
-    fn a_path_that_does_not_exist_is_not_a_local_path() {
-        assert_eq!(local_path("/definitely/not/here/at/all"), None);
+    fn a_missing_path_is_still_local() {
+        assert_eq!(
+            local_path("/definitely/not/here/at/all"),
+            Some(PathBuf::from("/definitely/not/here/at/all"))
+        );
     }
 
     /// There is no working tree to read on a remote, so the error must say so

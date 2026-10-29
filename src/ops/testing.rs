@@ -1728,7 +1728,7 @@ fn run_case(
                 template,
                 source,
                 None,
-                case.answers.clone(),
+                crate::answers::typed(case.answers.clone()),
                 user,
                 Answering::defaults(),
                 // Replaying this case's own `trust` field, decided in `run`
@@ -1773,7 +1773,7 @@ fn run_case(
                         super::materialise(
                             cwd,
                             rendered_files.iter().map(|file| {
-                                (file.path.as_str(), file.content.as_slice(), file.executable)
+                                (file.path.as_str(), file.content.as_slice(), file.mode)
                             }),
                             &|path, verb, io_error| TestingError::SandboxWrite {
                                 case: case_name.clone(),
@@ -1973,7 +1973,7 @@ fn run_case_plain(
         template,
         source,
         None,
-        case.answers.clone(),
+        crate::answers::typed(case.answers.clone()),
         user,
         Answering::defaults(),
         // Replaying this case's own `trust` field, decided in `run` without
@@ -2443,7 +2443,7 @@ fn classify_render_error(error: OpError, expected: &Option<String>, failures: &m
 #[derive(Debug, Clone, PartialEq)]
 struct SnapshotEntry {
     content: Vec<u8>,
-    executable: bool,
+    mode: FileMode,
 }
 
 /// Whether Git would call these bytes binary.
@@ -2490,7 +2490,7 @@ fn snapshot_step(
                 file.path.clone(),
                 SnapshotEntry {
                     content: file.content.clone(),
-                    executable: file.executable,
+                    mode: file.mode,
                 },
             )
         })
@@ -2594,6 +2594,12 @@ fn read_snapshot(
         let Some(path) = entry.path.strip_prefix(&prefix) else {
             continue;
         };
+        if entry.mode == FileMode::Link {
+            return Err(unreadable(format!(
+                "snapshot payload `{path}` must be an ordinary file, not a symlink"
+            ))
+            .into());
+        }
         files.insert(
             path.to_string(),
             (entry.oid, entry.mode == FileMode::BlobExecutable),
@@ -2632,7 +2638,7 @@ fn read_snapshot(
             path.clone(),
             SnapshotEntry {
                 content,
-                executable: recorded.executable,
+                mode: recorded.mode,
             },
         );
     }
@@ -2651,7 +2657,7 @@ fn read_snapshot(
 
 /// A manifest line.
 struct RecordedFile {
-    executable: bool,
+    mode: FileMode,
     /// `None` for a binary file, which records no digest.
     digest: Option<String>,
     size: u64,
@@ -2675,9 +2681,10 @@ fn parse_manifest(
         else {
             return Err(unreadable(format!("`{line}` is not a manifest entry")));
         };
-        let executable = match mode {
-            "100644" => false,
-            "100755" => true,
+        let mode = match mode {
+            "100644" => FileMode::Blob,
+            "100755" => FileMode::BlobExecutable,
+            "120000" => FileMode::Link,
             other => return Err(unreadable(format!("`{other}` is not a file mode"))),
         };
         let size = size
@@ -2686,7 +2693,7 @@ fn parse_manifest(
         out.insert(
             path.to_string(),
             RecordedFile {
-                executable,
+                mode,
                 digest: (digest != "binary").then(|| digest.to_string()),
                 size,
             },
@@ -2702,11 +2709,7 @@ fn render_manifest(case: &str, files: &BTreeMap<String, SnapshotEntry>) -> Strin
     out.push_str(&format!("# case: {case}\n"));
     out.push_str("# Written by `git tpl test --write`. Do not edit by hand.\n");
     for (path, entry) in files {
-        let mode = if entry.executable {
-            FileMode::BlobExecutable
-        } else {
-            FileMode::Blob
-        };
+        let mode = entry.mode;
         // `binary` in place of the digest, so the comparator knows not to try a
         // patch — the same distinction `FileStat.binary` makes for `diff`.
         let digest = if is_binary(&entry.content) {
@@ -2757,7 +2760,7 @@ fn compare(
             }),
             (Some(before), Some(after)) => {
                 if before.content == after.content {
-                    if before.executable != after.executable {
+                    if before.mode != after.mode {
                         changes.push(SnapshotChange {
                             path: path.clone(),
                             kind: ChangeKind::Modified,
@@ -2813,7 +2816,6 @@ fn write_snapshot(
     files: &BTreeMap<String, SnapshotEntry>,
 ) -> Result<(), OpError> {
     let workdir = template.repo.workdir()?;
-    let dir = workdir.join(snapshot_path(tests_dir, &case.name));
 
     let failed = |path: &Path, verb: &str, error: &std::io::Error| TestingError::SnapshotWrite {
         case: case.name.clone(),
@@ -2821,13 +2823,32 @@ fn write_snapshot(
         reason: format!("could not {verb} it: {error}"),
     };
 
+    // Unlike an explicit --output, the snapshot path is template-controlled.
+    // Resolve the caller-selected repository root, then reject links in every
+    // component below it before cleanup can touch an outside directory.
+    let workdir = workdir
+        .canonicalize()
+        .map_err(|error| failed(&workdir, "resolve", &error))?;
+    let dir = workdir.join(snapshot_path(tests_dir, &case.name));
+    super::reject_symlink_ancestors(&dir).map_err(|error| failed(&dir, "prepare", &error))?;
     super::clear_directory(&dir, &failed)?;
 
     super::materialise(
         &dir.join(SNAPSHOT_FILES),
         files
             .iter()
-            .map(|(path, entry)| (path.as_str(), entry.content.as_slice(), entry.executable)),
+            // Snapshot payloads are ordinary files, even when their manifest mode is 120000.
+            .map(|(path, entry)| {
+                (
+                    path.as_str(),
+                    entry.content.as_slice(),
+                    if entry.mode == FileMode::Link {
+                        FileMode::Blob
+                    } else {
+                        entry.mode
+                    },
+                )
+            }),
         &failed,
     )?;
 
@@ -3317,21 +3338,21 @@ mod tests {
             "a.txt".to_string(),
             SnapshotEntry {
                 content: b"hello\n".to_vec(),
-                executable: false,
+                mode: FileMode::Blob,
             },
         );
         files.insert(
             "run.sh".to_string(),
             SnapshotEntry {
                 content: b"#!/bin/sh\n".to_vec(),
-                executable: true,
+                mode: FileMode::BlobExecutable,
             },
         );
         files.insert(
             "logo.png".to_string(),
             SnapshotEntry {
                 content: vec![0, 1, 2, 3],
-                executable: false,
+                mode: FileMode::Blob,
             },
         );
 
@@ -3344,8 +3365,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(parsed.len(), 3);
-        assert!(!parsed["a.txt"].executable);
-        assert!(parsed["run.sh"].executable);
+        assert_eq!(parsed["a.txt"].mode, FileMode::Blob);
+        assert_eq!(parsed["run.sh"].mode, FileMode::BlobExecutable);
         assert_eq!(parsed["logo.png"].digest, None, "binary records no digest");
         assert_eq!(parsed["a.txt"].size, 6);
     }
@@ -3353,7 +3374,11 @@ mod tests {
     fn entry(content: &[u8], executable: bool) -> SnapshotEntry {
         SnapshotEntry {
             content: content.to_vec(),
-            executable,
+            mode: if executable {
+                FileMode::BlobExecutable
+            } else {
+                FileMode::Blob
+            },
         }
     }
 

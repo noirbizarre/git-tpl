@@ -71,7 +71,7 @@ git tpl merge         # apply it with an ordinary Git merge
 
 `mise run tpl:check` updates first, then exits nonzero if merging would change files.
 Updating never changes HEAD, the index or rendered worktree files;
-newly answered questions may be recorded in `.config/git.tpl.toml`, unstaged.
+semantically changed answers and composed child locks are recorded in `.config/git.tpl.toml`, unstaged.
 The tasks restore a missing local template ref from merged rendering provenance, so fresh clones need full history.
 The weekly/manual template workflow does the same and reports drift without pushing or merging anything.
 
@@ -124,10 +124,11 @@ src/
 ```
 
 `ops/` holds one *function* per command in `mod.rs` — `init`, `update`, `status`, `diff`, `merge`, `fetch`, `push`,
-`lint`, `questions` and the rest — and a file of its own for each command too large to be one: `backport`,
-`testing`, `hunks`, `unsubstitute`, plus `resolve` for fetching a template and `extends` for merging an `[extends]`
-chain. `commands/` is the directory with one module per subcommand; that is where argument handling and output
-formatting live, and nothing else.
+`lint`, `questions` and the rest — and separate command orchestration files such as `backport` and `testing`.
+`hunks` and `unsubstitute` are internal mechanisms used by backport, not commands or independent diagnostic areas.
+`resolve` fetches templates and `extends` merges an `[extends]` chain; each owns its resolution-specific errors.
+`commands/` is the directory with one module per subcommand;
+that is where argument handling and output formatting live, and nothing else.
 
 Dependencies point inward. `ops` uses `render`, `graph`, `git`; nothing in `template/` or `render.rs` knows a
 command exists.

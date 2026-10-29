@@ -4,6 +4,95 @@ mod common;
 
 use common::{Repo, tpl};
 
+#[test]
+fn missing_child_locks_are_saved_on_changed_and_identical_renderings() {
+    for changes_output in [false, true] {
+        let source = child("source");
+        let integration = child("integration");
+        let parent = parent(&source, &integration, "main", "main");
+        let project = Repo::init("project");
+        tpl(
+            &project,
+            &[
+                "init",
+                parent.path.to_str().unwrap(),
+                "--defaults",
+                "--answer",
+                "sources=[\"jira\"]",
+            ],
+        )
+        .success();
+        let mut config = tpl::config::Config::load(&project.path).unwrap();
+        let expected = config.composed.clone();
+        config.composed.clear();
+        config.save(&project.path).unwrap();
+        project.commit_all("remove recorded child lock");
+        if changes_output {
+            parent.write("template/README.md", "changed parent\n");
+            parent.commit_all("change parent output");
+        }
+        let before = project.working_state();
+        let result = tpl(&project, &["--json", "update", "--defaults"])
+            .success()
+            .json();
+        assert_eq!(
+            result["result"],
+            if changes_output {
+                "updated"
+            } else {
+                "upToDate"
+            }
+        );
+        assert_eq!(result["composedChanged"], true);
+        assert_eq!(result["answersChanged"], false);
+        assert_eq!(
+            tpl::config::Config::load(&project.path).unwrap().composed,
+            expected
+        );
+        let after = project.working_state();
+        assert_eq!(before.head, after.head);
+        assert_eq!(before.index, after.index);
+        assert_eq!(project.status(), "M .config/git.tpl.toml");
+    }
+}
+
+#[test]
+fn a_child_with_the_same_source_path_as_its_parent_cannot_backport_into_the_parent() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let manifest = parent.read("template.toml");
+    parent.write("template.toml", &format!("{manifest}\n[questions.module_path]\ntype = 'string'\ndefault = 'leaf'\n[questions.module_name]\ntype = 'string'\ndefault = 'leaf'\n"));
+    parent.write(
+        "template/{{ module_path }}/module.txt.jinja",
+        "{{ module_name }}\n",
+    );
+    parent.commit_all("add overlapping source path");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "init",
+            parent.path.to_str().unwrap(),
+            "--defaults",
+            "--answer",
+            "sources=[\"jira\"]",
+        ],
+    )
+    .success();
+    project.write("modules/jira/module.txt", "jira\nnew literal line\n");
+    for extra in [vec![], vec!["--list-hunks"]] {
+        let mut args = vec!["backport", "--json", "modules/jira/module.txt"];
+        args.extend(extra);
+        let output = tpl(&project, &args).failure();
+        assert!(
+            output.stdout.contains("tpl::backport::non_leaf"),
+            "{}",
+            output.stdout
+        );
+    }
+}
+
 fn child(name: &str) -> Repo {
     let child = Repo::init(name);
     child.write("template.toml", &format!(
@@ -514,7 +603,7 @@ fn backport_never_mistakes_a_child_generated_file_for_a_parent_template_file() {
         "child files must not be backported to the parent: {}",
         output.all()
     );
-    assert_eq!(output.error_code(), "tpl::backport::unknown_path");
+    assert_eq!(output.error_code(), "tpl::backport::non_leaf");
 }
 
 #[test]
@@ -831,6 +920,11 @@ fn a_remote_composed_child_is_refused_before_any_clone_without_consent() {
     parent
         .write("template.toml", &manifest)
         .commit_all("request remote child");
+    // Prior consent to the parent must not become invocation-wide --trust.
+    parent.user_config(&format!(
+        "[trust]\ntemplates = ['{}']\n",
+        parent.path.display()
+    ));
     let output = tempfile::tempdir().unwrap();
     let output = output.path().join("generated");
     let failure = tpl(

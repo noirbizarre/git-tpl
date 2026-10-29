@@ -7,7 +7,175 @@
 
 mod common;
 
+#[cfg(unix)]
+#[test]
+fn link_target_changes_and_file_to_link_conversions_are_refused_before_listing_hunks() {
+    let world = common::World::new();
+    let path = world.template.repo.path.join("template/link");
+    if std::os::unix::fs::symlink("old", &path).is_err() {
+        return;
+    }
+    world.template.repo.commit_all("add link");
+    world.init(&[]).success();
+    std::fs::remove_file(world.project.path.join("link")).unwrap();
+    std::os::unix::fs::symlink("new", world.project.path.join("link")).unwrap();
+    for extra in [vec![], vec!["--list-hunks"]] {
+        let mut args = vec!["--json", "backport", "link"];
+        args.extend(extra);
+        assert_eq!(
+            common::tpl(&world.project, &args).failure().error_code(),
+            "tpl::backport::symlink"
+        );
+    }
+    std::fs::remove_file(world.project.path.join("README.md")).unwrap();
+    std::os::unix::fs::symlink("new", world.project.path.join("README.md")).unwrap();
+    assert_eq!(
+        common::tpl(&world.project, &["--json", "backport", "README.md"])
+            .failure()
+            .error_code(),
+        "tpl::backport::symlink"
+    );
+}
+
+#[test]
+fn inherited_sources_are_refused_but_leaf_overrides_can_be_backported() {
+    use common::{Repo, tpl};
+    let parent = Repo::init("base");
+    parent.write("template.toml", "name = 'base'\n");
+    parent.write("template/shared.txt", "original\n");
+    parent.commit_all("base template");
+    let leaf = Repo::init("leaf");
+    leaf.write(
+        "template.toml",
+        &format!(
+            "name = 'leaf'\n[extends]\nsource = '{}'\nrev = '{}'\n",
+            parent.path.display(),
+            parent.rev_parse("HEAD")
+        ),
+    );
+    leaf.commit_all("inherit base");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &["init", leaf.path.to_str().unwrap(), "--defaults"],
+    )
+    .success();
+    project.write("shared.txt", "changed\n");
+    for extra in [vec![], vec!["--list-hunks"]] {
+        let mut args = vec!["backport", "--json", "shared.txt"];
+        args.extend(extra);
+        let output = tpl(&project, &args).failure();
+        assert!(
+            output.stdout.contains("tpl::backport::non_leaf"),
+            "{}",
+            output.stdout
+        );
+    }
+    project.git(&["restore", "shared.txt"]);
+    leaf.write("template/shared.txt", "leaf original\n");
+    leaf.commit_all("override base");
+    tpl(&project, &["update", "--defaults"]).success();
+    tpl(&project, &["merge"]).success();
+    project.write("shared.txt", "leaf fixed\n");
+    let output = tpl(&project, &["backport", "shared.txt"]).success();
+    assert!(output.stdout.contains("+leaf fixed"), "{}", output.stdout);
+}
+
 use common::{Repo, World, tpl};
+
+#[cfg(unix)]
+#[test]
+fn an_unselected_project_symlink_does_not_block_a_leaf_edit() {
+    let world = world();
+    world.init(&[]).success();
+    // A dangling project-only link must not be followed or treated as a template edit.
+    std::os::unix::fs::symlink("absent", world.project.path.join("local-link")).unwrap();
+    world.project.write("ci.yml", "name: CI\non: [push]\n");
+
+    let listing = tpl(&world.project, &["--json", "backport", "--list-hunks"])
+        .success()
+        .json();
+    assert_eq!(listing["plan"].as_array().unwrap().len(), 1, "{listing}");
+    assert_eq!(listing["plan"][0]["rendered"], "ci.yml");
+    assert!(
+        listing["skipped"].as_array().unwrap().is_empty(),
+        "{listing}"
+    );
+
+    let output = tpl(&world.project, &["backport"]).success();
+    assert!(!output.stdout.contains("local-link"), "{}", output.stdout);
+    let upstream = clone_of_template(&world);
+    let patch = upstream.path.join("backport.mbox");
+    std::fs::write(&patch, &output.stdout).unwrap();
+    let (ok, message) = upstream.try_git(&["am", &patch.to_string_lossy()]);
+    assert!(ok, "git am refused the patch: {message}");
+    assert_eq!(upstream.read("template/ci.yml"), "name: CI\non: [push]\n");
+
+    for extra in [vec![], vec!["--list-hunks"]] {
+        let mut args = vec!["--json", "backport", "local-link"];
+        args.extend(extra);
+        assert_eq!(
+            tpl(&world.project, &args).failure().error_code(),
+            "tpl::backport::symlink"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn an_inherited_mode_only_change_does_not_block_a_leaf_edit() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let parent = Repo::init("base");
+    parent.write("template.toml", "name = 'base'\n");
+    parent.write("template/run.sh", "#!/bin/sh\necho run\n");
+    parent.make_executable("template/run.sh");
+    parent.commit_all("base template");
+    let leaf = Repo::init("leaf");
+    leaf.write(
+        "template.toml",
+        &format!(
+            "name = 'leaf'\n[extends]\nsource = '{}'\nrev = '{}'\n",
+            parent.path.display(),
+            parent.rev_parse("HEAD")
+        ),
+    );
+    leaf.write("template/ci.yml", "name: CI\n");
+    leaf.commit_all("inherit base with leaf CI");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &["init", leaf.path.to_str().unwrap(), "--defaults"],
+    )
+    .success();
+    let path = project.path.join("run.sh");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    // Prove this fixture really has a Git-visible mode change, rather than a no-op chmod.
+    assert!(
+        project
+            .git(&["diff", "--summary"])
+            .contains("100755 => 100644")
+    );
+    project.write("ci.yml", "name: CI\non: [push]\n");
+
+    let listing = tpl(&project, &["--json", "backport", "--list-hunks"])
+        .success()
+        .json();
+    assert_eq!(listing["plan"].as_array().unwrap().len(), 1, "{listing}");
+    assert_eq!(listing["plan"][0]["rendered"], "ci.yml");
+    assert!(
+        listing["skipped"].as_array().unwrap().is_empty(),
+        "{listing}"
+    );
+    let output = tpl(&project, &["backport"]).success();
+    assert!(!output.stdout.contains("run.sh"), "{}", output.stdout);
+    let patch = project.path.join("backport.mbox");
+    std::fs::write(&patch, &output.stdout).unwrap();
+    let (ok, message) = leaf.try_git(&["am", &patch.to_string_lossy()]);
+    assert!(ok, "git am refused the patch: {message}");
+    assert_eq!(leaf.read("template/ci.yml"), "name: CI\non: [push]\n");
+    assert_eq!(parent.read("template/run.sh"), "#!/bin/sh\necho run\n");
+}
 
 /// A template whose `README.md.jinja` has one substituted line and several
 /// verbatim ones — the shape every case below needs.

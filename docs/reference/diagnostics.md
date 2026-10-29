@@ -19,6 +19,8 @@ $ git tpl --json render ./template --output ./out --defaults
 ```
 
 `causes` is where the actionable detail lives.
+Composed child failures retain their nested diagnostic codes and help in this chain.
+Template tests may match an inner code with `expect.error`, including errors wrapped by `tpl::compose::child_failed`.
 The outer error names the file; the one beneath it names the expression and the reason.
 Branch on the outer code to decide *what kind* of failure it is, and read the innermost one to say *why*.
 
@@ -133,7 +135,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::data::load` | A data source could not be read. |
 | `tpl::data::parse` | A data source is not valid in its declared format. |
 | `tpl::data::escapes_root` | A `local` path leaves the project root. |
-| `tpl::data::needs_project` | A `local` source was reached by a command with no project — `render`, `lint`, `context`. Use a `template` source, or run inside a project. |
+| `tpl::data::needs_project` | A `local` source was reached without a project during evaluation, such as `render` or `context`. Use a `template` source or a project-aware rendering. Lint checks declarations without loading values. |
 | `tpl::data::unknown_setting` | An unknown `kind` or `format`. |
 | `tpl::data::invalid_git_source` | A `git` source's `source`, `ref` and `path` do not name a file. Write all three keys, or a `<scheme>://<repo>@<ref>:<path>` source. |
 | `tpl::data::untrusted` | A network source — remote or `git` — was not authorised. Pass `--trust`, add the template to `[trust]`, or, in `git tpl test`, set `trust = true` on the case. |
@@ -146,6 +148,7 @@ These two are about the flags rather than the template, so they are raised as er
 | Code | Meaning |
 |---|---|
 | `tpl::config::missing` | No `.config/git.tpl.toml`. The repository has no template attached. |
+| `tpl::config::changed` | Configuration changed during rendering; review it and rerun update. Nothing was published. |
 | `tpl::config::parse` | `.config/git.tpl.toml` is not valid TOML. |
 | `tpl::config::io` | It could not be read or written. |
 | `tpl::config::serialise` | It could not be written back. |
@@ -187,6 +190,8 @@ The reasoning is [ADR-020](../adr/020-backport-is-a-patch.md).
 | `tpl::backport::binary` | A changed file is binary, and a text patch cannot carry it. |
 | `tpl::backport::stale_rendering` | The recorded answers no longer reproduce `refs/tpl/<id>`, so every line of the patch would be measured against the wrong file. Run `update` first. |
 | `tpl::backport::unknown_path` | A named path is neither produced by the template nor present in the project. |
+| `tpl::backport::non_leaf` | A modified output belongs to an inherited or composed repository. Edit its owning repository directly or exclude the path. |
+| `tpl::backport::symlink` | A changed path is a symlink on one side. Edit the link in the owning template directly or exclude it. |
 | `tpl::backport::output_write` | The patch could not be written to `--output`. |
 | `tpl::backport::hunk_refused` | One of the hunks selected with `-p` or `--hunk` cannot be backported. The refusal underneath keeps its own code and its own advice; this names the hunk. Run again and leave that hunk out. See [Choosing hunks](../usage/backport.md#choosing-hunks). |
 | `tpl::backport::cancelled` | The hunk picker was cancelled. No patch was produced and nothing was written. |
@@ -236,12 +241,17 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | Code | Meaning |
 |---|---|
 | `tpl::git::not_a_repository` | The command needs a repository and there is none. |
-| `tpl::git::no_such_revision` | The requested branch, tag or SHA does not exist. |
+| `tpl::git::no_merge` | No merge is active; inspect `git status`. Local changes are preserved. |
+| `tpl::git::abort_failed` | Native Git could not abort; inspect its captured reason and preserve edits before retrying. |
+| `tpl::git::no_such_revision` | The requested revision is absent, or an inheritance object pin is ambiguous or noncommit. |
 | `tpl::git::auth` | Authentication failed. |
 | `tpl::git::network` | The remote could not be reached. The help text carries libgit2's own reason. |
 | `tpl::git::clone` | The remote answered, but the clone could not be written — usually no space or no permission on the temporary directory. |
 | `tpl::git::remote_exists` | A remote of that name already exists. git-tpl never repoints one. |
+| `tpl::git::stale_ref` | The rendered ref changed concurrently; inspect expected/actual tips and retry. No config is saved. |
 | `tpl::git::dirty_worktree` | The operation merges, and the worktree has uncommitted changes. |
+| `tpl::git::dirty_index` | Attachment would include staged user changes; commit or unstage them, even with `--no-merge`. |
+| `tpl::git::repository_busy` | Another Git/template operation is active; wait, finish or abort it before retrying. |
 | `tpl::git::diverged` | The remote template ref has diverged. Nothing is force-pushed. |
 | `tpl::git::jj_not_colocated` | The path is a Jujutsu workspace without a colocated `.git`. |
 | `tpl::git::no_identity` | Git has no `user.name` or `user.email` configured. |

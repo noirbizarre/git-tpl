@@ -184,9 +184,16 @@ fn an_expanded_shortcut_is_what_gets_recorded_in_the_project() {
     .success();
 
     let recorded = world.project.read(".config/git.tpl.toml");
-    assert!(
-        recorded.contains(&format!("source = \"{parent}/{name}\"")),
-        "the expanded URL must be recorded, not the shortcut:\n{recorded}"
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    // Local expansions are stored project-relative, but still locate the same
+    // repository independently of this machine's shortcut configuration.
+    assert_eq!(
+        std::path::Path::new(
+            tpl::config::source_location(&config.template.source, &world.project.path).as_ref()
+        )
+        .canonicalize()
+        .unwrap(),
+        path.canonicalize().unwrap()
     );
     assert!(
         !recorded.contains("t:"),

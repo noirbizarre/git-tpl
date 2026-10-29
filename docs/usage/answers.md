@@ -20,6 +20,14 @@ CLI surface permanently.
 
 ## The file
 
+Strict dirty previews (`diff` and `show`) check keys supplied on the current invocation.
+Obsolete recorded keys are ignored, as on `update`; explicitly supplying an obsolete key still fails strict checking.
+
+Strings in files and recorded configuration keep their type, even if they look like integers, booleans or arrays.
+Only `--answer` text is parsed as the question's declared type.
+Correct previously recorded wrong-type strings explicitly, or override them with `--answer`;
+failed validation does not migrate configuration.
+
 Either a flat table of `name = value`:
 
 ```toml

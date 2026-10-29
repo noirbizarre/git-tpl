@@ -13,7 +13,7 @@ git tpl --json questions ./my-template
 |---|---|
 | `<template>` | The template — a Git URL or a path. Defaults to `.`. |
 | `--ref` | Branch, tag or commit to read the schema from. |
-| `--root` | Read the manifest for this subdirectory instead. |
+| `--root` | Override the manifest's render root with this subdirectory. Manifest discovery stays at the repository root. |
 | `--dirty` | Read the template's working tree rather than its `HEAD`. Local templates only. |
 | [`--json`](../reference/json.md#questions) | A global flag. The schema on stdout as one object. |
 
@@ -60,8 +60,13 @@ A caller that took it literally would write `{{ crate }}` into the answers file.
 
 When `choices_from` points at a data file inside the template repository, the values are resolved and included,
 so a caller does not have to fetch and parse the file itself.
+`choicesResolved` remains an array of string values.
+`choicesResolvedDetails` adds normalized `{value, label, help}` records, with absent labels replaced by their values.
+Static TOML, JSON and YAML use the render loader, including explicit formats, checksums and inherited data origins.
+Root arrays are supported; invalid static data fails rather than producing a filtered or empty list.
 
 Only for template-local sources.
+Dynamic sources and project-local sources remain unresolved.
 A remote one would mean this command silently acquired a network fetch, which a command that reads a manifest
 should not do.
 

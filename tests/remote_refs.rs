@@ -4,6 +4,62 @@ mod common;
 
 use common::{Repo, World, scrub_git_env, tpl};
 
+#[test]
+fn fetch_distinguishes_all_presence_combinations_without_adopting_the_local_ref() {
+    for local_present in [false, true] {
+        for remote_present in [false, true] {
+            let world = World::new();
+            world.init(&[]).success();
+            let _remote = with_remote(&world);
+            if remote_present {
+                tpl(&world.project, &["push"]).success();
+            }
+            let original_tip = world.project.rev_parse(&world.ref_name());
+            if !local_present {
+                world.project.git(&["update-ref", "-d", &world.ref_name()]);
+            }
+            let before = world.project.working_state();
+            let output = tpl(&world.project, &["--json", "fetch"]).success();
+            let json = output.json();
+            assert_eq!(json["localPresent"], local_present);
+            assert_eq!(json["remotePresent"], remote_present);
+            assert_eq!(
+                json["state"],
+                if local_present && remote_present {
+                    "synced"
+                } else {
+                    "absent"
+                }
+            );
+            assert_eq!(
+                json["relation"].is_null(),
+                !local_present || !remote_present
+            );
+            assert_eq!(world.project.has_ref(&world.ref_name()), local_present);
+            if local_present {
+                assert_eq!(world.project.rev_parse(&world.ref_name()), original_tip);
+            }
+            assert_eq!(before, world.project.working_state());
+            if !local_present && remote_present {
+                let output = tpl(&world.project, &["fetch"]).success();
+                assert!(
+                    output.stderr.contains("a shared copy is available"),
+                    "{}",
+                    output.stderr
+                );
+                assert!(!output.stderr.contains("No shared copy"));
+            }
+            // The existing library entry point retains its tuple/relation contract.
+            let backend = tpl::git::libgit2::LibGit2::open(&world.project.path).unwrap();
+            let preferences = tpl::gitconfig::Preferences::load(&backend).unwrap();
+            let (name, relation) =
+                tpl::ops::fetch(&backend, &world.project.path, &preferences).unwrap();
+            assert_eq!(name, world.ref_name());
+            assert_eq!(relation.is_some(), local_present && remote_present);
+        }
+    }
+}
+
 /// Give a world a bare remote and publish `main` to it.
 fn with_remote(world: &World) -> Repo {
     let remote_path = world.dir.path().join("remote.git");
@@ -107,6 +163,62 @@ fn fetch_retrieves_a_shared_ref_into_the_remote_namespace() {
     );
 }
 
+#[test]
+fn a_fresh_clone_restores_original_ancestry_before_its_next_update() {
+    let world = World::new();
+    world.init(&[]).success();
+    let _remote = with_remote(&world);
+    tpl(&world.project, &["push"]).success();
+    let original = world.project.rev_parse(&world.ref_name());
+    let other = Repo::init_in(world.dir.path(), "restored");
+    other.git(&[
+        "remote",
+        "add",
+        "origin",
+        &world.dir.path().join("remote.git").to_string_lossy(),
+    ]);
+    other.git(&["fetch", "-q", "origin"]);
+    other.git(&["checkout", "-q", "-b", "main", "origin/main"]);
+    assert!(!other.has_ref(&world.ref_name()));
+
+    // Full merged history retains the original rendering even without sharing its ref.
+    let recorded = tpl::config::Config::load(&world.project.path).unwrap();
+    let source = format!("^Template-Source: {}$", recorded.template.source);
+    let historical = other.git(&[
+        "log",
+        "HEAD",
+        "--topo-order",
+        "-1",
+        "--format=%H",
+        &format!("--grep={source}"),
+    ]);
+    assert_eq!(historical, original);
+    other.git(&["merge-base", "--is-ancestor", &historical, "HEAD"]);
+
+    tpl(&other, &["fetch"]).success();
+    assert!(!other.has_ref(&world.ref_name()));
+    let candidate = other.rev_parse("refs/remotes/origin/tpl/template");
+    assert_eq!(candidate, historical);
+    other.git(&["update-ref", &world.ref_name(), &candidate, ""]);
+    // The documented absent-only write must refuse even the same existing tip.
+    let mut command = std::process::Command::new("git");
+    command
+        .current_dir(&other.path)
+        .args(["update-ref", &world.ref_name(), &candidate, ""]);
+    scrub_git_env(&mut command, other.config_home());
+    assert!(
+        !command
+            .output()
+            .expect("conditional ref creation")
+            .status
+            .success()
+    );
+
+    world.move_template();
+    tpl(&other, &["update", "--defaults"]).success();
+    assert_eq!(other.rev_parse(&format!("{}^", world.ref_name())), original);
+}
+
 /// Fetching never moves the local ref. What to do about a newer remote copy is
 /// a decision, and adopting someone else's rendering silently would be a
 /// surprising thing for a fetch to do.
@@ -194,7 +306,7 @@ fn status_json_reports_the_remote_relation() {
 /// A rendered ref is history others may have merged from; overwriting it
 /// destroys the merge base their next update depends on.
 #[test]
-fn push_refuses_a_diverged_ref_and_says_how_to_reconcile() {
+fn push_refuses_a_diverged_ref_and_explains_the_reconciliation_limitation() {
     let world = World::new();
     world.init(&[]).success();
     let _remote = with_remote(&world);
@@ -238,11 +350,20 @@ fn push_refuses_a_diverged_ref_and_says_how_to_reconcile() {
     world.template.repo.commit_all("feat: add a file");
     tpl(&world.project, &["update", "--defaults"]).success();
 
-    tpl(&world.project, &["fetch"]).success();
+    let json = tpl(&world.project, &["--json", "fetch"]).success().json();
+    assert_eq!(json["localPresent"], true);
+    assert_eq!(json["remotePresent"], true);
+    assert_eq!(json["state"], "diverged");
+    assert_eq!(json["relation"]["diverged"], true);
+    tpl(&world.project, &["fetch"])
+        .success()
+        .says("No automatic rendered-ref reconciliation")
+        .silent_about("git merge refs/remotes");
     tpl(&world.project, &["push"])
         .failure()
         .says("diverged")
-        .says("git tpl fetch");
+        .says("Preserve both histories")
+        .silent_about("git tpl push");
 }
 
 /// The default. Nothing has to be configured for it to work, and the
@@ -353,6 +474,8 @@ fn fetch_reports_the_relation_as_json() {
     tpl(&world.project, &["push"]).success();
     let json = tpl(&world.project, &["--json", "fetch"]).success().json();
     assert_eq!(json["state"], "synced");
+    assert_eq!(json["localPresent"], true);
+    assert_eq!(json["remotePresent"], true);
     assert_eq!(json["relation"]["ahead"], 0);
     assert_eq!(json["relation"]["behind"], 0);
     assert_eq!(json["relation"]["synced"], true);
@@ -363,6 +486,8 @@ fn fetch_reports_the_relation_as_json() {
     tpl(&world.project, &["update", "--defaults"]).success();
     let json = tpl(&world.project, &["--json", "fetch"]).success().json();
     assert_eq!(json["state"], "ahead");
+    assert_eq!(json["localPresent"], true);
+    assert_eq!(json["remotePresent"], true);
     assert_eq!(json["relation"]["ahead"], 1);
 }
 
@@ -426,6 +551,8 @@ fn fetch_reports_being_behind_the_remote_as_json() {
     let json = tpl(&world.project, &["--json", "fetch"]).success().json();
 
     assert_eq!(json["state"], "behind");
+    assert_eq!(json["localPresent"], true);
+    assert_eq!(json["remotePresent"], true);
     assert_eq!(json["relation"]["behind"], 1);
     assert_eq!(json["relation"]["ahead"], 0);
     assert_eq!(json["relation"]["diverged"], false);

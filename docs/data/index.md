@@ -1,5 +1,10 @@
 # Data sources
 
+Within a render, declarations sharing a resource reuse its bytes.
+Each declaration still requires its own authorization, checksum and format validation,
+and contributes its own provenance entry in load order.
+Template resources are scoped to the layer that declared them, so identical paths in ancestors stay distinct.
+
 Templates often need reference data: a list of licences, the language versions a CI matrix should cover, an
 organisation's project categories.
 Data sources load that data once and make it available to both the question engine and the renderer.

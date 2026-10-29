@@ -1,7 +1,7 @@
 //! Rendering a template tree into a Git tree.
 //!
 //! The output is written straight into Git objects, never to the filesystem.
-//! That is what makes "`update` does not touch your working tree" structural
+//! That is what makes "`update` never writes rendered worktree files" structural
 //! rather than a promise: there is no code path here that opens a file for
 //! writing in the project.
 //!
@@ -152,6 +152,17 @@ pub fn collect_partials(
     Ok(Partials::new(out))
 }
 
+/// Repository ownership, independent of a source path that multiple repositories may share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Origin {
+    /// The directly requested repository owns the source.
+    Leaf,
+    /// An ancestor owns it; the index is relative to the resolved inheritance chain.
+    Inherited(usize),
+    /// A separately rendered module owns it, regardless of its own inheritance.
+    Composed(String),
+}
+
 /// A rendered file, before it becomes a tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rendered {
@@ -167,10 +178,12 @@ pub struct Rendered {
     /// which source a name came from. `backport` needs to name the `.jinja`
     /// its patch edits, so the mapping is kept rather than rediscovered.
     pub source: String,
+    /// Source ownership cannot be recovered from a path shared by multiple repositories.
+    pub origin: Origin,
     /// The output bytes.
     pub content: Vec<u8>,
-    /// Whether the executable bit is set.
-    pub executable: bool,
+    /// Git file kind and executable bit, including opaque symbolic links.
+    pub mode: FileMode,
     /// Whether the file went through MiniJinja, or was copied byte-for-byte.
     ///
     /// Reported because it is the one thing about a rendering an author cannot
@@ -215,11 +228,7 @@ pub fn write_tree(project: &dyn GitBackend, rendered: &[Rendered]) -> Result<Oid
         tree_entries.push(TreeEntry {
             path: file.path.clone(),
             oid,
-            mode: if file.executable {
-                FileMode::BlobExecutable
-            } else {
-                FileMode::Blob
-            },
+            mode: file.mode,
         });
     }
 
@@ -326,7 +335,9 @@ fn render_indexed(
         // A binary blob is copied even when it is named `.jinja`, so
         // "was it rendered" is not the same question as "is it named like a
         // template". This is the answer to the first.
-        let templated = entry.path.ends_with(TEMPLATE_SUFFIX) && !is_binary(&source);
+        let templated = entry.mode != FileMode::Link
+            && entry.path.ends_with(TEMPLATE_SUFFIX)
+            && !is_binary(&source);
 
         let content = if templated {
             let text = String::from_utf8_lossy(&source);
@@ -355,16 +366,40 @@ fn render_indexed(
         out.push(Rendered {
             path,
             source: entry.path.clone(),
+            origin: if origin == 0 {
+                Origin::Leaf
+            } else {
+                Origin::Inherited(origin)
+            },
             content,
             templated,
-            // Git records nothing about permissions except the executable bit,
-            // so it is the only one that can be carried.
-            executable: entry.mode == FileMode::BlobExecutable,
+            mode: entry.mode,
         });
     }
 
     out.sort_by(|a, b| a.path.cmp(&b.path));
+    validate_paths(&out)?;
     Ok(out)
+}
+
+/// A tree cannot contain a file (especially a link) and a descendant of that file.
+pub fn validate_paths(files: &[Rendered]) -> Result<(), RenderError> {
+    let paths: std::collections::BTreeMap<_, _> = files
+        .iter()
+        .map(|file| (file.path.as_str(), file.source.as_str()))
+        .collect();
+    for file in files {
+        for (index, _) in file.path.match_indices('/') {
+            if let Some(first) = paths.get(&file.path[..index]) {
+                return Err(RenderError::Collision {
+                    first: (*first).to_string(),
+                    second: file.source.clone(),
+                    rendered: file.path.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Render a path, stripping `.jinja` and evaluating each segment.
@@ -819,8 +854,8 @@ mod tests {
             .find(|r| r.path == "scripts/build.sh")
             .unwrap();
         let readme = rendered.iter().find(|r| r.path == "README.md").unwrap();
-        assert!(script.executable);
-        assert!(!readme.executable);
+        assert_eq!(script.mode, FileMode::BlobExecutable);
+        assert_eq!(readme.mode, FileMode::Blob);
     }
 
     /// A tool that normalised line endings would produce different trees on

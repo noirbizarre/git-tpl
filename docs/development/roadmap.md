@@ -36,8 +36,9 @@ Some things are absent on purpose.
 Proposing them again costs everyone an afternoon, so they are written down.
 
 The [declined features](contributing.md#things-that-will-be-declined) list covers the big ones — custom merge
-logic, a second template engine, code execution from templates, runtime values in the render context, automatic
-ref push and fetch, Copier compatibility.
+logic, a second template engine, code execution from templates, runtime values in the render context,
+implicit/default ref pushing and fetching, Copier compatibility.
+Explicit `tpl.autoPush` or `update --push` consent is supported; fetching remains explicit.
 
 Two more are deliberate trade-offs rather than non-goals, and both have the same shape:
 

@@ -1,7 +1,11 @@
 # JSON output
 
+Render `files` entries retain `executable` (boolean) and add `mode`, an octal string:
+`"100644"`, `"100755"` or `"120000"`.
+For a symbolic link, `bytes` counts its opaque target bytes and `templated` is false.
+
 `--json` is global.
-Every command accepts it and every failure emits the same envelope — including the commands that have no success
+Every command accepts it and every runtime failure emits the same envelope — including commands with no success
 payload of their own.
 Almost every command emits its payload to **stdout**; the three whose stdout is already the payload are
 [`show`, `completion` and `man`](#show-completion-and-man).
@@ -31,7 +35,11 @@ With `--json`, diff bypasses Git's display tools and pager entirely.
 
 ## Failure
 
-One shape, from every command:
+Argument parsing happens before command dispatch and JSON reporting.
+Unknown options, missing arguments and conflicting flags produce the parser's plain-text diagnostic on stderr
+and exit `2`, even with `--json`; they have no JSON envelope or `error.code`.
+Successful `--help` and `--version` also retain their raw output.
+After successful parsing, runtime failures use one shape, from every command:
 
 ```json
 {
@@ -167,6 +175,10 @@ Three keys appear only when the question declares them: `choices`, an array of `
 `choicesFrom`, the reference a `choices_from` names; and `choicesResolved`, that reference's values, present only
 when it points at a data file inside the template — which saves the caller fetching and parsing it, and is why a
 remote source has no resolved form here.
+`choicesResolved` is always a string array, including for structured choices.
+An accompanying `choicesResolvedDetails` array carries `{value, label, help}` records;
+`label` falls back to the value and absent `help` is null.
+Static sources use TOML/JSON/YAML format and checksum validation and their declaring layer's origin.
 
 ### `context`
 
@@ -212,6 +224,10 @@ leave in the worktree.
 
 ### `init`
 
+For `init --dry-run`, `files` is null without `--defaults` because no rendering was attempted.
+With `--defaults`, success requires a completed rendering and `files` is its path array;
+missing answers, trust refusals and render failures produce the ordinary diagnostic failure envelope.
+
 ```json
 { "ok": true,
   "id": "rust", "ref": "refs/tpl/rust",
@@ -237,8 +253,8 @@ the project, and a shortcut means nothing on anyone else's machine.
 (`{"result": "upToDate"}`).
 
 `note` is the template's own note, `null` when it declares none.
-It is **unsanitised** — escape sequences are a terminal's problem and this stream reaches no terminal, so strip
-them yourself if you are going to print it.
+It is **unsanitised**, even if stdout is a terminal: JSON preserves the raw text.
+Strip terminal control sequences before displaying decoded text to a user.
 Branch on its presence, never on its text: note prose is not a contract.
 
 `remotes` lists the `[remotes]` a template declared, in declaration order, with what became of each:
@@ -332,7 +348,20 @@ rendering left could not supply one — an older trailer format, or a hand-edite
 `pushed` names the remote when [`tpl.autoPush`](../usage/push.md) pushed automatically, `null` otherwise — the
 push still happens under `--json`, only its prose is silenced.
 
-With `--dry-run`, the same shape plus `"dryRun": true`, and `result` is `upToDate` or `wouldUpdate`.
+With `--dry-run`, `result` is `upToDate` or `wouldUpdate`, and the payload has its own shape:
+
+```json
+{ "ok": true, "dryRun": true, "result": "wouldUpdate",
+  "id": "rust", "ref": "refs/tpl/rust", "template": "…",
+  "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
+  "changes": [{ "path": "Cargo.toml", "kind": "modified" }],
+  "migrations": [], "ignoredAnswers": [] }
+```
+
+`wouldUpdate` reports `id`, `ref`, `template`, `revision`, `changes`, `migrations` and `ignoredAnswers`.
+It does not report `commit`, `previousRevision`, `answersChanged`, `startedNewHistory`, `movedCommit` or `pushed`.
+A dry-run `upToDate` report instead includes `changes: []` and `answersChanged`, but no `migrations` field.
+Neither dry-run outcome writes configuration or publishes a ref.
 
 ### `merge`
 
@@ -427,11 +456,14 @@ Branch on the code: `substituted_region` is routine and means "edit the template
 ```json
 { "ok": true, "remote": "origin", "ref": "refs/tpl/rust",
   "state": "behind",
+  "localPresent": true, "remotePresent": true,
   "relation": { "ahead": 0, "behind": 2, "synced": false, "diverged": false } }
 ```
 
-`state` is one of `absent`, `synced`, `diverged`, `behind` or `ahead`, and `relation` is `null` exactly when
-`state` is `absent` — the remote has no copy of the ref, which is a different thing from a copy level with yours.
+`state` is one of `absent`, `synced`, `diverged`, `behind` or `ahead`.
+`localPresent` and `remotePresent` are booleans identifying the presence of the local ref and fetched remote-tracking copy.
+`relation` is `null` exactly when `state` is `absent`: one or both compared tips are missing.
+An available shared copy does not restore an absent local ref.
 
 Fetching never moves the local ref, so `behind` is a report, not an action.
 

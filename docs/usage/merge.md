@@ -41,6 +41,10 @@ Merge commit 2fff441.
 
 Fast-forwards when it can, and says so:
 
+Fast-forward checkout protects tracked edits and untracked or ignored files obstructing incoming paths.
+Unrelated local edits survive.
+Checkout runs against the original HEAD before the branch moves; a refused checkout leaves the branch unpublished.
+
 ```console
 $ git tpl merge
 Fast-forwarded refs/tpl/github-com-noirbizarre-rust-library-template into the current branch
@@ -50,6 +54,10 @@ Now at 15b50a5.
 With `--no-commit`, the merge is staged and left for you to commit.
 
 ## Conflicts
+
+`git tpl merge --abort` delegates to native `git merge --abort`, preserving unrelated local edits.
+It refuses when no merge is in progress and retains Git's recovery state if Git cannot abort safely.
+Native Git must be installed; there is no destructive reset fallback.
 
 ```console
 $ git tpl merge

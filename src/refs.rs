@@ -15,6 +15,18 @@ use thiserror::Error;
 /// not appear in `git branch`, and a bare `git push` must not send it.
 pub const REF_PREFIX: &str = "refs/tpl/";
 
+/// A filesystem source, classified by spelling rather than whether it happens to exist.
+pub fn local_path(source: &str) -> Option<std::path::PathBuf> {
+    if source.contains("://")
+        || source
+            .split_once(':')
+            .is_some_and(|(host, _)| !host.contains('/') && !host.contains('\\') && host.len() != 1)
+    {
+        return None;
+    }
+    Some(std::path::PathBuf::from(source))
+}
+
 /// Errors from constructing a [`TemplateId`].
 ///
 /// Named after [`TemplateId`], the one domain type this module exports, not

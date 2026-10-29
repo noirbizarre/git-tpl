@@ -30,6 +30,52 @@ fn project(dir: &std::path::Path) -> Repo {
 const REGISTRY: &str = r#"{"count": 2, "items": ["a", "b"], "strict": true}"#;
 
 #[test]
+fn aliases_share_bytes_but_validate_and_record_each_declaration() {
+    for (policy, expected) in [
+        ("", None),
+        (
+            "sha256 = '0000000000000000000000000000000000000000000000000000000000000000'",
+            Some("tpl::data::checksum"),
+        ),
+        ("format = 'toml'", Some("tpl::data::parse")),
+    ] {
+        let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+        let dir = tempfile::tempdir().unwrap();
+        let template = template_with(
+            dir.path(),
+            &format!(
+                "source = '{}'\n[data.second]\nsource = '{}'\n{policy}",
+                server.url("/reg.json"),
+                server.url("/reg.json")
+            ),
+            "{{ data.reg.count }}{{ data.second.count }}",
+        );
+        let project = project(dir.path());
+        let result = tpl(
+            &project,
+            &[
+                "--json",
+                "init",
+                template.path.to_str().unwrap(),
+                "--defaults",
+                "--trust",
+            ],
+        );
+        if let Some(code) = expected {
+            assert_eq!(result.failure().error_code(), code);
+            assert!(!project.path.join(".config/git.tpl.toml").exists());
+        } else {
+            result.success();
+            let reference = project.git(&["for-each-ref", "--format=%(refname)", "refs/tpl/"]);
+            let message = project.git(&["log", "-1", "--format=%B", reference.trim()]);
+            assert!(message.contains("Data-Source: reg = remote:"));
+            assert!(message.contains("Data-Source: second = remote:"));
+        }
+        assert_eq!(server.hits(), 1);
+    }
+}
+
+#[test]
 fn a_remote_data_source_is_fetched_and_its_types_are_preserved() {
     let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
     let dir = tempfile::tempdir().unwrap();

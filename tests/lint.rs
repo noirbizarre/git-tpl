@@ -50,6 +50,76 @@ fn codes(output: &common::Output) -> Vec<String> {
 }
 
 #[test]
+fn syntax_lint_compiles_unimported_and_unreachable_partial_declarations() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = Template::with_shared(
+        dir.path(),
+        "name = 'partials'",
+        &[(
+            "out.jinja",
+            "{% if false %}{% include 'unreachable.jinja' %}{% endif %}",
+        )],
+        &[
+            ("unimported.jinja", "{% if %}"),
+            ("unreachable.jinja", "{% for %}"),
+        ],
+    );
+    let scratch = Scratch::new();
+    let json = scratch.lint(&template.source(), &[]).code(1).json();
+    let paths: Vec<_> = json["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["code"] == "tpl::lint::syntax")
+        .map(|finding| finding["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(paths, ["unimported.jinja", "unreachable.jinja"]);
+    assert_eq!(json, scratch.lint(&template.source(), &[]).code(1).json());
+}
+
+#[test]
+fn inherited_syntax_uses_effective_output_but_retains_shadowed_partials() {
+    let base = common::Repo::init("base");
+    base.write("template.toml", "name = 'base'")
+        .write("template/inherited.jinja", "{% if %}")
+        .write("template/overridden.jinja", "{% if %}")
+        .write("template/removed.jinja", "{% if %}")
+        .write("template/binary.jinja", "\0{% if %}")
+        .write("macro.jinja", "{% if %}")
+        .write("removed.jinja", "{% if %}")
+        .commit_all("malformed ancestor declarations");
+    let leaf = common::Repo::init("leaf");
+    leaf.write("template.toml", &format!("name = 'leaf'\n[extends]\nsource = '{}'\nrev = '{}'\nremove = ['template/removed.jinja', 'removed.jinja']", base.path.display(), base.git(&["rev-parse", "HEAD"])))
+        .write("template/overridden.jinja", "valid")
+        .write("template/leaf.jinja", "{% if %}")
+        .write("macro.jinja", "valid")
+        .commit_all("effective leaf");
+    let scratch = Scratch::new();
+    let json = scratch
+        .lint(leaf.path.to_str().unwrap(), &[])
+        .code(1)
+        .json();
+    let paths: Vec<_> = json["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|finding| finding["code"] == "tpl::lint::syntax")
+        .map(|finding| finding["path"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        paths,
+        ["leaf.jinja", "inherited.jinja", "parent:macro.jinja"]
+    );
+    assert_eq!(
+        json,
+        scratch
+            .lint(leaf.path.to_str().unwrap(), &[])
+            .code(1)
+            .json()
+    );
+}
+
+#[test]
 fn a_sound_template_reports_nothing() {
     let dir = tempfile::tempdir().expect("tempdir");
     let template = Template::standard(dir.path());

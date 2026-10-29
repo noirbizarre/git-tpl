@@ -8,6 +8,48 @@ mod common;
 
 use common::{World, tpl};
 
+#[test]
+fn structured_strings_are_not_coerced_but_cli_text_is() {
+    for (kind, text) in [("integer", "42"), ("boolean", "true"), ("list", "[\"a\"]")] {
+        let world = World::new();
+        world.template.repo.write(
+            "template.toml",
+            &format!("name = 'typed'\nroot = 'output'\n[questions.input]\ntype = '{kind}'\n"),
+        );
+        world.template.repo.write("output/out.jinja", "{{ input }}");
+        world.template.repo.commit_all("typed question");
+        let path = answers_file(
+            &world,
+            "typed.json",
+            &serde_json::json!({"input": text}).to_string(),
+        );
+        let failed = world.init(&["--json", "--answers-from", &path]).failure();
+        assert_eq!(failed.error_code(), "tpl::eval::wrong_type");
+        assert!(!world.project.path.join(".config/git.tpl.toml").exists());
+        world
+            .init(&[
+                "--answers-from",
+                &path,
+                "--answer",
+                &format!("input={text}"),
+            ])
+            .success();
+        let mut config = tpl::config::Config::load(&world.project.path).unwrap();
+        config
+            .answers
+            .insert("input".into(), tpl::Value::String(text.into()));
+        config.save(&world.project.path).unwrap();
+        let before = world.project.read(".config/git.tpl.toml");
+        assert_eq!(
+            tpl(&world.project, &["--json", "update", "--defaults"])
+                .failure()
+                .error_code(),
+            "tpl::eval::wrong_type"
+        );
+        assert_eq!(world.project.read(".config/git.tpl.toml"), before);
+    }
+}
+
 /// Write an answers file *outside* the project, so that supplying answers never
 /// dirties the worktree `init` requires to be clean.
 fn answers_file(world: &World, name: &str, content: &str) -> String {

@@ -1,6 +1,14 @@
 # `git tpl init`
 
+Rendered-ref publication is conditional on its original tip, including expected absence.
+A concurrent writer produces `tpl::git::stale_ref`; inspect the current ref and retry.
+The failed publication does not save the attachment configuration.
+
 Attach a template to a repository, render it, and merge the result.
+
+All attachments require an index matching HEAD (empty on an unborn branch) and no active Git operation.
+This includes `--no-merge`, which still creates an attachment configuration commit.
+Commit or unstage staged changes first; `--no-merge` preserves unrelated unstaged edits.
 
 ```sh
 git tpl init <template> [<dir>] [--ref <ref>] [--answer k=v]... [options]
@@ -153,9 +161,11 @@ destination that does not exist yet or is not a Git repository.
 Re-running `init` is refused with `tpl::ops::already_initialised`, because it would silently discard the recorded
 answers.
 To take a newer template revision with the answers you already gave, run `git tpl update`.
-To *change* those answers, run `git tpl init --force`, which re-asks every question and re-renders over the
-existing attachment — `update` cannot do that, since it re-renders with the recorded answers and there is
-otherwise no way to change them short of editing the config by hand.
+To re-run the full questionnaire, run `git tpl init <template> --force`, which re-asks every question
+and re-renders over the existing attachment.
+For targeted changes, use `git tpl update --answer key=value` or `--answers-from answers.toml`;
+these override the selected recorded answers and save them while preserving the others.
+Editing `[answers]` in `.config/git.tpl.toml` and running `update` works too.
 
 **A clean worktree**, because step 10 is a merge.
 Uncommitted changes are refused with the same message Git would give you.
@@ -172,6 +182,10 @@ main:  G0
 Which is the cleanest possible history for a project generated from a template.
 
 ## An existing project
+
+Dry runs honor explicit `--trust` and persistent trust during ancestor resolution.
+With `--defaults`, a dry run renders the resolved revision and reports any render failure as an error.
+Without `--defaults`, it reports only the schema and JSON `files` is null.
 
 `init` also works on a project that already has files — one generated last year by another tool, or written by
 hand and since grown to resemble a template.

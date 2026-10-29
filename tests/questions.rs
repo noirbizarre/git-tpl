@@ -4,6 +4,122 @@ mod common;
 
 use common::{Template, World, tpl, tpl_outside};
 
+#[test]
+fn static_choice_introspection_uses_formats_checksums_and_the_render_choice_reader() {
+    for (file, format, body) in [
+        (
+            "choices.json",
+            "",
+            r#"[{"value":"a","label":"Alpha","help":"First"},"b"]"#,
+        ),
+        (
+            "choices.yaml",
+            "",
+            "- value: a\n  label: Alpha\n  help: First\n- b\n",
+        ),
+        (
+            "choices.data",
+            "format = 'toml'",
+            "items = [{value = 'a', label = 'Alpha', help = 'First'}, 'b']",
+        ),
+    ] {
+        let reference = if file.ends_with("data") {
+            "data.options.items"
+        } else {
+            "data.options"
+        };
+        let world = World::with_template(
+            &format!(
+                "name = 'choices'\n[data.options]\nsource = '{file}'\n{format}\n[questions.pick]\ntype = 'choice'\nchoices_from = '{reference}'\n"
+            ),
+            &[("keep", "")],
+        );
+        world
+            .template
+            .repo
+            .write(file, body)
+            .commit_all("static choices");
+        let json = Scratch::new().ask(&world.template.source());
+        let pick = question(&json, "pick");
+        assert_eq!(pick["choicesResolved"], serde_json::json!(["a", "b"]));
+        assert_eq!(
+            pick["choicesResolvedDetails"][0],
+            serde_json::json!({"value":"a","label":"Alpha","help":"First"})
+        );
+        assert_eq!(pick["choicesResolvedDetails"][1]["label"], "b");
+        let manifest = world.template.repo.read("template.toml");
+        world
+            .template
+            .repo
+            .write(
+                "template.toml",
+                &manifest.replace(
+                    &format!("source = '{file}'"),
+                    &format!("source = '{file}'\nsha256 = '{}'", "0".repeat(64)),
+                ),
+            )
+            .commit_all("incorrect checksum");
+        assert_eq!(
+            tpl(
+                &world.project,
+                &["--json", "questions", &world.template.source()]
+            )
+            .failure()
+            .error_code(),
+            "tpl::data::checksum"
+        );
+    }
+    let world = World::with_template(
+        "name = 'bad'\n[data.options]\nsource = 'choices.json'\n[questions.pick]\ntype = 'choice'\nchoices_from = 'data.options'\n",
+        &[("keep", "")],
+    );
+    world
+        .template
+        .repo
+        .write("choices.json", r#"["a",42]"#)
+        .commit_all("invalid choice member");
+    assert_eq!(
+        tpl(
+            &world.project,
+            &["--json", "questions", &world.template.source()]
+        )
+        .failure()
+        .error_code(),
+        "tpl::eval::bad_choices"
+    );
+}
+
+#[test]
+fn inherited_choices_read_the_declaring_layer_until_overridden() {
+    let base = common::Repo::init("base");
+    base.write("template.toml", "name = 'base'\n[data.options]\nsource = 'choices.json'\n[questions.pick]\ntype = 'choice'\nchoices_from = 'data.options'\n")
+        .write("template/keep", "")
+        .write("choices.json", "[\"base\"]").commit_all("base choices");
+    let leaf = common::Repo::init("leaf");
+    let manifest = format!(
+        "name = 'leaf'\n[extends]\nsource = '{}'\nrev = '{}'\n",
+        base.path.display(),
+        base.git(&["rev-parse", "HEAD"])
+    );
+    leaf.write("template.toml", &manifest)
+        .write("choices.json", "[\"leaf\"]")
+        .write("template/keep", "")
+        .commit_all("inherit choices");
+    assert_eq!(
+        question(&Scratch::new().ask(leaf.path.to_str().unwrap()), "pick")["choicesResolved"],
+        serde_json::json!(["base"])
+    );
+    leaf.write(
+        "template.toml",
+        &format!("{manifest}\n[data.options]\nsource = 'choices.json'\n"),
+    )
+    .commit_all("override choices");
+    assert_eq!(
+        question(&Scratch::new().ask(leaf.path.to_str().unwrap()), "pick")["choicesResolved"],
+        serde_json::json!(["leaf"])
+    );
+}
+
 /// A manifest exercising conditionals, dynamic defaults and computed values.
 const DYNAMIC: &str = r#"
 name = "dynamic"

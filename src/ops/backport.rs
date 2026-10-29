@@ -27,7 +27,7 @@ use super::unsubstitute::{
     self, LineContext, Proposal, Unsubstitute, Unsubstitution, Verdict, split_terminator,
 };
 use super::{
-    Answering, OpError, Target, Trust, describe_revision, identify, render_files_with_composed,
+    Answering, OpError, Target, Trust, describe_revision, identify, render_files_from_location,
 };
 use std::sync::Arc;
 
@@ -38,6 +38,26 @@ use std::sync::Arc;
 /// floor no refusal can fall below. See ADR-020.
 #[derive(Debug, Error, Diagnostic)]
 pub enum BackportError {
+    /// Text patches cannot carry link modes or link target changes.
+    #[error("`{path}` is a symbolic link on one side of the change")]
+    #[diagnostic(
+        code(tpl::backport::symlink),
+        help("edit the link in its owning template directly, or exclude `{path}` with --exclude")
+    )]
+    Symlink {
+        /// Output whose mode cannot be backported.
+        path: String,
+    },
+    /// A patch against the leaf repository cannot edit a different repository's source.
+    #[error("`{path}` is owned by an inherited or composed template")]
+    #[diagnostic(
+        code(tpl::backport::non_leaf),
+        help("edit the owning template repository directly, or exclude `{path}` with --exclude")
+    )]
+    NonLeaf {
+        /// Output whose owner is outside the leaf repository.
+        path: String,
+    },
     /// A change lands on a line that rendering substituted into.
     ///
     /// The expected refusal, and the one users will meet most. Reversing the
@@ -372,7 +392,8 @@ pub fn backport(
         .or_else(|| config.template.r#ref.clone());
     let revision = recorded.as_ref().and_then(|r| r.revision);
 
-    let rendered = render_files_with_composed(
+    let location = crate::config::source_location(&config.template.source, project_root);
+    let rendered = render_files_from_location(
         Target {
             source: &config.template.source,
             // A SHA if we have one: a branch name would follow the branch, and
@@ -384,8 +405,9 @@ pub fn backport(
             root: config.template.root.as_deref(),
             dirty: false,
         },
+        &location,
         Some((project, project_root)),
-        config.answers.clone(),
+        crate::answers::typed(config.answers.clone()),
         user,
         answering,
         trust,
@@ -411,6 +433,11 @@ pub fn backport(
     // reimplementing Git's pathspec rules is the kind of thing that is subtly
     // wrong for years.
     let changes = project.diff_trees(Some(rendered_tree), workdir_tree, paths)?;
+    let workdir_modes: BTreeMap<_, _> = project
+        .list_tree(workdir_tree)?
+        .into_iter()
+        .map(|entry| (entry.path, entry.mode))
+        .collect();
 
     let by_output: BTreeMap<&str, &Rendered> = rendered
         .files
@@ -450,6 +477,24 @@ pub fn backport(
             continue;
         }
 
+        // Project-only files are opt-in, including links: an unrelated local link must not
+        // prevent backporting a template-owned edit merely because its mode is unsupported.
+        if change.kind == ChangeKind::Added && paths.is_empty() {
+            continue;
+        }
+
+        // Refuse both a link target edit and a regular-file/link conversion before hunk selection.
+        if workdir_modes.get(&change.path) == Some(&crate::git::FileMode::Link)
+            || by_output
+                .get(change.path.as_str())
+                .is_some_and(|file| file.mode == crate::git::FileMode::Link)
+        {
+            return Err(BackportError::Symlink {
+                path: change.path.clone(),
+            }
+            .into());
+        }
+
         match change.kind {
             ChangeKind::Deleted => {
                 // Deleting a file from a template deletes it from every project
@@ -465,19 +510,6 @@ pub fn backport(
                 continue;
             }
             ChangeKind::Added => {
-                // Not template-owned. Only carried when the user named it, and
-                // `paths` being empty means they named nothing.
-                //
-                // Silently, unlike a deletion: every project has files the
-                // template never produced — its own source, its notes, its
-                // `.config/git.tpl.toml` — and listing them all as "skipped"
-                // would bury the one line that matters under the whole
-                // repository. `skipped` means "you might have expected this
-                // and did not get it", which a file the template has never
-                // seen is not.
-                if paths.is_empty() {
-                    continue;
-                }
                 let project_bytes = read_required(project, workdir_tree, &change.path)?;
                 if is_binary(&project_bytes) {
                     // A listing reports and moves on. Refusing here would make
@@ -531,16 +563,6 @@ pub fn backport(
                     .into());
                 };
 
-                let template_bytes = rendered
-                    .template
-                    .repo
-                    .read_path(rendered.template.root_tree, &file.source)?;
-                let Some(template_bytes) = template_bytes else {
-                    return Err(BackportError::UnknownPath {
-                        path: file.source.clone(),
-                    }
-                    .into());
-                };
                 let project_bytes = read_required(project, workdir_tree, &change.path)?;
 
                 // A change with no change to the content: `diff_trees` reports
@@ -557,6 +579,26 @@ pub fn backport(
                 if project_bytes == file.content {
                     continue;
                 }
+
+                // Mode-only changes above need no owner, but content changes must be checked
+                // before reading leaf bytes or publishing a hunk: identical source paths in
+                // different repositories otherwise produce a plausible patch against the wrong owner.
+                if file.origin != crate::render::Origin::Leaf {
+                    return Err(BackportError::NonLeaf {
+                        path: change.path.clone(),
+                    }
+                    .into());
+                }
+                let template_bytes = rendered
+                    .template
+                    .repo
+                    .read_path(rendered.template.root_tree, &file.source)?;
+                let Some(template_bytes) = template_bytes else {
+                    return Err(BackportError::UnknownPath {
+                        path: file.source.clone(),
+                    }
+                    .into());
+                };
 
                 if is_binary(&template_bytes)
                     || is_binary(&file.content)
@@ -1381,7 +1423,8 @@ fn rfc2822(seconds: i64) -> String {
 /// would send the user to apply their patch into a directory that is about to
 /// be deleted.
 fn apply_command(source: &str, project_root: &Path) -> String {
-    let target = match super::resolve::local_path(source) {
+    let location = crate::config::source_location(source, project_root);
+    let target = match super::resolve::local_path(&location) {
         Some(path) => relative_to(&path, project_root),
         // A URL has no local clone to name, so the placeholder says so rather
         // than pretending to know.

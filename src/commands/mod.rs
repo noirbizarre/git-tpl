@@ -313,16 +313,18 @@ pub fn report_ignored(out: &Reporter, ignored: &[String]) {
 /// a recorded configuration to merge. Stated and implemented once here so that
 /// the four call sites — `init`, `init --dry-run`, `update`,
 /// `update --dry-run` — cannot come to disagree about the order.
-pub fn supplied(args: &AnswerArgs) -> Result<BTreeMap<String, tpl::template::Value>, OpError> {
+pub fn supplied(args: &AnswerArgs) -> Result<tpl::answers::SuppliedAnswers, OpError> {
     let mut out = BTreeMap::new();
 
     for path in &args.answers_from {
-        out.extend(tpl::answers::load(path)?);
+        out.extend(tpl::answers::typed(tpl::answers::load(path)?));
     }
 
     out.extend(
         args.parsed()
-            .map_err(|message| OpError::InvalidArgument { message })?,
+            .map_err(|message| OpError::InvalidArgument { message })?
+            .into_iter()
+            .map(|(key, value)| (key, tpl::answers::SuppliedAnswer::Cli(value.to_string()))),
     );
 
     Ok(out)

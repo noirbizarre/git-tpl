@@ -1,5 +1,16 @@
 # Template format
 
+Inheritance pins resolve exact tags (including `refs/tags/<name>`) or unique commit-object SHA prefixes
+of 7–40 hexadecimal characters.
+Tags take precedence over same-named branches; hexadecimal branch names never provide a fallback.
+Ambiguous prefixes and noncommit objects fail with `tpl::git::no_such_revision`.
+
+Rendered files retain Git modes `100644`, `100755` and `120000`.
+Symbolic-link targets are opaque bytes, never template expressions, even for links named `.jinja`.
+Output names still follow path rendering and suffix removal.
+Dirty traversal reads target bytes and never descends through a directory link.
+No output may be a descendant of another output, including a link.
+
 A template is a normal Git repository.
 Nothing registers it, nothing packages it, and any Git URL that libgit2 can clone will do — including a local
 path.
@@ -133,7 +144,10 @@ A `remote` *data source* under `[data]` is an unrelated thing — an HTTP URL th
 Render independent module trees from one or more sibling repositories, tracking the exact commit resolved from a ref.
 Every declaration has `source` (local path or Git URL, optionally an expression), `ref` (branch, tag or commit),
 and `from` (the parent list question that names zero or more module IDs).
-The child declares `module_name` and `module_path` as its own questions; it never inherits the parent's answers.
+The child has a separate answer namespace and declares `module_name` and `module_path` as its own questions.
+Composition supplies those two values explicitly and forwards parent answers named `version` and `memcastle`
+only when the child declares matching questions.
+Other child questions use their own defaults; parent answers are not inherited wholesale.
 See [Composing module templates](composition.md) for the output layout, trust decisions and updating projects.
 
 ### `[extends]`
@@ -233,8 +247,14 @@ A remote (non-local) `source` needs the same confirmation a `[data]` `kind = "gi
 `[trust]` entry, or an interactive confirmation — because it is chosen by the template's author, not typed on the
 command line, exactly like a git-kind data source is. See [Confirmation](../data/remote.md#confirmation). Unlike
 `[data]`, which is confirmed all at once before evaluation, an ancestor is confirmed as it is discovered — the
-chain is only readable one clone at a time. `git tpl lint`, `git tpl questions` and `git tpl status` resolve this
-chain too and need the same confirmation, even though none of them ever touch a `[data]` source.
+chain is only readable one clone at a time.
+
+Inspection commands resolve ancestors too, but `git tpl lint`, `git tpl questions` and `git tpl status`
+do not offer interactive confirmation or an invocation-wide `--trust` flag.
+Remote ancestors must already have persistent `[trust]` entries in the user configuration.
+Without that trust, lint and questions refuse resolution; status instead reports the available revision as unknown
+(`availableReferenceDescription` and `availableCommit` are `null`) while retaining recorded rendering information.
+This ancestor-resolution trust is separate from loading runtime data sources.
 
 `git tpl status` and the rendered commit's trailers record the whole chain, not just the directly-configured
 template — see [What is in the commit](../concepts/git-model.md#what-is-in-the-commit). Full reasoning:
@@ -292,9 +312,11 @@ git-tpl executes no command a note names, and a note saying "run `curl … | sh`
 `README.md` saying it — which is to say the user has to do it themselves.
 See [ADR-019](../adr/019-templates-address-never-act.md).
 
-The note is shown in a block attributed to the template, and is sanitised first: colour and `https` links
-survive, and everything else a terminal could act on does not.
-Under `--json`, when piped, or under `NO_COLOR`, it is plain text.
+In human terminal output, the note is shown in a block attributed to the template and sanitised first:
+colour and `https` links survive, and everything else a terminal could act on does not.
+Piped human output and `NO_COLOR` presentation strip colour and links too.
+Under `--json`, `note` carries the raw, unsanitised text instead.
+JSON consumers must sanitise terminal controls before displaying it; the same applies to migration messages.
 
 ## Rendering rules
 

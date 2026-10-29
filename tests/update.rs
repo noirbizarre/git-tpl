@@ -1,11 +1,286 @@
 //! `git tpl update` — re-rendering and advancing the ref.
 //!
-//! The invariant these tests exist to protect: **update changes one ref and
-//! nothing else.**
+//! Update isolates HEAD, the index and rendered worktree files; semantic answer/lock changes alone may edit config.
 
 mod common;
 
 use common::{World, file_url, tpl, tpl_colored};
+
+#[test]
+fn concurrent_publication_refuses_stale_created_and_deleted_tips_without_saving_answers() {
+    use std::collections::BTreeMap;
+    use tpl::eval::{EvalError, Prompter};
+    use tpl::git::{GitBackend, GitError, LibGit2, Oid};
+    use tpl::ops::{Answering, OpError, Trust};
+    use tpl::template::{Choice, Question, Value};
+    struct DuringPrompt<F>(F);
+    impl<F: FnMut()> Prompter for DuringPrompt<F> {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &Question,
+            default: Option<&Value>,
+            _: Option<&Value>,
+            _: Option<&[Choice]>,
+        ) -> Result<Value, EvalError> {
+            (self.0)();
+            Ok(default.unwrap().clone())
+        }
+    }
+    for action in ["replace", "create", "delete", "init", "identical"] {
+        let world = World::new();
+        if action != "init" {
+            world.init(&[]).success();
+        }
+        let ref_name = world.ref_name();
+        if action == "create" {
+            world.project.git(&["update-ref", "-d", &ref_name]);
+        }
+        if action != "identical" {
+            world.move_template();
+        }
+        world.template.repo.write(
+            "template.toml",
+            &format!(
+                "{}\n[questions.new_answer]\ntype = \"string\"\ndefault = \"new\"\n",
+                world.template.repo.read("template.toml")
+            ),
+        );
+        world.template.repo.commit_all("add question");
+        let before = world.project.working_state();
+        let backend = LibGit2::discover(&world.project.path).unwrap();
+        let other = LibGit2::discover(&world.project.path).unwrap();
+        let concurrent = Oid::parse(&world.project.rev_parse("HEAD")).unwrap();
+        let mut prompter = DuringPrompt(|| {
+            if action == "delete" {
+                world.project.git(&["update-ref", "-d", &ref_name]);
+            } else {
+                other
+                    .set_ref(&ref_name, concurrent, "concurrent render")
+                    .unwrap();
+            }
+        });
+        let result = if action == "init" {
+            tpl::ops::init(
+                &backend,
+                &world.project.path,
+                world.template.repo.path.to_str().unwrap(),
+                None,
+                None,
+                BTreeMap::new(),
+                false,
+                false,
+                false,
+                false,
+                &Default::default(),
+                Answering::Interactive(&mut prompter),
+                Trust::always(),
+            )
+            .map(|_| ())
+        } else {
+            tpl::ops::update(
+                &backend,
+                &world.project.path,
+                None,
+                BTreeMap::new(),
+                false,
+                false,
+                &Default::default(),
+                Answering::Interactive(&mut prompter),
+                Trust::always(),
+            )
+            .map(|_| ())
+        };
+        assert!(
+            matches!(result, Err(OpError::Git(GitError::StaleRef { .. }))),
+            "{action}: {result:?}"
+        );
+        assert_eq!(world.project.working_state(), before, "{action}");
+        assert_eq!(
+            backend.resolve_ref(&ref_name).unwrap(),
+            if action == "delete" {
+                None
+            } else {
+                Some(concurrent)
+            }
+        );
+    }
+}
+
+#[test]
+fn configured_source_trust_uses_its_spelling_rather_than_its_absolute_location() {
+    let server = common::TestServer::start(vec![("/data.json", 200, "{\"value\": 1}".into())]);
+    let world = World::with_template(
+        &format!(
+            "name = 'local'\n[data.remote]\nsource = '{}'\n",
+            server.url("/data.json")
+        ),
+        &[("out.jinja", "{{ data.remote.value }}\n")],
+    );
+    world.init(&["--trust"]).success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    world.project.user_config(&format!(
+        "[trust]\ntemplates = ['{}']\n",
+        config.template.source
+    ));
+    tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["backport"]).success();
+}
+
+#[test]
+fn configuration_edited_during_prompting_is_preserved_without_publishing_a_rendering() {
+    use tpl::eval::{EvalError, Prompter};
+    use tpl::git::LibGit2;
+    use tpl::ops::{Answering, OpError, Trust};
+    use tpl::template::{Choice, Question, Value};
+    struct EditDuringPrompt<'a>(&'a std::path::Path);
+    impl Prompter for EditDuringPrompt<'_> {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &Question,
+            default: Option<&Value>,
+            _: Option<&Value>,
+            _: Option<&[Choice]>,
+        ) -> Result<Value, EvalError> {
+            let mut config = tpl::config::Config::load(self.0).unwrap();
+            config
+                .answers
+                .insert("project_name".into(), Value::String("hand-edited".into()));
+            config.save(self.0).unwrap();
+            Ok(default.unwrap().clone())
+        }
+    }
+    let world = World::new();
+    world.init(&[]).success();
+    world.template.repo.write(
+        "template.toml",
+        &format!(
+            "{}\n[questions.new_answer]\ntype = 'string'\ndefault = 'new'\n",
+            world.template.repo.read("template.toml")
+        ),
+    );
+    world.template.repo.commit_all("add question");
+    let before = world.project.working_state();
+    let tip = world.project.rev_parse(&world.ref_name());
+    let backend = LibGit2::discover(&world.project.path).unwrap();
+    let mut prompter = EditDuringPrompt(&world.project.path);
+    let result = tpl::ops::update(
+        &backend,
+        &world.project.path,
+        None,
+        Default::default(),
+        false,
+        false,
+        &Default::default(),
+        Answering::Interactive(&mut prompter),
+        Trust::always(),
+    );
+    assert!(matches!(
+        result,
+        Err(OpError::Config(tpl::config::ConfigError::Changed { .. }))
+    ));
+    let after = world.project.working_state();
+    assert_eq!(before.head, after.head);
+    assert_eq!(before.index, after.index);
+    assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert_eq!(
+        config.answers["project_name"],
+        Value::String("hand-edited".into())
+    );
+    assert!(!config.answers.contains_key("new_answer"));
+}
+
+#[test]
+fn rebasing_a_local_source_preserves_absolute_path_trust() {
+    let server = common::TestServer::start(vec![("/data.json", 200, "{\"value\": 1}".into())]);
+    let world = World::with_template(
+        &format!(
+            "name = 'local'\n[data.remote]\nsource = '{}'\n",
+            server.url("/data.json")
+        ),
+        &[("out.jinja", "{{ data.remote.value }}\n")],
+    );
+    world.project.user_config(&format!(
+        "[trust]\ntemplates = ['{}']\n",
+        world.template.repo.path.display()
+    ));
+    world.init(&[]).success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert!(!std::path::Path::new(&config.template.source).is_absolute());
+    tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["update", "--defaults", "--dry-run"]).success();
+    tpl(&world.project, &["backport"]).success();
+}
+
+#[test]
+fn a_changed_rendering_preserves_exact_configuration_bytes_when_answers_and_locks_are_unchanged() {
+    let world = World::new();
+    world.init(&[]).success();
+    let config_path = ".config/git.tpl.toml";
+    let custom = format!(
+        "# A hand-written annotation that must survive.\n{}\n# Keep this trailing comment too.\n",
+        world
+            .project
+            .read(config_path)
+            .replace("[answers]", "[answers] # custom formatting")
+    );
+    world.project.write(config_path, &custom);
+    world.project.commit_all("annotate project configuration");
+    world.move_template();
+    let before = world.project.working_state();
+    let result = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+    assert_eq!(result["result"], "updated");
+    assert_eq!(result["answersChanged"], false);
+    assert_eq!(world.project.read(config_path), custom);
+    assert_eq!(world.project.working_state(), before);
+}
+
+#[test]
+fn answer_overrides_are_saved_on_changed_and_identical_renderings() {
+    for changes_output in [false, true] {
+        let world = World::with_template(
+            "name = 'answers'\n[questions.choice]\ntype = 'string'\ndefault = 'old'\n",
+            &[(
+                "value.txt.jinja",
+                if changes_output {
+                    "{{ choice }}\n"
+                } else {
+                    "constant\n"
+                },
+            )],
+        );
+        world.init(&[]).success();
+        let before = world.project.working_state();
+        let result = tpl(
+            &world.project,
+            &["--json", "update", "--defaults", "--answer", "choice=new"],
+        )
+        .success()
+        .json();
+        assert_eq!(result["answersChanged"], true);
+        assert_eq!(
+            result["result"],
+            if changes_output {
+                "updated"
+            } else {
+                "upToDate"
+            }
+        );
+        let config = tpl::config::Config::load(&world.project.path).unwrap();
+        assert_eq!(
+            config.answers["choice"],
+            tpl::template::Value::String("new".into())
+        );
+        let after = world.project.working_state();
+        assert_eq!(before.head, after.head);
+        assert_eq!(before.index, after.index);
+        assert_eq!(world.project.status(), "M .config/git.tpl.toml");
+    }
+}
 
 /// The single most important test in the suite.
 #[test]
@@ -280,7 +555,7 @@ fn update_reports_what_changed() {
         .success()
         .says("added     .github/workflows/release.yml")
         .says("modified  README.md")
-        .says("Your working tree was not modified.");
+        .says("Your rendered worktree files were not modified.");
 }
 
 #[test]
@@ -366,7 +641,7 @@ fn a_file_added_to_the_template_appears_in_the_rendering() {
 /// A question added since the last render has no recorded answer, so it is
 /// asked — or, with `--defaults`, takes its default — and written back.
 ///
-/// This is the one case where recording an answer is expected to change the
+/// Recording a changed answer is expected to change the
 /// worktree (AGENTS.md invariant 1): `.config/git.tpl.toml` moves, unstaged,
 /// and nothing else does. Earlier revisions of this test only checked the
 /// file's new contents, so a change reaching `HEAD` or the index — or a

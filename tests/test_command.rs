@@ -9,6 +9,62 @@ use std::path::Path;
 
 use common::{Repo, Template, tpl, tpl_colored, tpl_outside};
 
+#[cfg(unix)]
+#[test]
+fn snapshot_writes_refuse_template_controlled_parent_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(dir.path(), &[("tests/safe.toml", "snapshot = true\n")]);
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(outside.path().join("safe")).unwrap();
+    std::fs::write(outside.path().join("safe/keep"), b"untouched").unwrap();
+    std::os::unix::fs::symlink(
+        outside.path(),
+        template.repo.path.join("tests/__snapshots__"),
+    )
+    .unwrap();
+    let result = run(&template, &["--write", "--json"]);
+    assert_ne!(result.code, 0);
+    assert_eq!(
+        std::fs::read(outside.path().join("safe/keep")).unwrap(),
+        b"untouched"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_snapshots_store_ordinary_target_bytes_and_compare_the_recorded_link_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(dir.path(), &[("tests/link.toml", "snapshot = true\n")]);
+    let link = template.repo.path.join("template/link.jinja");
+    if std::os::unix::fs::symlink("opaque.jinja", &link).is_err() {
+        return;
+    }
+    template.repo.commit_all("add link");
+    run(&template, &["--write"]).success();
+    let snapshot = template.repo.path.join("tests/__snapshots__/link");
+    let payload = snapshot.join("files/link");
+    assert!(
+        !std::fs::symlink_metadata(&payload)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&payload).unwrap(), b"opaque.jinja");
+    assert!(
+        std::fs::read_to_string(snapshot.join("MANIFEST"))
+            .unwrap()
+            .contains("120000 ")
+    );
+    run(&template, &[]).success();
+    template.repo.commit_all("record link snapshot");
+    run(&template, &["--ref", "main"]).success();
+    // Equal bytes with a different kind must still be a snapshot difference.
+    std::fs::remove_file(&link).unwrap();
+    template.repo.write("template/link.jinja", "opaque.jinja");
+    let output = run(&template, &["--json"]);
+    assert_ne!(output.code, 0);
+}
+
 /// A template with a `[answers]`-driven conditional, plus whatever cases the
 /// test needs.
 ///

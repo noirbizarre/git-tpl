@@ -5,7 +5,7 @@ expression: transcript
 exit: 0
 --- stdout ---
 {
-  "source": "[tmp]/template",
+  "source": "../template",
   "id": "template",
   "ref": "refs/tpl/template",
   "appliedRendering": "[sha]",

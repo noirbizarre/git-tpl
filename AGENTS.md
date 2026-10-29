@@ -20,9 +20,10 @@ project.
 1. **`update` does not modify `HEAD` or the index, and never writes rendered output into the worktree.** Not
    "should not" — does not. The renderer writes into a `TreeBuilder`, so there is no code path that opens a
    *rendered* file for writing. The one file `update` does write is `.config/git.tpl.toml` itself — project
-   configuration, not render output — and only to record a newly-answered question, unstaged, the same way a
-   hand edit would. `tests/update.rs` fingerprints `HEAD`, the index and the worktree, including the case
-   where recording an answer is the one thing expected to change.
+   configuration, not render output — and only when resolved answers or composed child locks change semantically.
+   That edit is unstaged, the same way a hand edit would be.
+   Without a semantic change, its exact bytes, comments and formatting are preserved even when rendering changes.
+   `tests/update.rs` fingerprints `HEAD`, the index and the worktree, including expected configuration edits.
 
 2. **Rendering is deterministic.** Same template revision, same answers, same data → byte-identical tree. This is
    what makes an unchanged template produce no commit. Never introduce a timestamp, an environment read, a hash-map
@@ -44,6 +45,8 @@ project.
    The other narrow exception is diff presentation (ADR-039): `src/commands/diff.rs` may run native `git diff`
    over the completed preview's two trees, inheriting the user's pager, diff drivers and textconv configuration.
    This is display after rendering, never a template hook or a capability available to a render.
+   Explicit merge abort also delegates to native Git in the backend (ADR-040), solely for safe recovery.
+   It is unavailable to rendering, init and update.
 
 ## Layout
 
@@ -212,7 +215,7 @@ Formatting, Clippy, spelling, workflow and documentation linting, tests and the 
 This repository is attached to [rust.tpl](https://github.com/noirbizarre/rust.tpl), tracking `main`.
 Use `mise run tpl:update`, `mise run tpl:diff`, then an ordinary `git tpl merge` to apply an update.
 The tasks recover a missing local template ref from merged render history; fresh clones need full history.
-`mise run tpl:check` updates that ref before checking drift and can record newly answered defaults in project config.
+`mise run tpl:check` updates that ref before checking drift and can record changed answers and child locks in project config.
 Preserve the project's library name `tpl`, release inputs and archive layouts, runtime man/completion generation,
 both AUR packages, and the invariants above when reconciling template changes.
 See [development setup](docs/development/setup.md) for tooling and cache details.
@@ -220,7 +223,9 @@ See [development setup](docs/development/setup.md) for tooling and cache details
 ## Things that will be declined
 
 With reasons, in `docs/development/contributing.md`. Briefly: custom merge logic, a second template engine, code
-execution from templates, runtime values in the render context, automatic ref push/fetch, Copier compatibility.
+execution from templates, runtime values in the render context, implicit/default ref pushing or fetching,
+Copier compatibility.
+Explicit `tpl.autoPush` or `update --push` consent is supported; fetching remains explicit.
 
 If you think one of these is wrong, the way to change it is an ADR that supersedes the existing one — not a PR that
 quietly works around it.

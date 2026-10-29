@@ -95,11 +95,17 @@ reads as anything but confusing when the child's own `note` silently was the par
 
 ### Pinning is checked, not assumed
 
-`rev` is accepted as pinned when it looks like a hex commit SHA (`^[0-9a-f]{7,40}$`) or names an existing tag in
-the parent repository. Anything else — a branch name, or a name that resolves only through the parent's default
-branch — is rejected before the parent is ever merged in. This needs one new capability on `GitBackend`,
-`is_tag`, since `resolve_revision` already resolves a tag, a branch or a SHA to the same `Oid` and deliberately
-does not say which kind of reference it matched.
+`rev` resolves directly through an exact `refs/tags/` lookup or a unique commit-object SHA prefix
+(`^[0-9a-fA-F]{7,40}$`).
+Tags take precedence over same-named branches; an explicit `refs/tags/<name>` also selects the tag.
+A hexadecimal branch name is never a substitute for an absent or ambiguous object prefix.
+Noncommit objects are rejected, while annotated tags must peel to a commit.
+`GitBackend::resolve_pin` returns the resolved object ID once, before the ancestor manifest is read;
+general revision resolution is never used afterward.
+
+**Correction (2026-10-29):** spelling-based SHA validation followed by general revision lookup admitted
+moving hexadecimal branches as pins.
+Actual object lookup replaces that validation without changing the manifest format or existing diagnostic identifiers.
 
 ### A remote ancestor is trusted exactly like a `[data]` `git` source
 

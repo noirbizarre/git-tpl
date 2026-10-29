@@ -1,7 +1,9 @@
 # `git tpl lint`
 
-Check a template without rendering it. A local template needs no project or network;
-a remote Git template may be cloned for inspection.
+Check a template without rendering it. No project is required.
+A local template with only local ancestors needs no network;
+a remote Git template or a local template's remote `[extends]` ancestor may be cloned for inspection.
+Remote ancestors require [persistent trust](../templates/format.md#extends).
 
 ```sh
 git tpl lint .            # the template in this directory
@@ -22,11 +24,16 @@ When a particular template *has* decided it never means one of them, [`--deny`](
 Everything `init` would check before the first prompt: unknown references, cycles, incoherent question
 declarations.
 The difference is that this needs no project repository or render-time data-source fetch.
-Resolving a remote template still requires network access.
+Resolving a remote template or remote ancestor can still require network access.
+Lint does not fetch render-time HTTP or Git data sources.
 
 ### Every `.jinja` file parses
 
 Including branches no answer set reaches.
+Syntax is explicitly compiled for effective inherited outputs and every retained partial declaration,
+including unimported, unreachable and shadowed partials.
+Removed or overridden inherited outputs are excluded, as are binary output payloads.
+Other static rules retain their existing leaf-only scope; lint does not load runtime data for these checks.
 Otherwise a syntax error in a rarely taken conditional is found by the first person who answers their way into
 it.
 
@@ -108,9 +115,13 @@ default = "blue"
 accent: {{ docs_accent }}
 ```
 
-`accent: blue` today, whatever `docs` is — until `strict = true` is set, or until `strict` becomes the default.
-Then it fails only when `docs` is false, and nothing warned beforehand, because `docs_accent` is a name the
-manifest does declare.
+With `docs = true`, the output is `accent: blue`.
+With `docs = false`, `docs_accent` is absent despite its declared default,
+so lenient rendering produces `accent:` followed by a space, with no value.
+With `strict = true`, that skipped-question read fails instead.
+The manifest declares the name, so `undeclared` cannot warn about this answer-dependent absence.
+Set `default_when_skipped = true` if the default should remain available when `when` is false;
+otherwise guard the read as below.
 
 The fix is the same idiom `undeclared` already recommends for an optional name:
 
@@ -217,15 +228,13 @@ A warning rather than an error, and reported regardless of whether a `when` is p
 is invisible either way, and adding a `when` to an already-declared name later would reopen the hole with no new
 warning to catch it.
 
-## No local data sources
+## Data declarations, not runtime loading
 
-A `local` data source is resolved relative to the project root, and `lint` has no project — it checks a template
-in isolation.
-It fails with `tpl::data::needs_project` rather than being resolved against the working directory — that would
-make the same template, the same answers and the same revision check differently depending on where the command
-was run.
-
-Use a `template` source for data that belongs to the template.
+`lint` checks data declarations and their graph dependencies without loading their values.
+A `local` declaration is accepted without a project; lint neither reads the project-local file nor reports
+`tpl::data::needs_project` merely because the declaration exists.
+File availability, formats, checksums and value-dependent failures are checked when a render reaches the source.
+Use a `template` source for data that belongs to the template and a render or test case to validate its contents.
 
 ## Options
 
@@ -307,7 +316,7 @@ With prek, in the template repository's own `prek.toml`:
 ```toml
 [[repos]]
 repo = "https://github.com/noirbizarre/git-tpl"
-rev = "v0.12.1"
+rev = "0.14.3"
 hooks = [{ id = "git-tpl-lint" }]
 ```
 
@@ -316,7 +325,7 @@ With pre-commit, in `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/noirbizarre/git-tpl
-    rev: v0.12.1
+    rev: 0.14.3
     hooks:
       - id: git-tpl-lint
 ```
@@ -338,9 +347,9 @@ environment before running `entry` — no separate install step, and nothing add
 ```toml
 [[repos]]
 repo = "https://github.com/noirbizarre/git-tpl"
-rev = "v0.12.1"
+rev = "0.14.3"
 hooks = [
-  { id = "git-tpl-lint", language = "mise", additional_dependencies = ["github:noirbizarre/git-tpl@0.12.1"] },
+  { id = "git-tpl-lint", language = "mise", additional_dependencies = ["github:noirbizarre/git-tpl@0.14.3"] },
 ]
 ```
 

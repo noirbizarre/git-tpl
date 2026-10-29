@@ -175,8 +175,8 @@ description = "Validate the gh-ship release contract"
 run = "gh ship validate"
 
 # --- Template ---------------------------------------------------------------
-# Update advances the rendered ref, not HEAD or the index. Newly answered
-# questions can also be recorded in .config/git.tpl.toml, unstaged.
+# Update advances the rendered ref, not HEAD, the index or rendered worktree files.
+# Semantically changed answers/child locks are saved in .config/git.tpl.toml, unstaged.
 [tasks."tpl:update"]
 description = "Update the rendered template ref"
 depends = ["tpl:baseline"]

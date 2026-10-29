@@ -12,6 +12,7 @@ mod ignore;
 pub mod libgit2;
 
 use std::fmt;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use miette::Diagnostic;
@@ -63,8 +64,7 @@ impl fmt::Display for Oid {
 
 /// A file's mode, as Git records it.
 ///
-/// Git stores nothing else about a file's permissions, which is why the
-/// executable bit is the only thing rendering preserves.
+/// Rendering preserves regular/executable files and symbolic links, including their opaque target bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileMode {
     /// A regular file, `100644`.
@@ -278,6 +278,63 @@ pub struct Commit {
 /// Errors from Git operations.
 #[derive(Debug, Error, Diagnostic)]
 pub enum GitError {
+    /// An attachment commit would include someone else's staged files.
+    #[error("the index has staged changes")]
+    #[diagnostic(
+        code(tpl::git::dirty_index),
+        help(
+            "commit or unstage your changes before attaching a template, including with --no-merge"
+        )
+    )]
+    DirtyIndex,
+
+    /// Mutation must not interfere with another Git or template operation's state.
+    #[error("another Git operation is in progress")]
+    #[diagnostic(
+        code(tpl::git::repository_busy),
+        help(
+            "wait for the other git-tpl operation, or inspect `git status` and finish or abort the active Git operation"
+        )
+    )]
+    RepositoryBusy,
+    /// A rendering was based on a tip that another writer replaced.
+    #[error("ref `{name}` changed concurrently (expected {}, actual {})",
+        expected.map(Oid::to_hex).unwrap_or_else(|| "absent".into()),
+        actual.map(Oid::to_hex).unwrap_or_else(|| "absent".into()))]
+    #[diagnostic(
+        code(tpl::git::stale_ref),
+        help(
+            "inspect the ref and retry the operation against its current tip; no configuration was saved"
+        )
+    )]
+    StaleRef {
+        /// Destination ref.
+        name: String,
+        /// Tip used as the render's parent, or expected absence.
+        expected: Option<Oid>,
+        /// Tip observed under the lock, or actual absence.
+        actual: Option<Oid>,
+    },
+    /// Aborting outside a merge must never touch local changes.
+    #[error("there is no merge in progress")]
+    #[diagnostic(
+        code(tpl::git::no_merge),
+        help("inspect `git status`; there is no merge to abort")
+    )]
+    NoMerge,
+
+    /// Native Git refused recovery; retain its explanation and recovery state.
+    #[error("native `git merge --abort` failed: {reason}")]
+    #[diagnostic(
+        code(tpl::git::abort_failed),
+        help(
+            "inspect `git status` and the reason above; preserve your edits before retrying `git merge --abort`"
+        )
+    )]
+    AbortFailed {
+        /// Spawn failure or captured Git stderr.
+        reason: String,
+    },
     /// The path is not inside a Git repository.
     #[error("`{}` is not a Git repository", path.display())]
     #[diagnostic(
@@ -427,10 +484,9 @@ pub enum GitError {
     #[diagnostic(
         code(tpl::git::diverged),
         help(
-            "local is {ahead} ahead and {behind} behind. Both were rendered independently; reconcile them:\n  \
-             git tpl fetch\n  \
-             git merge {remote_ref}\n  \
-             git tpl push"
+            "local is {ahead} ahead and {behind} behind. Preserve both histories: \
+             no automatic rendered-ref reconciliation is available. Merging {remote_ref} into the project \
+             does not advance {ref_name}; do not force or reset either history"
         )
     )]
     Diverged {
@@ -478,6 +534,18 @@ pub struct HistoryEntry {
     pub committed_at: i64,
 }
 
+/// An owned, worktree-local template-operation lock.
+///
+/// Keep this alive from before reading project configuration until publication
+/// and configuration persistence finish. Closing the file releases its OS lock;
+/// the persistent lock file must never be removed, which would split waiters
+/// across different inodes.
+#[derive(Debug)]
+#[must_use = "dropping the guard releases the template-operation lock"]
+pub struct TemplateOperationGuard {
+    pub(crate) _file: File,
+}
+
 /// The operations git-tpl needs from a Git implementation.
 ///
 /// Every method takes and returns types defined in this module, never the
@@ -491,6 +559,10 @@ pub struct HistoryEntry {
 /// creating and cloning a repository are the exception, and stay inherent —
 /// they produce a backend rather than use one.
 pub trait GitBackend {
+    /// Serialize template operations in this worktree through configuration persistence.
+    /// Lock contention returns [`GitError::RepositoryBusy`] without waiting.
+    fn lock_template_operation(&self) -> Result<TemplateOperationGuard, GitError>;
+
     /// The repository's working directory.
     fn workdir(&self) -> Result<PathBuf, GitError>;
 
@@ -499,6 +571,12 @@ pub trait GitBackend {
 
     /// Whether the working tree and index are clean.
     fn is_clean(&self) -> Result<bool, GitError>;
+
+    /// Whether the index matches HEAD (or the empty tree on an unborn branch).
+    fn is_index_clean(&self) -> Result<bool, GitError>;
+
+    /// Whether no merge, rebase, cherry-pick or other operation is active.
+    fn is_normal_state(&self) -> bool;
 
     /// The commit `HEAD` points at, if any.
     fn head_commit(&self) -> Result<Option<Oid>, GitError>;
@@ -542,6 +620,15 @@ pub trait GitBackend {
 
     /// Point a ref at a commit.
     fn set_ref(&self, name: &str, oid: Oid, reflog_message: &str) -> Result<(), GitError>;
+
+    /// Publish only if the locked ref still has `expected`, including absence.
+    fn compare_and_set_ref(
+        &self,
+        name: &str,
+        expected: Option<Oid>,
+        target: Oid,
+        message: &str,
+    ) -> Result<(), GitError>;
 
     /// The differences between two trees, in path order.
     ///
@@ -650,13 +737,13 @@ pub trait GitBackend {
 
     /// Whether `reference` names a tag.
     ///
-    /// `resolve_revision` deliberately does not say which kind of reference it
-    /// matched — a tag, a branch or a raw SHA are all pinned the same way for
-    /// every other caller. `[extends].rev` is the one caller that needs to
-    /// know, because a branch is not a pin (ADR-034): a tag and a branch can
-    /// be spelled identically, and nothing about the string says which one it
-    /// is until the repository itself is asked.
+    /// This introspection alone does not select a pin: use `resolve_pin` when
+    /// the selected object must exclude branch fallback (ADR-034).
     fn is_tag(&self, reference: &str) -> Result<bool, GitError>;
+
+    /// Resolve a tag or unique commit-object SHA prefix without branch fallback.
+    /// `None` means the spelling is not a pin; malformed object pins are errors.
+    fn resolve_pin(&self, reference: &str, origin: &str) -> Result<Option<Oid>, GitError>;
 
     /// The default branch, used when no `ref` is configured.
     fn default_branch(&self) -> Result<String, GitError>;
@@ -703,14 +790,21 @@ pub trait GitBackend {
     /// Stage a path, for `init` writing the configuration file.
     fn stage(&self, relative: &Path) -> Result<(), GitError>;
 
+    /// Commit only HEAD plus the worktree's `.config/git.tpl.toml`.
+    ///
+    /// Checks for staged changes and active operations while holding Git's index
+    /// lock, then publishes the attachment and matching index under that lock.
+    /// Call without staging the configuration first. Unrelated staged changes
+    /// are refused and preserved, including changes made during prompting.
+    fn commit_attachment(&self, message: &str) -> Result<Oid, GitError>;
+
     /// Commit whatever is staged, moving `HEAD`.
     ///
-    /// The one method here that does move `HEAD`. It exists for the
-    /// configuration file `init` writes, which is a change to the project and
-    /// not to the rendered ref; invariant 1 is about `update`.
+    /// A low-level index commit; init uses [`Self::commit_attachment`] instead
+    /// so unrelated staged files cannot be incorporated into its automatic commit.
     fn commit_index(&self, message: &str) -> Result<Oid, GitError>;
 
-    /// Reset the index and worktree to `HEAD`, discarding a failed merge.
+    /// Delegate explicit recovery of an active merge to native Git, preserving unrelated edits.
     fn abort_merge(&self) -> Result<(), GitError>;
 
     /// Set a configuration value in this repository.

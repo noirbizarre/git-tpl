@@ -83,6 +83,69 @@ fn base(dir: &std::path::Path) -> Template {
     Template::with_shared(dir, BASE_MANIFEST, BASE_FILES, &[])
 }
 
+#[test]
+fn hexadecimal_branches_never_supply_missing_pins_or_override_real_object_prefixes() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = base(dir.path());
+    let original = parent.repo.rev_parse("HEAD");
+    parent.repo.write("template/marker", "moved branch\n");
+    parent.repo.commit_all("move parent");
+    for reference in ["deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", &original[..7]] {
+        parent.repo.git(&["branch", reference]);
+        let child = child_pinned_to(&parent, reference);
+        let scratch = Scratch::new();
+        if reference == &original[..7] {
+            scratch.render(&child.source()).success();
+            assert!(!scratch.out().join("marker").exists());
+        } else {
+            scratch
+                .render(&child.source())
+                .failure()
+                .says("could not resolve");
+        }
+    }
+}
+
+#[test]
+fn ancestor_tags_win_branch_collisions_and_noncommit_pins_are_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = base(dir.path());
+    parent.repo.git(&["tag", "v1.0.0"]);
+    parent.repo.write("template/marker", "branch only\n");
+    parent.repo.commit_all("move parent");
+    parent.repo.git(&["branch", "v1.0.0"]);
+    for reference in ["v1.0.0", "refs/tags/v1.0.0"] {
+        let child = child_pinned_to(&parent, reference);
+        let scratch = Scratch::new();
+        scratch.render(&child.source()).success();
+        assert!(!scratch.out().join("marker").exists());
+    }
+    let blob = parent.repo.rev_parse("HEAD:template/marker");
+    parent.repo.git(&["tag", "not-a-commit", &blob]);
+    for reference in [blob.as_str(), &blob[..7], "not-a-commit"] {
+        let child = child_pinned_to(&parent, reference);
+        Scratch::new()
+            .render(&child.source())
+            .failure()
+            .says("could not resolve");
+    }
+}
+
+/// Unlike the usual fixture, preserve the parent's refs so a branch cannot be
+/// accidentally turned into a tag by fixture setup.
+fn child_pinned_to(parent: &Template, reference: &str) -> Template {
+    let repo = Repo::init("pinned-child");
+    repo.write(
+        "template.toml",
+        &format!(
+            "name = 'child'\n[extends]\nsource = '{}'\nrev = '{reference}'\n",
+            parent.declared_source()
+        ),
+    );
+    repo.commit_all("declare parent pin");
+    Template { repo }
+}
+
 /// The acceptance criterion in issue #28, almost verbatim: a child overriding
 /// one question and one file renders a tree identical to the parent's except
 /// in those two places, deterministically.

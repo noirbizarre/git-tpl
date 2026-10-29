@@ -194,7 +194,9 @@ git show --no-patch refs/tpl/github-com-noirbizarre-rust-library-template
 
 ## Sharing, or not
 
-Rendered refs are never pushed implicitly. Both modes are first-class:
+Rendered refs are not pushed by default.
+`tpl.autoPush` or `git tpl update --push` explicitly opts into pushing after updates;
+fetching remains explicit. Both modes are first-class:
 
 **Local-only.** The ref exists in your clone. Nobody else needs it. Nothing to configure — this is the default.
 

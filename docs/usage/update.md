@@ -1,5 +1,12 @@
 # `git tpl update`
 
+Concurrent init/update operations in one worktree are refused until the first finishes saving configuration.
+A changed ref or configuration discovered after prompting is refused rather than overwriting the newer state.
+
+Publication compares the rendered ref's tip under a lock, including when the ref was absent.
+If another writer has changed it, `tpl::git::stale_ref` reports the expected and actual tips.
+Inspect the current ref before retrying; the failed publication does not save newly answered configuration.
+
 Re-render the template and advance `refs/tpl/<id>`.
 
 Read source commit messages before updating with [`git tpl log <ref>`](log.md),
@@ -18,9 +25,13 @@ This is structural rather than a promise: the rendered tree is built directly as
 moved. There is no code path that opens a rendered file for writing.
 
 The one file `update` does write on disk is `.config/git.tpl.toml` itself — project configuration, not render
-output. If a template added a question since your last render, `update` records the new answer back into that
-file (see [New questions](#new-questions) below), unstaged, exactly as a hand edit would. Nothing else in the
-worktree moves.
+output.
+It saves that file only when resolved answers or composed child locks change semantically,
+including answer overrides and [new questions](#new-questions), unstaged, exactly as a hand edit would.
+This applies whether a new rendered commit is made or the output is already up to date.
+When answers and locks are unchanged, the configuration keeps its exact bytes, comments and formatting,
+even if the rendered output changed.
+Nothing else in the worktree moves.
 
 ```console
 $ git tpl update
@@ -83,7 +94,7 @@ Updated refs/tpl/github-com-noirbizarre-rust-library-template
   with it.
 ────────────────────────────────────────────────────────────
 
-Your working tree was not modified.
+Your rendered worktree files were not modified.
 
 Run:
   git tpl diff
@@ -92,7 +103,7 @@ Run:
 
 ## When nothing changed
 
-If the rendered tree is byte-identical to the current ref tip, no commit is made:
+If the rendered tree is byte-identical to the current ref tip, normally no commit is made:
 
 ```console
 $ git tpl update
@@ -102,6 +113,10 @@ Already up to date with https://github.com/noirbizarre/rust-library-template at 
 This is why [determinism](../concepts/determinism.md) matters.
 A renderer that varied by a timestamp would create a commit every run, and every one of them would be noise you
 had to merge.
+
+A newly crossed [migration](#migrations) still produces a commit to record that it was applied.
+A changed [composed child revision](../templates/composition.md) can also require a provenance-only commit,
+even when the rendered tree is identical, so the pinned child commit is recorded in history.
 
 ## What triggers a change
 
@@ -181,8 +196,9 @@ merge base, `git tpl merge` can conflict on every file.
 
 Two things cause it, and both are legitimate, which is why this is a warning and not a refusal:
 
-- **You cloned a project and never fetched the ref.** `refs/tpl/*` is not fetched by default. Run
-  [`git tpl fetch`](fetch.md) first, and the update continues the history everyone else has.
+- **You cloned a project without the local ref.** `refs/tpl/*` is not fetched by default.
+  Before updating, [restore the original rendered ref](fetch.md#restoring-an-absent-local-ref).
+  Fetching alone does not adopt it; an equal re-render cannot recover its ancestry.
 - **You edited `source` or `id` in `.config/git.tpl.toml`.** The ref name is derived from them, so a new one means
   a new ref. That is the documented way to
   [point a project at a different template](../templates/local-development.md#pointing-an-existing-project-at-a-different-template),

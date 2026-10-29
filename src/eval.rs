@@ -197,7 +197,7 @@ pub struct Evaluation<'a> {
     /// Its validated dependency graph.
     pub graph: &'a Graph,
     /// Answers already known, from `.config/git.tpl.toml` or `--answer`.
-    pub supplied: BTreeMap<String, Value>,
+    pub supplied: crate::answers::SuppliedAnswers,
     /// Prompt seeds, by question name, from `default_from`.
     ///
     /// Empty whenever nobody is being asked. A seed is a machine value — it
@@ -391,24 +391,32 @@ fn resolve_choices(
             found: "nothing".into(),
         })?;
 
+    choices_from_value(name, reference, value).map(Some)
+}
+
+/// Normalize static introspection and render-time choices through the same reader.
+pub fn choices_from_value(
+    name: &str,
+    reference: &str,
+    value: &Value,
+) -> Result<Vec<Choice>, EvalError> {
     match value {
         Value::Array(items) => items
             .iter()
             .map(|item| {
                 Choice::from_value(item).map_err(|error| EvalError::BadChoices {
                     question: name.to_string(),
-                    reference: reference.clone(),
+                    reference: reference.to_string(),
                     found: error.to_string(),
                 })
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map(Some),
+            .collect::<Result<Vec<_>, _>>(),
         // A table is the likeliest mistake — pointing at `data.licenses`
         // instead of `data.licenses.ids` — so name what was found rather than
         // reporting a generic type error.
         other => Err(EvalError::BadChoices {
             question: name.to_string(),
-            reference: reference.clone(),
+            reference: reference.to_string(),
             found: other.type_name().to_string(),
         }),
     }
@@ -436,13 +444,22 @@ fn resolve_default(
 }
 
 /// Check a supplied answer against the question's declared type.
-fn coerce(name: &str, question: &Question, value: &Value) -> Result<Value, EvalError> {
-    if question.kind.accepts(value) {
+fn coerce(
+    name: &str,
+    question: &Question,
+    supplied: &crate::answers::SuppliedAnswer,
+) -> Result<Value, EvalError> {
+    use crate::answers::SuppliedAnswer;
+    let value = match supplied {
+        SuppliedAnswer::Typed(value) => value.clone(),
+        SuppliedAnswer::Cli(text) => Value::String(text.clone()),
+    };
+    if question.kind.accepts(&value) {
         return Ok(value.clone());
     }
 
     if question.kind == QuestionKind::List
-        && let Value::String(text) = value
+        && let SuppliedAnswer::Cli(text) = supplied
     {
         return Value::parse_as(text, "a list").map_err(|_| EvalError::InvalidList {
             question: name.to_string(),
@@ -455,7 +472,7 @@ fn coerce(name: &str, question: &Question, value: &Value) -> Result<Value, EvalE
     // which case parsing it as the declared type is correct. Anything else is a
     // genuine mismatch and must not be silently coerced — `--answer ci=maybe`
     // becoming the truthy string `"maybe"` would render the wrong template.
-    if let Value::String(text) = value
+    if let SuppliedAnswer::Cli(text) = supplied
         && let Ok(parsed) = Value::parse_as(text, question.kind.type_name())
         && question.kind.accepts(&parsed)
     {
@@ -668,6 +685,21 @@ impl Partials {
     /// suggest an import a typo could not have meant.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.0.keys().map(String::as_str)
+    }
+
+    /// Every retained declaration, including shadowed and unimported sources.
+    /// Syntax lint must not depend on which imports a particular render reaches.
+    pub fn declarations(&self) -> impl Iterator<Item = (String, &str)> {
+        self.0.iter().flat_map(|(name, declarations)| {
+            declarations.iter().enumerate().map(move |(index, source)| {
+                let path = match index {
+                    0 => name.clone(),
+                    1 => format!("parent:{name}"),
+                    n => format!("ancestor[{n}]:{name}"),
+                };
+                (path, source.as_str())
+            })
+        })
     }
 
     /// Drop this layer's own declaration of each name in `excluded`, if any.
@@ -1232,7 +1264,17 @@ mod tests {
                 graph: &graph,
                 supplied: supplied
                     .iter()
-                    .map(|(k, v)| ((*k).to_string(), v.clone()))
+                    .map(|(k, v)| {
+                        (
+                            (*k).to_string(),
+                            match v {
+                                Value::String(text) => {
+                                    crate::answers::SuppliedAnswer::Cli(text.clone())
+                                }
+                                value => crate::answers::SuppliedAnswer::Typed(value.clone()),
+                            },
+                        )
+                    })
                     .collect(),
                 seeds: &seeds,
                 partials: no_partials(),

@@ -56,6 +56,15 @@ A branch is the usual choice.
 `git tpl update` resolves it fresh each time, which is the point: `update` is how you find out the template moved.
 
 **`id`** is normally derived and normally left out.
+Local `source` paths are relative to the project root, the directory containing `.config/`, even from a subdirectory.
+`init` resolves its CLI path from the invocation directory and records a destination-project-relative spelling.
+If this changes the derived identity, it records the original `id` explicitly.
+URLs and scp-style addresses keep their spelling.
+For old cwd-relative attachments, correct `source` manually and set `id` to the existing `refs/tpl/<id>` suffix.
+Old relative `Template-Source` provenance used by `log` is also interpreted from the project root;
+restore that layout when inspecting ambiguous historical paths.
+See [ADR-043](adr/043-project-relative-sources.md).
+
 It determines the ref name, `refs/tpl/<id>`:
 
 | `source` | derived `id` |

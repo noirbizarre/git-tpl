@@ -2,7 +2,325 @@
 
 mod common;
 
+#[test]
+fn files_staged_during_the_questionnaire_never_enter_an_attachment_commit() {
+    use tpl::eval::{EvalError, Prompter};
+    use tpl::git::{GitError, LibGit2};
+    use tpl::ops::{Answering, OpError, Trust};
+    use tpl::template::{Choice, Question, Value};
+
+    struct StageDuringPrompt<'a>(&'a common::Repo);
+    impl Prompter for StageDuringPrompt<'_> {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &Question,
+            default: Option<&Value>,
+            _: Option<&Value>,
+            _: Option<&[Choice]>,
+        ) -> Result<Value, EvalError> {
+            self.0.write("user-staged", "staged while answering\n");
+            self.0.git(&["add", "user-staged"]);
+            Ok(default.unwrap().clone())
+        }
+    }
+
+    for merge_after in [false, true] {
+        let world = common::World::new();
+        let head = world.project.rev_parse("HEAD");
+        let backend = LibGit2::discover(&world.project.path).unwrap();
+        let mut prompter = StageDuringPrompt(&world.project);
+        let result = tpl::ops::init(
+            &backend,
+            &world.project.path,
+            world.template.repo.path.to_str().unwrap(),
+            None,
+            None,
+            Default::default(),
+            false,
+            merge_after,
+            false,
+            false,
+            &Default::default(),
+            Answering::Interactive(&mut prompter),
+            Trust::always(),
+        );
+        assert!(matches!(result, Err(OpError::Git(GitError::DirtyIndex))));
+        assert_eq!(world.project.rev_parse("HEAD"), head);
+        assert_eq!(
+            world.project.git(&["show", ":user-staged"]),
+            "staged while answering"
+        );
+        assert_eq!(
+            world.project.git(&["diff", "--cached", "--name-only"]),
+            "user-staged"
+        );
+    }
+}
+
+#[test]
+fn attachment_publication_rechecks_a_cached_index_and_preserves_new_staged_files() {
+    use tpl::git::{GitBackend, GitError, LibGit2};
+    let world = common::World::new();
+    let backend = LibGit2::discover(&world.project.path).unwrap();
+    assert!(backend.is_index_clean().unwrap());
+    world.project.write("user-staged", "do not commit me\n");
+    world.project.git(&["add", "user-staged"]);
+    world.project.write(".config/git.tpl.toml", "attachment\n");
+    let before = world.project.working_state();
+    assert!(matches!(
+        backend.commit_attachment("attach"),
+        Err(GitError::DirtyIndex)
+    ));
+    assert_eq!(world.project.working_state(), before);
+    assert!(!world.project.exists(".git/index.lock"));
+}
+
+#[test]
+fn attachment_publication_commits_only_config_and_leaves_unstaged_edits_alone() {
+    use tpl::git::{GitBackend, LibGit2};
+    for unborn in [false, true] {
+        let world = common::World::new();
+        if unborn {
+            world.project.git(&["update-ref", "-d", "refs/heads/main"]);
+            world.project.git(&["read-tree", "--empty"]);
+        } else {
+            world
+                .project
+                .git(&["update-index", "--assume-unchanged", "NOTES.md"]);
+        }
+        let notes_flags = world.project.git(&["ls-files", "-v", "NOTES.md"]);
+        let backend = LibGit2::discover(&world.project.path).unwrap();
+        world.project.write("NOTES.md", "unstaged\n");
+        world.project.write(".config/git.tpl.toml", "attachment\n");
+        backend.commit_attachment("attach").unwrap();
+        assert!(backend.is_index_clean().unwrap());
+        assert_eq!(
+            world.project.git(&["ls-files", "-v", "NOTES.md"]),
+            notes_flags
+        );
+        assert_eq!(world.project.read("NOTES.md"), "unstaged\n");
+        assert_eq!(
+            world.project.git(&["show", "HEAD:.config/git.tpl.toml"]),
+            "attachment"
+        );
+        assert_eq!(
+            world.project.git(&[
+                "diff-tree",
+                "--root",
+                "--no-commit-id",
+                "--name-only",
+                "-r",
+                "HEAD"
+            ]),
+            ".config/git.tpl.toml"
+        );
+    }
+}
+
+#[test]
+fn attachment_publication_respects_native_git_index_locks() {
+    use tpl::git::{GitBackend, GitError, LibGit2};
+    let world = common::World::new();
+    world.project.write(".git/index.lock", "another writer\n");
+    let backend = LibGit2::discover(&world.project.path).unwrap();
+    assert!(matches!(
+        backend.commit_attachment("attach"),
+        Err(GitError::RepositoryBusy)
+    ));
+    assert_eq!(world.project.read(".git/index.lock"), "another writer\n");
+}
+
+#[test]
+fn template_operation_guards_exclude_other_handles_and_release_on_drop() {
+    use tpl::git::{GitBackend, GitError, LibGit2};
+    let world = common::World::new();
+    let backend = LibGit2::discover(&world.project.path).unwrap();
+    let other = LibGit2::discover(&world.project.path).unwrap();
+    let guard = backend.lock_template_operation().unwrap();
+    assert!(matches!(
+        other.lock_template_operation(),
+        Err(GitError::RepositoryBusy)
+    ));
+    assert!(world.project.exists(".git/tpl-operation.lock"));
+    drop(guard);
+    let _guard = other.lock_template_operation().unwrap();
+}
+
+#[test]
+fn every_attachment_refuses_staged_changes_before_writing_anything() {
+    for unborn in [false, true] {
+        for no_merge in [false, true] {
+            let world = common::World::new();
+            if unborn {
+                world.project.git(&["update-ref", "-d", "refs/heads/main"]);
+            }
+            world.project.write("user-staged", "my staged file\n");
+            world.project.git(&["add", "user-staged"]);
+            let index = world.project.git(&["write-tree"]);
+            let status = world.project.status();
+            let output = if no_merge {
+                world.init(&["--no-merge", "--json"])
+            } else {
+                world.init(&["--json"])
+            }
+            .failure();
+            assert_eq!(output.json()["error"]["code"], "tpl::git::dirty_index");
+            assert_eq!(world.project.git(&["write-tree"]), index);
+            assert_eq!(world.project.status(), status);
+            assert!(!world.project.exists(".config/git.tpl.toml"));
+            let backend = tpl::git::LibGit2::discover(&world.project.path).unwrap();
+            assert_eq!(
+                tpl::git::GitBackend::resolve_ref(&backend, &world.ref_name()).unwrap(),
+                None
+            );
+        }
+    }
+}
+
+#[test]
+fn no_merge_preserves_unstaged_edits_and_commits_only_the_attachment() {
+    let world = common::World::new();
+    world.project.write("NOTES.md", "unstaged\n");
+    world.init(&["--no-merge"]).success();
+    assert_eq!(world.project.read("NOTES.md"), "unstaged\n");
+    assert_eq!(
+        world
+            .project
+            .git(&["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"])
+            .trim(),
+        ".config/git.tpl.toml"
+    );
+}
+
+#[test]
+fn attachment_refuses_active_git_operations_even_with_a_clean_index() {
+    for state in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
+        let world = common::World::new();
+        world.project.write(
+            &format!(".git/{state}"),
+            &format!("{}\n", world.project.rev_parse("HEAD")),
+        );
+        let before = world.project.working_state();
+        assert_eq!(
+            world.init(&["--no-merge", "--json"]).failure().json()["error"]["code"],
+            "tpl::git::repository_busy"
+        );
+        assert_eq!(world.project.working_state(), before);
+        assert!(world.project.exists(&format!(".git/{state}")));
+    }
+}
+
 use common::{World, global_identity, tpl, tpl_outside};
+
+#[test]
+fn rebasing_a_hostname_like_local_path_records_the_original_id_explicitly() {
+    let world = World::new();
+    let nested = world.dir.path().join("sources.local");
+    std::fs::create_dir(&nested).unwrap();
+    std::fs::rename(&world.template.repo.path, nested.join("template")).unwrap();
+    let source = "sources.local/template";
+    let original = tpl::refs::TemplateId::derive(source).unwrap();
+    tpl_outside(
+        world.dir.path(),
+        world.project.config_home(),
+        &["init", source, "project", "--defaults"],
+    )
+    .success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert_eq!(config.template.source, "../sources.local/template");
+    assert_ne!(
+        tpl::refs::TemplateId::derive(&config.template.source).unwrap(),
+        original
+    );
+    assert_eq!(config.template.id.as_deref(), Some(original.as_str()));
+    assert!(world.project.has_ref(&original.ref_name()));
+    tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["log"]).success();
+}
+
+#[test]
+fn a_cli_source_is_rebased_to_the_project_and_works_from_subdirectories() {
+    let world = World::new();
+    let source = world
+        .template
+        .repo
+        .path
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    tpl_outside(
+        world.dir.path(),
+        world.project._config_dir.path(),
+        &["init", source, "project", "--defaults"],
+    )
+    .success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert_eq!(config.template.source, format!("../{source}"));
+    let id = tpl::refs::TemplateId::derive(source).unwrap();
+    assert_eq!(
+        tpl::refs::TemplateId::resolve(&config.template.source, config.template.id.as_deref())
+            .unwrap(),
+        id
+    );
+    world.move_template();
+    std::fs::create_dir_all(world.project.path.join("nested/deeper")).unwrap();
+    tpl_outside(
+        &world.project.path.join("nested/deeper"),
+        world.project._config_dir.path(),
+        &["update", "--defaults"],
+    )
+    .success();
+    tpl_outside(
+        &world.project.path.join("nested"),
+        world.project._config_dir.path(),
+        &["log", "--json"],
+    )
+    .success();
+    tpl(&world.project, &["diff", "--defaults"]).success();
+}
+
+#[test]
+fn rebasing_an_absolute_source_preserves_its_original_derived_id() {
+    let world = World::new();
+    let source = world.template.repo.path.to_str().unwrap();
+    let expected = tpl::refs::TemplateId::derive(source).unwrap();
+    tpl(&world.project, &["init", source, "--defaults"]).success();
+    let config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert!(!std::path::Path::new(&config.template.source).is_absolute());
+    assert_eq!(
+        tpl::refs::TemplateId::resolve(&config.template.source, config.template.id.as_deref())
+            .unwrap(),
+        expected
+    );
+    assert!(world.project.has_ref(&expected.ref_name()));
+    tpl(&world.project, &["update", "--defaults"]).success();
+}
+
+#[test]
+fn a_rebased_source_keeps_an_explicit_id_and_missing_sources_fail_locally() {
+    let world = World::new();
+    tpl(
+        &world.project,
+        &[
+            "init",
+            world.template.repo.path.to_str().unwrap(),
+            "--id",
+            "stable",
+            "--defaults",
+        ],
+    )
+    .success();
+    let mut config = tpl::config::Config::load(&world.project.path).unwrap();
+    assert_eq!(config.template.id.as_deref(), Some("stable"));
+    config.template.source = "../missing-template".into();
+    config.save(&world.project.path).unwrap();
+    let before = world.project.working_state();
+    let output = tpl(&world.project, &["update", "--defaults", "--json"]).failure();
+    assert!(!output.stdout.contains("tpl::git::clone"));
+    assert_eq!(before, world.project.working_state());
+}
 
 #[test]
 fn init_renders_the_template_and_merges_it_into_the_branch() {
@@ -1104,6 +1422,67 @@ fn a_dry_run_against_a_destination_that_does_not_exist_creates_nothing() {
     .success();
 
     assert!(!destination.exists(), "a dry run must create nothing");
+}
+
+#[test]
+fn defaults_dry_runs_propagate_render_failures_without_creating_the_destination() {
+    for (manifest, files, extra, code) in [
+        (
+            "name = 'required'\n[questions.input]\ntype = 'string'",
+            vec![("out", "ok")],
+            vec![],
+            "tpl::eval::unanswered",
+        ),
+        (
+            "name = 'syntax'",
+            vec![("out.jinja", "{% if %}")],
+            vec![],
+            "tpl::render::content",
+        ),
+        (
+            "name = 'collision'",
+            vec![("out", "plain"), ("out.jinja", "rendered")],
+            vec![],
+            "tpl::render::collision",
+        ),
+        (
+            "name = 'type'\n[questions.input]\ntype = 'integer'",
+            vec![("out", "ok")],
+            vec!["--answer", "input=no"],
+            "tpl::eval::wrong_type",
+        ),
+        (
+            "name = 'checksum'\n[data.options]\nsource = 'values.json'\nsha256 = '0000000000000000000000000000000000000000000000000000000000000000'",
+            vec![("out.jinja", "{{ data.options }}")],
+            vec![],
+            "tpl::data::checksum",
+        ),
+    ] {
+        let world = World::with_template(manifest, &files);
+        world
+            .template
+            .repo
+            .write("values.json", "[\"a\"]")
+            .commit_all("data");
+        let source = world.template.source();
+        let destination = world.dir.path().join("not-yet");
+        let mut args = vec![
+            "--json",
+            "init",
+            &source,
+            destination.to_str().unwrap(),
+            "--defaults",
+            "--dry-run",
+        ];
+        args.extend(extra);
+        assert_eq!(
+            tpl_outside(world.dir.path(), world.project.config_home(), &args)
+                .failure()
+                .error_code(),
+            code
+        );
+        assert!(!destination.exists());
+    }
 }
 
 /// `--init` with no destination argument: the existing single-directory form,

@@ -1,5 +1,11 @@
 # `git tpl test`
 
+Snapshot manifests accept mode `120000` for symbolic links.
+The corresponding `files/` payload is an ordinary file containing target bytes, never a live link.
+Comparison checks mode as well as bytes, including regular-file/link conversions.
+Command sandboxes materialise real links on Unix and fail explicitly on unsupported platforms.
+See [ADR-044](../adr/044-symlink-artifacts.md).
+
 Run the test cases a template carries.
 
 ```sh

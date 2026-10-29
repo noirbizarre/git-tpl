@@ -33,22 +33,36 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         return Ok(crate::exit::SUCCESS);
     }
 
-    let (ref_name, relation) = ops::fetch(&ctx.repo, &ctx.root, &preferences)?;
+    let report = ops::fetch_report(&ctx.repo, &ctx.root, &preferences)?;
+    let ref_name = &report.ref_name;
+    let relation = &report.relation;
 
     // The arms are ordered, not independent: `is_diverged` is `ahead > 0 &&
     // behind > 0`, so it has to be tested before the plain `behind > 0` arm
     // below, which would otherwise swallow it and tell a diverged user to
-    // simply merge.
+    // fast-forward a genuinely divergent ref.
     //
     // `state` comes out of the *same* match for that reason. Deriving it a
     // second time somewhere else is how the JSON and the prose come to
     // disagree about a diverged ref.
-    let state = match &relation {
+    let state = match relation {
         None => {
-            ctx.out.say(muted(
-                &ctx.out.theme,
-                &format!("No shared copy of {ref_name} on {}.", preferences.remote),
-            ));
+            let message = match (report.local_tip.is_some(), report.remote_tip.is_some()) {
+                (false, true) => format!(
+                    "Local {ref_name} is absent; a shared copy is available on {}. Fetch did not restore the local ref.",
+                    preferences.remote
+                ),
+                (true, false) => format!(
+                    "No shared copy of {ref_name} on {}. The local ref is present.",
+                    preferences.remote
+                ),
+                (false, false) => format!(
+                    "Neither local {ref_name} nor a shared copy on {} is present.",
+                    preferences.remote
+                ),
+                (true, true) => unreachable!("two tips always have a relation"),
+            };
+            ctx.out.say(muted(&ctx.out.theme, &message));
             "absent"
         }
         Some(relation) if relation.is_synced() => {
@@ -63,12 +77,10 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ctx.out
                 .say(format!("{ref_name} has {}.", relation.describe()));
             ctx.out.blank();
-            ctx.out
-                .say("Both were rendered independently. Reconcile them:");
-            ctx.out.say(command(
-                &ctx.out.theme,
-                &format!("git merge refs/remotes/{}/tpl/...", preferences.remote),
-            ));
+            ctx.out.say(
+                "Preserve both histories. No automatic rendered-ref reconciliation is available.",
+            );
+            ctx.out.say("A project merge does not advance the rendered ref; do not force or reset either history.");
             "diverged"
         }
         Some(relation) if relation.behind > 0 => {
@@ -81,16 +93,8 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             // Fetching never moves the local ref. What to do about a newer
             // remote copy is a decision, and adopting someone else's rendering
             // silently would be a surprising thing for a fetch to do.
-            ctx.out.say("Adopt it, or render your own:");
-            ctx.out.say(command(
-                &ctx.out.theme,
-                &format!(
-                    "git merge refs/remotes/{}/tpl/{}",
-                    preferences.remote,
-                    ref_name.trim_start_matches("refs/tpl/")
-                ),
-            ));
-            ctx.out.say(command(&ctx.out.theme, "git tpl update"));
+            ctx.out.say("Review its provenance and ancestry before conditionally fast-forwarding the local rendered ref.");
+            ctx.out.say("See https://noirbizarre.github.io/git-tpl/usage/fetch/#fast-forwarding-an-existing-local-ref");
             "behind"
         }
         Some(relation) => {
@@ -110,8 +114,9 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 "remote": preferences.remote,
                 "ref": ref_name,
                 "state": state,
-                // `null` when the remote has no copy at all, which is a
-                // different thing from a copy that is level with ours.
+                "localPresent": report.local_tip.is_some(),
+                "remotePresent": report.remote_tip.is_some(),
+                // Absence of either tip prevents an ancestry comparison.
                 "relation": relation.as_ref().map(|relation| serde_json::json!({
                     "ahead": relation.ahead,
                     "behind": relation.behind,

@@ -18,7 +18,11 @@ pub fn run(args: QuestionsArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
     let source = ctx.user.expand(&args.template).into_owned();
 
-    let ops::Questionnaire { template, order } = ops::questions(
+    let ops::Questionnaire {
+        template,
+        order,
+        resolved_choices,
+    } = ops::questions(
         ops::Request {
             source: &source,
             reference: args.r#ref.as_deref(),
@@ -51,7 +55,7 @@ pub fn run(args: QuestionsArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 },
                 "questions": ordered
                     .iter()
-                    .map(|(order, name, question)| describe(&template, order, name, question))
+                    .map(|(order, name, question)| describe(order, name, question, resolved_choices.get(*name).map(Vec::as_slice)))
                     .collect::<Vec<_>>(),
                 "computed": manifest.computed.keys().collect::<Vec<_>>(),
                 "data": manifest.data.iter().map(|(name, decl)| serde_json::json!({
@@ -92,10 +96,10 @@ pub fn run(args: QuestionsArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 }
 
 fn describe(
-    template: &ops::Resolved,
     order: &usize,
     name: &str,
     question: &Question,
+    resolved: Option<&[tpl::template::Choice]>,
 ) -> serde_json::Value {
     let default_expression = question.default_expression().map(str::to_string);
 
@@ -147,67 +151,30 @@ fn describe(
         // parse the data file itself. Only for a source that lives in the
         // template repository: a remote one would mean a network fetch, and a
         // command that reads a manifest should not silently acquire one.
-        if let Some(values) = resolve_template_choices(template, reference) {
-            map.insert("choicesResolved".into(), serde_json::Value::Array(values));
+        if let Some(choices) = resolved {
+            // Preserve the string-array contract; presentation is additive.
+            map.insert(
+                "choicesResolved".into(),
+                serde_json::json!(
+                    choices
+                        .iter()
+                        .map(|choice| &choice.value)
+                        .collect::<Vec<_>>()
+                ),
+            );
+            map.insert(
+                "choicesResolvedDetails".into(),
+                serde_json::json!(
+                    choices
+                        .iter()
+                        .map(|choice| serde_json::json!({
+                            "value": choice.value, "label": choice.label(), "help": choice.help,
+                        }))
+                        .collect::<Vec<_>>()
+                ),
+            );
         }
     }
 
     out
-}
-
-/// The values behind a `choices_from`, when they are in the template itself.
-///
-/// Returns `None` for anything remote, anything project-local, or a reference
-/// that does not point at a plain array of strings — every one of which is a
-/// case where the honest answer is "ask the renderer", not a guess.
-fn resolve_template_choices(
-    template: &ops::Resolved,
-    reference: &str,
-) -> Option<Vec<serde_json::Value>> {
-    let rest = reference.strip_prefix("data.")?;
-    let (name, path) = rest.split_once('.')?;
-    let decl = template.manifest.data.get(name)?;
-
-    // Only a path inside the template repository. `kind` is inferred when it is
-    // absent, and the inference that matters here is: no scheme, no leading
-    // `./`, so it is a template file.
-    if decl.kind.as_deref().is_some_and(|kind| kind != "template") {
-        return None;
-    }
-    // A `ref` or a `path` makes it a git source whatever `source` looks like,
-    // and resolving it would mean a clone. A command that only reads a manifest
-    // must not acquire a network call.
-    if decl.reference.is_some() || decl.path.is_some() {
-        return None;
-    }
-    if decl.source.contains("://") || decl.source.starts_with('.') {
-        return None;
-    }
-    // An interpolated source depends on answers, which is exactly what has not
-    // been collected yet.
-    if is_expression(&decl.source) {
-        return None;
-    }
-
-    // Read through the flattened tree rather than a path lookup, because that
-    // is the only accessor the backend exposes and the trees involved are a
-    // template's, not a monorepo's.
-    let entries = template.repo.list_tree(template.tree).ok()?;
-    let entry = entries.iter().find(|entry| entry.path == decl.source)?;
-    let bytes = template.repo.read_blob(entry.oid).ok()?;
-    let text = String::from_utf8(bytes).ok()?;
-    let parsed: toml::Value = toml::from_str(&text).ok()?;
-
-    let mut cursor = &parsed;
-    for segment in path.split('.') {
-        cursor = cursor.get(segment)?;
-    }
-
-    Some(
-        cursor
-            .as_array()?
-            .iter()
-            .filter_map(|value| value.as_str().map(|s| serde_json::Value::String(s.into())))
-            .collect(),
-    )
 }

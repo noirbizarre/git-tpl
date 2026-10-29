@@ -53,7 +53,10 @@ kind = "local"
 
 A leading `./` or `../` marks it as project-local; `kind = "local"` states it outright and is clearer.
 
-The path is relative to the project root — the directory containing `.config/git.tpl.toml`.
+The path is relative to the project root — the directory under which `.config/git.tpl.toml` lives,
+not the `.config/` directory itself.
+For example, `project/.config/git.tpl.toml` makes `project/` the root,
+so `config/tpl-data.toml` resolves to `project/config/tpl-data.toml`.
 
 ### When to use it, and when not to
 

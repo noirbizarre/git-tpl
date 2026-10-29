@@ -61,6 +61,7 @@ pub enum ComposeError {
         origin: String,
         /// Original typed diagnostic.
         #[source]
+        #[diagnostic_source]
         source: Box<OpError>,
     },
 
@@ -74,6 +75,15 @@ pub enum ComposeError {
         /// Child repository with a recursive declaration.
         origin: String,
     },
+}
+
+// miette's diagnostic_source derive borrows the field as a trait object.
+// Keep the concrete box (it breaks the recursive OpError/ComposeError size)
+// while exposing its typed diagnostic instead of erasing it to Error::source.
+impl std::borrow::Borrow<dyn Diagnostic> for Box<OpError> {
+    fn borrow(&self) -> &(dyn Diagnostic + 'static) {
+        self.as_ref()
+    }
 }
 
 fn valid_id(name: &str) -> bool {
@@ -221,7 +231,7 @@ pub fn render(
                 &child,
                 &source,
                 None,
-                answers,
+                crate::answers::typed(answers),
                 user,
                 Answering::defaults(),
                 child_trust,
@@ -230,7 +240,9 @@ pub fn render(
                 origin: source.clone(),
                 source: Box::new(error),
             })?;
-            for file in rendered.files {
+            for mut file in rendered.files {
+                // The same pre-render path can exist in parent and child; the path is not ownership.
+                file.origin = crate::render::Origin::Composed(source.clone());
                 if !paths.insert(file.path.clone()) {
                     return Err(ComposeError::Collision { path: file.path });
                 }

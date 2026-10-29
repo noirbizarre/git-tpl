@@ -74,7 +74,8 @@ It does not use the newest unmerged rendering reported by [`status`](status.md).
 Application is a Git ancestry relationship, not a comparison of file contents.
 Squash merges and cherry-picks do not preserve it; reverting files does not remove it.
 An attachment made with `init --no-merge` needs to be merged before it has an applied history.
-If the rendered ref is absent, fetch it with `git tpl fetch` when shared, or restore the original local ref.
+If the rendered ref is absent, [restore the original rendered ref](fetch.md#restoring-an-absent-local-ref).
+Fetching a shared ref alone does not restore the local ref.
 Unusable provenance and dirty-worktree renderings are diagnosed rather than replaced with an older guessed baseline.
 Commit the template changes, update, and merge a clean rendering to inspect its exact source history.
 

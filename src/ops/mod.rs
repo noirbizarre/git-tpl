@@ -26,7 +26,9 @@ use crate::data::{
     declared_remotes,
 };
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Partials, Prompter};
-use crate::git::{AheadBehind, Change, FileStat, GitBackend, GitError, MergeOutcome, Oid};
+use crate::git::{
+    AheadBehind, Change, FileMode, FileStat, GitBackend, GitError, MergeOutcome, Oid,
+};
 use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
 use crate::provenance::{ComposedRevision, Provenance, Recorded};
@@ -407,40 +409,167 @@ pub fn clear_directory<E>(
     dir: &Path,
     failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
 ) -> Result<(), E> {
-    match std::fs::remove_dir_all(dir) {
+    let dir = resolve_output_root(dir).map_err(|error| failed(dir, "clear", &error))?;
+    match std::fs::remove_dir_all(&dir) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(failed(dir, "clear", &error)),
+        Err(error) => return Err(failed(&dir, "clear", &error)),
     }
-    std::fs::create_dir_all(dir).map_err(|error| failed(dir, "create", &error))
+    std::fs::create_dir_all(&dir).map_err(|error| failed(&dir, "create", &error))
 }
 
 /// Write a rendered tree onto the filesystem under `root`.
 ///
-/// The one place that turns rendered bytes into files, so that the executable
-/// bit is applied identically wherever a tree lands on disk. It had two
-/// implementations and they had already diverged: one set the bit and never
-/// cleared it, so a non-executable file written over an executable one kept a
-/// mode the rendering does not have.
-///
-/// Safe to join `root` with each path: every rendered path was validated by
-/// `render_path`, which rejects `.`, `..`, absolute segments and separators
-/// inside a segment. Joining is safe because of that check, not in spite of it.
+/// Validate the complete output set before writing, so a rendered link can never
+/// become the directory through which another output is written.
 pub fn materialise<'a, E>(
     root: &Path,
-    files: impl IntoIterator<Item = (&'a str, &'a [u8], bool)>,
+    files: impl IntoIterator<Item = (&'a str, &'a [u8], FileMode)>,
     failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
 ) -> Result<(), E> {
-    for (path, content, executable) in files {
+    let root = resolve_output_root(root).map_err(|error| failed(root, "materialise", &error))?;
+    let mut files: Vec<_> = files.into_iter().collect();
+    let paths: std::collections::BTreeSet<_> = files.iter().map(|(path, _, _)| *path).collect();
+    for (path, _, mode) in &files {
+        let invalid = |reason| std::io::Error::new(std::io::ErrorKind::InvalidInput, reason);
+        if path.is_empty()
+            || paths.len() != files.len()
+            || path.contains('\\')
+            || Path::new(path)
+                .components()
+                .any(|part| !matches!(part, std::path::Component::Normal(_)))
+            || path
+                .match_indices('/')
+                .any(|(index, _)| paths.contains(&path[..index]))
+        {
+            return Err(failed(
+                &root.join(path),
+                "materialise",
+                &invalid("output path escapes or overlaps another output"),
+            ));
+        }
+        if !matches!(
+            mode,
+            FileMode::Blob | FileMode::BlobExecutable | FileMode::Link
+        ) {
+            return Err(failed(
+                &root.join(path),
+                "materialise",
+                &invalid("unsupported output mode"),
+            ));
+        }
+        reject_symlink_ancestors(&root.join(path))
+            .map_err(|error| failed(&root.join(path), "materialise", &error))?;
+        #[cfg(not(unix))]
+        if *mode == FileMode::Link {
+            return Err(failed(
+                &root.join(path),
+                "materialise",
+                &std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "materialising symbolic links is unsupported on this platform",
+                ),
+            ));
+        }
+    }
+    // Links go last: filesystem aliases (case folding or Unicode normalisation)
+    // must not let a newly created link become an ordinary output's ancestor.
+    files.sort_by_key(|(_, _, mode)| *mode == FileMode::Link);
+    for (path, content, mode) in files {
         let target = root.join(path);
+        // Recheck after earlier writes too, since distinct Git names can alias
+        // on the destination filesystem even when lexical prefix checks pass.
+        reject_symlink_ancestors(&target)
+            .map_err(|error| failed(&target, "materialise", &error))?;
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|error| failed(parent, "create", &error))?;
         }
-        std::fs::write(&target, content).map_err(|error| failed(&target, "write", &error))?;
-        set_executable(&target, executable)
-            .map_err(|error| failed(&target, "set the permissions of", &error))?;
+        if mode == FileMode::Link {
+            if target.exists() {
+                std::fs::remove_file(&target)
+                    .map_err(|error| failed(&target, "replace", &error))?;
+            }
+            create_symlink(content, &target)
+                .map_err(|error| failed(&target, "create a symlink at", &error))?;
+        } else {
+            std::fs::write(&target, content).map_err(|error| failed(&target, "write", &error))?;
+            set_executable(&target, mode == FileMode::BlobExecutable)
+                .map_err(|error| failed(&target, "set the permissions of", &error))?;
+        }
     }
     Ok(())
+}
+
+/// Resolve caller-selected parent aliases while keeping the output root itself protected.
+///
+/// macOS places temporary directories below `/var`, an alias for `/private/var`.
+/// Checking every lexical ancestor would reject ordinary output there. Resolve
+/// only the existing parent prefix, then check the root and every generated child.
+pub fn resolve_output_root(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = std::path::absolute(path)?;
+    let invalid = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "output needs a directory name",
+        )
+    };
+    let mut suffix = vec![absolute.file_name().ok_or_else(invalid)?.to_owned()];
+    let mut parent = absolute.parent().ok_or_else(invalid)?;
+    loop {
+        match parent.canonicalize() {
+            Ok(mut resolved) => {
+                for component in suffix.iter().rev() {
+                    resolved.push(component);
+                }
+                // Never canonicalise the leaf: that would silently accept an
+                // output-root link and let --force clear its target directory.
+                reject_symlink_ancestors(&resolved)?;
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                suffix.push(parent.file_name().ok_or_else(invalid)?.to_owned());
+                parent = parent.parent().ok_or_else(invalid)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+/// Refuse existing links before directory cleanup or writes can follow them.
+pub fn reject_symlink_ancestors(path: &Path) -> std::io::Result<()> {
+    // Absolute spelling makes relative `..` paths check every traversed ancestor too.
+    let absolute = std::path::absolute(path)?;
+    for ancestor in absolute.ancestors() {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    format!("refusing symlink `{}`", ancestor.display()),
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn create_symlink(content: &[u8], target: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        // Git's target is opaque bytes, not text to interpolate or a path to resolve.
+        std::os::unix::fs::symlink(std::ffi::OsStr::from_bytes(content), target)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (content, target);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "materialising symbolic links is unsupported on this platform",
+        ))
+    }
 }
 
 /// Apply the executable bit, on the platforms that have one.
@@ -655,7 +784,7 @@ pub fn enforce_strict_answers(
 pub fn render_files(
     target: Target<'_>,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
@@ -668,7 +797,25 @@ pub fn render_files(
 pub fn render_files_with_composed(
     target: Target<'_>,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
+    user: &UserConfig,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+    composed: Option<&[ComposedRevision]>,
+) -> Result<RenderedFiles, OpError> {
+    let location = target.source;
+    render_files_from_location(
+        target, location, project, supplied, user, answering, trust, composed,
+    )
+}
+
+/// Keep configured identity (trust, defaults and provenance) separate from filesystem access.
+#[allow(clippy::too_many_arguments)]
+fn render_files_from_location(
+    target: Target<'_>,
+    location: &str,
+    project: Option<(&dyn GitBackend, &Path)>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     answering: Answering<'_>,
     mut trust: Trust<'_>,
@@ -680,7 +827,7 @@ pub fn render_files_with_composed(
     // over the same invocation's `Trust`, not one shared decision.
     let template = resolve::resolve(
         Request {
-            source: target.source,
+            source: location,
             reference: target.reference,
             root: target.root,
             dirty: target.dirty,
@@ -719,7 +866,7 @@ pub fn render_resolved(
     template: &Resolved,
     source: &str,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
@@ -735,10 +882,10 @@ pub fn render_resolved_with_composed(
     template: &Resolved,
     source: &str,
     project: Option<(&dyn GitBackend, &Path)>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     mut answering: Answering<'_>,
-    trust: Trust<'_>,
+    mut trust: Trust<'_>,
     recorded_composed: Option<&[ComposedRevision]>,
 ) -> Result<RenderedOnce, OpError> {
     // Built and validated before anything is prompted: a cycle or a typo
@@ -779,14 +926,20 @@ pub fn render_resolved_with_composed(
     //
     // An *unmatched* template is untouched, and `Trust::Refuse` still refuses
     // it loudly. Nothing is granted by omission.
-    let mut trust = if user.trust.allows(source) {
-        Trust::always()
-    } else {
-        trust
-    };
-
     let decisions: BTreeMap<String, Decision> = if requests.is_empty() {
         BTreeMap::new()
+    } else if user.trust.allows(source)
+        || (crate::refs::local_path(source).is_some()
+            && template
+                .repo
+                .workdir()
+                .is_ok_and(|location| user.trust.allows_local_location(&location)))
+    {
+        // Persistent consent covers this template's data, never a child's
+        // repository or ancestors. Preserve the invocation gate for composition.
+        Trust::always()
+            .gate()
+            .confirm(&requests, REMOTE_LIMIT_BYTES)?
     } else {
         trust.gate().confirm(&requests, REMOTE_LIMIT_BYTES)?
     };
@@ -874,6 +1027,7 @@ pub fn render_resolved_with_composed(
         Vec::new()
     };
 
+    crate::render::validate_paths(&files)?;
     let provenance = Provenance {
         source: source.to_string(),
         reference: template.reference.clone(),
@@ -905,21 +1059,28 @@ pub fn render(
     project: &dyn GitBackend,
     project_root: &Path,
     config: &Config,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     dirty: bool,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<Render, OpError> {
-    let rendered = render_files(
+    let location = crate::config::source_location(&config.template.source, project_root);
+    let rendered = render_files_from_location(
         Target::from_config(config, dirty),
+        &location,
         Some((project, project_root)),
         supplied,
         user,
         answering,
         trust,
+        None,
     )?;
 
+    rendered_tree(project, rendered)
+}
+
+fn rendered_tree(project: &dyn GitBackend, rendered: RenderedFiles) -> Result<Render, OpError> {
     // Blobs are read from the template repository — often a temporary clone —
     // and written into the project, which is where the ref will point.
     let tree = write_tree(project, &rendered.files)?;
@@ -1129,7 +1290,7 @@ pub fn init(
     source: &str,
     reference: Option<String>,
     explicit_id: Option<&str>,
-    supplied: BTreeMap<String, Value>,
+    supplied: crate::answers::SuppliedAnswers,
     dirty: bool,
     merge_after: bool,
     force: bool,
@@ -1138,6 +1299,9 @@ pub fn init(
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<InitOutcome, OpError> {
+    // Serialize cooperating initializers/updaters through configuration persistence,
+    // including the identical-tree path that has no new commit to publish.
+    let _operation = project.lock_template_operation()?;
     // `--force` re-asks the questions and renders onto the existing ref, which
     // is not a new operation: the ref is append-only, so another rendering on
     // it is exactly what `update` writes. The only thing `force` adds is
@@ -1146,25 +1310,47 @@ pub fn init(
         return Err(OpError::AlreadyInitialised);
     }
 
-    // A merge needs a clean worktree, and so does this. Checked before doing
-    // any work rather than after the questionnaire.
+    // Every attachment writes a commit, even --no-merge (ADR-021). Refuse
+    // before rendering or saving so staged user changes cannot ride in it.
+    if !project.is_normal_state() {
+        return Err(GitError::RepositoryBusy.into());
+    }
+    if !project.is_index_clean()? {
+        return Err(GitError::DirtyIndex.into());
+    }
+    // Merging also needs the worktree clean; --no-merge may preserve unstaged edits.
     if merge_after && !project.is_empty()? && !project.is_clean()? {
         return Err(GitError::DirtyWorktree.into());
     }
 
     let mut config = Config::new(source, reference);
     config.template.id = explicit_id.map(str::to_string);
+    config.template.rebase_local(project_root)?;
 
-    let rendered = render(
-        project,
-        project_root,
-        &config,
+    let id = TemplateId::resolve(source, explicit_id)?;
+    let ref_name = id.ref_name();
+    // Capture before prompting: another renderer may publish while answers are
+    // being collected, and must not silently become this invocation's parent.
+    let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
+
+    let location = crate::config::source_location(&config.template.source, project_root);
+    // Init's consent/default lookup belongs to the source the caller supplied; later
+    // operations use the configured spelling. Rebasing is a storage decision, not new consent.
+    let files = render_files_from_location(
+        Target {
+            source,
+            ..Target::from_config(&config, dirty)
+        },
+        &location,
+        Some((project, project_root)),
         supplied,
-        dirty,
         user,
         answering,
         trust,
+        None,
     )?;
+    let mut rendered = rendered_tree(project, files)?;
+    rendered.provenance.source = config.template.source.clone();
 
     // Before the ref is created, not after: `--force` re-renders onto an
     // existing ref, and a refusal that arrived once the commit already
@@ -1175,22 +1361,32 @@ pub fn init(
         rendered.template.manifest.questions.keys().cloned(),
     )?;
 
-    let id = TemplateId::resolve(source, explicit_id)?;
-    let ref_name = id.ref_name();
-
     // Before the ref, before the configuration, before the merge. A `note_file`
     // that names nothing is an authoring mistake, and this is the last moment
     // at which saying so costs the user nothing: after the next line there is a
     // commit in their repository to explain away.
     let note = template_note(&rendered)?;
 
+    // Questions can leave the command waiting while another terminal stages
+    // changes. Refuse before publication rather than incorporating those edits.
+    if !project.is_normal_state() {
+        return Err(GitError::RepositoryBusy.into());
+    }
+    if !project.is_index_clean()? {
+        return Err(GitError::DirtyIndex.into());
+    }
+
     // A forced reattachment to the same ref must descend from its tip: an
     // orphan here destroys the merge base of every previous attachment.
     // Only a genuinely new ref starts with an orphan rendering.
-    let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
     let commit =
         project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
-    project.set_ref(&ref_name, commit, "tpl: initial render")?;
+    project.compare_and_set_ref(
+        &ref_name,
+        parents.first().copied(),
+        commit,
+        "tpl: initial render",
+    )?;
 
     let changes = project.diff_trees(
         parents
@@ -1263,8 +1459,7 @@ pub fn init(
         // refuse to merge, and the failure would be about the index rather
         // than about anything the user did.
         _ => {
-            project.stage(Path::new(CONFIG_PATH))?;
-            project.commit_index(&format!(
+            project.commit_attachment(&format!(
                 "chore(tpl): attach the {} template\n\n\
                  Records the template source and the answers used to render it.\n\
                  See {CONFIG_PATH}.\n",
@@ -1668,31 +1863,32 @@ pub enum UpdateOutcome {
 /// actually are.
 pub fn merge_answers(
     recorded: BTreeMap<String, Value>,
-    overrides: BTreeMap<String, Value>,
-) -> BTreeMap<String, Value> {
-    let mut supplied = recorded;
+    overrides: crate::answers::SuppliedAnswers,
+) -> crate::answers::SuppliedAnswers {
+    let mut supplied = crate::answers::typed(recorded);
     supplied.extend(overrides);
     supplied
 }
 
 /// Re-render and advance the rendered ref.
 ///
-/// Never touches `HEAD`, the index or the worktree. That is structural: the
-/// tree is built as a Git object and one ref is moved. There is no code path
-/// here that writes a file into the project.
+/// Never touches `HEAD`, the index or rendered worktree files: the tree is built
+/// as a Git object. Changed answers and child locks are saved unstaged in project configuration.
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     project: &dyn GitBackend,
     project_root: &Path,
     reference: Option<&str>,
-    overrides: BTreeMap<String, Value>,
+    overrides: crate::answers::SuppliedAnswers,
     dirty: bool,
     strict_answers: bool,
     user: &UserConfig,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<UpdateOutcome, OpError> {
+    let _operation = project.lock_template_operation()?;
     let mut config = Config::load(project_root)?;
+    let initial_config = config.clone();
     let configured_reference = config.template.r#ref.clone();
     // `--ref` changes this invocation's render, not the attachment recorded
     // on disk; the next update must still use the configured reference.
@@ -1702,6 +1898,10 @@ pub fn update(
 
     let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let supplied = merge_answers(config.answers.clone(), overrides);
+
+    let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
+    let ref_name = id.ref_name();
+    let tip = project.resolve_ref(&ref_name)?;
 
     let rendered = render(
         project,
@@ -1724,10 +1924,6 @@ pub fn update(
             .collect::<Vec<_>>(),
         rendered.template.manifest.questions.keys().cloned(),
     )?;
-
-    let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
-    let ref_name = id.ref_name();
-    let tip = project.resolve_ref(&ref_name)?;
 
     let previous = tip.map(|oid| project.commit(oid)).transpose()?;
     let recorded_previous = previous
@@ -1777,9 +1973,26 @@ pub fn update(
         .map(ComposedRevision::lock)
         .collect();
     let composed_changed = config.composed != composed;
+    // A hand edit during a prompt is not ours to overwrite, even when another
+    // git-tpl invocation is excluded by the operation lock.
+    if Config::load(project_root)? != initial_config {
+        return Err(ConfigError::Changed {
+            path: Config::path_in(project_root),
+        }
+        .into());
+    }
     if migrations.is_empty() && identical && !child_changed {
         let answers_changed = config.answers != *rendered.context.answers();
         if composed_changed || answers_changed {
+            if let Some(tip) = tip {
+                // Validate stale snapshots even when only answers/locks change.
+                project.compare_and_set_ref(
+                    &ref_name,
+                    Some(tip),
+                    tip,
+                    "tpl: validate unchanged render",
+                )?;
+            }
             config.answers = rendered.context.answers().clone();
             config.composed = composed;
             config.template.r#ref = configured_reference;
@@ -1829,7 +2042,8 @@ pub fn update(
     let started_new_history = parents.is_empty();
     let commit =
         project.create_commit(rendered.tree, &parents, &rendered.provenance.to_message())?;
-    project.set_ref(&ref_name, commit, "tpl: update")?;
+    // Compare the original published tip, not an unpublished migration parent.
+    project.compare_and_set_ref(&ref_name, tip, commit, "tpl: update")?;
 
     let changes = project.diff_trees(previous.as_ref().map(|c| c.tree), rendered.tree, &[])?;
 
@@ -1837,14 +2051,15 @@ pub fn update(
     // recorded rather than asked again on every update.
     //
     // Deliberately NOT staged or committed. `update` touching the index would
-    // break the guarantee the whole design rests on — that it changes one ref
-    // and nothing else. When the answers change, the user sees the edit in
-    // `git status` and commits it with whatever else they are doing.
+    // break HEAD/index isolation. Save only semantic answer/lock changes: serialising
+    // an otherwise unchanged config would discard the user's comments and formatting.
     let answers_changed = config.answers != *rendered.context.answers();
-    config.answers = rendered.context.answers().clone();
-    config.composed = composed;
-    config.template.r#ref = configured_reference;
-    config.save(project_root)?;
+    if answers_changed || composed_changed {
+        config.answers = rendered.context.answers().clone();
+        config.composed = composed;
+        config.template.r#ref = configured_reference;
+        config.save(project_root)?;
+    }
 
     Ok(UpdateOutcome::Updated {
         id,
@@ -1950,9 +2165,10 @@ pub fn status(
     // ancestor outside `[trust]` then degrades exactly like any other resolve
     // failure here — the "available" side is already best-effort.
     let mut trust = Trust::refuse();
+    let location = crate::config::source_location(&config.template.source, project_root);
     let resolved = resolve::resolve(
         Request {
-            source: &config.template.source,
+            source: &location,
             reference: config.template.r#ref.as_deref(),
             root: config.template.root.as_deref(),
             dirty,
@@ -1991,7 +2207,7 @@ pub fn status(
             template,
             &config.template.source,
             Some((project, project_root)),
-            config.answers.clone(),
+            crate::answers::typed(config.answers.clone()),
             user,
             Answering::defaults(),
             Trust::refuse(),
@@ -2091,7 +2307,7 @@ pub struct Preview {
 pub fn render_preview(
     project: &dyn GitBackend,
     project_root: &Path,
-    overrides: BTreeMap<String, Value>,
+    overrides: crate::answers::SuppliedAnswers,
     dirty: bool,
     strict_answers: bool,
     user: &UserConfig,
@@ -2104,6 +2320,8 @@ pub fn render_preview(
     // the project already answered, which for a non-interactive caller means
     // hanging and for an interactive one means answering the questionnaire
     // again to look at a diff.
+    // Obsolete recorded keys are historical state, not this invocation's typos.
+    let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let supplied = merge_answers(config.answers.clone(), overrides);
 
     let rendered = render(
@@ -2119,7 +2337,12 @@ pub fn render_preview(
 
     enforce_strict_answers(
         strict_answers,
-        &rendered.ignored_answers,
+        &rendered
+            .ignored_answers
+            .iter()
+            .filter(|key| current_keys.contains(*key))
+            .cloned()
+            .collect::<Vec<_>>(),
         rendered.template.manifest.questions.keys().cloned(),
     )?;
 
@@ -2169,10 +2392,8 @@ pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> 
     let mut trust = Trust::refuse();
     let template = resolve::resolve(request, user, &mut trust)?;
 
-    // This template's own files only, even when it extends another: static
-    // analysis of an inherited file in a repository lint has no reason to
-    // clone a second time just to check syntax it cannot act on is left for a
-    // future ADR (`Resolved::own_entries`'s own doc comment says the same).
+    // Other static rules retain their leaf-only scope. Syntax additionally
+    // checks effective inherited output and every retained partial (ADR-042).
     let entries = template.own_entries()?;
     // The whole repository, not just the render root: a `note_file` names a
     // path beside the manifest, in the same namespace a partial lives in.
@@ -2190,7 +2411,7 @@ pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> 
         .unwrap_or_default();
     let manifest_text = String::from_utf8_lossy(&manifest_bytes);
 
-    let findings = crate::lint::lint(
+    let mut findings = crate::lint::lint(
         template.repo.as_ref(),
         &template.manifest,
         &manifest_text,
@@ -2198,6 +2419,34 @@ pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> 
         &repo_entries,
         &partials,
     )?;
+
+    // The leaf pass already reports its output syntax. Only surviving ancestor
+    // entries are added, so overridden/removed source cannot fail the lint.
+    for layered in template
+        .entries()?
+        .into_iter()
+        .filter(|entry| entry.origin != 0)
+    {
+        let entry = &layered.entry;
+        if !entry.mode.is_blob() || !entry.path.ends_with(crate::render::TEMPLATE_SUFFIX) {
+            continue;
+        }
+        let bytes = template.read_blob(layered.origin, entry.oid)?;
+        // Match rendering's binary exemption rather than interpreting payloads.
+        if bytes.iter().take(8192).any(|byte| *byte == 0) {
+            continue;
+        }
+        findings.extend(crate::lint::check_syntax(
+            &entry.path,
+            &String::from_utf8_lossy(&bytes),
+            &partials,
+        ));
+    }
+    // MiniJinja's loader is lazy: registering a partial does not compile it.
+    // Compile each declaration itself even when no reachable import uses it.
+    for (path, source) in partials.declarations() {
+        findings.extend(crate::lint::check_syntax(&path, source, &partials));
+    }
 
     Ok(Linted { template, findings })
 }
@@ -2212,6 +2461,8 @@ pub struct Questionnaire {
     /// the `Resolved` it travels with. The caller looks each one up in
     /// `template.manifest.questions`.
     pub order: Vec<String>,
+    /// Statically loadable template choices, normalized exactly as rendering.
+    pub resolved_choices: BTreeMap<String, Vec<crate::template::Choice>>,
 }
 
 /// Resolve a template and compute the order its questions are asked in.
@@ -2237,7 +2488,69 @@ pub fn questions(request: Request<'_>, user: &UserConfig) -> Result<Questionnair
         .filter(|key| template.manifest.questions.contains_key(key))
         .collect();
 
-    Ok(Questionnaire { template, order })
+    let resolved_choices = static_template_choices(&template, &order)?;
+    Ok(Questionnaire {
+        template,
+        order,
+        resolved_choices,
+    })
+}
+
+fn static_template_choices(
+    template: &Resolved,
+    order: &[String],
+) -> Result<BTreeMap<String, Vec<crate::template::Choice>>, OpError> {
+    let mut trees = template.template_trees();
+    let own = trees.remove(0);
+    let mut loader = Loader::new(own, None).with_ancestors(trees, template.data_origin().clone());
+    let mut context = crate::context::Context::new();
+    let mut resolved = BTreeMap::new();
+    for name in order {
+        let question = &template.manifest.questions[name];
+        if question.choices.is_some() {
+            continue;
+        }
+        let Some(reference) = &question.choices_from else {
+            continue;
+        };
+        let Some(rest) = reference.strip_prefix("data.") else {
+            continue;
+        };
+        let source_name = rest.split('.').next().expect("a path has a first segment");
+        let Some(decl) = template.manifest.data.get(source_name) else {
+            continue;
+        };
+        // Introspection must never guess answers, read a project, or contact
+        // a runtime data host. Static files still use all normal validation.
+        if crate::data::SourceKind::of(decl) != Some(crate::data::SourceKind::TemplateFile)
+            || crate::template::is_expression(&decl.source)
+        {
+            continue;
+        }
+        let value = loader.load(
+            source_name,
+            decl,
+            crate::data::Rendered {
+                source: &decl.source,
+                reference: decl.reference.as_deref(),
+                path: decl.path.as_deref(),
+            },
+        )?;
+        context.set_data(source_name, value);
+        let value =
+            context
+                .get_path(reference)
+                .ok_or_else(|| crate::eval::EvalError::BadChoices {
+                    question: name.clone(),
+                    reference: reference.clone(),
+                    found: "nothing".into(),
+                })?;
+        resolved.insert(
+            name.clone(),
+            crate::eval::choices_from_value(name, reference, value)?,
+        );
+    }
+    Ok(resolved)
 }
 
 /// The rendered ref's tip, or a helpful error.
@@ -2522,19 +2835,45 @@ pub fn fetch(
     project_root: &Path,
     preferences: &Preferences,
 ) -> Result<(String, Option<AheadBehind>), OpError> {
+    let report = fetch_report(project, project_root, preferences)?;
+    Ok((report.ref_name, report.relation))
+}
+
+/// Presence and ancestry are independent: no relation does not identify which ref is absent.
+pub struct FetchReport {
+    /// Local rendered ref that was compared.
+    pub ref_name: String,
+    /// Existing local tip; fetching never creates or moves it.
+    pub local_tip: Option<Oid>,
+    /// Tip in the fetched remote-tracking namespace.
+    pub remote_tip: Option<Oid>,
+    /// Ancestry comparison, available only when both tips exist.
+    pub relation: Option<AheadBehind>,
+}
+
+/// Fetch without adopting a local ref and retain both presence facts for reporting.
+pub fn fetch_report(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    preferences: &Preferences,
+) -> Result<FetchReport, OpError> {
     let (id, ref_name) = identify(project_root)?;
 
     project.fetch_refspec(&preferences.remote, &preferences.fetch_refspec())?;
 
     let remote_ref = id.remote_ref_name(&preferences.remote);
-    let relation = match (
-        project.resolve_ref(&ref_name)?,
-        project.resolve_ref(&remote_ref)?,
-    ) {
+    let local_tip = project.resolve_ref(&ref_name)?;
+    let remote_tip = project.resolve_ref(&remote_ref)?;
+    let relation = match (local_tip, remote_tip) {
         (Some(local), Some(remote)) => Some(project.ahead_behind(local, remote)?),
         _ => None,
     };
-    Ok((ref_name, relation))
+    Ok(FetchReport {
+        ref_name,
+        local_tip,
+        remote_tip,
+        relation,
+    })
 }
 
 /// Push the rendered ref to a remote.

@@ -6,6 +6,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -13,13 +15,12 @@ use git2::build::TreeUpdateBuilder;
 use git2::{
     AutotagOption, Cred, CredentialType, Delta, DiffFormat, DiffOptions, ErrorClass, ErrorCode,
     FetchOptions, ObjectType, PushOptions, RemoteCallbacks, Repository, RepositoryOpenFlags,
-    ResetType,
 };
 
 use super::ignore::IgnoreStack;
 use super::{
     AheadBehind, Change, ChangeKind, Commit, FileMode, FileStat, GitBackend, GitError,
-    HistoryEntry, MergeOutcome, MergePreview, Oid, TreeEntry,
+    HistoryEntry, MergeOutcome, MergePreview, Oid, TemplateOperationGuard, TreeEntry,
 };
 
 /// A repository opened through libgit2.
@@ -27,7 +28,87 @@ pub struct LibGit2 {
     repo: Repository,
 }
 
+/// Git's conventional lock excludes native Git index writers too, unlike the
+/// operation lock, which only coordinates git-tpl configuration transactions.
+struct AttachmentIndexLock {
+    path: PathBuf,
+    file: File,
+    published: bool,
+}
+
+impl Drop for AttachmentIndexLock {
+    fn drop(&mut self) {
+        // A failed attachment must not leave Git believing an index writer is
+        // still active. After successful rename this path is already absent.
+        if !self.published {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
+fn attachment_io(context: &str, error: std::io::Error) -> GitError {
+    GitError::Backend {
+        context: context.into(),
+        reason: error.to_string(),
+    }
+}
+
 impl LibGit2 {
+    /// Checkout against the original HEAD before publishing its destination.
+    fn checkout_fast_forward(&self, target: Oid, expected: Option<Oid>) -> Result<(), GitError> {
+        let mut transaction = self
+            .repo
+            .transaction()
+            .map_err(|e| backend("begin checkout", &e))?;
+        // Lock HEAD too: switching branches while checkout runs would otherwise
+        // publish the result to a branch no longer checked out.
+        transaction
+            .lock_ref("HEAD")
+            .map_err(|e| backend("lock HEAD", &e))?;
+        let head = self
+            .repo
+            .find_reference("HEAD")
+            .map_err(|e| backend("read HEAD", &e))?;
+        let branch = head
+            .symbolic_target()
+            .map_err(|e| backend("read symbolic HEAD", &e))?
+            .ok_or_else(|| GitError::Backend {
+                context: "fast-forward the branch".into(),
+                reason: "HEAD is detached".into(),
+            })?;
+        transaction
+            .lock_ref(branch)
+            .map_err(|e| backend("lock the branch", &e))?;
+        if self.resolve_ref(branch)? != expected {
+            return Err(GitError::Backend {
+                context: "fast-forward the branch".into(),
+                reason: "the branch moved concurrently; inspect HEAD and retry".into(),
+            });
+        }
+        let target = self
+            .repo
+            .find_commit(from_oid(target))
+            .map_err(|e| backend("read checkout target", &e))?;
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        // Default baseline is HEAD, still unmoved under the locks. In particular,
+        // ignored files are user data too, not permission to overwrite them.
+        checkout.safe().overwrite_ignored(false);
+        self.repo
+            .checkout_tree(target.as_object(), Some(&mut checkout))
+            .map_err(|e| backend("safely check out the merged tree", &e))?;
+        transaction
+            .set_target(
+                branch,
+                target.id(),
+                None,
+                "tpl: fast-forward to the template state",
+            )
+            .map_err(|e| backend("prepare the branch update", &e))?;
+        transaction
+            .commit()
+            .map_err(|e| backend("publish the checked-out branch", &e))
+    }
+
     /// The diff between two trees, limited to `paths`.
     ///
     /// The three diff methods below differ only in how they read the result;
@@ -185,25 +266,27 @@ impl LibGit2 {
     /// Turn `collect_workdir`'s output into blobs and a tree.
     ///
     /// Shared by `tree_from_workdir` and `tree_from_directory`: both walk a
-    /// directory into the same `(relative path, absolute path, executable)`
+    /// directory into the same `(relative path, absolute path, mode)`
     /// shape, and differ only in whether that walk consulted an `IgnoreStack`.
-    fn tree_from_entries(&self, entries: Vec<(String, PathBuf, bool)>) -> Result<Oid, GitError> {
+    fn tree_from_entries(
+        &self,
+        entries: Vec<(String, PathBuf, FileMode)>,
+    ) -> Result<Oid, GitError> {
         let mut blobs = Vec::new();
-        for (path, absolute, executable) in entries {
-            let content = std::fs::read(&absolute).map_err(|e| GitError::Backend {
+        for (path, absolute, mode) in entries {
+            // read_link never follows a dangling link or a directory link into another tree.
+            let content = if mode == FileMode::Link {
+                std::fs::read_link(&absolute)
+                    .map(|target| target.into_os_string().into_encoded_bytes())
+            } else {
+                std::fs::read(&absolute)
+            }
+            .map_err(|e| GitError::Backend {
                 context: format!("read `{}`", absolute.display()),
                 reason: e.to_string(),
             })?;
             let oid = self.write_blob(&content)?;
-            blobs.push(TreeEntry {
-                path,
-                oid,
-                mode: if executable {
-                    FileMode::BlobExecutable
-                } else {
-                    FileMode::Blob
-                },
-            });
+            blobs.push(TreeEntry { path, oid, mode });
         }
 
         self.build_tree(&blobs)
@@ -211,6 +294,25 @@ impl LibGit2 {
 }
 
 impl GitBackend for LibGit2 {
+    fn lock_template_operation(&self) -> Result<TemplateOperationGuard, GitError> {
+        // repo.path() is worktree-private for linked worktrees: their project
+        // configurations are separate even though rendered refs are shared (CAS).
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.repo.path().join("tpl-operation.lock"))
+            .map_err(|e| attachment_io("open the template-operation lock", e))?;
+        file.try_lock().map_err(|e| match e {
+            std::fs::TryLockError::WouldBlock => GitError::RepositoryBusy,
+            std::fs::TryLockError::Error(error) => {
+                attachment_io("lock the template operation", error)
+            }
+        })?;
+        Ok(TemplateOperationGuard { _file: file })
+    }
+
     fn workdir(&self) -> Result<PathBuf, GitError> {
         self.repo
             .workdir()
@@ -232,6 +334,41 @@ impl GitBackend for LibGit2 {
             .statuses(Some(&mut options))
             .map_err(|e| backend("read the repository status", &e))?;
         Ok(statuses.is_empty())
+    }
+
+    fn is_index_clean(&self) -> Result<bool, GitError> {
+        let mut index = self
+            .repo
+            .index()
+            .map_err(|e| backend("read the attachment index", &e))?;
+        // Index publication uses an atomic rename, and other Git processes may
+        // stage while we prompt; neither may be hidden by libgit2's cached index.
+        index
+            .read(true)
+            .map_err(|e| backend("refresh the attachment index", &e))?;
+        if index.has_conflicts() {
+            return Ok(false);
+        }
+        let head = self
+            .head_commit()?
+            .map(|oid| {
+                self.repo
+                    .find_commit(from_oid(oid))
+                    .and_then(|commit| commit.tree())
+            })
+            .transpose()
+            .map_err(|e| backend("read the attachment baseline", &e))?;
+        // A tree/index diff ignores unstaged worktree edits and compares an
+        // unborn index against emptiness rather than declaring it clean.
+        let diff = self
+            .repo
+            .diff_tree_to_index(head.as_ref(), Some(&index), None)
+            .map_err(|e| backend("compare the attachment index to HEAD", &e))?;
+        Ok(diff.deltas().len() == 0)
+    }
+
+    fn is_normal_state(&self) -> bool {
+        self.repo.state() == git2::RepositoryState::Clean
     }
 
     fn head_commit(&self) -> Result<Option<Oid>, GitError> {
@@ -440,6 +577,51 @@ impl GitBackend for LibGit2 {
         Ok(())
     }
 
+    fn compare_and_set_ref(
+        &self,
+        name: &str,
+        expected: Option<Oid>,
+        target: Oid,
+        message: &str,
+    ) -> Result<(), GitError> {
+        let mut transaction = self
+            .repo
+            .transaction()
+            .map_err(|e| backend("begin ref publication", &e))?;
+        // Absence must be checked under the same lock as publication: checking
+        // first and then creating a ref can overwrite a concurrent first render.
+        transaction
+            .lock_ref(name)
+            .map_err(|e| backend("lock the rendered ref", &e))?;
+        let actual = match self.repo.find_reference(name) {
+            Ok(reference) => {
+                // Rendered refs are direct. Following a symbolic ref here would
+                // let a writer replace another destination without locking it.
+                Some(to_oid(reference.target().ok_or_else(|| {
+                    GitError::Backend {
+                        context: "publish the rendered ref".into(),
+                        reason: format!("`{name}` must be a direct ref"),
+                    }
+                })?))
+            }
+            Err(e) if e.code() == ErrorCode::NotFound => None,
+            Err(e) => return Err(backend("read the locked ref", &e)),
+        };
+        if actual != expected {
+            return Err(GitError::StaleRef {
+                name: name.into(),
+                expected,
+                actual,
+            });
+        }
+        transaction
+            .set_target(name, from_oid(target), None, message)
+            .map_err(|e| backend("prepare ref publication", &e))?;
+        transaction
+            .commit()
+            .map_err(|e| backend("publish the rendered ref", &e))
+    }
+
     fn diff_trees(
         &self,
         from: Option<Oid>,
@@ -587,15 +769,7 @@ impl GitBackend for LibGit2 {
         // is `git tpl init` in a freshly `git init`ed directory, and produces
         // the cleanest possible history for a generated project.
         let Some(head_oid) = head else {
-            let branch = self.head_branch()?.unwrap_or_else(|| "main".to_string());
-            self.set_ref(
-                &format!("refs/heads/{branch}"),
-                commit,
-                "tpl: initial template state",
-            )?;
-            self.repo
-                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-                .map_err(|e| backend("check out the template", &e))?;
+            self.checkout_fast_forward(commit, None)?;
             return Ok(MergeOutcome::FastForward { to: commit });
         };
 
@@ -609,21 +783,7 @@ impl GitBackend for LibGit2 {
         }
 
         if analysis.is_fast_forward() {
-            let branch = self.head_branch()?.ok_or_else(|| GitError::Backend {
-                context: "fast-forward the branch".into(),
-                reason: "HEAD is detached".into(),
-            })?;
-            self.set_ref(
-                &format!("refs/heads/{branch}"),
-                commit,
-                "tpl: fast-forward to the template state",
-            )?;
-            self.repo
-                .set_head(&format!("refs/heads/{branch}"))
-                .map_err(|e| backend("move HEAD", &e))?;
-            self.repo
-                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-                .map_err(|e| backend("check out the merged tree", &e))?;
+            self.checkout_fast_forward(commit, Some(head_oid))?;
             return Ok(MergeOutcome::FastForward { to: commit });
         }
 
@@ -999,6 +1159,42 @@ impl GitBackend for LibGit2 {
             .is_ok())
     }
 
+    fn resolve_pin(&self, reference: &str, origin: &str) -> Result<Option<Oid>, GitError> {
+        let missing = || GitError::NoSuchRevision {
+            reference: reference.into(),
+            origin: origin.into(),
+        };
+        let tag = if reference.starts_with("refs/tags/") {
+            reference.to_string()
+        } else {
+            format!("refs/tags/{reference}")
+        };
+        // Exact ref lookup excludes revspec operators and gives tags precedence
+        // over same-named branches, without validating then resolving again.
+        match self.repo.find_reference(&tag) {
+            Ok(tag) => {
+                return tag
+                    .peel_to_commit()
+                    .map(|commit| Some(to_oid(commit.id())))
+                    .map_err(|_| missing());
+            }
+            Err(e) if e.code() == ErrorCode::NotFound || e.code() == ErrorCode::InvalidSpec => {}
+            Err(e) => return Err(backend("look up the pinned tag", &e)),
+        }
+        if !(7..=40).contains(&reference.len()) || !reference.bytes().all(|c| c.is_ascii_hexdigit())
+        {
+            return Ok(None);
+        }
+        // Look up objects, never names. Do not peel a blob/tree/tag object into
+        // a commit or filter ambiguity away by searching commits alone.
+        let object = self
+            .repo
+            .find_object_by_prefix(reference, None)
+            .map_err(|_| missing())?;
+        let commit = object.into_commit().map_err(|_| missing())?;
+        Ok(Some(to_oid(commit.id())))
+    }
+
     fn default_branch(&self) -> Result<String, GitError> {
         // `HEAD` in a bare clone points at whatever the remote said its default
         // branch was, which is the correct answer and needs no guessing between
@@ -1164,18 +1360,181 @@ impl GitBackend for LibGit2 {
             .map_err(|e| backend("create the commit", &e))
     }
 
-    fn abort_merge(&self) -> Result<(), GitError> {
+    fn commit_attachment(&self, message: &str) -> Result<Oid, GitError> {
+        let index_path = self.repo.path().join("index");
+        let lock_path = self.repo.path().join("index.lock");
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    GitError::RepositoryBusy
+                } else {
+                    attachment_io("lock the attachment index", e)
+                }
+            })?;
+        let mut index_lock = AttachmentIndexLock {
+            path: lock_path,
+            file,
+            published: false,
+        };
+        // Lock HEAD and its destination as well: an external commit or checkout
+        // must not change the baseline between index validation and publication.
+        let mut transaction = self
+            .repo
+            .transaction()
+            .map_err(|e| backend("begin attachment publication", &e))?;
+        transaction
+            .lock_ref("HEAD")
+            .map_err(|e| backend("lock attachment HEAD", &e))?;
         let head = self
             .repo
-            .head()
-            .and_then(|h| h.peel(ObjectType::Commit))
-            .map_err(|e| backend("resolve HEAD", &e))?;
-        self.repo
-            .reset(&head, ResetType::Hard, None)
-            .map_err(|e| backend("reset the worktree", &e))?;
-        self.repo
-            .cleanup_state()
-            .map_err(|e| backend("clean up the merge state", &e))?;
+            .find_reference("HEAD")
+            .map_err(|e| backend("read attachment HEAD", &e))?;
+        let destination = head
+            .symbolic_target()
+            .map_err(|e| backend("read attachment branch", &e))?
+            .unwrap_or("HEAD");
+        if destination != "HEAD" {
+            transaction
+                .lock_ref(destination)
+                .map_err(|e| backend("lock attachment branch", &e))?;
+        }
+        if !self.is_normal_state() {
+            return Err(GitError::RepositoryBusy);
+        }
+        // Force a fresh read: this Repository may have cached its index before
+        // the questionnaire, while another process staged files in the meantime.
+        let mut index = self
+            .repo
+            .index()
+            .map_err(|e| backend("read attachment index", &e))?;
+        index
+            .read(true)
+            .map_err(|e| backend("refresh attachment index", &e))?;
+        let parent = self
+            .head_commit()?
+            .map(|oid| self.repo.find_commit(from_oid(oid)))
+            .transpose()
+            .map_err(|e| backend("read attachment parent", &e))?;
+        let baseline = parent
+            .as_ref()
+            .map(|commit| commit.tree())
+            .transpose()
+            .map_err(|e| backend("read attachment baseline", &e))?;
+        if index.has_conflicts()
+            || self
+                .repo
+                .diff_tree_to_index(baseline.as_ref(), Some(&index), None)
+                .map_err(|e| backend("validate attachment index", &e))?
+                .deltas()
+                .len()
+                != 0
+        {
+            return Err(GitError::DirtyIndex);
+        }
+
+        // Build independently of the user's index, including non-renderable
+        // HEAD entries (submodules and non-UTF-8 paths) without flattening them.
+        let temporary = tempfile::tempdir_in(self.repo.path())
+            .map_err(|e| attachment_io("prepare the isolated attachment index", e))?;
+        let mut isolated = git2::Index::open(&temporary.path().join("index"))
+            .map_err(|e| backend("open the isolated attachment index", &e))?;
+        if let Some(baseline) = &baseline {
+            isolated
+                .read_tree(baseline)
+                .map_err(|e| backend("seed the attachment tree", &e))?;
+        }
+        // Preserve stat data and user index flags (assume-unchanged and
+        // skip-worktree) without letting the original index supply tree content.
+        let baseline_entries: HashMap<_, _> = isolated
+            .iter()
+            .map(|entry| (entry.path.clone(), (entry.id, entry.mode)))
+            .collect();
+        for original in index.iter() {
+            if baseline_entries.get(&original.path) == Some(&(original.id, original.mode)) {
+                isolated
+                    .add(&original)
+                    .map_err(|e| backend("preserve attachment index metadata", &e))?;
+            }
+        }
+        let config_path = Path::new(".config/git.tpl.toml");
+        let content = std::fs::read(self.workdir()?.join(config_path))
+            .map_err(|e| attachment_io("read the attachment configuration", e))?;
+        let blob = self
+            .repo
+            .blob(&content)
+            .map_err(|e| backend("write the attachment configuration", &e))?;
+        isolated
+            .add(&git2::IndexEntry {
+                ctime: git2::IndexTime::new(0, 0),
+                mtime: git2::IndexTime::new(0, 0),
+                dev: 0,
+                ino: 0,
+                mode: 0o100644,
+                uid: 0,
+                gid: 0,
+                file_size: content.len() as u32,
+                id: blob,
+                flags: 0,
+                flags_extended: 0,
+                path: b".config/git.tpl.toml".to_vec(),
+            })
+            .map_err(|e| backend("record the attachment configuration", &e))?;
+        let tree = isolated
+            .write_tree_to(&self.repo)
+            .map_err(|e| backend("write the attachment tree", &e))?;
+        let parents: Vec<_> = parent
+            .as_ref()
+            .map(|p| to_oid(p.id()))
+            .into_iter()
+            .collect();
+        let commit = self.create_commit(to_oid(tree), &parents, message)?;
+        isolated
+            .write()
+            .map_err(|e| backend("serialize the attachment index", &e))?;
+        let bytes = std::fs::read(temporary.path().join("index"))
+            .map_err(|e| attachment_io("read the isolated attachment index", e))?;
+        index_lock
+            .file
+            .write_all(&bytes)
+            .map_err(|e| attachment_io("prepare the attachment index", e))?;
+        transaction
+            .set_target(destination, from_oid(commit), None, message)
+            .map_err(|e| backend("prepare attachment publication", &e))?;
+        transaction
+            .commit()
+            .map_err(|e| backend("publish the attachment commit", &e))?;
+        std::fs::rename(&index_lock.path, index_path)
+            .map_err(|e| attachment_io("publish the attachment index", e))?;
+        // After rename another Git writer may already own index.lock; dropping
+        // our guard must not remove that writer's newly created lock file.
+        index_lock.published = true;
+        Ok(commit)
+    }
+
+    fn abort_merge(&self) -> Result<(), GitError> {
+        if self.repo.state() != git2::RepositoryState::Merge {
+            return Err(GitError::NoMerge);
+        }
+        // Only explicit abort delegates recovery to Git (ADR-040). A hard
+        // reset loses unrelated edits; cleanup on failure destroys recovery state.
+        let output = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(self.repo.path())
+            .arg("--work-tree")
+            .arg(self.repo.workdir().unwrap_or(self.repo.path()))
+            .args(["merge", "--abort"])
+            .output()
+            .map_err(|e| GitError::AbortFailed {
+                reason: e.to_string(),
+            })?;
+        if !output.status.success() {
+            return Err(GitError::AbortFailed {
+                reason: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            });
+        }
         Ok(())
     }
 
@@ -1444,7 +1803,7 @@ fn collect_workdir(
     root: &Path,
     dir: &Path,
     stack: Option<&IgnoreStack>,
-    out: &mut Vec<(String, PathBuf, bool)>,
+    out: &mut Vec<(String, PathBuf, FileMode)>,
     ignored: &mut Vec<String>,
 ) -> Result<(), GitError> {
     let entered = stack.map(|stack| stack.entering(dir));
@@ -1501,9 +1860,16 @@ fn collect_workdir(
 
         if file_type.is_dir() {
             collect_workdir(root, &path, stack, out, ignored)?;
-        } else if file_type.is_file() {
+        } else if file_type.is_file() || file_type.is_symlink() {
             let relative_str = relative.to_string_lossy().replace('\\', "/");
-            out.push((relative_str, path.clone(), is_executable(&path)));
+            let mode = if file_type.is_symlink() {
+                FileMode::Link
+            } else if is_executable(&path) {
+                FileMode::BlobExecutable
+            } else {
+                FileMode::Blob
+            };
+            out.push((relative_str, path.clone(), mode));
         }
     }
 
@@ -1895,6 +2261,66 @@ mod tests {
 
         assert_eq!(repo.resolve_ref("refs/tpl/demo").unwrap(), Some(commit));
         assert_eq!(repo.resolve_ref("refs/tpl/absent").unwrap(), None);
+    }
+
+    #[test]
+    fn expected_absence_is_locked_against_another_real_backend() {
+        let (_dir, repo) = scratch();
+        let other = LibGit2::discover(repo.repo.path()).unwrap();
+        let target = commit_files(&repo, &[], &[("f", "content")]);
+        let mut transaction = repo.repo.transaction().unwrap();
+        transaction.lock_ref("refs/tpl/new").unwrap();
+        assert!(
+            other
+                .compare_and_set_ref("refs/tpl/new", None, target, "competing writer")
+                .is_err()
+        );
+        assert_eq!(repo.resolve_ref("refs/tpl/new").unwrap(), None);
+        drop(transaction);
+        other
+            .compare_and_set_ref("refs/tpl/new", None, target, "first writer")
+            .unwrap();
+        assert!(matches!(
+            repo.compare_and_set_ref("refs/tpl/new", None, target, "stale writer"),
+            Err(GitError::StaleRef {
+                expected: None,
+                actual: Some(_),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn ambiguous_commit_object_prefixes_never_fall_back_to_a_branch() {
+        let (_dir, repo) = scratch();
+        let tree = repo.build_tree(&[]).unwrap();
+        let mut seen = HashMap::new();
+        // Birthday search hashes candidates in memory, writing only the two
+        // colliding real commits so the fixture stays small and deterministic.
+        for number in 0..1_000_000 {
+            let bytes = format!(
+                "tree {tree}\nauthor Test <test@example.invalid> 0 +0000\ncommitter Test <test@example.invalid> 0 +0000\n\ncandidate {number}\n"
+            );
+            let oid = git2::Oid::hash_object(ObjectType::Commit, bytes.as_bytes()).unwrap();
+            let prefix = to_oid(oid).to_hex()[..7].to_string();
+            if let Some(previous) = seen.insert(prefix.clone(), bytes.clone()) {
+                let odb = repo.repo.odb().unwrap();
+                odb.write(ObjectType::Commit, previous.as_bytes()).unwrap();
+                odb.write(ObjectType::Commit, bytes.as_bytes()).unwrap();
+                repo.set_ref(
+                    &format!("refs/heads/{prefix}"),
+                    to_oid(oid),
+                    "ambiguous branch",
+                )
+                .unwrap();
+                assert!(matches!(
+                    repo.resolve_pin(&prefix, "fixture"),
+                    Err(GitError::NoSuchRevision { .. })
+                ));
+                return;
+            }
+        }
+        panic!("deterministic fixture did not find a seven-character collision");
     }
 
     #[test]

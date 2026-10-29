@@ -1,12 +1,11 @@
 ---
 source: tests/snapshots.rs
-assertion_line: 29
 expression: transcript
 ---
 exit: 2
 --- stdout ---
 {
-  "source": "[tmp]/template",
+  "source": "../template",
   "id": "template",
   "ref": "refs/tpl/template",
   "tip": "[sha]",

@@ -6,7 +6,7 @@ exit: 0
 --- stdout ---
 {
   "result": "patched",
-  "template": "[tmp]/template",
+  "template": "../template",
   "revision": {
     "reference": "main",
     "commit": "[sha]",

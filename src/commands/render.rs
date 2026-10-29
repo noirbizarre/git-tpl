@@ -59,13 +59,13 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     report_ignored(&ctx.out, &rendered.ignored_answers);
     report_ignored_paths(&ctx.out, &rendered.template.ignored);
 
-    prepare_output(&args.output, args.force)?;
+    let output = prepare_output(&args.output, args.force)?;
     ops::materialise(
-        &args.output,
+        &output,
         rendered
             .files
             .iter()
-            .map(|file| (file.path.as_str(), file.content.as_slice(), file.executable)),
+            .map(|file| (file.path.as_str(), file.content.as_slice(), file.mode)),
         &io,
     )?;
 
@@ -80,7 +80,8 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ),
             "output": args.output,
             "files": rendered.files.iter().map(|f| serde_json::json!({
-                "path": f.path, "bytes": f.content.len(), "executable": f.executable,
+                "path": f.path, "bytes": f.content.len(), "executable": f.mode == tpl::git::FileMode::BlobExecutable,
+                "mode": format!("{:06o}", f.mode.as_u32()),
                 "templated": f.templated,
             })).collect::<Vec<_>>(),
             "ignoredAnswers": rendered.ignored_answers,
@@ -129,7 +130,10 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 /// it is a policy of this command: refusing to replace a directory somebody
 /// did not say could be replaced. Clearing it, once permitted, is the shared
 /// operation.
-fn prepare_output(output: &Path, force: bool) -> Result<(), OpError> {
+fn prepare_output(output: &Path, force: bool) -> Result<std::path::PathBuf, OpError> {
+    let resolved =
+        ops::resolve_output_root(output).map_err(|error| io(output, "prepare", &error))?;
+    let output = resolved.as_path();
     match std::fs::read_dir(output) {
         Ok(mut entries) => {
             if entries.next().is_some() {
@@ -149,7 +153,7 @@ fn prepare_output(output: &Path, force: bool) -> Result<(), OpError> {
         }
         Err(error) => return Err(io(output, "read", &error)),
     }
-    Ok(())
+    Ok(resolved)
 }
 
 /// The failure to write the output directory, under the code that means it.
