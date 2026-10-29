@@ -247,8 +247,14 @@ A remote (non-local) `source` needs the same confirmation a `[data]` `kind = "gi
 `[trust]` entry, or an interactive confirmation — because it is chosen by the template's author, not typed on the
 command line, exactly like a git-kind data source is. See [Confirmation](../data/remote.md#confirmation). Unlike
 `[data]`, which is confirmed all at once before evaluation, an ancestor is confirmed as it is discovered — the
-chain is only readable one clone at a time. `git tpl lint`, `git tpl questions` and `git tpl status` resolve this
-chain too and need the same confirmation, even though none of them ever touch a `[data]` source.
+chain is only readable one clone at a time.
+
+Inspection commands resolve ancestors too, but `git tpl lint`, `git tpl questions` and `git tpl status`
+do not offer interactive confirmation or an invocation-wide `--trust` flag.
+Remote ancestors must already have persistent `[trust]` entries in the user configuration.
+Without that trust, lint and questions refuse resolution; status instead reports the available revision as unknown
+(`availableReferenceDescription` and `availableCommit` are `null`) while retaining recorded rendering information.
+This ancestor-resolution trust is separate from loading runtime data sources.
 
 `git tpl status` and the rendered commit's trailers record the whole chain, not just the directly-configured
 template — see [What is in the commit](../concepts/git-model.md#what-is-in-the-commit). Full reasoning:
