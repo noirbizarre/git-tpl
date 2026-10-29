@@ -9,7 +9,7 @@ There is no manual step and no custom script.
 push to main
      │
      ▼
-🚢 Ship  →  gh ship prepare
+🚢 Ship  →  gh ship run  (prepare)
      │
      ▼
 🚀 Prepare Release
@@ -20,7 +20,7 @@ Release PR  (chore(release): X.Y.Z)
      │
      │  ← review the changelog, then squash-merge
      ▼
-🚢 Ship  →  gh ship release
+🚢 Ship  →  gh ship run  (release)
      │  tags, creates a draft release
      ▼
 📦 Publish Release
@@ -37,6 +37,11 @@ the release is made public
      │  pushes it to
      │  noirbizarre/homebrew-tap
 ```
+
+The Ship workflow has one orchestration job.
+`gh ship run` routes pushes to preparation and merged Release PRs to publication;
+unrelated closed PRs skip successfully.
+Both triggers share a non-cancelling concurrency group so preparation and publication cannot interleave.
 
 ## Division of labour
 
@@ -260,6 +265,11 @@ git commit -am 'Update to X.Y.Z' && git push
 
 A GitHub App with `APP_CLIENT_ID` (a repository variable) and `APP_PRIVATE_KEY` (a secret) in the `release`
 environment.
+The Ship job passes these as `SHIP_APP_CLIENT_ID` and `SHIP_APP_PRIVATE_KEY` so gh-ship can mint and renew
+installation tokens during long builds.
+`SHIP_RUN_TIMEOUT=7200` allows a two-hour wait for a dispatched workflow;
+the job's 150-minute timeout leaves headroom for orchestration.
+The default token is used only for checkout and installing gh-ship, with checkout credentials left unpersisted.
 The default `GITHUB_TOKEN` cannot trigger workflows, so a Release PR it authored would show no CI results.
 
 A `TAP_TOKEN` secret in the `homebrew` environment: a fine-grained personal access token whose repository access
