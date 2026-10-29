@@ -17,6 +17,10 @@ metadata:
 
 # git-tpl
 
+`questions` resolves static template-local choices using render-time formats, checksums and inherited origins.
+`choicesResolved` stays a string array; `choicesResolvedDetails` adds normalized value/label/help records.
+Invalid static data fails; dynamic, project-local and network data remain unresolved.
+
 Files and recorded answers preserve types: quoted booleans, integers or arrays remain strings and fail type checks.
 Only `--answer` text is coerced; correct old wrong-type configuration explicitly.
 Strict dirty `diff`/`show` ignore obsolete recorded keys, but reject unknown keys supplied by flags or answers files.

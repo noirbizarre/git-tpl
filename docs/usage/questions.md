@@ -60,8 +60,13 @@ A caller that took it literally would write `{{ crate }}` into the answers file.
 
 When `choices_from` points at a data file inside the template repository, the values are resolved and included,
 so a caller does not have to fetch and parse the file itself.
+`choicesResolved` remains an array of string values.
+`choicesResolvedDetails` adds normalized `{value, label, help}` records, with absent labels replaced by their values.
+Static TOML, JSON and YAML use the render loader, including explicit formats, checksums and inherited data origins.
+Root arrays are supported; invalid static data fails rather than producing a filtered or empty list.
 
 Only for template-local sources.
+Dynamic sources and project-local sources remain unresolved.
 A remote one would mean this command silently acquired a network fetch, which a command that reads a manifest
 should not do.
 

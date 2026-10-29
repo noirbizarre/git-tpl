@@ -2234,6 +2234,8 @@ pub struct Questionnaire {
     /// the `Resolved` it travels with. The caller looks each one up in
     /// `template.manifest.questions`.
     pub order: Vec<String>,
+    /// Statically loadable template choices, normalized exactly as rendering.
+    pub resolved_choices: BTreeMap<String, Vec<crate::template::Choice>>,
 }
 
 /// Resolve a template and compute the order its questions are asked in.
@@ -2259,7 +2261,69 @@ pub fn questions(request: Request<'_>, user: &UserConfig) -> Result<Questionnair
         .filter(|key| template.manifest.questions.contains_key(key))
         .collect();
 
-    Ok(Questionnaire { template, order })
+    let resolved_choices = static_template_choices(&template, &order)?;
+    Ok(Questionnaire {
+        template,
+        order,
+        resolved_choices,
+    })
+}
+
+fn static_template_choices(
+    template: &Resolved,
+    order: &[String],
+) -> Result<BTreeMap<String, Vec<crate::template::Choice>>, OpError> {
+    let mut trees = template.template_trees();
+    let own = trees.remove(0);
+    let mut loader = Loader::new(own, None).with_ancestors(trees, template.data_origin().clone());
+    let mut context = crate::context::Context::new();
+    let mut resolved = BTreeMap::new();
+    for name in order {
+        let question = &template.manifest.questions[name];
+        if question.choices.is_some() {
+            continue;
+        }
+        let Some(reference) = &question.choices_from else {
+            continue;
+        };
+        let Some(rest) = reference.strip_prefix("data.") else {
+            continue;
+        };
+        let source_name = rest.split('.').next().expect("a path has a first segment");
+        let Some(decl) = template.manifest.data.get(source_name) else {
+            continue;
+        };
+        // Introspection must never guess answers, read a project, or contact
+        // a runtime data host. Static files still use all normal validation.
+        if crate::data::SourceKind::of(decl) != Some(crate::data::SourceKind::TemplateFile)
+            || crate::template::is_expression(&decl.source)
+        {
+            continue;
+        }
+        let value = loader.load(
+            source_name,
+            decl,
+            crate::data::Rendered {
+                source: &decl.source,
+                reference: decl.reference.as_deref(),
+                path: decl.path.as_deref(),
+            },
+        )?;
+        context.set_data(source_name, value);
+        let value =
+            context
+                .get_path(reference)
+                .ok_or_else(|| crate::eval::EvalError::BadChoices {
+                    question: name.clone(),
+                    reference: reference.clone(),
+                    found: "nothing".into(),
+                })?;
+        resolved.insert(
+            name.clone(),
+            crate::eval::choices_from_value(name, reference, value)?,
+        );
+    }
+    Ok(resolved)
 }
 
 /// The rendered ref's tip, or a helpful error.

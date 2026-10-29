@@ -167,6 +167,10 @@ Three keys appear only when the question declares them: `choices`, an array of `
 `choicesFrom`, the reference a `choices_from` names; and `choicesResolved`, that reference's values, present only
 when it points at a data file inside the template — which saves the caller fetching and parsing it, and is why a
 remote source has no resolved form here.
+`choicesResolved` is always a string array, including for structured choices.
+An accompanying `choicesResolvedDetails` array carries `{value, label, help}` records;
+`label` falls back to the value and absent `help` is null.
+Static sources use TOML/JSON/YAML format and checksum validation and their declaring layer's origin.
 
 ### `context`
 

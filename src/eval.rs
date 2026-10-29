@@ -391,24 +391,32 @@ fn resolve_choices(
             found: "nothing".into(),
         })?;
 
+    choices_from_value(name, reference, value).map(Some)
+}
+
+/// Normalize static introspection and render-time choices through the same reader.
+pub fn choices_from_value(
+    name: &str,
+    reference: &str,
+    value: &Value,
+) -> Result<Vec<Choice>, EvalError> {
     match value {
         Value::Array(items) => items
             .iter()
             .map(|item| {
                 Choice::from_value(item).map_err(|error| EvalError::BadChoices {
                     question: name.to_string(),
-                    reference: reference.clone(),
+                    reference: reference.to_string(),
                     found: error.to_string(),
                 })
             })
-            .collect::<Result<Vec<_>, _>>()
-            .map(Some),
+            .collect::<Result<Vec<_>, _>>(),
         // A table is the likeliest mistake — pointing at `data.licenses`
         // instead of `data.licenses.ids` — so name what was found rather than
         // reporting a generic type error.
         other => Err(EvalError::BadChoices {
             question: name.to_string(),
-            reference: reference.clone(),
+            reference: reference.to_string(),
             found: other.type_name().to_string(),
         }),
     }
