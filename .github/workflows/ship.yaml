@@ -1,0 +1,60 @@
+
+name: 🚢 Ship
+
+# gh ship run routes each event to the right half of the release lifecycle:
+# pushes prepare the Release PR, and merging it tags, drafts, builds assets,
+# then makes the release public. Unrelated closed PRs skip successfully.
+# Nothing to release costs one prepare-release run reporting changed: false.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [closed]
+
+# The App authenticates release operations; the default token only needs to
+# check out the repository and install the published extension.
+permissions:
+  contents: read
+
+# Merging fires both triggers. Serialize them so the pending-release guard
+# can stop preparation until publication finishes, regardless of event order.
+# Never cancel: that would orphan the dispatched prepare or publish run.
+concurrency:
+  group: ship
+  cancel-in-progress: false
+
+jobs:
+  ship:
+    name: 🚢 Ship
+    # Public forks do not have the App/release secrets this job requires.
+    if: github.repository_owner == 'noirbizarre'
+    runs-on: ubuntu-latest
+    # Renewable App tokens allow long builds; leave orchestration headroom
+    # beyond the two-hour dispatched-workflow wait configured below.
+    timeout-minutes: 150
+
+    # The environment holds App credentials, but orchestration is not itself
+    # a deployment. Only Publish Release registers a release deployment.
+    environment:
+      name: release
+      deployment: false
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # gh-ship authenticates its own operations without checkout's token.
+          persist-credentials: false
+
+      - name: Install gh-ship
+        run: gh extension install noirbizarre/gh-ship
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Ship the release
+        run: gh ship run
+        env:
+          # Only gh-ship needs the private key to mint and refresh its tokens.
+          SHIP_APP_CLIENT_ID: ${{ vars.APP_CLIENT_ID }}
+          SHIP_APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+          SHIP_RUN_TIMEOUT: 7200

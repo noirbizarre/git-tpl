@@ -1,0 +1,197 @@
+
+name: 📦 Publish Release
+run-name: 📦 Publish Release ${{ inputs.ref || github.ref }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Run tag or commit SHA; leave blank for a manual main rebuild
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUSTFLAGS: -D warnings
+  # gh-ship runs on the version tag; main CI publishes to the rolling channel.
+  TAG: ${{ startsWith(inputs.ref || github.ref, 'refs/tags/') && github.ref_name || vars.PRERELEASE_NAME || 'development' }}
+
+jobs:
+
+  build:
+    name: 🏗️ Build (${{ matrix.build.label }})
+    runs-on: ${{ matrix.build.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - { label: linux-amd64, target: x86_64-unknown-linux-gnu, runner: ubuntu-latest, cross: true }
+          - { label: linux-arm64, target: aarch64-unknown-linux-gnu, runner: ubuntu-latest, cross: true }
+          - { label: linux-amd64-musl, target: x86_64-unknown-linux-musl, runner: ubuntu-latest, cross: true }
+          - { label: darwin-amd64, target: x86_64-apple-darwin, runner: macos-latest }
+          - { label: darwin-arm64, target: aarch64-apple-darwin, runner: macos-latest }
+          - { label: windows-amd64, target: x86_64-pc-windows-msvc, runner: windows-latest, ext: ".exe" }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Every matrix leg uses the immutable run commit, even if a tag or main moves later.
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.build.target }}
+      # Published binaries must not depend on shared compiler-output caches.
+      - uses: jdx/mr-boxington-action@v1
+        with:
+          version: 1.28.0
+          backend: local
+      - uses: taiki-e/install-action@cross
+        if: matrix.build.cross
+      # Standalone Windows binaries must start without a separately installed redistributable.
+      - name: Statically link the MSVC C runtime
+        if: endsWith(matrix.build.target, 'windows-msvc')
+        run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "$GITHUB_ENV"
+      - name: Build and stage the asset
+        env:
+          TARGET: ${{ matrix.build.target }}
+          LABEL: ${{ matrix.build.label }}
+          CROSS: ${{ matrix.build.cross }}
+          EXT: ${{ matrix.build.ext }}
+        run: |
+          if [ "${CROSS:-}" = true ]; then
+            cross build --release --locked --target "$TARGET"
+          else
+            mbx build --release --locked --target "$TARGET"
+          fi
+          mkdir -p dist
+          cp "target/${TARGET}/release/git-tpl${EXT:-}" "dist/git-tpl_${TAG}_${LABEL}${EXT:-}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: asset-${{ matrix.build.label }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: 🚀 Publish
+    needs: build
+    runs-on: ubuntu-latest
+    # Only uploads serialize; builds remain parallel and no partial upload is cancelled.
+    concurrency:
+      group: publish-release
+      cancel-in-progress: false
+    environment:
+      name: release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.TAG }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: asset-*
+          merge-multiple: true
+          path: dist
+      # Both channels exercise the same reproducible prefix layout; Windows keeps its .exe.
+      - name: Package the Unix binaries
+        run: |
+          export LC_ALL=C
+          umask 022
+          epoch=$(git log -1 --format=%ct)
+          assets=(linux-amd64 linux-arm64 linux-amd64-musl darwin-amd64 darwin-arm64 )
+          for asset in "${assets[@]}"; do
+            name="git-tpl-${TAG}-${asset}"
+            root="stage/${name}"
+            put() { if [ -f "$2" ]; then install -D -m "$1" "$2" "${root}/$3"; fi; }
+            install -D -m 755 "dist/git-tpl_${TAG}_${asset}" "${root}/bin/git-tpl"
+            install -D -m 644 LICENSE "${root}/share/doc/git-tpl/LICENSE"
+            install -D -m 644 README.md "${root}/share/doc/git-tpl/README.md"
+            for page in stage/man/*.1; do put 644 "$page" "share/man/man1/$(basename "$page")"; done
+            put 644 stage/completions/git-tpl.bash "share/bash-completion/completions/git-tpl"
+            put 644 stage/completions/_git-tpl "share/zsh/site-functions/_git-tpl"
+            put 644 stage/completions/git-tpl.fish "share/fish/vendor_completions.d/git-tpl.fish"
+            tar -C stage --sort=name --format=gnu --mtime="@${epoch}" \
+              --owner=0 --group=0 --numeric-owner -cf - "$name" \
+              | gzip -n -9 > "dist/git-tpl_${TAG}_${asset}.tar.gz"
+          done
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- * > SHA256SUMS
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - name: Ensure the prerelease exists
+        if: ${{ !startsWith(inputs.ref || github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" \
+              --notes 'Development build' --prerelease --latest=false
+      - name: Upload assets to the release
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: gh release upload "$TAG" dist/* --clobber
+      - name: Update the rolling prerelease tag
+        if: ${{ !startsWith(inputs.ref || github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: >-
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}"
+          -f sha="$GITHUB_SHA" -F force=true --silent
+      - name: Finalize the prerelease
+        if: ${{ !startsWith(inputs.ref || github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh release edit "$TAG" --title "$TAG" --prerelease --draft=false --latest=false \
+            --notes "Main SHA: ${GITHUB_SHA}. CI: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      - uses: dtolnay/rust-toolchain@stable
+        if: startsWith(inputs.ref || github.ref, 'refs/tags/')
+      - uses: jdx/mr-boxington-action@v1
+        if: startsWith(inputs.ref || github.ref, 'refs/tags/')
+        with:
+          version: 1.28.0
+          backend: local
+      # Last: an irreversible crates.io publication must follow successful binary uploads.
+      - name: Check whether this version is already published
+        id: existing
+        if: startsWith(inputs.ref || github.ref, 'refs/tags/')
+        run: |
+          status=$(curl -sS -o /dev/null -w '%{http_code}' --retry 3 \
+            -H 'User-Agent: git-tpl-release' "https://crates.io/api/v1/crates/git-tpl/${TAG}")
+          case "$status" in
+            200) echo 'published=true' >> "$GITHUB_OUTPUT" ;;
+            404) echo 'published=false' >> "$GITHUB_OUTPUT" ;;
+            *) echo '::error::Could not check the existing crate version; retry publication.'; exit 1 ;;
+          esac
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+        if: startsWith(inputs.ref || github.ref, 'refs/tags/') && steps.existing.outputs.published == 'false'
+      - name: Publish to crates.io
+        if: startsWith(inputs.ref || github.ref, 'refs/tags/') && steps.existing.outputs.published == 'false'
+        run: mbx publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
