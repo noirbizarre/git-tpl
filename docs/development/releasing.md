@@ -228,8 +228,9 @@ checked through `git tpl --version` — not `git-tpl --version`.
 Git resolves `git tpl` only via an executable named exactly `git-tpl` on `PATH`, and a rename inside the archive
 is the one failure that would otherwise pass unnoticed.
 
-The source package's `check()` runs the suite in release mode against the packaged source before publication.
-This complements CI by checking the source archive as an Arch packager builds it.
+The source package's `check()` runs `./target/release/git-tpl --version` to smoke-check the built binary.
+The full test suite runs in normal CI; packaging checks that the executable starts,
+then the installed-package check verifies Git's command lookup through `git tpl --version`.
 
 !!! warning "namcap exits 0 whatever it reports"
 

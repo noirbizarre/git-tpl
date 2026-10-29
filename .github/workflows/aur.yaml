@@ -126,7 +126,7 @@ jobs:
       # Proves the PKGBUILD actually builds, and that the checksums verify,
       # before it reaches users.
       #
-      # Run source-package checks too: the packaged source must work outside CI.
+      # Smoke-check the source package's built binary too; CI owns the full suite.
       - name: Build the package
         working-directory: build
         run: |
