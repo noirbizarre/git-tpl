@@ -464,3 +464,44 @@ fn an_aborted_merge_is_reported_as_json() {
     assert_eq!(world.project.rev_parse("HEAD"), head, "HEAD moved");
     assert_eq!(world.project.status(), "", "the worktree is not clean");
 }
+
+#[test]
+fn abort_without_a_merge_preserves_staged_and_unstaged_changes() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.project.write("NOTES.md", "staged\n");
+    world.project.git(&["add", "NOTES.md"]);
+    world.project.write("NOTES.md", "unstaged\n");
+    let before = world.project.working_state();
+    let json = tpl(&world.project, &["--json", "merge", "--abort"])
+        .failure()
+        .json();
+    assert_eq!(json["error"]["code"], "tpl::git::no_merge");
+    assert_eq!(world.project.working_state(), before);
+}
+
+#[test]
+fn abort_preserves_unrelated_edits_and_native_failure_keeps_recovery_state() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+    tpl(&world.project, &["merge", "--no-commit"]).success();
+    world.project.write("NOTES.md", "my unrelated edit\n");
+    // Editing a newly staged merge result makes Git refuse reset --merge.
+    world
+        .project
+        .write(".github/workflows/release.yml", "my recovery edit\n");
+    let before = world.project.working_state();
+    let json = tpl(&world.project, &["--json", "merge", "--abort"])
+        .failure()
+        .json();
+    assert_eq!(json["error"]["code"], "tpl::git::abort_failed");
+    assert_eq!(world.project.working_state(), before);
+    assert!(world.project.exists(".git/MERGE_HEAD"));
+    world
+        .project
+        .git(&["restore", ".github/workflows/release.yml"]);
+    tpl(&world.project, &["merge", "--abort"]).success();
+    assert_eq!(world.project.read("NOTES.md"), "my unrelated edit\n");
+}

@@ -51,6 +51,10 @@ With `--no-commit`, the merge is staged and left for you to commit.
 
 ## Conflicts
 
+`git tpl merge --abort` delegates to native `git merge --abort`, preserving unrelated local edits.
+It refuses when no merge is in progress and retains Git's recovery state if Git cannot abort safely.
+Native Git must be installed; there is no destructive reset fallback.
+
 ```console
 $ git tpl merge
 

@@ -44,6 +44,8 @@ project.
    The other narrow exception is diff presentation (ADR-039): `src/commands/diff.rs` may run native `git diff`
    over the completed preview's two trees, inheriting the user's pager, diff drivers and textconv configuration.
    This is display after rendering, never a template hook or a capability available to a render.
+   Explicit merge abort also delegates to native Git in the backend (ADR-040), solely for safe recovery.
+   It is unavailable to rendering, init and update.
 
 ## Layout
 

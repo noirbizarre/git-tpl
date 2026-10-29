@@ -278,6 +278,26 @@ pub struct Commit {
 /// Errors from Git operations.
 #[derive(Debug, Error, Diagnostic)]
 pub enum GitError {
+    /// Aborting outside a merge must never touch local changes.
+    #[error("there is no merge in progress")]
+    #[diagnostic(
+        code(tpl::git::no_merge),
+        help("inspect `git status`; there is no merge to abort")
+    )]
+    NoMerge,
+
+    /// Native Git refused recovery; retain its explanation and recovery state.
+    #[error("native `git merge --abort` failed: {reason}")]
+    #[diagnostic(
+        code(tpl::git::abort_failed),
+        help(
+            "inspect `git status` and the reason above; preserve your edits before retrying `git merge --abort`"
+        )
+    )]
+    AbortFailed {
+        /// Spawn failure or captured Git stderr.
+        reason: String,
+    },
     /// The path is not inside a Git repository.
     #[error("`{}` is not a Git repository", path.display())]
     #[diagnostic(

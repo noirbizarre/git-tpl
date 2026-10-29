@@ -13,7 +13,6 @@ use git2::build::TreeUpdateBuilder;
 use git2::{
     AutotagOption, Cred, CredentialType, Delta, DiffFormat, DiffOptions, ErrorClass, ErrorCode,
     FetchOptions, ObjectType, PushOptions, RemoteCallbacks, Repository, RepositoryOpenFlags,
-    ResetType,
 };
 
 use super::ignore::IgnoreStack;
@@ -1165,17 +1164,26 @@ impl GitBackend for LibGit2 {
     }
 
     fn abort_merge(&self) -> Result<(), GitError> {
-        let head = self
-            .repo
-            .head()
-            .and_then(|h| h.peel(ObjectType::Commit))
-            .map_err(|e| backend("resolve HEAD", &e))?;
-        self.repo
-            .reset(&head, ResetType::Hard, None)
-            .map_err(|e| backend("reset the worktree", &e))?;
-        self.repo
-            .cleanup_state()
-            .map_err(|e| backend("clean up the merge state", &e))?;
+        if self.repo.state() != git2::RepositoryState::Merge {
+            return Err(GitError::NoMerge);
+        }
+        // Only explicit abort delegates recovery to Git (ADR-040). A hard
+        // reset loses unrelated edits; cleanup on failure destroys recovery state.
+        let output = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(self.repo.path())
+            .arg("--work-tree")
+            .arg(self.repo.workdir().unwrap_or(self.repo.path()))
+            .args(["merge", "--abort"])
+            .output()
+            .map_err(|e| GitError::AbortFailed {
+                reason: e.to_string(),
+            })?;
+        if !output.status.success() {
+            return Err(GitError::AbortFailed {
+                reason: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            });
+        }
         Ok(())
     }
 
