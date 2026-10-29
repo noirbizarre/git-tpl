@@ -41,6 +41,10 @@ Merge commit 2fff441.
 
 Fast-forwards when it can, and says so:
 
+Fast-forward checkout protects tracked edits and untracked or ignored files obstructing incoming paths.
+Unrelated local edits survive.
+Checkout runs against the original HEAD before the branch moves; a refused checkout leaves the branch unpublished.
+
 ```console
 $ git tpl merge
 Fast-forwarded refs/tpl/github-com-noirbizarre-rust-library-template into the current branch

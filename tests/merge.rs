@@ -9,6 +9,67 @@ mod common;
 use common::{World, tpl};
 
 #[test]
+fn fast_forward_preserves_local_files_and_publishes_only_after_safe_checkout() {
+    use tpl::git::{GitBackend, LibGit2, Oid};
+    for obstruction in ["tracked", "untracked", "ignored", "unrelated"] {
+        let repo = common::Repo::init("checkout");
+        repo.write("tracked", "base\n");
+        repo.write("unrelated", "base\n");
+        repo.commit_all("base");
+        let base = repo.rev_parse("HEAD");
+        repo.write("tracked", "incoming\n");
+        repo.write("incoming", "incoming\n");
+        repo.commit_all("incoming");
+        let target = Oid::parse(&repo.rev_parse("HEAD")).unwrap();
+        repo.git(&["reset", "--hard", &base]);
+        if obstruction == "ignored" {
+            repo.write(".git/info/exclude", "incoming\n");
+        }
+        let path = if ["ignored", "untracked"].contains(&obstruction) {
+            "incoming"
+        } else {
+            obstruction
+        };
+        repo.write(path, "local\n");
+        let backend = LibGit2::discover(&repo.path).unwrap();
+        let result = backend.merge(target, "merge", true, &[]);
+        assert_eq!(repo.read(path), "local\n", "{obstruction}");
+        if obstruction == "unrelated" {
+            result.unwrap();
+            assert_eq!(repo.rev_parse("HEAD"), target.to_hex());
+        } else {
+            assert!(result.is_err(), "{obstruction}");
+            assert_eq!(repo.rev_parse("HEAD"), base);
+        }
+    }
+}
+
+#[test]
+fn unborn_checkout_refuses_untracked_and_ignored_obstructions() {
+    use tpl::git::{GitBackend, LibGit2};
+    for ignored in [false, true] {
+        let repo = common::Repo::init("unborn");
+        let backend = LibGit2::discover(&repo.path).unwrap();
+        let blob = backend.write_blob(b"incoming\n").unwrap();
+        let tree = backend
+            .build_tree(&[tpl::git::TreeEntry {
+                path: "incoming".into(),
+                oid: blob,
+                mode: tpl::git::FileMode::Blob,
+            }])
+            .unwrap();
+        let target = backend.create_commit(tree, &[], "incoming").unwrap();
+        repo.write("incoming", "local\n");
+        if ignored {
+            repo.write(".git/info/exclude", "incoming\n");
+        }
+        assert!(backend.merge(target, "merge", true, &[]).is_err());
+        assert_eq!(backend.head_commit().unwrap(), None);
+        assert_eq!(repo.read("incoming"), "local\n");
+    }
+}
+
+#[test]
 fn diff_reports_nothing_when_the_rendering_is_merged() {
     let world = World::new();
     world.init(&[]).success();

@@ -27,6 +27,61 @@ pub struct LibGit2 {
 }
 
 impl LibGit2 {
+    /// Checkout against the original HEAD before publishing its destination.
+    fn checkout_fast_forward(&self, target: Oid, expected: Option<Oid>) -> Result<(), GitError> {
+        let mut transaction = self
+            .repo
+            .transaction()
+            .map_err(|e| backend("begin checkout", &e))?;
+        // Lock HEAD too: switching branches while checkout runs would otherwise
+        // publish the result to a branch no longer checked out.
+        transaction
+            .lock_ref("HEAD")
+            .map_err(|e| backend("lock HEAD", &e))?;
+        let head = self
+            .repo
+            .find_reference("HEAD")
+            .map_err(|e| backend("read HEAD", &e))?;
+        let branch = head
+            .symbolic_target()
+            .map_err(|e| backend("read symbolic HEAD", &e))?
+            .ok_or_else(|| GitError::Backend {
+                context: "fast-forward the branch".into(),
+                reason: "HEAD is detached".into(),
+            })?;
+        transaction
+            .lock_ref(branch)
+            .map_err(|e| backend("lock the branch", &e))?;
+        if self.resolve_ref(branch)? != expected {
+            return Err(GitError::Backend {
+                context: "fast-forward the branch".into(),
+                reason: "the branch moved concurrently; inspect HEAD and retry".into(),
+            });
+        }
+        let target = self
+            .repo
+            .find_commit(from_oid(target))
+            .map_err(|e| backend("read checkout target", &e))?;
+        let mut checkout = git2::build::CheckoutBuilder::new();
+        // Default baseline is HEAD, still unmoved under the locks. In particular,
+        // ignored files are user data too, not permission to overwrite them.
+        checkout.safe().overwrite_ignored(false);
+        self.repo
+            .checkout_tree(target.as_object(), Some(&mut checkout))
+            .map_err(|e| backend("safely check out the merged tree", &e))?;
+        transaction
+            .set_target(
+                branch,
+                target.id(),
+                None,
+                "tpl: fast-forward to the template state",
+            )
+            .map_err(|e| backend("prepare the branch update", &e))?;
+        transaction
+            .commit()
+            .map_err(|e| backend("publish the checked-out branch", &e))
+    }
+
     /// The diff between two trees, limited to `paths`.
     ///
     /// The three diff methods below differ only in how they read the result;
@@ -586,15 +641,7 @@ impl GitBackend for LibGit2 {
         // is `git tpl init` in a freshly `git init`ed directory, and produces
         // the cleanest possible history for a generated project.
         let Some(head_oid) = head else {
-            let branch = self.head_branch()?.unwrap_or_else(|| "main".to_string());
-            self.set_ref(
-                &format!("refs/heads/{branch}"),
-                commit,
-                "tpl: initial template state",
-            )?;
-            self.repo
-                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-                .map_err(|e| backend("check out the template", &e))?;
+            self.checkout_fast_forward(commit, None)?;
             return Ok(MergeOutcome::FastForward { to: commit });
         };
 
@@ -608,21 +655,7 @@ impl GitBackend for LibGit2 {
         }
 
         if analysis.is_fast_forward() {
-            let branch = self.head_branch()?.ok_or_else(|| GitError::Backend {
-                context: "fast-forward the branch".into(),
-                reason: "HEAD is detached".into(),
-            })?;
-            self.set_ref(
-                &format!("refs/heads/{branch}"),
-                commit,
-                "tpl: fast-forward to the template state",
-            )?;
-            self.repo
-                .set_head(&format!("refs/heads/{branch}"))
-                .map_err(|e| backend("move HEAD", &e))?;
-            self.repo
-                .checkout_head(Some(git2::build::CheckoutBuilder::new().force()))
-                .map_err(|e| backend("check out the merged tree", &e))?;
+            self.checkout_fast_forward(commit, Some(head_oid))?;
             return Ok(MergeOutcome::FastForward { to: commit });
         }
 
