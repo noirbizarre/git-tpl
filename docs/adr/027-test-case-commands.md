@@ -2,6 +2,8 @@
 
 **Status:** accepted
 
+**Related exception:** [ADR-039](039-native-diff-presentation.md) permits native Git diff presentation at the command edge.
+
 **Supersedes:** the "no `command` key" clause of [ADR-016](016-template-tests-are-data.md)
 
 **Relates to:** [ADR-013](013-user-configuration.md), [ADR-019](019-templates-address-never-act.md)

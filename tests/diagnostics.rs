@@ -165,6 +165,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::migration::move_target_exists",
     "tpl::migration::parse",
     "tpl::ops::already_initialised",
+    "tpl::ops::diff_display",
     "tpl::ops::invalid_argument",
     "tpl::ops::migration_file_not_utf8",
     "tpl::ops::migration_message_file_not_utf8",

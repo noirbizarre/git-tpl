@@ -21,11 +21,13 @@ Four flags are accepted by every command, before or after the subcommand:
 | `--json` | off | The payload on stdout as one object, as described here. Silences the prose narration, as `--quiet` does. |
 | `-q`, `--quiet` | off | Suppress everything but errors and warnings. The exit code still says what happened. |
 | `-v`, `--verbose` | off | More detail. Repeatable — `-vv` for more again. |
-| `--color <auto\|always\|never>` | `auto` | `auto` colours only when stderr is a terminal. |
+| `--color <auto\|always\|never>` | `auto` | Auto-detect git-tpl's colors; native `diff` display follows Git's configuration. |
 
 A warning is deliberately louder than the rest: neither `--quiet` nor `--json` suppresses one, because a warning
 names something the caller is getting wrong right now.
 Warnings go to stderr, so a JSON payload on stdout stays parseable.
+Without `--json`, `diff` patches and diffstats are also payloads on stdout, displayed by native Git.
+With `--json`, diff bypasses Git's display tools and pager entirely.
 
 ## Failure
 

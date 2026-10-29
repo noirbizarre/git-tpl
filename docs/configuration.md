@@ -337,8 +337,9 @@ what a URL prefix abbreviates, and which templates you have already agreed to le
 
 ## The environment
 
-git-tpl reads eight environment variables and writes none.
-Everything else it knows comes from a file you can point at.
+Git-tpl itself reads the environment variables below and writes none.
+The native Git display used by `diff` also inherits Git's environment, including `GIT_PAGER` and `PAGER`.
+See [`git tpl diff`](usage/diff.md#your-git-display-settings) for pager and diff configuration.
 
 | Variable | Read for |
 |---|---|
@@ -364,6 +365,10 @@ environment get a say:
 `FORCE_COLOR`/`CLICOLOR_FORCE` outrank `NO_COLOR` and outrank not being a terminal, which is deliberate: that is
 what CI systems set to get coloured logs, and a build that asked for colour explicitly has said something a
 heuristic has not.
+
+These rules govern git-tpl's own output.
+For `diff` patches and diffstats, `--color=always|never` overrides Git's colors,
+while `auto` leaves Git's `color.diff`, `color.ui` and stdout terminal detection in control.
 
 None of these reach a template.
 A rendered tree cannot depend on where it was rendered — that is [invariant 2](concepts/determinism.md).

@@ -4,9 +4,8 @@ expression: output.transcript()
 ---
 exit: 0
 --- stdout ---
-<empty>
+ .github/workflows/release.yml | 1 +
+ README.md                     | 2 ++
+ 2 files changed, 3 insertions(+)
 --- stderr ---
-  added     .github/workflows/release.yml     +1    -0
-  modified  README.md                         +2    -0
-
-2 files changed, 3 insertions(+)
+<empty>

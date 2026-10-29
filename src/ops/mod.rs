@@ -47,6 +47,17 @@ pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Ve
 /// Errors from any operation.
 #[derive(Debug, Error, Diagnostic)]
 pub enum OpError {
+    /// Native Git could not display a merge preview.
+    #[error("could not display the diff with Git: {reason}")]
+    #[diagnostic(
+        code(tpl::ops::diff_display),
+        help("ensure `git` is on PATH and check Git's diff and pager configuration")
+    )]
+    DiffDisplay {
+        /// The operating-system error or Git exit status.
+        reason: String,
+    },
+
     /// The project configuration is missing or invalid.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -2247,6 +2258,37 @@ pub struct DiffPreview<T> {
     pub changes: T,
     /// The paths the merge could not resolve, shown with conflict markers.
     pub conflicts: Vec<String>,
+}
+
+/// Concrete trees for a frontend that delegates presentation to native Git.
+pub struct DiffEndpoints {
+    /// The source tree, after applying `--reverse`.
+    pub from: Oid,
+    /// The destination tree, after applying `--reverse`.
+    pub to: Oid,
+    /// Paths that the merge could not resolve without conflict markers.
+    pub conflicts: Vec<String>,
+}
+
+/// Resolve a merge preview without choosing how its diff is displayed.
+pub fn diff_preview(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    reverse: bool,
+    against: Option<Oid>,
+) -> Result<DiffEndpoints, OpError> {
+    let (from, to, conflicts) = diff_endpoints(project, project_root, reverse, against)?;
+    // Native Git needs two concrete objects even before the first commit.
+    // Building the empty tree avoids assuming a particular object hash format.
+    let from = match from {
+        Some(tree) => tree,
+        None => project.build_tree(&[])?,
+    };
+    Ok(DiffEndpoints {
+        from,
+        to,
+        conflicts,
+    })
 }
 
 /// The two trees a diff runs between, oriented, and the conflicts on the way.
