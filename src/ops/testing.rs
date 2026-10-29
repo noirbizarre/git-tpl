@@ -2816,7 +2816,6 @@ fn write_snapshot(
     files: &BTreeMap<String, SnapshotEntry>,
 ) -> Result<(), OpError> {
     let workdir = template.repo.workdir()?;
-    let dir = workdir.join(snapshot_path(tests_dir, &case.name));
 
     let failed = |path: &Path, verb: &str, error: &std::io::Error| TestingError::SnapshotWrite {
         case: case.name.clone(),
@@ -2824,6 +2823,14 @@ fn write_snapshot(
         reason: format!("could not {verb} it: {error}"),
     };
 
+    // Unlike an explicit --output, the snapshot path is template-controlled.
+    // Resolve the caller-selected repository root, then reject links in every
+    // component below it before cleanup can touch an outside directory.
+    let workdir = workdir
+        .canonicalize()
+        .map_err(|error| failed(&workdir, "resolve", &error))?;
+    let dir = workdir.join(snapshot_path(tests_dir, &case.name));
+    super::reject_symlink_ancestors(&dir).map_err(|error| failed(&dir, "prepare", &error))?;
     super::clear_directory(&dir, &failed)?;
 
     super::materialise(

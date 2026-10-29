@@ -3,7 +3,8 @@
 Symbolic links retain Git mode `120000` and their exact target bytes.
 Targets are never interpolated, including for `.jinja` links; output path rendering still strips that suffix.
 `--dirty` reads links without following dangling or directory targets.
-Output prefix collisions and existing destination symlink ancestors are refused before writing.
+The caller-selected output parent is resolved first, including system aliases such as macOS `/var`.
+Output prefix collisions, links at the output root and symlink ancestors inside that root are refused before writing.
 Unix materialisation creates real links; unsupported platforms report a write failure explicitly.
 
 Render a template into a directory. No project, no ref, no merge.

@@ -11,6 +11,27 @@ use common::{Repo, Template, tpl, tpl_colored, tpl_outside};
 
 #[cfg(unix)]
 #[test]
+fn snapshot_writes_refuse_template_controlled_parent_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(dir.path(), &[("tests/safe.toml", "snapshot = true\n")]);
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(outside.path().join("safe")).unwrap();
+    std::fs::write(outside.path().join("safe/keep"), b"untouched").unwrap();
+    std::os::unix::fs::symlink(
+        outside.path(),
+        template.repo.path.join("tests/__snapshots__"),
+    )
+    .unwrap();
+    let result = run(&template, &["--write", "--json"]);
+    assert_ne!(result.code, 0);
+    assert_eq!(
+        std::fs::read(outside.path().join("safe/keep")).unwrap(),
+        b"untouched"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn symlink_snapshots_store_ordinary_target_bytes_and_compare_the_recorded_link_mode() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(dir.path(), &[("tests/link.toml", "snapshot = true\n")]);

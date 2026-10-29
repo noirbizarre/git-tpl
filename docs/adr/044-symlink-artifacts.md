@@ -18,7 +18,9 @@ Path rendering, including suffix removal, follows the ordinary output naming rul
 Dirty traversal reads link targets without following them, including dangling and directory links.
 
 Reject output prefix collisions before building trees or materialising files.
-Reject existing symlinks at destination paths and their ancestors before cleanup or writes.
+Resolve the caller-selected output parent, including platform aliases such as macOS `/var`.
+Reject links at the output root and symlinks beneath it before cleanup or writes.
+Snapshot paths are template-controlled: resolve the selected repository root first and reject links below that boundary.
 No output may be written through a rendered link.
 Materialise ordinary files before links and recheck destination ancestors for each write,
 because case folding or Unicode normalisation can alias distinct Git paths on the destination filesystem.

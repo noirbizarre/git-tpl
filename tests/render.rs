@@ -125,6 +125,33 @@ fn materialisation_rejects_link_prefixes_and_existing_symlink_ancestors_before_w
 
 #[cfg(unix)]
 #[test]
+fn a_caller_selected_parent_alias_is_resolved_without_following_output_links() {
+    use tpl::git::FileMode;
+    let root = tempfile::tempdir().unwrap();
+    let actual = root.path().join("actual");
+    std::fs::create_dir(&actual).unwrap();
+    let alias = root.path().join("alias");
+    std::os::unix::fs::symlink(&actual, &alias).unwrap();
+    let output = alias.join("new/nested/output");
+    let failed = |_: &std::path::Path, _: &str, error: &std::io::Error| error.to_string();
+    tpl::ops::materialise(
+        &output,
+        [("file", b"inside".as_slice(), FileMode::Blob)],
+        &failed,
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(actual.join("new/nested/output/file")).unwrap(),
+        b"inside"
+    );
+    tpl::ops::clear_directory(&output, &failed).unwrap();
+    assert!(!actual.join("new/nested/output/file").exists());
+    assert!(tpl::ops::clear_directory(&alias, &failed).is_err());
+    assert!(actual.exists());
+}
+
+#[cfg(unix)]
+#[test]
 fn filesystem_aliases_cannot_turn_a_rendered_link_into_an_output_directory() {
     use tpl::git::FileMode;
     let root = tempfile::tempdir().unwrap();

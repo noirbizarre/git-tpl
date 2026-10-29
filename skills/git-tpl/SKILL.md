@@ -47,7 +47,9 @@ Fetch JSON adds `localPresent` and `remotePresent`; `state: "absent"` means eith
 A fetched remote-tracking copy never creates or moves the local rendered ref.
 
 Rendering preserves symlink modes and opaque target bytes; render JSON adds octal-string `mode` beside `executable`.
-Materialisation refuses output-prefix collisions and existing symlink ancestors and creates real links only on Unix.
+Materialisation resolves the selected output parent, then refuses output-root links and prefix collisions.
+Existing symlink ancestors inside the output root are refused.
+Real links are created only on Unix; snapshot paths reject links below the selected repository root.
 Snapshots store link targets as ordinary payload files with manifest mode `120000`.
 Backport rejects links and file/link conversions with `tpl::backport::symlink`, including hunk listings.
 

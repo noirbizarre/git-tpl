@@ -409,13 +409,13 @@ pub fn clear_directory<E>(
     dir: &Path,
     failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
 ) -> Result<(), E> {
-    reject_symlink_ancestors(dir).map_err(|error| failed(dir, "clear", &error))?;
-    match std::fs::remove_dir_all(dir) {
+    let dir = resolve_output_root(dir).map_err(|error| failed(dir, "clear", &error))?;
+    match std::fs::remove_dir_all(&dir) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(failed(dir, "clear", &error)),
+        Err(error) => return Err(failed(&dir, "clear", &error)),
     }
-    std::fs::create_dir_all(dir).map_err(|error| failed(dir, "create", &error))
+    std::fs::create_dir_all(&dir).map_err(|error| failed(&dir, "create", &error))
 }
 
 /// Write a rendered tree onto the filesystem under `root`.
@@ -427,6 +427,7 @@ pub fn materialise<'a, E>(
     files: impl IntoIterator<Item = (&'a str, &'a [u8], FileMode)>,
     failed: &impl Fn(&Path, &str, &std::io::Error) -> E,
 ) -> Result<(), E> {
+    let root = resolve_output_root(root).map_err(|error| failed(root, "materialise", &error))?;
     let mut files: Vec<_> = files.into_iter().collect();
     let paths: std::collections::BTreeSet<_> = files.iter().map(|(path, _, _)| *path).collect();
     for (path, _, mode) in &files {
@@ -497,6 +498,41 @@ pub fn materialise<'a, E>(
         }
     }
     Ok(())
+}
+
+/// Resolve caller-selected parent aliases while keeping the output root itself protected.
+///
+/// macOS places temporary directories below `/var`, an alias for `/private/var`.
+/// Checking every lexical ancestor would reject ordinary output there. Resolve
+/// only the existing parent prefix, then check the root and every generated child.
+pub fn resolve_output_root(path: &Path) -> std::io::Result<PathBuf> {
+    let absolute = std::path::absolute(path)?;
+    let invalid = || {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "output needs a directory name",
+        )
+    };
+    let mut suffix = vec![absolute.file_name().ok_or_else(invalid)?.to_owned()];
+    let mut parent = absolute.parent().ok_or_else(invalid)?;
+    loop {
+        match parent.canonicalize() {
+            Ok(mut resolved) => {
+                for component in suffix.iter().rev() {
+                    resolved.push(component);
+                }
+                // Never canonicalise the leaf: that would silently accept an
+                // output-root link and let --force clear its target directory.
+                reject_symlink_ancestors(&resolved)?;
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                suffix.push(parent.file_name().ok_or_else(invalid)?.to_owned());
+                parent = parent.parent().ok_or_else(invalid)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// Refuse existing links before directory cleanup or writes can follow them.
