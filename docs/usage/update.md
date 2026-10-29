@@ -100,7 +100,7 @@ Run:
 
 ## When nothing changed
 
-If the rendered tree is byte-identical to the current ref tip, no commit is made:
+If the rendered tree is byte-identical to the current ref tip, normally no commit is made:
 
 ```console
 $ git tpl update
@@ -110,6 +110,10 @@ Already up to date with https://github.com/noirbizarre/rust-library-template at 
 This is why [determinism](../concepts/determinism.md) matters.
 A renderer that varied by a timestamp would create a commit every run, and every one of them would be noise you
 had to merge.
+
+A newly crossed [migration](#migrations) still produces a commit to record that it was applied.
+A changed [composed child revision](../templates/composition.md) can also require a provenance-only commit,
+even when the rendered tree is identical, so the pinned child commit is recorded in history.
 
 ## What triggers a change
 
