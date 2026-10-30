@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1](https://github.com/noirbizarre/git-tpl/compare/0.15.0..0.15.1) - 2026-10-30
+
+### 🐛 Bug Fixes
+
+- **aur** Replace full test suite with a version smoke check ([#196](https://github.com/noirbizarre/git-tpl/issues/196)) - ([e99afd1](https://github.com/noirbizarre/git-tpl/commit/e99afd117391177a4b7f41cf4c9100a8eb6088e1))
+
+### 🔧 CI
+
+- **ship** Adopt single-job release orchestration ([#194](https://github.com/noirbizarre/git-tpl/issues/194)) - ([6ae9058](https://github.com/noirbizarre/git-tpl/commit/6ae90588092b71d685e249cdd569598c9a9b4d6e))
+
 ## [0.15.0](https://github.com/noirbizarre/git-tpl/compare/0.14.3..0.15.0) - 2026-10-29
 
 ### 💫 Features
