@@ -25,7 +25,11 @@ pub fn run(args: ManArgs, _global: &GlobalArgs) -> Result<u8, OpError> {
     // alone, the page would be titled `git tpl` and `man git-tpl` — the exact
     // command Git runs — would never match it, which is the entire failure this
     // module exists to fix.
-    let mut cmd = Cli::command().display_name("git-tpl");
+    let mut cmd = Cli::command()
+        // Like clap_mangen's recursive generator, omit the synthetic help
+        // command: it needs no separate manual page or manual command listing.
+        .disable_help_subcommand(true)
+        .display_name("git-tpl");
     // Propagates globals and defaults into the subcommands before they are
     // read, so a per-command page documents the flags that command truly takes.
     cmd.build();

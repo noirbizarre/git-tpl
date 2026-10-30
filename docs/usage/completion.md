@@ -88,4 +88,14 @@ git tpl man --out-dir ~/.local/share/man/man1
 ```
 
 Without it, `git tpl --help` fails with *No manual entry for git-tpl*.
-Use `git-tpl --help` in the meantime, which Git never intercepts.
+Use the built-in help, which works without man pages:
+
+```sh
+git tpl help
+git tpl help update
+```
+
+`git-tpl --help` also displays built-in help directly.
+Help uses the CLI's colours and honours `NO_COLOR`, `FORCE_COLOR`, and `--color`;
+see [colour precedence](../configuration.md#the-environment).
+Place global options before the `help` command, for example `git tpl --color always help update`.

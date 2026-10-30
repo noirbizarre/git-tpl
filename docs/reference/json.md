@@ -38,7 +38,7 @@ With `--json`, diff bypasses Git's display tools and pager entirely.
 Argument parsing happens before command dispatch and JSON reporting.
 Unknown options, missing arguments and conflicting flags produce the parser's plain-text diagnostic on stderr
 and exit `2`, even with `--json`; they have no JSON envelope or `error.code`.
-Successful `--help` and `--version` also retain their raw output.
+Successful `help`, `help <command>`, `--help` and `--version` also retain their raw output.
 After successful parsing, runtime failures use one shape, from every command:
 
 ```json

@@ -73,6 +73,7 @@ git tpl man --out-dir ~/.local/share/man/man1
 ```
 
 See [Shell completion](../usage/completion.md) for the rest.
+Built-in help is available immediately with `git tpl help` and `git tpl help <command>`.
 
 ## With mise
 

@@ -51,6 +51,7 @@ release archives contain them for manual installation.
 `cargo install` and `cargo binstall` place only the binary, so `git tpl --help`
 reports *No manual entry for git-tpl* until you generate and install the man page.
 Mise's cargo backend has the same binary-only behavior.
+Use `git tpl help` or `git tpl help <command>` for built-in help without man pages.
 
 The binary must be named `git-tpl` and be on your `PATH` — that is how Git
 resolves `git tpl`.

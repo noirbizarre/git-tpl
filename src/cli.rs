@@ -18,7 +18,7 @@ use tpl::template::Value;
     long_about = "Render a template into a Git ref, then merge it like anything else.\n\n\
                   `git tpl update` advances refs/tpl/<id> without touching your branch. \
                   You take the changes with a normal `git merge`.",
-    disable_help_subcommand = true
+    styles = crate::theme::clap_styles()
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -685,6 +685,14 @@ mod tests {
     fn the_help_advertises_the_git_subcommand_form() {
         let rendered = Cli::command().render_usage().to_string();
         assert!(rendered.contains("git tpl"), "{rendered}");
+    }
+
+    #[test]
+    fn the_help_command_displays_root_and_subcommand_help() {
+        for args in [vec!["git-tpl", "help"], vec!["git-tpl", "help", "update"]] {
+            let error = Cli::try_parse_from(args).unwrap_err();
+            assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+        }
     }
 
     #[test]

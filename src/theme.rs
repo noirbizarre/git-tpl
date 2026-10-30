@@ -11,6 +11,20 @@ use tpl::ops::{Proposal, Selection};
 
 use crate::cli::ColorChoice;
 
+/// Clap uses its own style types; keep its palette aligned with human reports.
+pub fn clap_styles() -> clap::builder::Styles {
+    use clap::builder::styling::AnsiColor;
+
+    clap::builder::Styles::styled()
+        .header(AnsiColor::Cyan.on_default().bold())
+        .usage(AnsiColor::Cyan.on_default().bold())
+        .literal(AnsiColor::Cyan.on_default())
+        .placeholder(clap::builder::styling::Style::new().dimmed())
+        .error(AnsiColor::Red.on_default().bold())
+        .valid(AnsiColor::Green.on_default())
+        .invalid(AnsiColor::Yellow.on_default())
+}
+
 /// The styles used across the CLI.
 #[derive(Debug, Clone)]
 pub struct Theme {

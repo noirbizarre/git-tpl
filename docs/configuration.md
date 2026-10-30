@@ -377,6 +377,9 @@ what CI systems set to get coloured logs, and a build that asked for colour expl
 heuristic has not.
 
 These rules govern git-tpl's own output.
+They also apply to built-in help and argument-parsing errors, using the same stderr terminal detection.
+For command-specific help, put colour options first: `git tpl --color always help update`.
+On malformed input, colour options encountered after the parsing failure may not affect its diagnostic.
 For `diff` patches and diffstats, `--color=always|never` overrides Git's colors,
 while `auto` leaves Git's `color.diff`, `color.ui` and stdout terminal detection in control.
 

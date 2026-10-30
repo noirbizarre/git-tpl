@@ -31,6 +31,8 @@ fn every_supported_shell_gets_a_completion_script() {
             "{shell} script never names the executable:\n{}",
             out.stdout
         );
+        assert!(out.stdout.contains("help"), "{shell}: {}", out.stdout);
+        assert!(!out.stdout.contains('\u{1b}'), "{shell}: {}", out.stdout);
     }
 }
 
@@ -126,6 +128,7 @@ fn a_hidden_command_gets_no_page() {
     );
 
     assert!(!pages.join("git-tpl-man.1").exists());
+    assert!(!pages.join("git-tpl-help.1").exists());
 }
 
 /// The directory is created rather than demanded: a packaging script should not

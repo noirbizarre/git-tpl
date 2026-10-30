@@ -46,6 +46,7 @@ Homebrew and AUR packages install the man page and completions; release archives
 `cargo install git-tpl` and `cargo binstall git-tpl` place only the binary, as does mise's cargo backend.
 With these binary-only installations, `git tpl --help` reports *No manual entry for git-tpl*
 until you generate and install the man page.
+Use `git tpl help` or `git tpl help <command>` for built-in help without man pages.
 
 That works on an empty repository and on a project that already has files — see
 [adopting an existing project](usage/init.md#an-existing-project).

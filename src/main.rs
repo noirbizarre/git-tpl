@@ -17,13 +17,13 @@ mod theme;
 
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Arg, ArgAction, CommandFactory, FromArgMatches};
 use miette::Report;
 
 use cli::{Cli, Command};
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cli = parse_cli();
 
     install_diagnostic_hook(&cli);
 
@@ -69,6 +69,47 @@ fn main() -> ExitCode {
             ExitCode::from(exit::FAILURE)
         }
     }
+}
+
+/// Resolve presentation before clap's help and argument errors can exit.
+fn parse_cli() -> Cli {
+    let argv: Vec<_> = std::env::args_os().collect();
+    // Probe the actual grammar rather than scanning argv: option values and
+    // tokens after `--` must never become accidental color instructions.
+    // Help/version actions must be inert because ignore_errors only suppresses
+    // failures, not the successful early exits used to display help and version.
+    let probe = Cli::command()
+        .ignore_errors(true)
+        .disable_help_subcommand(true)
+        .disable_help_flag(true)
+        .disable_version_flag(true)
+        .arg(
+            Arg::new("probe_help")
+                .short('h')
+                .long("help")
+                .global(true)
+                .action(ArgAction::Count),
+        )
+        .arg(
+            Arg::new("probe_version")
+                .short('V')
+                .long("version")
+                .action(ArgAction::Count),
+        )
+        .get_matches_from(&argv);
+    // The probe can stop at invalid input (including the synthetic `help`
+    // path). Only the fresh strict parser below decides validity and exits.
+    let choice = probe
+        .get_one::<cli::ColorChoice>("color")
+        .copied()
+        .unwrap_or(cli::ColorChoice::Auto);
+    let color = if theme::Theme::resolve(choice).is_colored() {
+        clap::ColorChoice::Always
+    } else {
+        clap::ColorChoice::Never
+    };
+    let mut matches = Cli::command().color(color).get_matches_from(argv);
+    Cli::from_arg_matches_mut(&mut matches).unwrap_or_else(|error| error.exit())
 }
 
 /// Configure how diagnostics are rendered.
