@@ -249,6 +249,10 @@ jobs:
           # Proves Git found and executed our binary as a subcommand.
           git tpl --version
 
+          # Built-in help works even without an installed manual page.
+          git tpl help > /dev/null
+          git tpl help update > /dev/null
+
           # `git tpl --help` does not reach the binary at all: Git intercepts
           # `--help` for a subcommand and execs `man git-tpl`. That is why the
           # project ships a man page — without one this exits 16 with "No

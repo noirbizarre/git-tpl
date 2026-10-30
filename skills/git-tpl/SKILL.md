@@ -454,6 +454,11 @@ Diagnostic codes: <https://noirbizarre.github.io/git-tpl/reference/diagnostics/>
 Unknown flags, missing arguments and incompatible options fail before JSON reporting, even with `--json`.
 They exit `2` with plain-text stderr and no envelope or `error.code`.
 Successful help/version output is raw too.
+Use `git tpl help` or `git tpl help <command>` without installed man pages;
+Git intercepts `git tpl --help` to display the manual instead.
+Built-in help and parser errors honour the CLI's colour policy:
+explicit `--color always|never`, then `FORCE_COLOR`/`CLICOLOR_FORCE`, then `NO_COLOR`, then terminal detection.
+Put global flags before `help`, for example `git tpl --color never help update`.
 
 ## Known limitations
 
