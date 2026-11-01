@@ -1,7 +1,7 @@
 # Computed values
 
 A list answer can be iterated directly in files that enumerate the same module IDs passed to
-[`[[compose]]`](composition.md), e.g. `{% raw %}{% for id in modules %}{% endfor %}{% endraw %}`.
+[`[[compose]]`](composition.md), e.g. `{% for id in modules %}{{ id }}{% endfor %}`.
 
 A computed value is derived from answers, data and other computed values.
 It is declared once and available everywhere, so a template does not repeat the same expression in twelve files.
