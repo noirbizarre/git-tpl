@@ -88,5 +88,5 @@ See [`answers`](answers.md) for how they combine.
 | Code | Meaning |
 |---|---|
 | `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist. Restore the original rendered ref before updating. |
-| `tpl::ops::no_such_path` | The path is not in the rendering. `git tpl diff --name-only` lists what is. |
+| `tpl::ops::no_such_path` | The path is not in the rendering. `git tpl show .` lists rendered paths. |
 | `tpl::ops::invalid_argument` | The path was absolute, or left the rendering with `..`. |

@@ -94,7 +94,7 @@ fn show_without_a_template_says_the_repository_has_none() {
 /// and pinning the message would make every wording improvement a breaking
 /// change.
 #[test]
-fn an_absent_path_names_the_ref_and_suggests_diff() {
+fn an_absent_path_names_the_ref_and_suggests_listing_the_rendering() {
     let world = World::new();
     world.init(&[]).success();
 

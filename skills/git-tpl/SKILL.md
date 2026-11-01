@@ -416,6 +416,7 @@ Quiet lint retains diagnostic findings on stderr; JSON lint reports them only in
 Dirty snapshots preserve tracked files despite ignore rules; ignore exclusions apply to untracked discovery.
 Dirty diff/show report unknown answer keys on stderr; diff JSON also carries `ignoredAnswers`.
 Show always retains its raw file/listing stdout, including with `--json`.
+On `tpl::ops::no_such_path`, use `git tpl show .` to list rendered paths; diff lists changes, not the inventory.
 
 `git tpl test` honors `tpl.testCommands=false` from the invocation repository's configuration chain,
 or from global/system configuration outside a repository. The tested template's local config cannot enable it.

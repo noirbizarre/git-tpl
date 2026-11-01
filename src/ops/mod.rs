@@ -327,7 +327,7 @@ pub enum OpError {
     #[error("`{path}` is not in `{ref_name}`")]
     #[diagnostic(
         code(tpl::ops::no_such_path),
-        help("run `git tpl diff --name-only` to list what the template renders")
+        help("run `git tpl show .` to list what the template renders")
     )]
     NoSuchPath {
         /// The path that was looked for.
