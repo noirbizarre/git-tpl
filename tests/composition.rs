@@ -32,6 +32,22 @@ fn missing_child_locks_are_saved_on_changed_and_identical_renderings() {
             parent.commit_all("change parent output");
         }
         let before = project.working_state();
+        let tip = project.rev_parse("refs/tpl/parent");
+        let preview = tpl(&project, &["--json", "update", "--defaults", "--dry-run"])
+            .success()
+            .json();
+        assert_eq!(preview["composedChanged"], true);
+        assert_eq!(preview["answersChanged"], false);
+        assert_eq!(
+            preview["result"],
+            if changes_output {
+                "wouldUpdate"
+            } else {
+                "upToDate"
+            }
+        );
+        assert_eq!(before, project.working_state());
+        assert_eq!(tip, project.rev_parse("refs/tpl/parent"));
         let result = tpl(&project, &["--json", "update", "--defaults"])
             .success()
             .json();

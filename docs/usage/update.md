@@ -238,5 +238,8 @@ An already-current `update --push` does not push, even if the remote lacks the l
 
 ## Machine-readable output
 
+Dry runs predict semantic configuration edits through `answersChanged` and `composedChanged`,
+including child-lock repairs when the rendered tree is already current. They leave the configuration unchanged.
+
 `git tpl --json update` emits its outcome on stdout as a single JSON object, with the prose on stderr.
 The payload is described in [JSON output](../reference/json.md#update).

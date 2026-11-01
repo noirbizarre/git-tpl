@@ -119,6 +119,7 @@ do not assume it is preinstalled.
 3. **Preview before committing.**
    `init`, `update`, `fetch`, and `push` all accept `--dry-run` (the JSON payload gains `"dryRun": true`) —
    use it on an unfamiliar template or repository before acting for real.
+   Update dry runs report `answersChanged` and `composedChanged`, including lock repairs without a new commit.
 4. **`update` does not apply rendered files.** It advances `refs/tpl/<id>` while preserving `HEAD` and the index.
    Semantic answer or child-lock changes can also leave an unstaged `.config/git.tpl.toml` edit; report it.
    Follow it with `git tpl diff` to preview and `git tpl merge` to apply rendered changes.

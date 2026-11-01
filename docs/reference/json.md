@@ -345,6 +345,8 @@ Before updating a fresh clone, [restore the original ref](../usage/fetch.md#rest
 Fetching alone does not adopt it or reconcile an orphan that has already been created; preserve both histories.
 
 `previousRevision` is `null` on the first rendering.
+Dry-run update outcomes include `answersChanged` and `composedChanged` to predict configuration edits,
+even when `result` is `upToDate` and no rendered commit would be created.
 When present, its `reference` and `commit` are independently `null` if the recorded provenance the previous
 rendering left could not supply one — an older trailer format, or a hand-edited commit on the ref.
 `pushed` names the remote when [`tpl.autoPush`](../usage/push.md) pushed automatically, `null` otherwise — the
