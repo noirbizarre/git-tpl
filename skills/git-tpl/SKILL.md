@@ -75,7 +75,8 @@ as an unstaged edit, on both updated and up-to-date outcomes.
 Otherwise it preserves the file's exact bytes, comments and formatting, even when rendered output changes.
 Applying the result is always a separate, explicit `git tpl merge` (or a plain `git merge refs/tpl/<id>`).
 Ordinary `git push`/`git pull` ignore template refs; git-tpl does not push them by default.
-`tpl.autoPush` or `git tpl update --push` opts into pushing after an update; fetching remains explicit.
+`tpl.autoPush` or `git tpl update --push` opts into pushing when update creates a rendered commit.
+Use `git tpl push` to publish an existing rendering or retry a failed push; fetching remains explicit.
 
 Full model: <https://noirbizarre.github.io/git-tpl/concepts/git-model/>.
 

@@ -214,7 +214,7 @@ pub struct UpdateArgs {
     #[arg(long)]
     pub dirty: bool,
 
-    /// Push the rendered ref afterwards
+    /// Push the rendered ref if this update creates a rendered commit
     #[arg(long)]
     pub push: bool,
 

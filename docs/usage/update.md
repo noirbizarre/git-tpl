@@ -227,11 +227,14 @@ then an error.
 | `--strict-answers` | Fail on an answer that names no question, rather than warning. |
 | `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--dirty` | Render the template's working tree. Local templates only. |
-| `--push` | Push the ref afterwards. Same as `tpl.autoPush`. |
+| `--push` | Push after creating a rendered commit. Same as `tpl.autoPush`; unchanged renderings are not pushed. |
 | `--remote <name>` | The remote `--push` uses. Default `origin`, or `tpl.remote`. |
 | `--dry-run` | Report what would change, including migration-only commits; write nothing. |
 
 `--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser.
+
+Use `git tpl push` to publish an existing rendering or retry a failed automatic push.
+An already-current `update --push` does not push, even if the remote lacks the local rendering.
 
 ## Machine-readable output
 

@@ -41,7 +41,7 @@ pub fn seed(repo: &dyn GitBackend, key: &str) -> Result<Option<String>, GitError
 pub struct Preferences {
     /// The remote for `fetch` and `push`.
     pub remote: String,
-    /// Whether to push the rendered ref after a successful update.
+    /// Whether to push the rendered ref when update creates a rendered commit.
     pub auto_push: bool,
     /// Whether to prompt for unanswered questions.
     pub interactive: bool,

@@ -298,7 +298,7 @@ All keys are under `tpl.`.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `tpl.remote` | string | `origin` | Remote used by `git tpl fetch` and `git tpl push`. |
-| `tpl.autoPush` | bool | `false` | Push the rendered ref after a successful `update`. |
+| `tpl.autoPush` | bool | `false` | Push the rendered ref when `update` creates a rendered commit. |
 | `tpl.interactive` | bool | `true` | Prompt for unanswered questions. `false` behaves as `--defaults`. |
 | `tpl.testCommands` | bool | `true` | Run a `git tpl test` case's `[commands]`. `false` implies `--skip-commands`. |
 | `tpl.log.relativeDate` | bool | `true` | Relative commit ages in `log`; `false` shows UTC dates and times to the minute. |
