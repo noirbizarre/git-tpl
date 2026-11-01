@@ -18,6 +18,9 @@ git tpl --json questions ./template | jq '.questions[] | select(.when == null) |
 
 ## The global flags
 
+Dirty `diff` previews include `ignoredAnswers` for supplied keys that name no question;
+non-dirty diffs return an empty list. Dirty `show` keeps raw stdout and reports those keys only on stderr.
+
 Four flags are accepted by every command, before or after the subcommand:
 
 | Flag | Default | Meaning |

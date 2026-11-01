@@ -4,7 +4,7 @@ use std::io::{self, Write};
 
 use tpl::ops::{self, OpError, Shown};
 
-use super::{Session, answering, report_ignored_paths, supplied, trust};
+use super::{Session, answering, report_ignored, report_ignored_paths, supplied, trust};
 use crate::cli::{GlobalArgs, ShowArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::warning;
@@ -36,6 +36,7 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         )?;
         // stderr, so the file bytes on stdout stay exactly the file bytes.
         report_ignored_paths(&ctx.out, &preview.ignored);
+        report_ignored(&ctx.out, &preview.ignored_answers);
         Some(preview.commit)
     } else {
         None

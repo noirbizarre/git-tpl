@@ -414,6 +414,8 @@ A merge that left conflicts unresolved stops the sync: backporting from a half-m
 
 Quiet lint retains diagnostic findings on stderr; JSON lint reports them only in `diagnostics[]`.
 Dirty snapshots preserve tracked files despite ignore rules; ignore exclusions apply to untracked discovery.
+Dirty diff/show report unknown answer keys on stderr; diff JSON also carries `ignoredAnswers`.
+Show always retains its raw file/listing stdout, including with `--json`.
 
 `git tpl test` honors `tpl.testCommands=false` from the invocation repository's configuration chain,
 or from global/system configuration outside a repository. The tested template's local config cannot enable it.

@@ -1,5 +1,8 @@
 # `git tpl show`
 
+Dirty previews warn about unknown answer keys on stderr, including with `--quiet` or `--json`.
+The file bytes on stdout remain unchanged; `--strict-answers` turns unknown invocation keys into failures.
+
 The template's version of one file.
 
 ```sh

@@ -2293,6 +2293,8 @@ pub struct Preview {
     pub commit: Oid,
     /// Template files a `.gitignore` removed from the rendering.
     pub ignored: Vec<String>,
+    /// Answer keys that named no question, retained for caller warnings.
+    pub ignored_answers: Vec<String>,
 }
 
 /// Render the configured template now, as a commit nothing points at.
@@ -2302,9 +2304,8 @@ pub struct Preview {
 /// is untouched and `git gc` reclaims it. It exists at all only because
 /// [`GitBackend::merge_preview`] merges *commits*, and a rendering is a tree.
 ///
-/// Answers come from `.config/git.tpl.toml`, so the preview asks nothing: the
-/// question being answered is "what would my template edit do to this
-/// project?", not "what would a different set of answers do?".
+/// Recorded answers are reused; newly applicable unanswered questions follow
+/// the supplied answering policy, just as a real update would.
 #[allow(clippy::too_many_arguments)]
 pub fn render_preview(
     project: &dyn GitBackend,
@@ -2361,6 +2362,7 @@ pub fn render_preview(
             "preview: uncommitted template\n",
         )?,
         ignored: rendered.template.ignored,
+        ignored_answers: rendered.ignored_answers,
     })
 }
 

@@ -132,6 +132,8 @@ untrusted network data can also require confirmation.
 Use `--defaults` for noninteractive answers and pre-authorize required network access through
 [persistent trust](../configuration.md#trust), or pass `--trust` for this invocation.
 `--answer` overrides them for the preview only; nothing is recorded.
+Unknown answer keys warn on stderr, including under `--quiet` and `--json`;
+the JSON payload also includes `ignoredAnswers` (empty without a dirty preview).
 
 Nothing is written.
 The preview is a commit no ref points at — a loose object `git gc` reclaims — so `refs/tpl/<id>` does not move and
