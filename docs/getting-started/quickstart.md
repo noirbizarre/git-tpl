@@ -75,7 +75,10 @@ git add -A && git commit -m "feat: initial template"
 
 ## Use it
 
+From the template directory, return to its parent so the project and template are siblings:
+
 ```sh
+cd ..
 mkdir my-project && cd my-project
 git init
 

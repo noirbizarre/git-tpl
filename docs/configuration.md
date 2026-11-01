@@ -298,7 +298,7 @@ All keys are under `tpl.`.
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `tpl.remote` | string | `origin` | Remote used by `git tpl fetch` and `git tpl push`. |
-| `tpl.autoPush` | bool | `false` | Push the rendered ref after a successful `update`. |
+| `tpl.autoPush` | bool | `false` | Push the rendered ref when `update` creates a rendered commit. |
 | `tpl.interactive` | bool | `true` | Prompt for unanswered questions. `false` behaves as `--defaults`. |
 | `tpl.testCommands` | bool | `true` | Run a `git tpl test` case's `[commands]`. `false` implies `--skip-commands`. |
 | `tpl.log.relativeDate` | bool | `true` | Relative commit ages in `log`; `false` shows UTC dates and times to the minute. |
@@ -307,6 +307,12 @@ All keys are under `tpl.`.
 git config tpl.remote upstream
 git config --global tpl.interactive false
 ```
+
+`tpl.testCommands` also reads global/system configuration when `git tpl test` runs outside a repository.
+When invoked from elsewhere, the template under test's repository-local configuration is not consulted.
+
+Standalone `render` and `context` do not load `tpl.interactive`, including a globally configured value.
+Pass `--defaults` explicitly to disable their answer prompts.
 
 One family of keys outside `tpl.` is read: a question declaring
 [`default_from`](templates/questions.md#machine-seeded-defaults) has the keys it names — `git:user.name`, or

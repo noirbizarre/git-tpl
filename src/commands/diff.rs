@@ -5,7 +5,7 @@ use std::process::Command;
 use tpl::git::GitBackend;
 use tpl::ops::{self, OpError};
 
-use super::{Session, answering, report_ignored_paths, supplied, trust};
+use super::{Session, answering, report_ignored, report_ignored_paths, supplied, trust};
 use crate::cli::{ColorChoice, DiffArgs, GlobalArgs};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{muted, warning};
@@ -40,7 +40,8 @@ fn report_conflicts(ctx: &Session, conflicts: &[String]) {
 
 pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
-    let against = preview(&ctx, args.dirty, &args.answers)?;
+    let rendered = preview(&ctx, args.dirty, &args.answers)?;
+    let against = rendered.as_ref().map(|preview| preview.commit);
 
     // `--exit-code` reports *difference*, in Git's own convention, so that CI
     // can assert "the template output has not drifted" without parsing
@@ -67,6 +68,7 @@ pub fn run(args: DiffArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             "{}",
             crate::report::success(serde_json::json!({
                 "conflicts": preview.conflicts,
+                "ignoredAnswers": rendered.as_ref().map(|preview| preview.ignored_answers.as_slice()).unwrap_or_default(),
                 "changes": stats.iter().map(|s| serde_json::json!({
                     "path": s.path,
                     "kind": s.kind.as_str(),
@@ -172,7 +174,7 @@ fn preview(
     ctx: &Session,
     dirty: bool,
     answers: &crate::cli::AnswerArgs,
-) -> Result<Option<tpl::git::Oid>, OpError> {
+) -> Result<Option<ops::Preview>, OpError> {
     if !dirty {
         return Ok(None);
     }
@@ -193,6 +195,7 @@ fn preview(
         // Warned here rather than swallowed: a `--dirty` diff that quietly
         // omitted the files a `.gitignore` removed would understate the change.
         report_ignored_paths(&ctx.out, &preview.ignored);
-        Some(preview.commit)
+        report_ignored(&ctx.out, &preview.ignored_answers);
+        Some(preview)
     })
 }

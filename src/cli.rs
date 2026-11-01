@@ -214,7 +214,7 @@ pub struct UpdateArgs {
     #[arg(long)]
     pub dirty: bool,
 
-    /// Push the rendered ref afterwards
+    /// Push the rendered ref if this update creates a rendered commit
     #[arg(long)]
     pub push: bool,
 
@@ -629,7 +629,7 @@ pub struct ShowArgs {
 /// `git tpl merge`
 #[derive(Debug, clap::Args)]
 pub struct MergeArgs {
-    /// Merge and stage, but do not commit
+    /// Stage without a merge commit; fast-forwards still advance HEAD
     #[arg(long)]
     pub no_commit: bool,
 

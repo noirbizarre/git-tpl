@@ -191,9 +191,12 @@ If it is not there, the commit is written as an orphan and `update` says so:
 $ git tpl update
 ...
 No refs/tpl/rust existed here, so this update started a new history.
-If the ref exists on a remote, run `git tpl fetch` before merging: without a
-merge base, `git tpl merge` can conflict on every file.
+Preserve this history and inspect the original rendering before merging:
+fetching alone cannot repair an orphan's missing merge base.
 ```
+
+If this warning has already appeared, preserve the new ref for inspection.
+The [absent-ref restoration procedure](fetch.md#restoring-an-absent-local-ref) does not reconcile an existing orphan.
 
 Two things cause it, and both are legitimate, which is why this is a warning and not a refusal:
 
@@ -224,13 +227,19 @@ then an error.
 | `--strict-answers` | Fail on an answer that names no question, rather than warning. |
 | `--trust` | Fetch [remote data sources](../data/remote.md) without confirming. Per invocation; nothing is recorded. |
 | `--dirty` | Render the template's working tree. Local templates only. |
-| `--push` | Push the ref afterwards. Same as `tpl.autoPush`. |
+| `--push` | Push after creating a rendered commit. Same as `tpl.autoPush`; unchanged renderings are not pushed. |
 | `--remote <name>` | The remote `--push` uses. Default `origin`, or `tpl.remote`. |
 | `--dry-run` | Report what would change, including migration-only commits; write nothing. |
 
 `--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser.
 
+Use `git tpl push` to publish an existing rendering or retry a failed automatic push.
+An already-current `update --push` does not push, even if the remote lacks the local rendering.
+
 ## Machine-readable output
+
+Dry runs predict semantic configuration edits through `answersChanged` and `composedChanged`,
+including child-lock repairs when the rendered tree is already current. They leave the configuration unchanged.
 
 `git tpl --json update` emits its outcome on stdout as a single JSON object, with the prose on stderr.
 The payload is described in [JSON output](../reference/json.md#update).

@@ -27,9 +27,10 @@ The two modes this gives you are both first-class:
     └── refs/tpl/foo         local
     ```
 
-    Nobody else needs it.
-    The template attachment is fully described by `.config/git.tpl.toml`, which *is* pushed — so a collaborator
-    can run `git tpl update` and render an identical ref for themselves.
+    Contributors can work on the project without the local ref.
+    Before running updates in a fresh clone, a collaborator must
+    [restore the original rendered ref from full merged history](fetch.md#restoring-an-absent-local-ref).
+    Re-rendering from `.config/git.tpl.toml` can reproduce its tree, but cannot recover the original ancestry.
 
 === "Shared"
 
@@ -79,6 +80,10 @@ and [conditional fast-forward adoption](fetch.md#fast-forwarding-an-existing-loc
 
 ## Options
 
+A server hook or policy can reject a ref even after its objects have transferred successfully.
+This fails with `tpl::git::push_rejected`, including the ref and server reason.
+Resolve the rejection and retry `git tpl push`; the same rejection also fails an automatic push after update.
+
 | Option | Meaning |
 |---|---|
 | `--remote <name>` | Default `origin`, or `tpl.remote`. |
@@ -91,6 +96,9 @@ git config tpl.autoPush true
 ```
 
 Or per-invocation, `git tpl update --push`.
+
+These push only when update creates a rendered commit.
+Use `git tpl push` to publish an existing rendering or retry a failed push after an already-current update.
 
 ## Machine-readable output
 

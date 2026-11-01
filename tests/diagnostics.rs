@@ -137,6 +137,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::git::no_merge",
     "tpl::git::no_such_revision",
     "tpl::git::not_a_repository",
+    "tpl::git::push_rejected",
     "tpl::git::remote_exists",
     "tpl::git::repository_busy",
     "tpl::git::stale_ref",

@@ -207,8 +207,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     &ctx.out.theme,
                     &format!(
                         "No {} existed here, so this update started a new history.\n\
-                         If the ref exists on a remote, run `git tpl fetch` before merging: \
-                         without a merge base, `git tpl merge` can conflict on every file.",
+                         Preserve this history and inspect the original rendering before merging: \
+                         fetching alone cannot repair an orphan's missing merge base.",
                         id.ref_name()
                     ),
                 ));
@@ -324,14 +324,23 @@ fn dry_run(
     let child_changed = recorded
         .as_ref()
         .is_some_and(|previous| previous.composed != rendered.provenance.composed);
+    // Configuration may need lock repair even when rendered provenance has
+    // not moved. Predict the same semantic edit as the real update.
+    let composed: Vec<_> = rendered
+        .provenance
+        .composed
+        .iter()
+        .map(|child| child.lock())
+        .collect();
+    let composed_changed = config.composed != composed;
+    let answers_changed = config.answers != *rendered.context.answers();
     let revision_description =
         ops::describe_revision(&rendered.template.reference, rendered.template.revision);
 
     if previous_tree == Some(rendered.tree) && migrations.is_empty() && !child_changed {
-        let answers_changed = config.answers != *rendered.context.answers();
-        if answers_changed {
+        if answers_changed || composed_changed {
             ctx.out
-                .say("No rendered-ref commit would be made. Recorded answers would change.");
+                .say("No rendered-ref commit would be made. Recorded answers or child locks would change.");
         } else {
             ctx.out.say("Already up to date. Nothing would change.");
         }
@@ -348,6 +357,7 @@ fn dry_run(
             ),
             "changes": [],
             "answersChanged": answers_changed,
+            "composedChanged": composed_changed,
             "ignoredAnswers": rendered.ignored_answers,
         }));
     }
@@ -367,6 +377,10 @@ fn dry_run(
         ctx.out.say(change(&ctx.out.theme, c.kind, &c.path));
     }
     ctx.out.blank();
+    if answers_changed || composed_changed {
+        ctx.out
+            .say("Recorded answers or child locks would change in .config/git.tpl.toml.");
+    }
     ctx.out.say(muted(&ctx.out.theme, "Nothing was written."));
 
     Ok(serde_json::json!({
@@ -382,6 +396,8 @@ fn dry_run(
         ),
         "changes": crate::report::changes(&changes),
         "migrations": crate::report::migrations(&migrations),
+        "answersChanged": answers_changed,
+        "composedChanged": composed_changed,
         "ignoredAnswers": rendered.ignored_answers,
     }))
 }

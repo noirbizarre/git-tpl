@@ -5,6 +5,22 @@ mod common;
 use common::{Template, World, tpl, tpl_outside};
 
 #[test]
+fn question_schema_exposes_the_list_item_constraints_enforced_by_evaluation() {
+    let world = World::with_template(
+        "name = 'lists'\n[questions.modules]\ntype = 'list'\ndefault = []\nitem_pattern = '^[a-z]+$'\nitem_message = 'lowercase module names only'\n",
+        &[("modules.jinja", "{{ modules | join(',') }}")],
+    );
+    let schema = Scratch::new().ask(&world.template.source());
+    let modules = question(&schema, "modules");
+    assert_eq!(modules["itemPattern"], "^[a-z]+$");
+    assert_eq!(modules["itemMessage"], "lowercase module names only");
+    world
+        .init(&["--answer", "modules=[\"INVALID\"]"])
+        .failure()
+        .says("lowercase module names only");
+}
+
+#[test]
 fn static_choice_introspection_uses_formats_checksums_and_the_render_choice_reader() {
     for (file, format, body) in [
         (

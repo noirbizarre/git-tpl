@@ -93,23 +93,25 @@ fn print_text(ctx: &Standalone, verdicts: &[Verdict], errors: usize, denied: usi
             Severity::Warning if *denied => format!("warning[{}] (denied)", finding.code),
             Severity::Warning => format!("warning[{}]", finding.code),
         };
-        ctx.out.say(heading(&ctx.out.theme, &label));
+        // Findings explain the verdict, so quiet mode must not hide them.
+        // JSON takes its separate branch above and does not duplicate this report.
+        ctx.out.warn(heading(&ctx.out.theme, &label));
         if let Some(path) = &finding.path {
-            ctx.out.say(muted(&ctx.out.theme, &format!("  {path}")));
+            ctx.out.warn(muted(&ctx.out.theme, &format!("  {path}")));
         }
-        ctx.out.say(format!("  {}", finding.message));
+        ctx.out.warn(format!("  {}", finding.message));
         ctx.out
-            .say(muted(&ctx.out.theme, &format!("  help: {}", finding.help)));
+            .warn(muted(&ctx.out.theme, &format!("  help: {}", finding.help)));
         ctx.out.blank();
     }
 
     let warnings = verdicts.len() - errors;
-    ctx.out.say(warning(
+    ctx.out.warn(warning(
         &ctx.out.theme,
         &format!("{errors} error(s), {warnings} warning(s)"),
     ));
     if denied > 0 {
-        ctx.out.say(warning(
+        ctx.out.warn(warning(
             &ctx.out.theme,
             &format!("{denied} warning(s) denied, which fails the lint"),
         ));

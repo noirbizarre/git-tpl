@@ -827,6 +827,40 @@ project_name = { type = "string", default = "demo" }
 }
 
 #[test]
+fn quiet_lint_keeps_findings_visible_but_json_does_not_duplicate_them() {
+    let world = mixed();
+    let scratch = Scratch::new();
+    for deny in [false, true] {
+        let mut args = vec!["--quiet"];
+        if deny {
+            args.extend(["--deny", "warnings"]);
+        }
+        let output = scratch
+            .lint_text(&world.template.source(), &args)
+            .code(i32::from(deny));
+        assert!(output.stderr.contains("tpl::lint::foreign_expression"));
+        assert!(output.stderr.contains("ci.yaml.jinja"));
+        if deny {
+            assert!(output.stderr.contains("denied"));
+        }
+        let json = scratch
+            .lint(&world.template.source(), &args)
+            .code(i32::from(deny));
+        assert!(json.stderr.is_empty(), "{}", json.stderr);
+        assert_eq!(json.json()["warnings"], 2);
+    }
+    world
+        .template
+        .repo
+        .write("template/broken.jinja", "{% if %}")
+        .commit_all("broken syntax");
+    scratch
+        .lint_text(&world.template.source(), &["--quiet"])
+        .failure()
+        .says("tpl::lint::syntax");
+}
+
+#[test]
 fn denying_warnings_makes_a_warning_fail_the_lint() {
     let world = mixed();
     let scratch = Scratch::new();

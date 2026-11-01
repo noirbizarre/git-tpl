@@ -30,6 +30,7 @@ Four flags are accepted by every command, before or after the subcommand:
 A warning is deliberately louder than the rest: neither `--quiet` nor `--json` suppresses one, because a warning
 names something the caller is getting wrong right now.
 Warnings go to stderr, so a JSON payload on stdout stays parseable.
+Lint findings are report data: `--quiet` retains them on stderr, while `--json` puts them only in `diagnostics[]`.
 Without `--json`, `diff` patches and diffstats are also payloads on stdout, displayed by native Git.
 With `--json`, diff bypasses Git's display tools and pager entirely.
 
@@ -149,6 +150,9 @@ An `--allow`ed finding appears nowhere and is counted nowhere.
 
 ### `questions`
 
+Each question includes `itemPattern` and `itemMessage` for enforced list-item validation, or `null` when unset.
+`itemMessage` contains the effective validation message, including the default when no custom message is declared.
+
 ```json
 { "ok": true,
   "template": { "name": "rust", "description": "…", "root": "template" },
@@ -209,6 +213,9 @@ Documented in [status](../usage/status.md).
 `--json` is the only spelling: the `--format json` it replaced was removed in 0.7.
 
 ### `diff`
+
+Dirty previews include `ignoredAnswers` for supplied or recorded keys that name no question;
+non-dirty diffs return an empty list. Dirty `show` keeps raw stdout and reports those keys only on stderr.
 
 ```json
 { "ok": true,
@@ -338,9 +345,10 @@ See [Migrations](../usage/update.md#migrations).
 `startedNewHistory` is `true` when there was no `refs/tpl/<id>` to descend from, so the new commit is an orphan
 sharing no ancestry with anything the branch has merged.
 Two causes, both legitimate: the configuration's `source` or `id` was edited, or the project was cloned without
-`refs/tpl/*` and never fetched.
-Not an error, but a `git tpl merge` from here has no merge base and can conflict on every file — fetch first if
-the ref exists on a remote.
+`refs/tpl/*` and never restored its local rendered ref.
+A `git tpl merge` from here has no merge base and can conflict on every file.
+Before updating a fresh clone, [restore the original ref](../usage/fetch.md#restoring-an-absent-local-ref).
+Fetching alone does not adopt it or reconcile an orphan that has already been created; preserve both histories.
 
 `previousRevision` is `null` on the first rendering.
 When present, its `reference` and `commit` are independently `null` if the recorded provenance the previous
@@ -355,12 +363,14 @@ With `--dry-run`, `result` is `upToDate` or `wouldUpdate`, and the payload has i
   "id": "rust", "ref": "refs/tpl/rust", "template": "…",
   "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
   "changes": [{ "path": "Cargo.toml", "kind": "modified" }],
-  "migrations": [], "ignoredAnswers": [] }
+  "migrations": [], "ignoredAnswers": [], "answersChanged": false, "composedChanged": false }
 ```
 
-`wouldUpdate` reports `id`, `ref`, `template`, `revision`, `changes`, `migrations` and `ignoredAnswers`.
-It does not report `commit`, `previousRevision`, `answersChanged`, `startedNewHistory`, `movedCommit` or `pushed`.
-A dry-run `upToDate` report instead includes `changes: []` and `answersChanged`, but no `migrations` field.
+`wouldUpdate` reports `id`, `ref`, `template`, `revision`, `changes`, `migrations`, `ignoredAnswers`,
+`answersChanged` and `composedChanged`.
+It does not report `commit`, `previousRevision`, `startedNewHistory`, `movedCommit` or `pushed`.
+A dry-run `upToDate` report includes `changes: []`, `answersChanged` and `composedChanged`, but no `migrations` field.
+Both outcomes predict semantic configuration edits, including child-lock repairs without a new rendered commit.
 Neither dry-run outcome writes configuration or publishes a ref.
 
 ### `merge`
@@ -444,8 +454,10 @@ With `--list-hunks`, `result` is `plan`, `patch` is `""`, `files` is empty, and 
 `id` is derived from the hunk's content and the file's path, so it is stable while the file is unchanged and stops
 matching when it changes.
 `lines` is the hunk body, each line prefixed with a space, `-` or `+`.
-A file that the template would refuse to patch is still listed, because the listing is produced before the proof;
-and a binary file appears in `skipped` instead.
+Eligible leaf-owned text files are listed before substitution and round-trip proof checks;
+a binary file appears in `skipped` instead.
+Symlink changes and inherited or composed content can fail before listing.
+Exclude unsupported paths and retry, or edit their owning template directly.
 
 A refusal is a failure, with a `tpl::backport::*` [code](diagnostics.md#backport).
 Branch on the code: `substituted_region` is routine and means "edit the template by hand", while

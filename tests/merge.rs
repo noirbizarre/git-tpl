@@ -141,7 +141,7 @@ fn diff_without_a_rendered_ref_says_what_to_do() {
 
     tpl(&world.project, &["diff"])
         .failure()
-        .says("git tpl update");
+        .says("restore the original rendered ref");
 }
 
 // --- merging ----------------------------------------------------------------

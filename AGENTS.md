@@ -195,7 +195,8 @@ git tpl --json context ./tpl --eval '{{ some | filter }}'
 ```
 
 Then check the *output* with the tools that understand it — `cargo build`, `actionlint`, whatever the template
-emits. git-tpl runs nothing over a rendering and never will; that is invariant 5, not an omission.
+emits. `render`, `init` and `update` execute no commands over their output; that is invariant 5, not an omission.
+The explicit `git tpl test` harness can run a case's `[commands]`, as described in invariant 5's exception.
 
 ## Commits
 

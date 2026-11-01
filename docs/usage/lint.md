@@ -1,5 +1,8 @@
 # `git tpl lint`
 
+`--quiet` suppresses narration but retains lint errors, warnings, paths, and help on stderr.
+With `--json`, findings are reported in the JSON payload without a duplicate text report.
+
 Check a template without rendering it. No project is required.
 A local template with only local ancestors needs no network;
 a remote Git template or a local template's remote `[extends]` ancestor may be cloned for inspection.

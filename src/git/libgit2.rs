@@ -5,7 +5,7 @@
 //! anywhere else under `src/`. See `docs/adr/011-git-backend-isolation.md`.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -1032,12 +1032,27 @@ impl GitBackend for LibGit2 {
             })?;
         let url = remote_handle.url().unwrap_or(remote).to_string();
 
-        let mut options = PushOptions::new();
-        options.remote_callbacks(credential_callbacks(&url));
-
-        remote_handle
-            .push(&[refspec], Some(&mut options))
-            .map_err(|e| translate_remote(&url, None, &e))
+        let mut rejection = None;
+        {
+            let mut callbacks = credential_callbacks(&url);
+            // Transport success only means the pack arrived. Receive hooks and
+            // server policy reject individual refs through this callback.
+            callbacks.push_update_reference(|reference, status| {
+                if let Some(reason) = status {
+                    rejection = Some((reference.to_string(), reason.to_string()));
+                }
+                Ok(())
+            });
+            let mut options = PushOptions::new();
+            options.remote_callbacks(callbacks);
+            remote_handle
+                .push(&[refspec], Some(&mut options))
+                .map_err(|e| translate_remote(&url, None, &e))?;
+        }
+        match rejection {
+            Some((reference, reason)) => Err(GitError::PushRejected { reference, reason }),
+            None => Ok(()),
+        }
     }
 
     fn add_remote(&self, name: &str, url: &str) -> Result<(), GitError> {
@@ -1085,6 +1100,16 @@ impl GitBackend for LibGit2 {
             Ok(value) => Ok(Some(value)),
             Err(e) if e.code() == ErrorCode::NotFound => Ok(None),
             Err(e) => Err(backend("read a configuration value", &e)),
+        }
+    }
+
+    fn global_config_bool(key: &str) -> Result<Option<bool>, GitError> {
+        let config = git2::Config::open_default()
+            .map_err(|e| backend("read the global Git configuration", &e))?;
+        match config.get_bool(key) {
+            Ok(value) => Ok(Some(value)),
+            Err(e) if e.code() == ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(backend("read a global configuration value", &e)),
         }
     }
 
@@ -1234,6 +1259,12 @@ impl GitBackend for LibGit2 {
     }
 
     fn tree_from_workdir(&self, root: &Path) -> Result<(Oid, Vec<String>), GitError> {
+        // Git's workdir and the caller can spell the same directory through
+        // different aliases (/var vs /private/var, or Windows path prefixes).
+        // Tracked-path membership and ignore matching need one identity.
+        let root = root
+            .canonicalize()
+            .map_err(|e| attachment_io("resolve the working-tree snapshot root", e))?;
         // The rules in force above `root`. `root` is the template source, which
         // may sit below the working tree, and the outer rules still apply.
         //
@@ -1248,17 +1279,40 @@ impl GitBackend for LibGit2 {
                 context: "read the working tree".into(),
                 reason: "the repository is bare".into(),
             })?
-            .to_path_buf();
+            .canonicalize()
+            .map_err(|e| attachment_io("resolve the working tree", e))?;
         let excludes_file = self
             .repo
             .config()
             .ok()
             .and_then(|config| config.get_path("core.excludesFile").ok());
-        let stack = IgnoreStack::new(&workdir, self.repo.path(), excludes_file.as_deref(), root);
+        let stack = IgnoreStack::new(&workdir, self.repo.path(), excludes_file.as_deref(), &root);
+
+        // Ignore rules govern discovery, never files already tracked in the
+        // index. Include their ancestors so ignored directories are not pruned.
+        let index = self
+            .repo
+            .index()
+            .map_err(|e| backend("read tracked paths", &e))?;
+        let mut tracked = BTreeSet::new();
+        for entry in index.iter() {
+            let path = workdir.join(String::from_utf8_lossy(&entry.path).as_ref());
+            for ancestor in path.ancestors().take_while(|p| p.starts_with(&workdir)) {
+                tracked.insert(ancestor.to_path_buf());
+            }
+        }
 
         let mut entries = Vec::new();
         let mut ignored = Vec::new();
-        collect_workdir(root, root, Some(&stack), &mut entries, &mut ignored)?;
+        collect_workdir(
+            &root,
+            &root,
+            Some(&stack),
+            &tracked,
+            false,
+            &mut entries,
+            &mut ignored,
+        )?;
         ignored.sort();
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -1271,7 +1325,15 @@ impl GitBackend for LibGit2 {
         // against an `IgnoreStack` — `collect_workdir` is only asked to skip
         // `.git` and to walk in a deterministic order.
         let mut ignored = Vec::new();
-        collect_workdir(dir, dir, None, &mut entries, &mut ignored)?;
+        collect_workdir(
+            dir,
+            dir,
+            None,
+            &BTreeSet::new(),
+            false,
+            &mut entries,
+            &mut ignored,
+        )?;
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
         self.tree_from_entries(entries)
@@ -1733,7 +1795,7 @@ fn describe_attempted_methods(url: &str) -> String {
 /// credential helper for HTTPS. libgit2 calls this repeatedly, once per method
 /// it is willing to try, so state is kept to avoid offering the same failing
 /// method forever.
-fn credential_callbacks(url: &str) -> RemoteCallbacks<'static> {
+fn credential_callbacks<'a>(url: &str) -> RemoteCallbacks<'a> {
     let mut callbacks = RemoteCallbacks::new();
     let url = url.to_string();
     let mut tried_agent = false;
@@ -1803,6 +1865,8 @@ fn collect_workdir(
     root: &Path,
     dir: &Path,
     stack: Option<&IgnoreStack>,
+    tracked: &BTreeSet<PathBuf>,
+    excluded_parent: bool,
     out: &mut Vec<(String, PathBuf, FileMode)>,
     ignored: &mut Vec<String>,
 ) -> Result<(), GitError> {
@@ -1847,19 +1911,17 @@ fn collect_workdir(
         // `git status` to consult, and an unexplained absence is the hardest
         // kind of bug to find.
         //
-        // An ignored directory is recorded and left, not walked. That is Git's
-        // rule rather than an optimisation: a file cannot be re-included once
-        // one of its parent directories is excluded, so descending to look for
-        // a negation inside would resurrect files `git add -A` leaves alone.
-        if let Some(stack) = stack
-            && stack.is_ignored(&path, file_type.is_dir())
-        {
+        // Descend ignored directories only for tracked descendants. Carry the
+        // exclusion down so nested negations cannot resurrect untracked files.
+        let excluded = excluded_parent
+            || stack.is_some_and(|stack| stack.is_ignored(&path, file_type.is_dir()));
+        if excluded && !tracked.contains(&path) {
             ignored.push(relative.to_string_lossy().replace('\\', "/"));
             continue;
         }
 
         if file_type.is_dir() {
-            collect_workdir(root, &path, stack, out, ignored)?;
+            collect_workdir(root, &path, stack, tracked, excluded, out, ignored)?;
         } else if file_type.is_file() || file_type.is_symlink() {
             let relative_str = relative.to_string_lossy().replace('\\', "/");
             let mode = if file_type.is_symlink() {

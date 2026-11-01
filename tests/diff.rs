@@ -8,6 +8,44 @@ mod common;
 use common::{World, tpl};
 
 #[test]
+fn lenient_dirty_previews_report_ignored_answers_without_changing_show_bytes() {
+    let world = World::new();
+    world.init(&[]).success();
+    let expected = tpl(
+        &world.project,
+        &["show", "README.md", "--dirty", "--defaults"],
+    )
+    .success()
+    .stdout;
+    for json in [false, true] {
+        for command in [vec!["diff"], vec!["show", "README.md"]] {
+            let is_show = command[0] == "show";
+            let mut args = command;
+            args.extend([
+                "--dirty",
+                "--defaults",
+                "--quiet",
+                "--answer",
+                "unknown_key=typo",
+            ]);
+            if json {
+                args.push("--json");
+            }
+            let output = tpl(&world.project, &args).success();
+            assert!(output.stderr.contains("unknown_key"), "{}", output.stderr);
+            if is_show {
+                assert_eq!(output.stdout, expected);
+            } else if json {
+                assert_eq!(
+                    output.json()["ignoredAnswers"],
+                    serde_json::json!(["unknown_key"])
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn strict_previews_ignore_history_but_reject_current_unknown_inputs() {
     let world = World::new();
     world.init(&[]).success();

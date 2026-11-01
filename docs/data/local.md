@@ -70,8 +70,9 @@ Project data is none of those things.
 
 !!! warning "Project data breaks the self-contained property"
 
-    A template that requires a project-local file will fail on `git tpl init` for anyone who does not already
-    have that file — which is everyone, since `init` runs before the project exists.
+    A template that requires a project-local file will fail on `git tpl init` unless that file exists before
+    evaluation. This makes it unsuitable for general bootstrapping into an empty project.
+    When attaching to an existing project, its existing files can deliberately supply that data.
 
     Template data has no such problem: it ships with the template.
 

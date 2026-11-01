@@ -126,9 +126,14 @@ inspected before it is committed, let alone updated to.
 git tpl diff --dirty --stat
 ```
 
-Answers come from the ones recorded in `.config/git.tpl.toml`, so the preview asks nothing: the question is "what
-would my template edit do to this project?", not "what would different answers do?".
+The preview reuses applicable answers recorded in `.config/git.tpl.toml`.
+New questions, or previously skipped questions that become applicable, can still prompt;
+untrusted network data can also require confirmation.
+Use `--defaults` for noninteractive answers and pre-authorize required network access through
+[persistent trust](../configuration.md#trust).
 `--answer` overrides them for the preview only; nothing is recorded.
+Unknown answer keys warn on stderr, including under `--quiet` and `--json`;
+the JSON payload also includes `ignoredAnswers` (empty without a dirty preview).
 
 Nothing is written.
 The preview is a commit no ref points at — a loose object `git gc` reclaims — so `refs/tpl/<id>` does not move and

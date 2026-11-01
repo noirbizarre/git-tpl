@@ -19,7 +19,7 @@ Each of these is a way the guarantee could be lost, and how it is prevented:
 |---|---|
 | Directory traversal order | The template tree is walked in Git tree order, never filesystem order. `readdir` order varies by filesystem; Git's is sorted and canonical. |
 | Line endings | Bytes are never translated. A `\r\n` in the template stays `\r\n` on Linux and on Windows. |
-| File permissions | Only the executable bit is carried, taken from the source blob's Git mode. Git records nothing else, so nothing else can vary. See the caveat below for a worktree source. |
+| File kind and permissions | Source Git modes preserve regular files, executable files, and symbolic links. Other regular-file permission bits are not recorded. See the caveat below for a worktree source. |
 | Binary files | Detected by a NUL byte in the first 8 KiB and copied verbatim, never rendered. |
 | Timestamps | Never injected. The commit's author and committer time are the only timestamps, and they are metadata, not content. |
 | Environment variables | Not exposed to templates. At all. |

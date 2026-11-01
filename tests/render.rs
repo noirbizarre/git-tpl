@@ -763,9 +763,56 @@ fn strict_answers_accepts_an_answer_set_that_names_only_real_questions() {
     assert!(scratch.read("Cargo.toml").contains("strictly"));
 }
 
-/// The ignore stack includes `core.excludesFile`, so a global rule set years
-/// ago on an unrelated project can remove a file the author can see on disk.
-/// Inside a render there is no `git status` to explain the absence.
+#[test]
+fn dirty_snapshots_keep_tracked_ignored_files_and_match_git_staging() {
+    use tpl::git::{GitBackend, LibGit2};
+    let repo = common::Repo::init("tracked-ignored");
+    repo.write("template/tracked.txt", "old\n")
+        .write("template/hidden/kept.txt", "kept\n")
+        .write("template/deleted.txt", "gone\n")
+        .commit_all("tracked output");
+    repo.write(".gitignore", "template/tracked.txt\ntemplate/hidden/\n")
+        .write("template/tracked.txt", "new\n")
+        .write("template/hidden/untracked.txt", "ignore me\n")
+        .write("template/hidden/.gitignore", "!untracked.txt\n")
+        .write("template/fresh.txt", "discover me\n");
+    std::fs::remove_file(repo.path.join("template/deleted.txt")).unwrap();
+    let excludes = repo.config_home().join("ignored");
+    std::fs::write(&excludes, "tracked.txt\n").unwrap();
+    repo.git(&["config", "core.excludesFile", excludes.to_str().unwrap()]);
+    let backend = LibGit2::open(&repo.path).unwrap();
+    let before = repo.working_state();
+    let (dirty, ignored) = backend.tree_from_workdir(&repo.path).unwrap();
+    assert_eq!(before, repo.working_state());
+    assert!(
+        !ignored
+            .iter()
+            .any(|p| p == "template/tracked.txt" || p == "template/hidden")
+    );
+    #[cfg(unix)]
+    {
+        // macOS temp paths can name the same directory through /var and
+        // /private/var. Exercise that identity mismatch on Linux too.
+        let alias = repo.path.parent().unwrap().join("alias");
+        std::os::unix::fs::symlink(&repo.path, &alias).unwrap();
+        let (aliased, alias_ignored) = backend.tree_from_workdir(&alias).unwrap();
+        assert_eq!(aliased, dirty);
+        assert_eq!(alias_ignored, ignored);
+    }
+    repo.git(&["add", "-A"]);
+    let staged = repo.git(&["write-tree"]);
+    assert_eq!(dirty.to_hex(), staged);
+    let (subtree, _) = backend
+        .tree_from_workdir(&repo.path.join("template"))
+        .unwrap();
+    assert_eq!(
+        subtree.to_hex(),
+        repo.git(&["rev-parse", &format!("{staged}:template")])
+    );
+}
+
+/// The ignore stack includes global rules, so explain excluded untracked files
+/// that an author can see on disk but would not stage with `git add -A`.
 #[test]
 fn dirty_reports_what_gitignore_removed_from_the_render() {
     let (_keep, template) = template();
@@ -862,7 +909,8 @@ fn a_gitignore_negation_overrides_a_global_ignore_rule() {
     template.repo.write("template/.gitignore", "!mise.toml\n");
     template.repo.write("template/mise.toml", "[tools]\n");
     template.repo.write("template/mise.lock", "lock\n");
-    template.repo.commit_all("feat: render a mise.toml");
+    // Leave both files untracked: otherwise tracked membership, not the
+    // negation, decides inclusion and ambient Git ignores change this fixture.
 
     let output = scratch
         .run(&[
@@ -974,7 +1022,7 @@ fn an_ignored_partial_outside_the_render_root_is_reported() {
         "macros.local.jinja",
         "{% macro greet() %}hi{% endmacro %}\n",
     );
-    template.repo.commit_all("feat: a partial");
+    // Keep it untracked: ignore rules cannot remove a committed partial.
 
     let output = scratch
         .run(&[

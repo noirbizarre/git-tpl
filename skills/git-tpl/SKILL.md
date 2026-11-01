@@ -75,7 +75,8 @@ as an unstaged edit, on both updated and up-to-date outcomes.
 Otherwise it preserves the file's exact bytes, comments and formatting, even when rendered output changes.
 Applying the result is always a separate, explicit `git tpl merge` (or a plain `git merge refs/tpl/<id>`).
 Ordinary `git push`/`git pull` ignore template refs; git-tpl does not push them by default.
-`tpl.autoPush` or `git tpl update --push` opts into pushing after an update; fetching remains explicit.
+`tpl.autoPush` or `git tpl update --push` opts into pushing when update creates a rendered commit.
+Use `git tpl push` to publish an existing rendering or retry a failed push; fetching remains explicit.
 
 Full model: <https://noirbizarre.github.io/git-tpl/concepts/git-model/>.
 
@@ -112,11 +113,16 @@ do not assume it is preinstalled.
    Build the answer set first with `git tpl --json questions <template>`,
    then supply it with repeated `--answer k=v`, one or more `--answers-from file.toml`, and/or `--defaults`.
    Add `--strict-answers` to catch a typoed key instead of a silent warning.
+   Standalone `render` and `context` ignore `tpl.interactive`; pass `--defaults` explicitly.
+   Dirty diff previews can ask newly unanswered questions and confirm network access too;
+   use `--defaults` and authorize required data access explicitly.
 3. **Preview before committing.**
    `init`, `update`, `fetch`, and `push` all accept `--dry-run` (the JSON payload gains `"dryRun": true`) —
    use it on an unfamiliar template or repository before acting for real.
-4. **`update` alone changes nothing you can see.** It only advances `refs/tpl/<id>`.
-   Follow it with `git tpl diff` to preview and `git tpl merge` to apply — skipping the merge leaves the update inert.
+   Update dry runs report `answersChanged` and `composedChanged`, including lock repairs without a new commit.
+4. **`update` does not apply rendered files.** It advances `refs/tpl/<id>` while preserving `HEAD` and the index.
+   Semantic answer or child-lock changes can also leave an unstaged `.config/git.tpl.toml` edit; report it.
+   Follow it with `git tpl diff` to preview and `git tpl merge` to apply rendered changes.
 5. **A migration can ride along with an `update`.** `migrations[]` is empty on almost every update; when it isn't,
    the template crossed a version boundary declared under its own `migrations/` directory (ADR-024). Read each
     entry's non-null `message` before merging — it is meant to be shown once, the same as `init`'s `note`.
@@ -162,6 +168,9 @@ do not assume it is preinstalled.
 10. **Sharing renderings across a team is explicit.**
     `git tpl fetch` retrieves remote-tracking refs; `git tpl push` publishes the local rendered ref.
     `push` never forces. Genuine rendered-ref divergence has no automatic reconciliation operation.
+    `tpl::git::push_rejected` means the server declined the ref; resolve its reported policy before retrying.
+    On `tpl::ops::no_rendered_ref` in a fresh clone, restore original ancestry before updating; fetching alone
+    does not adopt a ref, and an equal re-render starts unrelated history.
     Preserve both histories; merging into the project branch does not advance the ref being pushed.
     Only adopt an absent ref or fast-forward an ancestor, with conditional `git update-ref`;
     see <https://noirbizarre.github.io/git-tpl/usage/fetch/>.
@@ -272,8 +281,12 @@ Then ask whether to proceed. Only on a yes:
 git tpl merge --json
 ```
 
-If the user declines, leave the ref where it is — `update` already advanced it, which changes nothing they can see —
-and say so.
+The merge wrapper uses libgit2 and does not execute configured external `merge.<name>.driver` commands.
+If the project depends on those drivers, use native `git merge refs/tpl/<id>` after the same user confirmation.
+`merge --no-commit` leaves non-fast-forward merges staged; it still advances `HEAD` on a fast-forward.
+
+If the user declines, leave the advanced ref where it is and explain that rendered changes remain unapplied.
+Report any unstaged answer or child-lock edits that update saved in `.config/git.tpl.toml`.
 
 ### Resolve a merge conflict
 
@@ -310,7 +323,9 @@ git tpl backport --list-hunks --json
 
 `plan[]` has one entry per changed file (`rendered`, `source`, `added`), each with `hunks[]`:
 `spec` (what `--hunk` takes), `header`, `insertions`, `deletions`, and `lines` (the hunk body, prefixed ` `/`-`/`+`).
-Nothing is produced yet, and nothing is refused yet — a file git-tpl would not be able to backport is still listed.
+No patch is produced yet. Eligible leaf-owned text files are listed before substitution and round-trip proof checks.
+Symlink changes and inherited or composed content can fail before listing;
+exclude those paths and retry, or edit their owning template directly.
 A file the template never produced appears only if you name it as a `<pathspec>`.
 `skipped[]` holds what cannot be backported at all (a locally deleted file, a binary file).
 Tell the user about those, once.
@@ -398,6 +413,20 @@ A merge that left conflicts unresolved stops the sync: backporting from a half-m
 
 ## Commands used above
 
+Question schemas expose list-item constraints as `itemPattern` and effective `itemMessage` (or `null` when unset).
+
+Quiet lint retains diagnostic findings on stderr; JSON lint reports them only in `diagnostics[]`.
+Dirty snapshots preserve tracked files despite ignore rules; ignore exclusions apply to untracked discovery.
+Dirty diff/show report unknown answer keys on stderr; diff JSON also carries `ignoredAnswers`.
+Show always retains its raw file/listing stdout, including with `--json`.
+On `tpl::ops::no_such_path`, use `git tpl show .` to list rendered paths; diff lists changes, not the inventory.
+
+`git tpl test` honors `tpl.testCommands=false` from the invocation repository's configuration chain,
+or from global/system configuration outside a repository.
+When invoked from elsewhere, the tested template's repository-local config is not consulted.
+Remote `[extends]` ancestors need persistent trust before test cases are discovered;
+case-level `trust` only controls data loading during cases, and `test` has no invocation-wide `--trust`.
+
 | Command | Synopsis | Key JSON fields |
 |---|---|---|
 | `questions` | `git tpl --json questions <template>` | `questions[]{name,default,defaultIsExpression,when,choices,defaultWhenSkipped}` |
@@ -464,7 +493,8 @@ Put global flags before `help`, for example `git tpl --color never help update`.
 
 ## Known limitations
 
-- git-tpl runs nothing over a rendering — no build, no lint, no test.
+- `render`, `init`, and `update` run no build, lint, or test commands over their output.
+  The explicit `git tpl test` harness can run a case's `[commands]`, unless disabled.
   After `update`/`merge`, verify the result with the project's own tools (e.g. `cargo build`, `npm test`, `actionlint`).
 - There are no custom merge strategies.
   A conflict is an ordinary Git conflict; git-tpl contributes no reconciliation logic of its own.

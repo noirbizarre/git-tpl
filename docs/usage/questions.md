@@ -29,6 +29,10 @@ is what anything driving git-tpl non-interactively needs first.
 
 ## Generating an answers file
 
+Question JSON includes string validation as `pattern`/`message` and list-item validation as
+`itemPattern`/`itemMessage`. Unset constraints are `null`;
+messages include the same effective fallback used when validating answers.
+
 ```sh
 git tpl --json questions ./tpl \
   | jq -r '.questions[] | select(.default != null and .defaultIsExpression == false)

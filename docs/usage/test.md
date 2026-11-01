@@ -190,11 +190,12 @@ opposite: every entry in it runs regardless of anything failing before or within
 There is no timeout. A hanging command hangs the run.
 
 Every command also gets `CLICOLOR_FORCE=1` and `FORCE_COLOR=1` added to its environment, whenever `git tpl test`'s
-own output is colourised (never under `--color=never`, `NO_COLOR`, or a non-terminal stderr). A command talking to
-a pipe rather than a terminal — which is what capturing its output requires — otherwise assumes nobody can see
-colour and silently prints in black and white, which is backwards when that output is about to be shown on a real
-terminal either way. `commands.env` (or a list's own `env`) still wins for either variable, so a case that wants
-plain output from a tool that only checks these two can still ask for it.
+own output is colourised under the [effective colour policy](../configuration.md#the-environment).
+Explicit `--color always` or force-colour variables can enable colour despite `NO_COLOR` or non-terminal stderr.
+A command talking to a pipe rather than a terminal otherwise assumes nobody can see colour.
+Capturing its output requires a pipe, but that output can still be shown on a real terminal.
+`commands.env` (or a list's own `env`) still wins for either variable,
+so a case that wants plain output from a tool that only checks these two can still ask for it.
 
 A CI job wants colour for the same reason, but has to ask for it explicitly: a runner's shell is not a terminal,
 so `--color auto` (the default) never colourises there on its own — the same reason a workflow already sets
@@ -278,7 +279,8 @@ visible only once a job has step debug logging enabled.
 A case's `[commands]` need no confirmation: running `git tpl test` on a template you have in front of you is
 already the same act as cloning a repository and running `make test` in it. Commands run by default. To skip them
 for one invocation, pass `--skip-commands`; to disable them for yourself by default, set `tpl.testCommands` to
-`false` (`git config tpl.testCommands false`) — `--skip-commands` can only disable further, never re-enable what
+`false` (`git config --global tpl.testCommands false` also applies outside repositories).
+`--skip-commands` can only disable further, never re-enable what
 configuration turned off. See [ADR-027](../adr/027-test-case-commands.md) for the full reasoning, including why
 this does not reopen the rule that a *rendered* project — `render`, `init`, `update` — cannot execute anything.
 
@@ -350,10 +352,15 @@ Set `trust = false` to assert the *refused* path instead — the render fails wi
 with no host to reach.
 
 This is not the `--trust`/`[trust]` mechanism `render`, `init`, `update` and `backport` use.
-Those act on a real project for a real person, so they refuse by default and ask, once, for consent; `test` never
-asks anybody, and the persistent `[trust]` list in `~/.config/git-tpl/config.toml` is not consulted here either —
-a case's `trust` must mean the same thing on every machine that runs the suite, including CI, where there is
-nobody to ask and nothing pre-trusted. See [ADR-028](../adr/028-test-case-trust.md) for the reasoning.
+For case-level data loading, `test` never asks anybody and does not consult the persistent `[trust]` list:
+a case's `trust` must mean the same thing on every machine, including CI.
+See [ADR-028](../adr/028-test-case-trust.md) for the reasoning.
+
+Before discovering cases, `test` resolves the template's `[extends]` ancestors using persistent trust from
+`~/.config/git-tpl/config.toml`.
+Remote ancestors must be authorized there on each machine, including CI;
+case-level `trust` cannot authorize them, and `test` has no invocation-wide `--trust` option.
+Missing authorization fails with `tpl::extends::untrusted` before cases run.
 
 ## Snapshots
 

@@ -50,10 +50,10 @@ are errors before the rendered tree or the destination directory is written.
 Iterate the same list in a parent file:
 
 ```jinja
-{% raw %}{% for id in modules %}
+{% for id in modules %}
 [[modules]]
 id = "{{ id }}"
-{% endfor %}{% endraw %}
+{% endfor %}
 ```
 
 The parent manifest names each child ref; `.config/git.tpl.toml` records its resolved commit on `init` and `update`.

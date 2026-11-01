@@ -310,7 +310,9 @@ pub enum OpError {
     #[error("`{ref_name}` does not exist")]
     #[diagnostic(
         code(tpl::ops::no_rendered_ref),
-        help("run `git tpl update` to render it, or `git tpl fetch` if it is shared")
+        help(
+            "in a fresh clone, restore the original rendered ref before `git tpl update`; see https://noirbizarre.github.io/git-tpl/usage/fetch/#restoring-an-absent-local-ref"
+        )
     )]
     NoRenderedRef {
         /// The ref that was looked for.
@@ -325,7 +327,7 @@ pub enum OpError {
     #[error("`{path}` is not in `{ref_name}`")]
     #[diagnostic(
         code(tpl::ops::no_such_path),
-        help("run `git tpl diff --name-only` to list what the template renders")
+        help("run `git tpl show .` to list what the template renders")
     )]
     NoSuchPath {
         /// The path that was looked for.
@@ -2291,6 +2293,8 @@ pub struct Preview {
     pub commit: Oid,
     /// Template files a `.gitignore` removed from the rendering.
     pub ignored: Vec<String>,
+    /// Answer keys that named no question, retained for caller warnings.
+    pub ignored_answers: Vec<String>,
 }
 
 /// Render the configured template now, as a commit nothing points at.
@@ -2300,9 +2304,8 @@ pub struct Preview {
 /// is untouched and `git gc` reclaims it. It exists at all only because
 /// [`GitBackend::merge_preview`] merges *commits*, and a rendering is a tree.
 ///
-/// Answers come from `.config/git.tpl.toml`, so the preview asks nothing: the
-/// question being answered is "what would my template edit do to this
-/// project?", not "what would a different set of answers do?".
+/// Recorded answers are reused; newly applicable unanswered questions follow
+/// the supplied answering policy, just as a real update would.
 #[allow(clippy::too_many_arguments)]
 pub fn render_preview(
     project: &dyn GitBackend,
@@ -2359,6 +2362,7 @@ pub fn render_preview(
             "preview: uncommitted template\n",
         )?,
         ignored: rendered.template.ignored,
+        ignored_answers: rendered.ignored_answers,
     })
 }
 

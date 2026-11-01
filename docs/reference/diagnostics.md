@@ -171,7 +171,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::ops::missing_template_revision` | The previous template commit is unavailable from the resolved source, and the current template has migrations. Restore the commit under a fetchable branch or tag in the template repository so `update` can determine which migrations are new. |
 | `tpl::ops::missing_migration_message_file` | A migration's `message_file` names nothing at the template revision. |
 | `tpl::ops::migration_message_file_not_utf8` | A migration's `message_file` names a binary file. |
-| `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist yet. Run `init` or `update`. |
+| `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` is absent. In a fresh clone, [restore the original ref](../usage/fetch.md#restoring-an-absent-local-ref) before updating; fetching alone does not adopt it. |
 | `tpl::ops::no_such_directory` | `init`'s destination does not exist. Create it, or pass `--init` to create it and the repository. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
 | `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
@@ -246,6 +246,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::git::no_such_revision` | The requested revision is absent, or an inheritance object pin is ambiguous or noncommit. |
 | `tpl::git::auth` | Authentication failed. |
 | `tpl::git::network` | The remote could not be reached. The help text carries libgit2's own reason. |
+| `tpl::git::push_rejected` | The server refused the ref update. Resolve its reported hook or policy rejection, then retry `git tpl push`. |
 | `tpl::git::clone` | The remote answered, but the clone could not be written — usually no space or no permission on the temporary directory. |
 | `tpl::git::remote_exists` | A remote of that name already exists. git-tpl never repoints one. |
 | `tpl::git::stale_ref` | The rendered ref changed concurrently; inspect expected/actual tips and retry. No config is saved. |

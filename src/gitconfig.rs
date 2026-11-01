@@ -41,7 +41,7 @@ pub fn seed(repo: &dyn GitBackend, key: &str) -> Result<Option<String>, GitError
 pub struct Preferences {
     /// The remote for `fetch` and `push`.
     pub remote: String,
-    /// Whether to push the rendered ref after a successful update.
+    /// Whether to push the rendered ref when update creates a rendered commit.
     pub auto_push: bool,
     /// Whether to prompt for unanswered questions.
     pub interactive: bool,
@@ -70,6 +70,11 @@ impl Default for Preferences {
 }
 
 impl Preferences {
+    /// Preserve the personal command opt-out even without an invocation repository.
+    pub fn global_test_commands<G: GitBackend>() -> Result<bool, GitError> {
+        Ok(G::global_config_bool(keys::TEST_COMMANDS)?.unwrap_or(Self::default().test_commands))
+    }
+
     /// Read preferences from a repository.
     ///
     /// libgit2's configuration snapshot applies Git's own precedence —
