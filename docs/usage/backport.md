@@ -292,7 +292,9 @@ Four rules make this safe to run unattended:
   List again rather than guessing which hunk was meant.
 - **Selection still happens before the patch is built**, exactly as with `-p`.
   A named hunk that cannot be carried is refused as `hunk_refused`, and the listing does not pre-judge it:
-  it is produced before the proof, so a file that would refuse is still listed.
+  eligible leaf-owned text files are listed before substitution and round-trip proof checks.
+  Symlink changes and inherited or composed content can still fail before listing.
+  Exclude those paths and list again, or edit their owning template directly.
 
 `--hunk` conflicts with `-p` and `--list-hunks`; `--list-hunks` conflicts with `-o`, since it writes no patch.
 See [ADR-037](../adr/037-non-interactive-hunk-selection.md).

@@ -314,7 +314,9 @@ git tpl backport --list-hunks --json
 
 `plan[]` has one entry per changed file (`rendered`, `source`, `added`), each with `hunks[]`:
 `spec` (what `--hunk` takes), `header`, `insertions`, `deletions`, and `lines` (the hunk body, prefixed ` `/`-`/`+`).
-Nothing is produced yet, and nothing is refused yet — a file git-tpl would not be able to backport is still listed.
+No patch is produced yet. Eligible leaf-owned text files are listed before substitution and round-trip proof checks.
+Symlink changes and inherited or composed content can fail before listing;
+exclude those paths and retry, or edit their owning template directly.
 A file the template never produced appears only if you name it as a `<pathspec>`.
 `skipped[]` holds what cannot be backported at all (a locally deleted file, a binary file).
 Tell the user about those, once.

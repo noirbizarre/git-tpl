@@ -445,8 +445,10 @@ With `--list-hunks`, `result` is `plan`, `patch` is `""`, `files` is empty, and 
 `id` is derived from the hunk's content and the file's path, so it is stable while the file is unchanged and stops
 matching when it changes.
 `lines` is the hunk body, each line prefixed with a space, `-` or `+`.
-A file that the template would refuse to patch is still listed, because the listing is produced before the proof;
-and a binary file appears in `skipped` instead.
+Eligible leaf-owned text files are listed before substitution and round-trip proof checks;
+a binary file appears in `skipped` instead.
+Symlink changes and inherited or composed content can fail before listing.
+Exclude unsupported paths and retry, or edit their owning template directly.
 
 A refusal is a failure, with a `tpl::backport::*` [code](diagnostics.md#backport).
 Branch on the code: `substituted_region` is routine and means "edit the template by hand", while
