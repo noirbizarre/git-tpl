@@ -629,7 +629,7 @@ pub struct ShowArgs {
 /// `git tpl merge`
 #[derive(Debug, clap::Args)]
 pub struct MergeArgs {
-    /// Merge and stage, but do not commit
+    /// Stage without a merge commit; fast-forwards still advance HEAD
     #[arg(long)]
     pub no_commit: bool,
 

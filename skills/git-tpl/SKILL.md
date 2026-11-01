@@ -282,6 +282,7 @@ git tpl merge --json
 ```
 
 The merge wrapper uses libgit2 and does not execute configured external `merge.<name>.driver` commands.
+`merge --no-commit` leaves non-fast-forward merges staged; it still advances `HEAD` on a fast-forward.
 If the project depends on those drivers, use native `git merge refs/tpl/<id>` after the same user confirmation.
 
 If the user declines, leave the advanced ref where it is and explain that rendered changes remain unapplied.

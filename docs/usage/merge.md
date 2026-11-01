@@ -53,7 +53,9 @@ Fast-forwarded refs/tpl/github-com-noirbizarre-rust-library-template into the cu
 Now at 15b50a5.
 ```
 
-With `--no-commit`, the merge is staged and left for you to commit.
+With `--no-commit`, a non-fast-forward merge is staged and left for you to commit.
+As with native Git, this prevents creating a merge commit, not fast-forwarding:
+when a fast-forward is possible, `HEAD` advances immediately.
 
 ## Conflicts
 
@@ -94,7 +96,7 @@ Which is genuinely ambiguous, and genuinely wants a human.
 
 | Option | Meaning |
 |---|---|
-| `--no-commit` | Merge and stage, but do not commit. |
+| `--no-commit` | Stage a non-fast-forward merge without committing. Fast-forwards still advance `HEAD`. |
 | `-m`, `--message <msg>` | Override the merge commit message. |
 | `--abort` | Abort an in-progress merge. Same as `git merge --abort`. |
 
