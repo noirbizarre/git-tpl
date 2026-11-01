@@ -52,6 +52,12 @@ A note is shown in a block attributed to the template, so it cannot be mistaken 
 is stripped of everything a terminal would act on beyond colour and an `https` link.
 It is read from the template repository and is never written into your project.
 
+Notes are rendered as Markdown when colour is enabled, with styled headings, emphasis, code and lists.
+Links show their destinations, and images and HTML remain text.
+When colour is disabled, the sanitised Markdown source is shown instead.
+This follows the normal colour policy, including `--color always` through a pipe and `--color never` on a terminal.
+The `--json` note remains the raw, evaluated text.
+
 A `note_file` naming nothing is refused, and refused *early*: the note is resolved before the rendered ref is
 created and before the merge, so a template with a wrong path leaves your repository exactly as it found it.
 

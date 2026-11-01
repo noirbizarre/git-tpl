@@ -1156,6 +1156,36 @@ fn a_migration_message_keeps_its_colour_on_a_terminal() {
     assert!(output.stderr.contains("bold"));
 }
 
+#[test]
+fn migration_markdown_uses_the_same_colour_and_source_policy_as_notes() {
+    for mode in ["colored", "plain", "json"] {
+        let world = World::new();
+        world.init(&[]).success();
+        world.add_migration("000-note.toml", "message = '# Upgrade **now**'\n");
+        let output = match mode {
+            "colored" => tpl_colored(&world.project, &["update", "--defaults"]),
+            "json" => tpl(&world.project, &["--json", "update", "--defaults"]),
+            _ => tpl(&world.project, &["update", "--defaults"]),
+        }
+        .success();
+        match mode {
+            "colored" => {
+                let plain = console::strip_ansi_codes(&output.stderr);
+                assert!(plain.contains("  Upgrade now\n"), "{plain}");
+                assert!(!plain.contains("**now**"));
+            }
+            "json" => {
+                assert_eq!(
+                    output.json()["migrations"][0]["message"],
+                    "# Upgrade **now**"
+                );
+                assert!(!output.stderr.contains("from the template"));
+            }
+            _ => assert!(output.stderr.contains("  # Upgrade **now**\n")),
+        }
+    }
+}
+
 /// `message_file` is repository-root-relative, read from the whole template
 /// tree, exactly like `note_file`.
 #[test]

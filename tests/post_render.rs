@@ -501,6 +501,56 @@ fn a_note_keeps_its_colour_on_a_terminal() {
     assert!(output.stderr.contains("bold"));
 }
 
+#[test]
+fn markdown_notes_are_formatted_when_colour_is_enabled() {
+    let world = world_with_note_file(
+        "NEXT-STEPS.md",
+        "NEXT-STEPS.md",
+        "# Next steps\n\nRun **bootstrap** with `scripts/bootstrap.sh`.\n\n- [Docs](https://example.com)\n",
+    );
+    let output = tpl_colored(
+        &world.project,
+        &["init", &world.template.source(), "--defaults"],
+    )
+    .success();
+    let plain = console::strip_ansi_codes(&output.stderr);
+    assert!(plain.contains("from the template"));
+    assert!(plain.contains("  Next steps\n"), "{plain}");
+    assert!(
+        plain.contains("Run bootstrap with scripts/bootstrap.sh."),
+        "{plain}"
+    );
+    assert!(plain.contains("• Docs (https://example.com)"), "{plain}");
+    assert!(!plain.contains("**bootstrap**"));
+}
+
+#[test]
+fn unformatted_notes_preserve_markdown_and_json_keeps_the_source() {
+    let markdown = "# Next steps\n\nRun **bootstrap** and `scripts/bootstrap.sh`.\n";
+    let world = world_with_note_file("NEXT-STEPS.md", "NEXT-STEPS.md", markdown);
+    let output = world.init(&[]).success();
+    assert!(output.stderr.contains("  # Next steps\n"));
+    assert!(output.stderr.contains("**bootstrap**"));
+    assert!(!output.stderr.contains('\x1b'));
+
+    let world = world_with_note_file("NEXT-STEPS.md", "NEXT-STEPS.md", markdown);
+    let output = init_json(&world, &[]).success();
+    assert_eq!(output.json()["note"], markdown);
+    assert!(!output.stderr.contains("from the template"));
+}
+
+#[test]
+fn quiet_init_suppresses_markdown_notes() {
+    let world = world_with_note_file("NEXT-STEPS.md", "NEXT-STEPS.md", "# Next steps\n");
+    let output = tpl_colored(
+        &world.project,
+        &["--quiet", "init", &world.template.source(), "--defaults"],
+    )
+    .success();
+    assert!(!output.stderr.contains("Next steps"));
+    assert!(!output.stderr.contains("from the template"));
+}
+
 /// A note that is nothing but a stripped sequence has nothing to show, and an
 /// empty frame reads as the template having trailed off.
 #[test]

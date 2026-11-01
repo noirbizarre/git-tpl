@@ -11,6 +11,8 @@ use tpl::ops::{Proposal, Selection};
 
 use crate::cli::ColorChoice;
 
+mod markdown;
+
 /// Clap uses its own style types; keep its palette aligned with human reports.
 pub fn clap_styles() -> clap::builder::Styles {
     use clap::builder::styling::AnsiColor;
@@ -475,6 +477,21 @@ pub fn warning(theme: &Theme, text: &str) -> String {
 /// Returns the whole block, lines included, because the frame's width depends
 /// on the content and a caller printing line by line could not know it.
 pub fn note_block(theme: &Theme, sanitised: &str) -> String {
+    let rendered;
+    let sanitised = if theme.is_colored() {
+        // Parsing decodes entities, so source sanitisation alone cannot catch
+        // every control character that might reach the terminal.
+        rendered = tpl::note::sanitise(
+            &markdown::render(theme, sanitised),
+            tpl::note::Formatting::Allowed,
+        );
+        rendered.as_str()
+    } else {
+        sanitised
+    };
+    if sanitised.trim().is_empty() {
+        return String::new();
+    }
     const LABEL: &str = " from the template ";
     // Wide enough for the label and for what is inside it, and capped so that a
     // long line does not draw a rule off the edge of a narrow terminal.

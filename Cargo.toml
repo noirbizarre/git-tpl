@@ -134,6 +134,8 @@ clap = { version = "4", features = ["derive", "env", "wrap_help", "string"] }
 clap_complete = "4"
 clap_mangen = "0.3"
 console = "0.16"
+# Parse note Markdown without coupling terminal presentation to HTML generation.
+pulldown-cmark = { version = "0.13", default-features = false }
 demand = "2"
 # Calendar conversion for changelog display; UTC avoids host timezone differences.
 time = { version = "0.3", default-features = false, features = ["std"] }
