@@ -26,7 +26,8 @@ git tpl init <template> [<dir>] [--ref <ref>] [--answer k=v]... [options]
 7. Renders the template.
 8. Writes `.config/git.tpl.toml`. A template that fails to render leaves no half-initialised project behind,
    which is why this comes after the rendering rather than before it.
-9. Creates `refs/tpl/<id>` as an **orphan commit**.
+9. Creates `refs/tpl/<id>` as an **orphan commit** when no prior rendered ref exists.
+   With `--force` on an existing ref, its previous tip is the parent, preserving the established merge base.
 10. Merges that commit into the current branch, allowing unrelated histories, with `.config/git.tpl.toml` in the
     merge commit itself. One `init`, one commit on your branch — see
     [ADR-021](../adr/021-attachment-in-the-merge-commit.md).
