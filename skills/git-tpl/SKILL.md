@@ -489,7 +489,8 @@ Put global flags before `help`, for example `git tpl --color never help update`.
 
 ## Known limitations
 
-- git-tpl runs nothing over a rendering — no build, no lint, no test.
+- `render`, `init`, and `update` run no build, lint, or test commands over their output.
+  The explicit `git tpl test` harness can run a case's `[commands]`, unless disabled.
   After `update`/`merge`, verify the result with the project's own tools (e.g. `cargo build`, `npm test`, `actionlint`).
 - There are no custom merge strategies.
   A conflict is an ordinary Git conflict; git-tpl contributes no reconciliation logic of its own.
