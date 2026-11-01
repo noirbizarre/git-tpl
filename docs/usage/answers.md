@@ -141,6 +141,8 @@ A question covered by none of them is asked as usual, unless `--defaults` or `tp
 force — in which case its default is taken, and a question with no default is an error
 (`tpl::eval::unanswered`).
 
+Standalone `render` and `context` do not load `tpl.interactive`; use `--defaults` explicitly for those commands.
+
 ## Failures
 
 | Code | Meaning |

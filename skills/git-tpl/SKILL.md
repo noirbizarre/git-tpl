@@ -112,6 +112,7 @@ do not assume it is preinstalled.
    Build the answer set first with `git tpl --json questions <template>`,
    then supply it with repeated `--answer k=v`, one or more `--answers-from file.toml`, and/or `--defaults`.
    Add `--strict-answers` to catch a typoed key instead of a silent warning.
+   Standalone `render` and `context` ignore `tpl.interactive`; pass `--defaults` explicitly.
 3. **Preview before committing.**
    `init`, `update`, `fetch`, and `push` all accept `--dry-run` (the JSON payload gains `"dryRun": true`) —
    use it on an unfamiliar template or repository before acting for real.

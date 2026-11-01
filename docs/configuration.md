@@ -311,6 +311,9 @@ git config --global tpl.interactive false
 `tpl.testCommands` also reads global/system configuration when `git tpl test` runs outside a repository.
 The template under test cannot override this preference with its own repository-local configuration.
 
+Standalone `render` and `context` do not load `tpl.interactive`, including a globally configured value.
+Pass `--defaults` explicitly to disable their answer prompts.
+
 One family of keys outside `tpl.` is read: a question declaring
 [`default_from`](templates/questions.md#machine-seeded-defaults) has the keys it names — `git:user.name`, or
 `git.user.name` inside an expression — read, read-only, to pre-fill its prompt.
