@@ -722,6 +722,11 @@ pub trait GitBackend {
     /// Read a boolean `tpl.*` configuration value.
     fn config_bool(&self, key: &str) -> Result<Option<bool>, GitError>;
 
+    /// Read system/user configuration without discovering a repository.
+    fn global_config_bool(key: &str) -> Result<Option<bool>, GitError>
+    where
+        Self: Sized;
+
     /// Every configuration entry, in Git's own precedence order.
     ///
     /// For prompt seeds only. Enumerated rather than read key by key so that a

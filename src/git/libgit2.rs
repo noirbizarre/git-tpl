@@ -1103,6 +1103,16 @@ impl GitBackend for LibGit2 {
         }
     }
 
+    fn global_config_bool(key: &str) -> Result<Option<bool>, GitError> {
+        let config = git2::Config::open_default()
+            .map_err(|e| backend("read the global Git configuration", &e))?;
+        match config.get_bool(key) {
+            Ok(value) => Ok(Some(value)),
+            Err(e) if e.code() == ErrorCode::NotFound => Ok(None),
+            Err(e) => Err(backend("read a global configuration value", &e)),
+        }
+    }
+
     fn config_entries(&self) -> Result<Vec<(String, String)>, GitError> {
         let mut config = self
             .repo

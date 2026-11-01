@@ -181,6 +181,50 @@ fn tpl_test_commands_false_disables_them_without_a_flag() {
 }
 
 #[test]
+fn global_command_preferences_apply_outside_any_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(
+        dir.path(),
+        &[(
+            "tests/c.toml",
+            "[answers]\n[commands]\nrendered = [\"ls marker.txt\"]\n",
+        )],
+    );
+    let config = tempfile::tempdir().unwrap();
+    std::fs::create_dir(config.path().join("git")).unwrap();
+    // libgit2 reads XDG Git config, not Git core's GIT_CONFIG_GLOBAL override.
+    let global = config.path().join("git/config");
+    let source = template.repo.path.to_str().unwrap();
+    for (value, enabled) in [("false", false), ("true", true), ("", true)] {
+        std::fs::write(
+            &global,
+            if value.is_empty() {
+                String::new()
+            } else {
+                format!("[tpl]\n testCommands = {value}\n")
+            },
+        )
+        .unwrap();
+        let json = tpl_outside(
+            dir.path(),
+            config.path(),
+            &["--json", "test", "--template", source],
+        )
+        .success()
+        .json();
+        assert_eq!(json["summary"]["commandsEnabled"], enabled);
+        assert_eq!(json["summary"]["commandsRun"], usize::from(enabled));
+    }
+    std::fs::write(&global, "[tpl]\n testCommands = invalid\n").unwrap();
+    tpl_outside(
+        dir.path(),
+        config.path(),
+        &["--json", "test", "--template", source],
+    )
+    .failure();
+}
+
+#[test]
 fn the_human_output_reports_how_many_commands_ran() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(

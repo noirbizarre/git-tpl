@@ -278,7 +278,8 @@ visible only once a job has step debug logging enabled.
 A case's `[commands]` need no confirmation: running `git tpl test` on a template you have in front of you is
 already the same act as cloning a repository and running `make test` in it. Commands run by default. To skip them
 for one invocation, pass `--skip-commands`; to disable them for yourself by default, set `tpl.testCommands` to
-`false` (`git config tpl.testCommands false`) — `--skip-commands` can only disable further, never re-enable what
+`false` (`git config --global tpl.testCommands false` also applies outside repositories).
+`--skip-commands` can only disable further, never re-enable what
 configuration turned off. See [ADR-027](../adr/027-test-case-commands.md) for the full reasoning, including why
 this does not reopen the rule that a *rendered* project — `render`, `init`, `update` — cannot execute anything.
 

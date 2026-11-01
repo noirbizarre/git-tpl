@@ -413,16 +413,16 @@ impl Progress for TestProgress {
 /// controls: their own machine's Git configuration, not a repository they
 /// are merely pointing a test run at.
 ///
-/// A missing repository here falls back to the built-in default silently:
-/// running `test` from outside any repository at all is fine as long as
-/// `TEMPLATE` names one — `resolve::resolve` is what actually enforces that,
-/// and this function must not fail first over configuration nobody asked
-/// about.
+/// Outside a repository, the user's global/system configuration still applies:
+/// changing invocation directory must not re-enable commands they opted out of.
 fn test_commands_enabled(skip: bool) -> Result<bool, OpError> {
     let preferences = match LibGit2::discover(&super::current_dir()?) {
         Ok(repo) => Preferences::load(&repo)?,
         Err(GitError::NotARepository { .. } | GitError::JujutsuNotColocated { .. }) => {
-            Preferences::default()
+            Preferences {
+                test_commands: Preferences::global_test_commands::<LibGit2>()?,
+                ..Preferences::default()
+            }
         }
         Err(other) => return Err(other.into()),
     };

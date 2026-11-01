@@ -399,6 +399,9 @@ A merge that left conflicts unresolved stops the sync: backporting from a half-m
 
 ## Commands used above
 
+`git tpl test` honors `tpl.testCommands=false` from the invocation repository's configuration chain,
+or from global/system configuration outside a repository. The tested template's local config cannot enable it.
+
 | Command | Synopsis | Key JSON fields |
 |---|---|---|
 | `questions` | `git tpl --json questions <template>` | `questions[]{name,default,defaultIsExpression,when,choices,defaultWhenSkipped}` |

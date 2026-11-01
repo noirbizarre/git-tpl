@@ -70,6 +70,11 @@ impl Default for Preferences {
 }
 
 impl Preferences {
+    /// Preserve the personal command opt-out even without an invocation repository.
+    pub fn global_test_commands<G: GitBackend>() -> Result<bool, GitError> {
+        Ok(G::global_config_bool(keys::TEST_COMMANDS)?.unwrap_or(Self::default().test_commands))
+    }
+
     /// Read preferences from a repository.
     ///
     /// libgit2's configuration snapshot applies Git's own precedence —
