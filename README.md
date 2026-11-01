@@ -154,9 +154,11 @@ package_name = "{{ project_name | lower | replace(' ', '-') }}"
 Rendering is [MiniJinja](https://docs.rs/minijinja), and only MiniJinja.
 Templates cannot execute code — no hooks, no scripts, no embedded interpreter.
 
-Templates published on GitHub carry the
-[`git-tpl`](https://github.com/topics/git-tpl) topic — add it to yours so others
-can find it.
+**[Browse templates on GitHub](https://github.com/search?q=topic%3Agit-tpl+topic%3Atemplate&type=repositories)**
+— repositories tagged with both `git-tpl` and `template`.
+Add both topics to reusable template repositories you publish on GitHub;
+see [Publishing](https://noirbizarre.github.io/git-tpl/templates/format/#publishing) for UI and CLI instructions.
+Topics are a discovery convention, not a registry or runtime lookup: `git tpl init` still takes a Git URL.
 
 ## Documentation
 
