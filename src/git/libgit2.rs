@@ -1259,6 +1259,12 @@ impl GitBackend for LibGit2 {
     }
 
     fn tree_from_workdir(&self, root: &Path) -> Result<(Oid, Vec<String>), GitError> {
+        // Git's workdir and the caller can spell the same directory through
+        // different aliases (/var vs /private/var, or Windows path prefixes).
+        // Tracked-path membership and ignore matching need one identity.
+        let root = root
+            .canonicalize()
+            .map_err(|e| attachment_io("resolve the working-tree snapshot root", e))?;
         // The rules in force above `root`. `root` is the template source, which
         // may sit below the working tree, and the outer rules still apply.
         //
@@ -1273,13 +1279,14 @@ impl GitBackend for LibGit2 {
                 context: "read the working tree".into(),
                 reason: "the repository is bare".into(),
             })?
-            .to_path_buf();
+            .canonicalize()
+            .map_err(|e| attachment_io("resolve the working tree", e))?;
         let excludes_file = self
             .repo
             .config()
             .ok()
             .and_then(|config| config.get_path("core.excludesFile").ok());
-        let stack = IgnoreStack::new(&workdir, self.repo.path(), excludes_file.as_deref(), root);
+        let stack = IgnoreStack::new(&workdir, self.repo.path(), excludes_file.as_deref(), &root);
 
         // Ignore rules govern discovery, never files already tracked in the
         // index. Include their ancestors so ignored directories are not pruned.
@@ -1298,8 +1305,8 @@ impl GitBackend for LibGit2 {
         let mut entries = Vec::new();
         let mut ignored = Vec::new();
         collect_workdir(
-            root,
-            root,
+            &root,
+            &root,
             Some(&stack),
             &tracked,
             false,

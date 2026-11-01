@@ -789,6 +789,16 @@ fn dirty_snapshots_keep_tracked_ignored_files_and_match_git_staging() {
             .iter()
             .any(|p| p == "template/tracked.txt" || p == "template/hidden")
     );
+    #[cfg(unix)]
+    {
+        // macOS temp paths can name the same directory through /var and
+        // /private/var. Exercise that identity mismatch on Linux too.
+        let alias = repo.path.parent().unwrap().join("alias");
+        std::os::unix::fs::symlink(&repo.path, &alias).unwrap();
+        let (aliased, alias_ignored) = backend.tree_from_workdir(&alias).unwrap();
+        assert_eq!(aliased, dirty);
+        assert_eq!(alias_ignored, ignored);
+    }
     repo.git(&["add", "-A"]);
     let staged = repo.git(&["write-tree"]);
     assert_eq!(dirty.to_hex(), staged);
@@ -899,7 +909,8 @@ fn a_gitignore_negation_overrides_a_global_ignore_rule() {
     template.repo.write("template/.gitignore", "!mise.toml\n");
     template.repo.write("template/mise.toml", "[tools]\n");
     template.repo.write("template/mise.lock", "lock\n");
-    template.repo.commit_all("feat: render a mise.toml");
+    // Leave both files untracked: otherwise tracked membership, not the
+    // negation, decides inclusion and ambient Git ignores change this fixture.
 
     let output = scratch
         .run(&[
