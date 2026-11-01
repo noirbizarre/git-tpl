@@ -175,6 +175,7 @@ not help: migration discovery reads the *template* repository.
 
 A migration message is sanitised and framed exactly like a template's `init`-time note (see [`init`](init.md)):
 shown once, in an attributed block, never executed.
+It is rendered as Markdown when colour is enabled; otherwise its sanitised Markdown source is preserved.
 Its `--json` field carries the raw text, since a `--json` consumer is not a terminal.
 
 `git tpl lint` validates a migration file's shape without a project.

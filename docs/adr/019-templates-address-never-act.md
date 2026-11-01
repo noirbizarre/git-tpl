@@ -148,12 +148,23 @@ extension:
 - **Dropped:** everything else. Cursor motion, erase, scroll regions, OSC 52 and all other OSC, DCS/APC/PM/SOS, C1
   bytes, `\r`, backspace, NUL.
 - Every line is terminated with `SGR 0`, so styling cannot leak past the note into git-tpl's own output.
-- Under `--json`, when the stream is not a terminal, or when `NO_COLOR` is set, everything is stripped and the
-  note is plain text.
+- When the resolved colour policy disables formatting, all terminal formatting is stripped and the Markdown source
+  is preserved.
+  Explicit colour flags and force-colour environment settings follow the same precedence as other human output.
+- `--json` carries the raw, evaluated note instead of terminal presentation.
+  A consumer must sanitise it before displaying it on a terminal.
 
 Formatting was kept rather than flattened because a note with no emphasis and no clickable link is a note people
 stop reading, and the status quo it replaces — a README the user opens in a pager — has both.
 The allowlist is what makes that affordable.
+
+With colour enabled, the CLI delegates Markdown presentation to Termimad rather than maintaining its own renderer.
+Termimad styles headings, emphasis, code, unordered lists, blockquotes and tables.
+Links, images, ordered lists and HTML remain source text; code blocks have no language-aware syntax highlighting.
+No resource is loaded and no command is executed.
+The source is bounded and sanitised before rendering, and the displayed result is bounded and sanitised again:
+third-party formatting must stay within the same terminal-control allowlist as author-provided escapes.
+This is presentation only, independent of the `.jinja` suffix that controls note-file interpolation.
 
 The note is additionally printed inside a delimited block attributed to the template.
 The attribution is load-bearing, not decoration: it is what keeps a note from *claiming* to be git-tpl.

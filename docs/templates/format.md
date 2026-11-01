@@ -287,11 +287,11 @@ The file is read from the template and **never rendered into the project**.
 A note is guidance, not an artifact — if you want a file the user keeps, render one and let the note say to read
 it.
 
-It is rendered if and only if the path ends in `.jinja`, exactly as a file is:
+It is evaluated with MiniJinja if and only if the path ends in `.jinja`, exactly as a file is:
 
 ```toml
-note_file = "NEXT-STEPS.md"        # shown verbatim, braces and all
-note_file = "NEXT-STEPS.md.jinja"  # rendered with the answers
+note_file = "NEXT-STEPS.md"        # no interpolation; braces are preserved
+note_file = "NEXT-STEPS.md.jinja"  # evaluated with the answers
 ```
 
 The path itself may be an expression, so a template can choose its note:
@@ -305,6 +305,20 @@ A path that renders to nothing means no note.
 A non-empty path naming nothing is an **error**, and `init` refuses before it writes anything — `git tpl lint`
 reports the same thing without a repository.
 
+### Markdown presentation
+
+Both inline notes and note files are displayed using [Termimad](https://github.com/Canop/termimad)
+when colour is enabled.
+Its supported Markdown includes headings, emphasis, code blocks, unordered lists, blockquotes and tables.
+Links, images, ordered lists and HTML remain source text; no resource is loaded.
+Code blocks are styled uniformly, without language-aware syntax highlighting.
+Markdown presentation is independent of MiniJinja evaluation and does not depend on a file's suffix.
+
+When colour is disabled, the sanitised Markdown source is shown instead, preserving syntax and line breaks.
+The normal colour policy applies: `--color always` renders Markdown even through a pipe,
+while `--color never` always preserves the source.
+Automatic colour normally turns formatting off for piped stderr, `NO_COLOR` or `TERM=dumb`.
+
 ### What a note cannot do
 
 Nothing here runs.
@@ -314,7 +328,8 @@ See [ADR-019](../adr/019-templates-address-never-act.md).
 
 In human terminal output, the note is shown in a block attributed to the template and sanitised first:
 colour and `https` links survive, and everything else a terminal could act on does not.
-Piped human output and `NO_COLOR` presentation strip colour and links too.
+When colour is disabled, terminal colour escapes and clickable hyperlinks are stripped too.
+Markdown link destinations remain visible text.
 Under `--json`, `note` carries the raw, unsanitised text instead.
 JSON consumers must sanitise terminal controls before displaying it; the same applies to migration messages.
 

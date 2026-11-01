@@ -475,6 +475,24 @@ pub fn warning(theme: &Theme, text: &str) -> String {
 /// Returns the whole block, lines included, because the frame's width depends
 /// on the content and a caller printing line by line could not know it.
 pub fn note_block(theme: &Theme, sanitised: &str) -> String {
+    let rendered;
+    let sanitised = if theme.is_colored() {
+        // Keep third-party formatting inside the same terminal-control allowlist
+        // and byte budget as author-provided escapes. No terminal I/O here:
+        // the resolved theme owns color policy, including forced color in pipes.
+        rendered = tpl::note::sanitise(
+            &termimad::MadSkin::default()
+                .text(sanitised, None)
+                .to_string(),
+            tpl::note::Formatting::Allowed,
+        );
+        rendered.as_str()
+    } else {
+        sanitised
+    };
+    if sanitised.trim().is_empty() {
+        return String::new();
+    }
     const LABEL: &str = " from the template ";
     // Wide enough for the label and for what is inside it, and capped so that a
     // long line does not draw a rule off the edge of a narrow terminal.
@@ -508,6 +526,64 @@ pub fn note_block(theme: &Theme, sanitised: &str) -> String {
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    fn formatted_note(source: &str) -> String {
+        note_block(
+            &Theme::colored(),
+            &tpl::note::sanitise(source, tpl::note::Formatting::Allowed),
+        )
+    }
+
+    #[test]
+    fn plain_notes_preserve_markdown_source() {
+        let source = "# Heading\n\n**bold** and `code`\n- [docs](../README.md)";
+        let text = note_block(&Theme::plain(), source);
+        assert!(
+            text.contains("  # Heading\n  \n  **bold** and `code`\n  - [docs](../README.md)\n")
+        );
+        assert!(!text.contains('\x1b'));
+    }
+
+    #[test]
+    fn formatted_notes_cannot_introduce_terminal_actions() {
+        let text = formatted_note(
+            "\x1b[2Jgone &#27;[2J &#13;rewrite &#8;erase &#x9b;clear\n\n[x](javascript:alert(1))",
+        );
+        assert!(!text.contains("\x1b[2J"));
+        for control in ['\r', '\x08', '\u{9b}'] {
+            assert!(!text.contains(control));
+        }
+        assert!(!text.contains("\x1b]"));
+        assert!(text.contains("gone"));
+    }
+
+    #[test]
+    fn author_styles_and_links_close_before_the_note_frame() {
+        let text = formatted_note("\x1b[31mred\n\x1b]8;;https://example.com\x1b\\linked");
+        assert!(text.contains("\x1b[31m"));
+        assert!(text.contains("\x1b]8;;\x1b\\"));
+        let lines: Vec<_> = text.lines().collect();
+        assert!(lines[1].ends_with("\x1b[0m"));
+        assert!(lines[2].ends_with("\x1b[0m"));
+        assert!(!lines.last().unwrap().contains("https://"));
+    }
+
+    #[test]
+    fn formatted_unicode_notes_remain_bounded_and_report_truncation() {
+        let text = formatted_note(&format!(
+            "# Heading\n\n{}",
+            "界".repeat(tpl::note::LIMIT_BYTES)
+        ));
+        assert!(text.contains("… (truncated)"));
+        // The frame is outside the note's byte budget.
+        assert!(text.len() < tpl::note::LIMIT_BYTES + 1024);
+    }
+
+    #[test]
+    fn notes_without_visible_content_have_no_frame() {
+        assert!(formatted_note("\x1b[2J\r\x08").is_empty());
+        assert!(note_block(&Theme::plain(), "\n\t ").is_empty());
+    }
 
     /// The three texts, in a fixed order, each labelled.
     ///

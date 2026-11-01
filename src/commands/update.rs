@@ -167,8 +167,9 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     tpl::note::Formatting::Stripped
                 };
                 let sanitised = tpl::note::sanitise(raw, formatting);
-                if !sanitised.trim().is_empty() {
-                    ctx.out.say(note_block(&ctx.out.theme, &sanitised));
+                let block = note_block(&ctx.out.theme, &sanitised);
+                if !block.is_empty() {
+                    ctx.out.say(block);
                     ctx.out.blank();
                 }
             }
