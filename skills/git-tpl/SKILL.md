@@ -413,6 +413,8 @@ A merge that left conflicts unresolved stops the sync: backporting from a half-m
 
 ## Commands used above
 
+Question schemas expose list-item constraints as `itemPattern` and effective `itemMessage` (or `null` when unset).
+
 Quiet lint retains diagnostic findings on stderr; JSON lint reports them only in `diagnostics[]`.
 Dirty snapshots preserve tracked files despite ignore rules; ignore exclusions apply to untracked discovery.
 Dirty diff/show report unknown answer keys on stderr; diff JSON also carries `ignoredAnswers`.

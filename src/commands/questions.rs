@@ -120,6 +120,9 @@ fn describe(
         "defaultWhenSkipped": question.default_when_skipped,
         "pattern": question.pattern,
         "message": question.pattern_message(),
+        // Clients preparing answers need the same constraints evaluation enforces.
+        "itemPattern": question.item_pattern,
+        "itemMessage": question.item_pattern_message(),
         "defaultFrom": question.default_from,
     });
     let map = out.as_object_mut().expect("object");
