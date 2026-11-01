@@ -338,9 +338,10 @@ See [Migrations](../usage/update.md#migrations).
 `startedNewHistory` is `true` when there was no `refs/tpl/<id>` to descend from, so the new commit is an orphan
 sharing no ancestry with anything the branch has merged.
 Two causes, both legitimate: the configuration's `source` or `id` was edited, or the project was cloned without
-`refs/tpl/*` and never fetched.
-Not an error, but a `git tpl merge` from here has no merge base and can conflict on every file — fetch first if
-the ref exists on a remote.
+`refs/tpl/*` and never restored its local rendered ref.
+A `git tpl merge` from here has no merge base and can conflict on every file.
+Before updating a fresh clone, [restore the original ref](../usage/fetch.md#restoring-an-absent-local-ref).
+Fetching alone does not adopt it or reconcile an orphan that has already been created; preserve both histories.
 
 `previousRevision` is `null` on the first rendering.
 When present, its `reference` and `commit` are independently `null` if the recorded provenance the previous

@@ -27,9 +27,10 @@ The two modes this gives you are both first-class:
     └── refs/tpl/foo         local
     ```
 
-    Nobody else needs it.
-    The template attachment is fully described by `.config/git.tpl.toml`, which *is* pushed — so a collaborator
-    can run `git tpl update` and render an identical ref for themselves.
+    Contributors can work on the project without the local ref.
+    Before running updates in a fresh clone, a collaborator must
+    [restore the original rendered ref from full merged history](fetch.md#restoring-an-absent-local-ref).
+    Re-rendering from `.config/git.tpl.toml` can reproduce its tree, but cannot recover the original ancestry.
 
 === "Shared"
 

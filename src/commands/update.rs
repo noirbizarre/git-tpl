@@ -207,8 +207,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     &ctx.out.theme,
                     &format!(
                         "No {} existed here, so this update started a new history.\n\
-                         If the ref exists on a remote, run `git tpl fetch` before merging: \
-                         without a merge base, `git tpl merge` can conflict on every file.",
+                         Preserve this history and inspect the original rendering before merging: \
+                         fetching alone cannot repair an orphan's missing merge base.",
                         id.ref_name()
                     ),
                 ));

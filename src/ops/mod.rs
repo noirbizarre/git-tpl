@@ -310,7 +310,9 @@ pub enum OpError {
     #[error("`{ref_name}` does not exist")]
     #[diagnostic(
         code(tpl::ops::no_rendered_ref),
-        help("run `git tpl update` to render it, or `git tpl fetch` if it is shared")
+        help(
+            "in a fresh clone, restore the original rendered ref before updating; see https://noirbizarre.github.io/git-tpl/usage/fetch/#restoring-an-absent-local-ref"
+        )
     )]
     NoRenderedRef {
         /// The ref that was looked for.

@@ -171,7 +171,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::ops::missing_template_revision` | The previous template commit is unavailable from the resolved source, and the current template has migrations. Restore the commit under a fetchable branch or tag in the template repository so `update` can determine which migrations are new. |
 | `tpl::ops::missing_migration_message_file` | A migration's `message_file` names nothing at the template revision. |
 | `tpl::ops::migration_message_file_not_utf8` | A migration's `message_file` names a binary file. |
-| `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` does not exist yet. Run `init` or `update`. |
+| `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` is absent. In a fresh clone, [restore the original ref](../usage/fetch.md#restoring-an-absent-local-ref) before updating; fetching alone does not adopt it. |
 | `tpl::ops::no_such_directory` | `init`'s destination does not exist. Create it, or pass `--init` to create it and the repository. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
 | `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
