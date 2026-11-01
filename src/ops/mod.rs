@@ -311,7 +311,7 @@ pub enum OpError {
     #[diagnostic(
         code(tpl::ops::no_rendered_ref),
         help(
-            "in a fresh clone, restore the original rendered ref before updating; see https://noirbizarre.github.io/git-tpl/usage/fetch/#restoring-an-absent-local-ref"
+            "in a fresh clone, restore the original rendered ref before `git tpl update`; see https://noirbizarre.github.io/git-tpl/usage/fetch/#restoring-an-absent-local-ref"
         )
     )]
     NoRenderedRef {

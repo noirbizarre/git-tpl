@@ -282,8 +282,8 @@ git tpl merge --json
 ```
 
 The merge wrapper uses libgit2 and does not execute configured external `merge.<name>.driver` commands.
-`merge --no-commit` leaves non-fast-forward merges staged; it still advances `HEAD` on a fast-forward.
 If the project depends on those drivers, use native `git merge refs/tpl/<id>` after the same user confirmation.
+`merge --no-commit` leaves non-fast-forward merges staged; it still advances `HEAD` on a fast-forward.
 
 If the user declines, leave the advanced ref where it is and explain that rendered changes remain unapplied.
 Report any unstaged answer or child-lock edits that update saved in `.config/git.tpl.toml`.
@@ -422,7 +422,8 @@ Show always retains its raw file/listing stdout, including with `--json`.
 On `tpl::ops::no_such_path`, use `git tpl show .` to list rendered paths; diff lists changes, not the inventory.
 
 `git tpl test` honors `tpl.testCommands=false` from the invocation repository's configuration chain,
-or from global/system configuration outside a repository. The tested template's local config cannot enable it.
+or from global/system configuration outside a repository.
+When invoked from elsewhere, the tested template's repository-local config is not consulted.
 Remote `[extends]` ancestors need persistent trust before test cases are discovered;
 case-level `trust` only controls data loading during cases, and `test` has no invocation-wide `--trust`.
 

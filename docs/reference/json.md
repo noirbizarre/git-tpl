@@ -18,9 +18,6 @@ git tpl --json questions ./template | jq '.questions[] | select(.when == null) |
 
 ## The global flags
 
-Dirty `diff` previews include `ignoredAnswers` for supplied keys that name no question;
-non-dirty diffs return an empty list. Dirty `show` keeps raw stdout and reports those keys only on stderr.
-
 Four flags are accepted by every command, before or after the subcommand:
 
 | Flag | Default | Meaning |
@@ -217,6 +214,9 @@ Documented in [status](../usage/status.md).
 
 ### `diff`
 
+Dirty previews include `ignoredAnswers` for supplied or recorded keys that name no question;
+non-dirty diffs return an empty list. Dirty `show` keeps raw stdout and reports those keys only on stderr.
+
 ```json
 { "ok": true,
   "conflicts": ["mise.toml"],
@@ -351,8 +351,6 @@ Before updating a fresh clone, [restore the original ref](../usage/fetch.md#rest
 Fetching alone does not adopt it or reconcile an orphan that has already been created; preserve both histories.
 
 `previousRevision` is `null` on the first rendering.
-Dry-run update outcomes include `answersChanged` and `composedChanged` to predict configuration edits,
-even when `result` is `upToDate` and no rendered commit would be created.
 When present, its `reference` and `commit` are independently `null` if the recorded provenance the previous
 rendering left could not supply one — an older trailer format, or a hand-edited commit on the ref.
 `pushed` names the remote when [`tpl.autoPush`](../usage/push.md) pushed automatically, `null` otherwise — the
@@ -365,12 +363,14 @@ With `--dry-run`, `result` is `upToDate` or `wouldUpdate`, and the payload has i
   "id": "rust", "ref": "refs/tpl/rust", "template": "…",
   "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
   "changes": [{ "path": "Cargo.toml", "kind": "modified" }],
-  "migrations": [], "ignoredAnswers": [] }
+  "migrations": [], "ignoredAnswers": [], "answersChanged": false, "composedChanged": false }
 ```
 
-`wouldUpdate` reports `id`, `ref`, `template`, `revision`, `changes`, `migrations` and `ignoredAnswers`.
-It does not report `commit`, `previousRevision`, `answersChanged`, `startedNewHistory`, `movedCommit` or `pushed`.
-A dry-run `upToDate` report instead includes `changes: []` and `answersChanged`, but no `migrations` field.
+`wouldUpdate` reports `id`, `ref`, `template`, `revision`, `changes`, `migrations`, `ignoredAnswers`,
+`answersChanged` and `composedChanged`.
+It does not report `commit`, `previousRevision`, `startedNewHistory`, `movedCommit` or `pushed`.
+A dry-run `upToDate` report includes `changes: []`, `answersChanged` and `composedChanged`, but no `migrations` field.
+Both outcomes predict semantic configuration edits, including child-lock repairs without a new rendered commit.
 Neither dry-run outcome writes configuration or publishes a ref.
 
 ### `merge`

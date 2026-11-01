@@ -195,10 +195,10 @@ Preserve this history and inspect the original rendering before merging:
 fetching alone cannot repair an orphan's missing merge base.
 ```
 
-Two things cause it, and both are legitimate, which is why this is a warning and not a refusal:
-
 If this warning has already appeared, preserve the new ref for inspection.
 The [absent-ref restoration procedure](fetch.md#restoring-an-absent-local-ref) does not reconcile an existing orphan.
+
+Two things cause it, and both are legitimate, which is why this is a warning and not a refusal:
 
 - **You cloned a project without the local ref.** `refs/tpl/*` is not fetched by default.
   Before updating, [restore the original rendered ref](fetch.md#restoring-an-absent-local-ref).

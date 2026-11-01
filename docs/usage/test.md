@@ -192,11 +192,10 @@ There is no timeout. A hanging command hangs the run.
 Every command also gets `CLICOLOR_FORCE=1` and `FORCE_COLOR=1` added to its environment, whenever `git tpl test`'s
 own output is colourised under the [effective colour policy](../configuration.md#the-environment).
 Explicit `--color always` or force-colour variables can enable colour despite `NO_COLOR` or non-terminal stderr.
-A command talking to
-a pipe rather than a terminal — which is what capturing its output requires — otherwise assumes nobody can see
-colour and silently prints in black and white, which is backwards when that output is about to be shown on a real
-terminal either way. `commands.env` (or a list's own `env`) still wins for either variable, so a case that wants
-plain output from a tool that only checks these two can still ask for it.
+A command talking to a pipe rather than a terminal otherwise assumes nobody can see colour.
+Capturing its output requires a pipe, but that output can still be shown on a real terminal.
+`commands.env` (or a list's own `env`) still wins for either variable,
+so a case that wants plain output from a tool that only checks these two can still ask for it.
 
 A CI job wants colour for the same reason, but has to ask for it explicitly: a runner's shell is not a terminal,
 so `--color auto` (the default) never colourises there on its own — the same reason a workflow already sets

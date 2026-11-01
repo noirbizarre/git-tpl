@@ -763,9 +763,6 @@ fn strict_answers_accepts_an_answer_set_that_names_only_real_questions() {
     assert!(scratch.read("Cargo.toml").contains("strictly"));
 }
 
-/// The ignore stack includes `core.excludesFile`, so a global rule set years
-/// ago on an unrelated project can remove a file the author can see on disk.
-/// Inside a render there is no `git status` to explain the absence.
 #[test]
 fn dirty_snapshots_keep_tracked_ignored_files_and_match_git_staging() {
     use tpl::git::{GitBackend, LibGit2};
@@ -804,6 +801,8 @@ fn dirty_snapshots_keep_tracked_ignored_files_and_match_git_staging() {
     );
 }
 
+/// The ignore stack includes global rules, so explain excluded untracked files
+/// that an author can see on disk but would not stage with `git add -A`.
 #[test]
 fn dirty_reports_what_gitignore_removed_from_the_render() {
     let (_keep, template) = template();

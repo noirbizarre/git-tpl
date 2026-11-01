@@ -130,7 +130,7 @@ The preview reuses applicable answers recorded in `.config/git.tpl.toml`.
 New questions, or previously skipped questions that become applicable, can still prompt;
 untrusted network data can also require confirmation.
 Use `--defaults` for noninteractive answers and pre-authorize required network access through
-[persistent trust](../configuration.md#trust), or pass `--trust` for this invocation.
+[persistent trust](../configuration.md#trust).
 `--answer` overrides them for the preview only; nothing is recorded.
 Unknown answer keys warn on stderr, including under `--quiet` and `--json`;
 the JSON payload also includes `ignoredAnswers` (empty without a dirty preview).

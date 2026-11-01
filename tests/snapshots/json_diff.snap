@@ -6,6 +6,7 @@ exit: 0
 --- stdout ---
 {
   "conflicts": [],
+  "ignoredAnswers": [],
   "changes": [
     {
       "path": ".github/workflows/release.yml",

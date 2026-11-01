@@ -309,7 +309,7 @@ git config --global tpl.interactive false
 ```
 
 `tpl.testCommands` also reads global/system configuration when `git tpl test` runs outside a repository.
-The template under test cannot override this preference with its own repository-local configuration.
+When invoked from elsewhere, the template under test's repository-local configuration is not consulted.
 
 Standalone `render` and `context` do not load `tpl.interactive`, including a globally configured value.
 Pass `--defaults` explicitly to disable their answer prompts.

@@ -26,19 +26,19 @@ fn lenient_dirty_previews_report_ignored_answers_without_changing_show_bytes() {
                 "--defaults",
                 "--quiet",
                 "--answer",
-                "project_naem=typo",
+                "unknown_key=typo",
             ]);
             if json {
                 args.push("--json");
             }
             let output = tpl(&world.project, &args).success();
-            assert!(output.stderr.contains("project_naem"), "{}", output.stderr);
+            assert!(output.stderr.contains("unknown_key"), "{}", output.stderr);
             if is_show {
                 assert_eq!(output.stdout, expected);
             } else if json {
                 assert_eq!(
                     output.json()["ignoredAnswers"],
-                    serde_json::json!(["project_naem"])
+                    serde_json::json!(["unknown_key"])
                 );
             }
         }
