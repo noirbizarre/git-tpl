@@ -190,7 +190,9 @@ opposite: every entry in it runs regardless of anything failing before or within
 There is no timeout. A hanging command hangs the run.
 
 Every command also gets `CLICOLOR_FORCE=1` and `FORCE_COLOR=1` added to its environment, whenever `git tpl test`'s
-own output is colourised (never under `--color=never`, `NO_COLOR`, or a non-terminal stderr). A command talking to
+own output is colourised under the [effective colour policy](../configuration.md#the-environment).
+Explicit `--color always` or force-colour variables can enable colour despite `NO_COLOR` or non-terminal stderr.
+A command talking to
 a pipe rather than a terminal — which is what capturing its output requires — otherwise assumes nobody can see
 colour and silently prints in black and white, which is backwards when that output is about to be shown on a real
 terminal either way. `commands.env` (or a list's own `env`) still wins for either variable, so a case that wants
