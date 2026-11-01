@@ -351,10 +351,15 @@ Set `trust = false` to assert the *refused* path instead — the render fails wi
 with no host to reach.
 
 This is not the `--trust`/`[trust]` mechanism `render`, `init`, `update` and `backport` use.
-Those act on a real project for a real person, so they refuse by default and ask, once, for consent; `test` never
-asks anybody, and the persistent `[trust]` list in `~/.config/git-tpl/config.toml` is not consulted here either —
-a case's `trust` must mean the same thing on every machine that runs the suite, including CI, where there is
-nobody to ask and nothing pre-trusted. See [ADR-028](../adr/028-test-case-trust.md) for the reasoning.
+For case-level data loading, `test` never asks anybody and does not consult the persistent `[trust]` list:
+a case's `trust` must mean the same thing on every machine, including CI.
+See [ADR-028](../adr/028-test-case-trust.md) for the reasoning.
+
+Before discovering cases, `test` resolves the template's `[extends]` ancestors using persistent trust from
+`~/.config/git-tpl/config.toml`.
+Remote ancestors must be authorized there on each machine, including CI;
+case-level `trust` cannot authorize them, and `test` has no invocation-wide `--trust` option.
+Missing authorization fails with `tpl::extends::untrusted` before cases run.
 
 ## Snapshots
 

@@ -413,6 +413,8 @@ A merge that left conflicts unresolved stops the sync: backporting from a half-m
 
 `git tpl test` honors `tpl.testCommands=false` from the invocation repository's configuration chain,
 or from global/system configuration outside a repository. The tested template's local config cannot enable it.
+Remote `[extends]` ancestors need persistent trust before test cases are discovered;
+case-level `trust` only controls data loading during cases, and `test` has no invocation-wide `--trust`.
 
 | Command | Synopsis | Key JSON fields |
 |---|---|---|
