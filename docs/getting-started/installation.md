@@ -39,8 +39,8 @@ compiling:
     paru -S git-tpl
     ```
 
-    Builds from the tagged source against the `Cargo.lock` this project commits, and runs the test suite before
-    packaging.
+    Builds from the tagged source against the `Cargo.lock` this project commits,
+    and smoke-checks the executable before packaging. The full test suite runs in upstream CI.
     For people who would rather not run someone else's binary.
 
 Both cover x86-64 and aarch64, and both install the man page and the bash, zsh and fish completions.
