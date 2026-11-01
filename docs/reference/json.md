@@ -30,6 +30,7 @@ Four flags are accepted by every command, before or after the subcommand:
 A warning is deliberately louder than the rest: neither `--quiet` nor `--json` suppresses one, because a warning
 names something the caller is getting wrong right now.
 Warnings go to stderr, so a JSON payload on stdout stays parseable.
+Lint findings are report data: `--quiet` retains them on stderr, while `--json` puts them only in `diagnostics[]`.
 Without `--json`, `diff` patches and diffstats are also payloads on stdout, displayed by native Git.
 With `--json`, diff bypasses Git's display tools and pager entirely.
 

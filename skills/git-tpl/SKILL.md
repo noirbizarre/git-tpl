@@ -411,6 +411,8 @@ A merge that left conflicts unresolved stops the sync: backporting from a half-m
 
 ## Commands used above
 
+Quiet lint retains diagnostic findings on stderr; JSON lint reports them only in `diagnostics[]`.
+
 `git tpl test` honors `tpl.testCommands=false` from the invocation repository's configuration chain,
 or from global/system configuration outside a repository. The tested template's local config cannot enable it.
 Remote `[extends]` ancestors need persistent trust before test cases are discovered;
