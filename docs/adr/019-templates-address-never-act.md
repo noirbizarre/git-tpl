@@ -158,12 +158,12 @@ Formatting was kept rather than flattened because a note with no emphasis and no
 stop reading, and the status quo it replaces — a README the user opens in a pager — has both.
 The allowlist is what makes that affordable.
 
-With colour enabled, the CLI interprets the note as CommonMark and applies terminal styles to headings, emphasis,
-code, lists and blockquotes.
-Links keep visible destinations, images remain descriptions and destinations, and HTML stays literal text.
+With colour enabled, the CLI delegates Markdown presentation to Termimad rather than maintaining its own renderer.
+Termimad styles headings, emphasis, code, unordered lists, blockquotes and tables.
+Links, images, ordered lists and HTML remain source text; code blocks have no language-aware syntax highlighting.
 No resource is loaded and no command is executed.
-The source is bounded and sanitised before parsing, and the displayed result is bounded and sanitised again:
-Markdown entity decoding must not become a way to introduce terminal controls after the security boundary.
+The source is bounded and sanitised before rendering, and the displayed result is bounded and sanitised again:
+third-party formatting must stay within the same terminal-control allowlist as author-provided escapes.
 This is presentation only, independent of the `.jinja` suffix that controls note-file interpolation.
 
 The note is additionally printed inside a delimited block attributed to the template.

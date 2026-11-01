@@ -506,7 +506,10 @@ fn markdown_notes_are_formatted_when_colour_is_enabled() {
     let world = world_with_note_file(
         "NEXT-STEPS.md",
         "NEXT-STEPS.md",
-        "# Next steps\n\nRun **bootstrap** with `scripts/bootstrap.sh`.\n\n- [Docs](https://example.com)\n",
+        concat!(
+            "# Next steps\n\nRun **bootstrap** with `scripts/bootstrap.sh`.\n\n",
+            "- [Docs](https://example.com)\n\n```sh\necho '**literal**'\n```\n",
+        ),
     );
     let output = tpl_colored(
         &world.project,
@@ -520,7 +523,9 @@ fn markdown_notes_are_formatted_when_colour_is_enabled() {
         plain.contains("Run bootstrap with scripts/bootstrap.sh."),
         "{plain}"
     );
-    assert!(plain.contains("• Docs (https://example.com)"), "{plain}");
+    assert!(plain.contains("• [Docs](https://example.com)"), "{plain}");
+    assert!(plain.contains("echo '**literal**'"), "{plain}");
+    assert!(!plain.contains("```sh"));
     assert!(!plain.contains("**bootstrap**"));
 }
 

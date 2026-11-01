@@ -307,10 +307,11 @@ reports the same thing without a repository.
 
 ### Markdown presentation
 
-Both inline notes and note files are displayed as Markdown when colour is enabled.
-Headings, emphasis, code, lists and blockquotes get terminal formatting inside the attributed block.
-Links show their labels and destinations; images show their descriptions and destinations without loading them.
-HTML is displayed literally, and code blocks preserve whitespace without syntax highlighting.
+Both inline notes and note files are displayed using [Termimad](https://github.com/Canop/termimad)
+when colour is enabled.
+Its supported Markdown includes headings, emphasis, code blocks, unordered lists, blockquotes and tables.
+Links, images, ordered lists and HTML remain source text; no resource is loaded.
+Code blocks are styled uniformly, without language-aware syntax highlighting.
 Markdown presentation is independent of MiniJinja evaluation and does not depend on a file's suffix.
 
 When colour is disabled, the sanitised Markdown source is shown instead, preserving syntax and line breaks.
