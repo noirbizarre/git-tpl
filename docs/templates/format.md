@@ -492,8 +492,9 @@ Rendering a PNG would corrupt it, and the failure would be silent.
 
 ### Permissions
 
-The executable bit is preserved.
-Git records nothing else about a file's mode, so nothing else can be.
+Git file kind and executable mode are preserved: regular files (`100644`), executable files (`100755`),
+and symbolic links (`120000`) with their opaque target bytes.
+For regular files, Git records no permission bits beyond executable mode.
 
 ### Determinism
 
