@@ -4,6 +4,84 @@ mod common;
 
 use common::{Repo, World, scrub_git_env, tpl};
 
+#[cfg(unix)]
+#[test]
+fn a_server_rejected_ref_is_a_failure_for_explicit_and_automatic_pushes() {
+    let world = World::new();
+    world.init(&[]).success();
+    let remote = with_remote(&world);
+    remote.write(
+        "hooks/pre-receive",
+        "#!/bin/sh\necho 'publication disabled' >&2\nexit 1\n",
+    );
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(
+        remote.path.join("hooks/pre-receive"),
+        std::fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+
+    // The local transport bypasses receive hooks. A real receive-pack server
+    // exercises rejection after a successful object transfer instead.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    drop(listener);
+    struct Daemon(std::process::Child);
+    impl Drop for Daemon {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut command = std::process::Command::new("git");
+    command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    command.args([
+        "daemon",
+        "--reuseaddr",
+        "--export-all",
+        "--enable=receive-pack",
+        "--listen=127.0.0.1",
+        &format!("--port={port}"),
+        &format!("--base-path={}", world.dir.path().display()),
+    ]);
+    scrub_git_env(&mut command, world.project.config_home());
+    let mut daemon = Daemon(command.spawn().unwrap());
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+            break;
+        }
+        assert!(daemon.0.try_wait().unwrap().is_none(), "git daemon exited");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "git daemon did not start"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    world.project.git(&[
+        "remote",
+        "set-url",
+        "origin",
+        &format!("git://127.0.0.1:{port}/remote.git"),
+    ]);
+    world.move_template();
+    for args in [
+        vec!["push"],
+        vec!["--json", "push"],
+        vec!["--json", "update", "--defaults", "--push"],
+    ] {
+        let output = tpl(&world.project, &args).failure();
+        if args.contains(&"--json") {
+            assert_eq!(output.json()["error"]["code"], "tpl::git::push_rejected");
+        } else {
+            output.says("pre-receive hook declined");
+        }
+        assert!(remote_refs(&remote).is_empty());
+    }
+}
+
 #[test]
 fn fetch_distinguishes_all_presence_combinations_without_adopting_the_local_ref() {
     for local_present in [false, true] {

@@ -79,6 +79,10 @@ and [conditional fast-forward adoption](fetch.md#fast-forwarding-an-existing-loc
 
 ## Options
 
+A server hook or policy can reject a ref even after its objects have transferred successfully.
+This fails with `tpl::git::push_rejected`, including the ref and server reason.
+Resolve the rejection and retry `git tpl push`; the same rejection also fails an automatic push after update.
+
 | Option | Meaning |
 |---|---|
 | `--remote <name>` | Default `origin`, or `tpl.remote`. |

@@ -427,6 +427,19 @@ pub enum GitError {
         reason: String,
     },
 
+    /// The transport succeeded, but receive-pack refused the ref update.
+    #[error("the remote rejected `{reference}`: {reason}")]
+    #[diagnostic(
+        code(tpl::git::push_rejected),
+        help("resolve the remote policy or hook rejection above, then retry `git tpl push`")
+    )]
+    PushRejected {
+        /// Ref the server declined to update.
+        reference: String,
+        /// Server-provided rejection status.
+        reason: String,
+    },
+
     /// A clone failed for a local reason — the remote is not implicated.
     ///
     /// Split from `Network` because the two remedies share nothing. `clone`

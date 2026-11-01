@@ -161,7 +161,8 @@ do not assume it is preinstalled.
    Narrowing by whole file is still `<pathspec>` / `--exclude`.
 10. **Sharing renderings across a team is explicit.**
     `git tpl fetch` retrieves remote-tracking refs; `git tpl push` publishes the local rendered ref.
-    `push` never forces. Genuine rendered-ref divergence has no automatic reconciliation operation.
+     `push` never forces. Genuine rendered-ref divergence has no automatic reconciliation operation.
+     `tpl::git::push_rejected` means the server declined the ref; resolve its reported policy before retrying.
     Preserve both histories; merging into the project branch does not advance the ref being pushed.
     Only adopt an absent ref or fast-forward an ancestor, with conditional `git update-ref`;
     see <https://noirbizarre.github.io/git-tpl/usage/fetch/>.

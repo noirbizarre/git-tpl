@@ -1032,12 +1032,27 @@ impl GitBackend for LibGit2 {
             })?;
         let url = remote_handle.url().unwrap_or(remote).to_string();
 
-        let mut options = PushOptions::new();
-        options.remote_callbacks(credential_callbacks(&url));
-
-        remote_handle
-            .push(&[refspec], Some(&mut options))
-            .map_err(|e| translate_remote(&url, None, &e))
+        let mut rejection = None;
+        {
+            let mut callbacks = credential_callbacks(&url);
+            // Transport success only means the pack arrived. Receive hooks and
+            // server policy reject individual refs through this callback.
+            callbacks.push_update_reference(|reference, status| {
+                if let Some(reason) = status {
+                    rejection = Some((reference.to_string(), reason.to_string()));
+                }
+                Ok(())
+            });
+            let mut options = PushOptions::new();
+            options.remote_callbacks(callbacks);
+            remote_handle
+                .push(&[refspec], Some(&mut options))
+                .map_err(|e| translate_remote(&url, None, &e))?;
+        }
+        match rejection {
+            Some((reference, reason)) => Err(GitError::PushRejected { reference, reason }),
+            None => Ok(()),
+        }
     }
 
     fn add_remote(&self, name: &str, url: &str) -> Result<(), GitError> {
@@ -1733,7 +1748,7 @@ fn describe_attempted_methods(url: &str) -> String {
 /// credential helper for HTTPS. libgit2 calls this repeatedly, once per method
 /// it is willing to try, so state is kept to avoid offering the same failing
 /// method forever.
-fn credential_callbacks(url: &str) -> RemoteCallbacks<'static> {
+fn credential_callbacks<'a>(url: &str) -> RemoteCallbacks<'a> {
     let mut callbacks = RemoteCallbacks::new();
     let url = url.to_string();
     let mut tried_agent = false;

@@ -246,6 +246,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::git::no_such_revision` | The requested revision is absent, or an inheritance object pin is ambiguous or noncommit. |
 | `tpl::git::auth` | Authentication failed. |
 | `tpl::git::network` | The remote could not be reached. The help text carries libgit2's own reason. |
+| `tpl::git::push_rejected` | The server refused the ref update. Resolve its reported hook or policy rejection, then retry `git tpl push`. |
 | `tpl::git::clone` | The remote answered, but the clone could not be written — usually no space or no permission on the temporary directory. |
 | `tpl::git::remote_exists` | A remote of that name already exists. git-tpl never repoints one. |
 | `tpl::git::stale_ref` | The rendered ref changed concurrently; inspect expected/actual tips and retry. No config is saved. |
