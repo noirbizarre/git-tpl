@@ -16,6 +16,16 @@ copyright = """
 Copyright &copy; 2026 Axel H. — MIT licensed
 """
 
+# These are template-authoring docs, not theme templates excluded by default.
+exclude_docs = """
+!/templates/
+"""
+
+# Individual decisions are reached through the ADR index to keep the sidebar compact.
+not_in_nav = """
+/adr/[0-9][0-9][0-9]-*.md
+"""
+
 nav = [
   { "Home" = "index.md" },
   { "Getting Started" = [
