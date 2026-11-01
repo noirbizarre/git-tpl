@@ -3,10 +3,12 @@
 There are three places configuration lives, and the split is deliberate.
 Each has exactly one owner.
 
-```
-.config/git.tpl.toml           →  the project. Versioned in Git. Everyone gets it.
-~/.config/git-tpl/config.toml  →  you. Never committed, never read by anyone else.
-.git/config, ~/.gitconfig      →  tpl.* preferences
+```mermaid
+flowchart LR
+    accTitle: Configuration files and their owners
+    project(".config/git.tpl.toml") --> shared("The project: versioned in Git, shared with everyone")
+    user("~/.config/git-tpl/config.toml") --> personal("You: never committed, never read by anyone else")
+    git(".git/config, ~/.gitconfig") --> preferences("tpl.* preferences")
 ```
 
 A freshly cloned repository is fully understandable from `.config/git.tpl.toml` alone.

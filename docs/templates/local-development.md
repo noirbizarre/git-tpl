@@ -13,14 +13,16 @@ git tpl init ../my-template
 A local path is a template source like any other.
 From then on:
 
-```
-edit the template
-       ↓
-git tpl update       ← re-renders, advances refs/tpl/<id>
-       ↓
-git tpl diff         ← exactly what changed
-       ↓
-git tpl merge        ← take it, or don't
+```mermaid
+flowchart TD
+    accTitle: Local template development loop
+    accDescr: Edit, render, and inspect the template changes, then choose whether to merge them before iterating.
+    edit("Edit the template") --> update("git tpl update: re-render and advance refs/tpl/#60;id#62;")
+    update --> diff("git tpl diff: inspect exactly what changed")
+    diff --> apply{Take the changes?}
+    apply -->|Yes| merge("git tpl merge")
+    merge --> edit
+    apply -->|No| edit
 ```
 
 Nothing about this differs from using a published template.

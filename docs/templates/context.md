@@ -5,11 +5,13 @@ A value resolved while prompting is the same value the template sees.
 
 ## Shape
 
-```
-answers      →  at the top level, by name
-computed     →  at the top level, by name
-data         →  under `data`
-template     →  under `template`
+```mermaid
+flowchart LR
+    accTitle: Template context namespaces
+    answers("Answers") --> top("Top level, by name")
+    computed("Computed values") --> top
+    data("Data sources") --> data_namespace("Under data")
+    template("Template metadata") --> template_namespace("Under template")
 ```
 
 ```jinja
@@ -48,30 +50,23 @@ See [Data sources](../data/index.md).
 
 ## How it is built
 
-```
-template revision
-        │
-   ┌────┴────┐
-   │         │
- local     remote          ← data sources
-  data      data
-   └────┬────┘
-        ▼
- initial context
-        │
-  question engine          ← topologically ordered
-        │
-   ┌────┼────┐
-   │    │    │
-answers │  conditions
-     computed
-        │
-        ▼
- resolved context
-        │
-   ┌────┴────┐
-   ▼         ▼
-prompting  MiniJinja
+```mermaid
+flowchart TD
+    accTitle: One context for prompting and rendering
+    accDescr: The question engine resolves values in dependency order; prompting and MiniJinja share the same context.
+    revision("Template revision") --> local("Local data sources")
+    revision --> remote("Remote data sources")
+    local --> initial("Initial context")
+    remote --> initial
+    initial --> engine("Question engine: topologically ordered")
+    engine --> answers("Answers")
+    engine --> computed("Computed values")
+    engine --> conditions("Conditions")
+    answers --> context("Resolved context")
+    computed --> context
+    conditions --> context
+    context --> prompting("Prompting")
+    context --> rendering("MiniJinja")
 ```
 
 There is no second pass and no second context.

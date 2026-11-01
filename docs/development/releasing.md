@@ -5,37 +5,24 @@ There is no manual step and no custom script.
 
 ## The flow
 
-```
-push to main
-     │
-     ▼
-🚢 Ship  →  gh ship run  (prepare)
-     │
-     ▼
-🚀 Prepare Release
-     │  git-cliff computes the version and the changelog
-     │  Cargo.toml is bumped, CHANGELOG.md written
-     ▼
-Release PR  (chore(release): X.Y.Z)
-     │
-     │  ← review the changelog, then squash-merge
-     ▼
-🚢 Ship  →  gh ship run  (release)
-     │  tags, creates a draft release
-     ▼
-📦 Publish Release
-     │  cross-compiles six targets, uploads assets + SHA256SUMS
-     │  then publishes to crates.io
-     ▼
-the release is made public
-     │
-     ├─────────────────────┐
-     ▼                     ▼
-🍺 Homebrew           📦 AUR
-     │  renders the       │  renders both PKGBUILDs and pushes
-     │  formula and       │  them to aur.archlinux.org
-     │  pushes it to
-     │  noirbizarre/homebrew-tap
+```mermaid
+flowchart TD
+    accTitle: Release preparation and publication
+    accDescr: Ship prepares a release PR, publishes after review and merge, then updates Homebrew and AUR.
+    push("Push to main") --> prepare_ship("Ship: gh ship run (prepare)")
+    prepare_ship --> prepare("Prepare Release<br/>
+        git-cliff computes version and changelog<br/>
+        Bump Cargo.toml and write CHANGELOG.md")
+    prepare --> pr("Release PR: chore(release): X.Y.Z")
+    pr -->|Review changelog, then squash-merge| release_ship("Ship: gh ship run (release)")
+    release_ship --> draft("Tag and create draft release")
+    draft --> publish("Publish Release<br/>
+        Cross-compile six targets<br/>
+        Upload assets + SHA256SUMS<br/>
+        Then publish to crates.io")
+    publish --> public("Make release public")
+    public --> homebrew("Homebrew: render formula and push to noirbizarre/homebrew-tap")
+    public --> aur("AUR: render both PKGBUILDs and push to aur.archlinux.org")
 ```
 
 The Ship workflow has one orchestration job.

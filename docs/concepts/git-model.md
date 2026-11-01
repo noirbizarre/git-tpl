@@ -4,35 +4,44 @@ Everything git-tpl does rests on one idea: **the rendered state of a template is
 
 ## The shape of it
 
-```
-TEMPLATE GIT REPOSITORY
-          │
-          │ fetch / resolve
-          ▼
-     template tree
-          │
-          │ MiniJinja + resolved context
-          ▼
-    rendered template tree
-          │
-          ▼
-    refs/tpl/<template-id>
-          │
-          │ normal Git merge
-          ▼
-     your working branch
+```mermaid
+flowchart TD
+    accTitle: From template repository to working branch
+    repository("Template Git repository") -->|Fetch / resolve| template("Template tree")
+    template -->|MiniJinja + resolved context| rendered("Rendered template tree")
+    rendered --> ref("refs/tpl/#60;template-id#62;")
+    ref -->|Normal Git merge| branch("Your working branch")
 ```
 
 Your branch and the template ref are two lines of history that periodically meet:
 
-```
-main:
-
-    A ─── B ─── C ─── D ─── M
-         /                 /
-        /                 /
-refs/tpl/foo:            /
-    G0 ─────── G1 ─── G2
+```mermaid
+---
+config:
+    theme: base
+    # Zensical overrides classless text; inherit Mermaid's per-branch label colors instead.
+    themeCSS: ".branchLabel text { fill: inherit !important; }"
+---
+gitGraph
+    accTitle: Project and rendered-template histories
+    accDescr: Independent roots A and G0 meet at B; later, rendered state G2 is merged into main at M.
+    %% Create both lanes before any commit so G0 has no parent.
+    branch "refs/tpl/foo"
+    checkout main
+    commit id: "A"
+    checkout "refs/tpl/foo"
+    commit id: "G0"
+    checkout main
+    merge "refs/tpl/foo" id: "B"
+    commit id: "C"
+    checkout "refs/tpl/foo"
+    commit id: "G1"
+    checkout main
+    commit id: "D"
+    checkout "refs/tpl/foo"
+    commit id: "G2"
+    checkout main
+    merge "refs/tpl/foo" id: "M"
 ```
 
 `G0`, `G1`, `G2` are successive rendered states of the template.
@@ -131,11 +140,24 @@ project before this moment — and then **merges it into your current branch**, 
 With `init --force` on an existing template ref, the new rendering instead has that ref's tip as its parent;
 reattaching must not destroy the merge base established by the first attachment.
 
-```
-main:  A ─── M
-            /
-           /
-       G0 ┘
+```mermaid
+---
+config:
+    theme: base
+    # Zensical overrides classless text; inherit Mermaid's per-branch label colors instead.
+    themeCSS: ".branchLabel text { fill: inherit !important; }"
+---
+gitGraph
+    accTitle: Initial attachment merges unrelated histories
+    accDescr: Merge M has two parents, the existing project commit A and the orphan rendered commit G0.
+    %% Create both lanes before any commit so G0 has no parent.
+    branch "refs/tpl/foo"
+    checkout main
+    commit id: "A"
+    checkout "refs/tpl/foo"
+    commit id: "G0"
+    checkout main
+    merge "refs/tpl/foo" id: "M"
 ```
 
 That merge is the load-bearing step.

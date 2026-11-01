@@ -21,10 +21,33 @@ The rendered output of a template is a commit on a dedicated ref, `refs/tpl/<tem
 Updating the template adds a commit to that ref.
 The user incorporates changes with a normal `git merge`.
 
-```
-main:  A ─── B ─── C ─── D ─── M
-            /                 /
-       G0 ─┴──────── G1 ─── G2
+```mermaid
+---
+config:
+    theme: base
+    # Zensical overrides classless text; inherit Mermaid's per-branch label colors instead.
+    themeCSS: ".branchLabel text { fill: inherit !important; }"
+---
+gitGraph
+    accTitle: Project and rendered-template histories
+    accDescr: Independent roots A and G0 meet at B; later, rendered state G2 is merged into main at M.
+    %% Create both lanes before any commit so G0 has no parent.
+    branch "refs/tpl/foo"
+    checkout main
+    commit id: "A"
+    checkout "refs/tpl/foo"
+    commit id: "G0"
+    checkout main
+    merge "refs/tpl/foo" id: "B"
+    commit id: "C"
+    checkout "refs/tpl/foo"
+    commit id: "G1"
+    checkout main
+    commit id: "D"
+    checkout "refs/tpl/foo"
+    commit id: "G2"
+    checkout main
+    merge "refs/tpl/foo" id: "M"
 ```
 
 git-tpl's entire job is to produce the desired rendered Git state.

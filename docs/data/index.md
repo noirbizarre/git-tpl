@@ -46,12 +46,13 @@ They cannot cause a load.
 
 ## Kinds
 
-```
-DataSource
-    ├── TemplateFile   a path in the template repository   (the common case)
-    ├── LocalFile      a path in the project               (rare, deliberate)
-    ├── Remote         an http(s) URL
-    └── Git            a file in another repository, at a revision
+```mermaid
+flowchart LR
+    accTitle: Data source kinds
+    source("DataSource") --> template("TemplateFile: path in the template repository, the common case")
+    source --> local("LocalFile: path in the project, rare and deliberate")
+    source --> remote("Remote: HTTP(S) URL")
+    source --> git("Git: file in another repository at a revision")
 ```
 
 The kind is inferred from `source`:

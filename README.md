@@ -28,14 +28,18 @@ That is the whole idea. There is no reconciliation algorithm, no patch replay,
 no conflict resolver — Git already has all of those, and they are better than
 anything a template tool would write.
 
-```
-Traditional template tools:
-
-    template  →  generated project  →  custom reconciliation  →  updated project
-
-git-tpl:
-
-    template  →  rendered Git ref  →  normal Git merge  →  updated project
+```mermaid
+flowchart LR
+    accTitle: Traditional template tools and git-tpl
+    accDescr: Traditional tools own reconciliation; git-tpl renders a ref and leaves merging to Git.
+    subgraph traditional[Traditional template tools]
+        template("Template") --> generated("Generated project")
+        generated --> reconcile("Custom reconciliation") --> updated("Updated project")
+    end
+    subgraph git_tpl[git-tpl]
+        source("Template") --> ref("Rendered Git ref")
+        ref --> merge("Normal Git merge") --> project("Updated project")
+    end
 ```
 
 ## Install
@@ -100,10 +104,31 @@ Have an agent do this for you? See the [AI agent skill](https://noirbizarre.gith
 
 ## The model
 
-```
-main:  A ─── B ─── C ─── D ─── M
-            /                 /
-       G0 ─┴──────── G1 ─── G2       refs/tpl/<template-id>
+```mermaid
+---
+config:
+    theme: base
+---
+gitGraph
+    accTitle: Project and rendered-template histories
+    accDescr: Independent roots A and G0 meet at B; later, rendered state G2 is merged into main at M.
+    %% Create both lanes before any commit so G0 has no parent.
+    branch "refs/tpl/foo"
+    checkout main
+    commit id: "A"
+    checkout "refs/tpl/foo"
+    commit id: "G0"
+    checkout main
+    merge "refs/tpl/foo" id: "B"
+    commit id: "C"
+    checkout "refs/tpl/foo"
+    commit id: "G1"
+    checkout main
+    commit id: "D"
+    checkout "refs/tpl/foo"
+    commit id: "G2"
+    checkout main
+    merge "refs/tpl/foo" id: "M"
 ```
 
 `G0`, `G1`, `G2` are successive rendered states of the template. `M` is a merge
