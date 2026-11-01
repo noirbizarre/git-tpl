@@ -55,6 +55,10 @@ cd /tmp/out && cargo build && actionlint .github/workflows/*.yaml
 
 !!! warning "A `--dirty` render honours `.gitignore`"
 
+    Ignore rules exclude untracked paths, including rules from global ignore files.
+    Tracked files remain included even when they match a rule, as with `git add -A`;
+    ignored directories are traversed when necessary to retain tracked descendants.
+
     It renders what Git would see, because that is what a committed revision would contain — so a new template
     file still matched by an ignore rule is left out, and the rendering is missing a file you can see on disk.
 

@@ -5,7 +5,7 @@
 //! anywhere else under `src/`. See `docs/adr/011-git-backend-isolation.md`.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -1281,9 +1281,31 @@ impl GitBackend for LibGit2 {
             .and_then(|config| config.get_path("core.excludesFile").ok());
         let stack = IgnoreStack::new(&workdir, self.repo.path(), excludes_file.as_deref(), root);
 
+        // Ignore rules govern discovery, never files already tracked in the
+        // index. Include their ancestors so ignored directories are not pruned.
+        let index = self
+            .repo
+            .index()
+            .map_err(|e| backend("read tracked paths", &e))?;
+        let mut tracked = BTreeSet::new();
+        for entry in index.iter() {
+            let path = workdir.join(String::from_utf8_lossy(&entry.path).as_ref());
+            for ancestor in path.ancestors().take_while(|p| p.starts_with(&workdir)) {
+                tracked.insert(ancestor.to_path_buf());
+            }
+        }
+
         let mut entries = Vec::new();
         let mut ignored = Vec::new();
-        collect_workdir(root, root, Some(&stack), &mut entries, &mut ignored)?;
+        collect_workdir(
+            root,
+            root,
+            Some(&stack),
+            &tracked,
+            false,
+            &mut entries,
+            &mut ignored,
+        )?;
         ignored.sort();
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -1296,7 +1318,15 @@ impl GitBackend for LibGit2 {
         // against an `IgnoreStack` — `collect_workdir` is only asked to skip
         // `.git` and to walk in a deterministic order.
         let mut ignored = Vec::new();
-        collect_workdir(dir, dir, None, &mut entries, &mut ignored)?;
+        collect_workdir(
+            dir,
+            dir,
+            None,
+            &BTreeSet::new(),
+            false,
+            &mut entries,
+            &mut ignored,
+        )?;
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
         self.tree_from_entries(entries)
@@ -1828,6 +1858,8 @@ fn collect_workdir(
     root: &Path,
     dir: &Path,
     stack: Option<&IgnoreStack>,
+    tracked: &BTreeSet<PathBuf>,
+    excluded_parent: bool,
     out: &mut Vec<(String, PathBuf, FileMode)>,
     ignored: &mut Vec<String>,
 ) -> Result<(), GitError> {
@@ -1872,19 +1904,17 @@ fn collect_workdir(
         // `git status` to consult, and an unexplained absence is the hardest
         // kind of bug to find.
         //
-        // An ignored directory is recorded and left, not walked. That is Git's
-        // rule rather than an optimisation: a file cannot be re-included once
-        // one of its parent directories is excluded, so descending to look for
-        // a negation inside would resurrect files `git add -A` leaves alone.
-        if let Some(stack) = stack
-            && stack.is_ignored(&path, file_type.is_dir())
-        {
+        // Descend ignored directories only for tracked descendants. Carry the
+        // exclusion down so nested negations cannot resurrect untracked files.
+        let excluded = excluded_parent
+            || stack.is_some_and(|stack| stack.is_ignored(&path, file_type.is_dir()));
+        if excluded && !tracked.contains(&path) {
             ignored.push(relative.to_string_lossy().replace('\\', "/"));
             continue;
         }
 
         if file_type.is_dir() {
-            collect_workdir(root, &path, stack, out, ignored)?;
+            collect_workdir(root, &path, stack, tracked, excluded, out, ignored)?;
         } else if file_type.is_file() || file_type.is_symlink() {
             let relative_str = relative.to_string_lossy().replace('\\', "/");
             let mode = if file_type.is_symlink() {

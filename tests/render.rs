@@ -767,6 +767,44 @@ fn strict_answers_accepts_an_answer_set_that_names_only_real_questions() {
 /// ago on an unrelated project can remove a file the author can see on disk.
 /// Inside a render there is no `git status` to explain the absence.
 #[test]
+fn dirty_snapshots_keep_tracked_ignored_files_and_match_git_staging() {
+    use tpl::git::{GitBackend, LibGit2};
+    let repo = common::Repo::init("tracked-ignored");
+    repo.write("template/tracked.txt", "old\n")
+        .write("template/hidden/kept.txt", "kept\n")
+        .write("template/deleted.txt", "gone\n")
+        .commit_all("tracked output");
+    repo.write(".gitignore", "template/tracked.txt\ntemplate/hidden/\n")
+        .write("template/tracked.txt", "new\n")
+        .write("template/hidden/untracked.txt", "ignore me\n")
+        .write("template/hidden/.gitignore", "!untracked.txt\n")
+        .write("template/fresh.txt", "discover me\n");
+    std::fs::remove_file(repo.path.join("template/deleted.txt")).unwrap();
+    let excludes = repo.config_home().join("ignored");
+    std::fs::write(&excludes, "tracked.txt\n").unwrap();
+    repo.git(&["config", "core.excludesFile", excludes.to_str().unwrap()]);
+    let backend = LibGit2::open(&repo.path).unwrap();
+    let before = repo.working_state();
+    let (dirty, ignored) = backend.tree_from_workdir(&repo.path).unwrap();
+    assert_eq!(before, repo.working_state());
+    assert!(
+        !ignored
+            .iter()
+            .any(|p| p == "template/tracked.txt" || p == "template/hidden")
+    );
+    repo.git(&["add", "-A"]);
+    let staged = repo.git(&["write-tree"]);
+    assert_eq!(dirty.to_hex(), staged);
+    let (subtree, _) = backend
+        .tree_from_workdir(&repo.path.join("template"))
+        .unwrap();
+    assert_eq!(
+        subtree.to_hex(),
+        repo.git(&["rev-parse", &format!("{staged}:template")])
+    );
+}
+
+#[test]
 fn dirty_reports_what_gitignore_removed_from_the_render() {
     let (_keep, template) = template();
     let scratch = Scratch::new();
@@ -974,7 +1012,7 @@ fn an_ignored_partial_outside_the_render_root_is_reported() {
         "macros.local.jinja",
         "{% macro greet() %}hi{% endmacro %}\n",
     );
-    template.repo.commit_all("feat: a partial");
+    // Keep it untracked: ignore rules cannot remove a committed partial.
 
     let output = scratch
         .run(&[
