@@ -21,10 +21,14 @@ The two modes this gives you are both first-class:
 
 === "Local-only (default)"
 
-    ```
-    project
-    ├── refs/heads/main      pushed
-    └── refs/tpl/foo         local
+    ```mermaid
+    flowchart LR
+        accTitle: Local-only rendered ref, the default
+        subgraph project[Local project]
+            main("refs/heads/main")
+            template("refs/tpl/foo: stays local")
+        end
+        main -->|git push| remote("Remote refs/heads/main")
     ```
 
     Contributors can work on the project without the local ref.
@@ -34,10 +38,15 @@ The two modes this gives you are both first-class:
 
 === "Shared"
 
-    ```
-    project
-    ├── refs/heads/main      pushed
-    └── refs/tpl/foo         pushed explicitly
+    ```mermaid
+    flowchart LR
+        accTitle: Explicitly shared rendered ref
+        subgraph project[Local project]
+            main("refs/heads/main")
+            template("refs/tpl/foo")
+        end
+        main -->|git push| remote_main("Remote refs/heads/main")
+        template -->|Explicit git tpl push| remote_template("Remote refs/tpl/foo")
     ```
 
     Useful when several people run updates, when CI does, or when you want the rendering history visible to the

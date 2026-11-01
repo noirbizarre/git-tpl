@@ -16,14 +16,20 @@ they are better than anything a template tool would write.
 
 Traditional template tools own the update:
 
-```
-template  →  generated project  →  custom reconciliation logic  →  updated project
+```mermaid
+flowchart LR
+    accTitle: Traditional template update pipeline
+    template("Template") --> generated("Generated project")
+    generated --> reconcile("Custom reconciliation logic") --> updated("Updated project")
 ```
 
 git-tpl owns only the rendering:
 
-```
-template  →  rendered Git ref  →  normal Git merge  →  updated project
+```mermaid
+flowchart LR
+    accTitle: Git-native template update pipeline
+    template("Template") --> ref("Rendered Git ref")
+    ref --> merge("Normal Git merge") --> updated("Updated project")
 ```
 
 What that buys you is not subtle.

@@ -74,10 +74,24 @@ Without it the template commit is not an ancestor of your branch, so the *first*
 merge base — and without one, Git cannot tell your edits from the template's.
 Every file that differs would conflict, including files you customised that the template never changed.
 
-```
-main:  A ─── M
-            /
-       G0 ──┘
+```mermaid
+---
+config:
+    theme: base
+    # Zensical overrides classless text; inherit Mermaid's per-branch label colors instead.
+    themeCSS: ".branchLabel text { fill: inherit !important; }"
+---
+gitGraph
+    accTitle: Initial attachment merges unrelated histories
+    accDescr: Merge M has two parents, the existing project commit A and the orphan rendered commit G0.
+    %% Create both lanes before any commit so G0 has no parent.
+    branch "refs/tpl/foo"
+    checkout main
+    commit id: "A"
+    checkout "refs/tpl/foo"
+    commit id: "G0"
+    checkout main
+    merge "refs/tpl/foo" id: "M"
 ```
 
 `git log --graph` shows the template entering your history as a merged parent, which is exactly what it is.

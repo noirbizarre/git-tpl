@@ -411,9 +411,10 @@ path reads better as one expression.
 A `.jinja` file **outside** the rendered subdirectory is a partial.
 It is never written into a project, and it can be imported by name from any file that is:
 
-```
-macros.jinja                             ← the partial
-template/README.md.jinja                 ← imports it
+```mermaid
+flowchart LR
+    accTitle: Importing a shared partial
+    readme("template/README.md.jinja") -->|Imports| macros("macros.jinja: partial")
 ```
 
 ```jinja
@@ -451,9 +452,10 @@ A partial can also be the base of a `{% extends %}` chain. `{% block %}`, `{% ex
 plain Jinja, and the loader that serves `{% import %}` and `{% include %}` serves these exactly the same way, by
 name, from the same partial namespace — there is nothing extends-specific to configure:
 
-```
-base.html.jinja                          ← the partial, declares the blocks
-template/page.html.jinja                 ← extends it
+```mermaid
+flowchart LR
+    accTitle: Extending a shared Jinja partial
+    page("template/page.html.jinja") -->|Jinja extends| base("base.html.jinja: partial, declares blocks")
 ```
 
 ```jinja

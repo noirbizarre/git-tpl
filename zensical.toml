@@ -16,6 +16,16 @@ copyright = """
 Copyright &copy; 2026 Axel H. — MIT licensed
 """
 
+# These are template-authoring docs, not theme templates excluded by default.
+exclude_docs = """
+!/templates/
+"""
+
+# Individual decisions are reached through the ADR index to keep the sidebar compact.
+not_in_nav = """
+/adr/[0-9][0-9][0-9]-*.md
+"""
+
 nav = [
   { "Home" = "index.md" },
   { "Getting Started" = [
@@ -144,6 +154,10 @@ line_spans = "__span"
 pygments_lang_class = true
 [project.markdown_extensions.pymdownx.inlinehilite]
 [project.markdown_extensions.pymdownx.superfences]
+# Use the native runtime so diagrams follow theme changes and instant navigation.
+custom_fences = [
+  { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
 [project.markdown_extensions.pymdownx.tabbed]
 alternate_style = true
 [project.markdown_extensions.pymdownx.tasklist]

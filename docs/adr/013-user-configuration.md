@@ -26,10 +26,12 @@ $XDG_CONFIG_HOME/git-tpl/config.toml     (default: ~/.config/git-tpl/config.toml
 
 Three files, three owners, stated once:
 
-```
-.config/git.tpl.toml          →  the project. Versioned. Everyone gets it.
-~/.config/git-tpl/config.toml →  you. Never committed, never read by anyone else.
-.git/config, ~/.gitconfig     →  tpl.* preferences (ADR-010, unchanged)
+```mermaid
+flowchart LR
+    accTitle: Configuration files and their owners
+    project(".config/git.tpl.toml") --> shared("The project: versioned, shared with everyone")
+    user("~/.config/git-tpl/config.toml") --> personal("You: never committed, never read by anyone else")
+    git(".git/config, ~/.gitconfig") --> preferences("tpl.* preferences (ADR-010, unchanged)")
 ```
 
 Exactly three sections, and deliberately nothing else.
@@ -89,9 +91,15 @@ unchanged template produces no commit" becomes false.
 
 Precedence, stated once:
 
-```
---answer  >  --answers-from  >  answers in .config/git.tpl.toml
-          >  [defaults]  >  default_from  >  the question's default
+```mermaid
+flowchart TD
+    accTitle: Answer and prompt default precedence
+    accDescr: Higher-priority values appear first; user defaults only apply to questions that are asked.
+    answer("--answer") -->|Takes precedence over| file("--answers-from")
+    file --> saved("Answers in .config/git.tpl.toml")
+    saved --> user("User [defaults]")
+    user --> seed("default_from")
+    seed --> default("The question's default")
 ```
 
 Keys naming no question are ignored and reported, exactly as for `--answers-from`.

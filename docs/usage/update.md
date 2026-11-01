@@ -43,36 +43,21 @@ nothing to commit, working tree clean
 
 ## What it does
 
-```
-.config/git.tpl.toml
-        │
-        ▼
-template source/ref
-        │
-        ▼
-fetch/resolve template
-        │
-        ▼
-load data sources
-        │
-        ▼
-resolve answers/computed values
-        │
-        ▼
-MiniJinja rendering
-        │
-        ▼
-new Git tree
-        │
-        ▼
-migrations newly crossed?  (see below) ──yes──▶ rename-only commit, if a move
-        │ no                                    lands beside other changes
-        ▼                                        │
-new commit  (parent: the current ref tip,        │
-             or the rename-only commit above) ◀──┘
-        │
-        ▼
-refs/tpl/<template-id>
+```mermaid
+flowchart TD
+    accTitle: Update advances the rendered ref
+    accDescr: Rendering builds a Git tree and advances the ref, optionally inserting a rename-only migration commit.
+    config(".config/git.tpl.toml") --> source("Template source/ref")
+    source --> resolve("Fetch/resolve template")
+    resolve --> data("Load data sources")
+    data --> answers("Resolve answers/computed values")
+    answers --> render("MiniJinja rendering") --> tree("New Git tree")
+    tree --> migration{Newly crossed migration needs a rename-only commit?}
+    migration -->|Yes: move beside other changes| rename("Rename-only commit: parent is current ref tip")
+    migration -->|No| commit("New commit: parent is current ref tip")
+    rename --> child("New commit: parent is rename-only commit")
+    commit --> ref("refs/tpl/#60;template-id#62;")
+    child --> ref
 ```
 
 ## Output
