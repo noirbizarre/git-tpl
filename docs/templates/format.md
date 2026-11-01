@@ -528,16 +528,19 @@ What a visitor lands on is the repository itself, so the template's own `README.
 outside `template/` that are never rendered — are the ones worth writing.
 They are the only description anyone gets before cloning.
 
-On GitHub, add the `git-tpl` repository topic:
+On GitHub, add both `git-tpl` and `template` topics to reusable template repositories, existing or new.
+From the template repository's checkout, run:
 
 ```sh
-gh repo edit --add-topic git-tpl
+gh repo edit --add-topic git-tpl --add-topic template
 ```
 
-or Settings → *About* → *Topics*.
-The template then appears at [github.com/topics/git-tpl](https://github.com/topics/git-tpl), which is how
-templates are found.
+Or, on the repository's main page, click the gear beside *About*, add `git-tpl` and `template` under *Topics*,
+and click *Save changes*.
 
-The topic is a discovery convention between humans, nothing more.
+[Browse templates on GitHub](https://github.com/search?q=topic%3Agit-tpl+topic%3Atemplate&type=repositories)
+to find repositories carrying both topics.
+
+These topics are a discovery convention between humans, nothing more.
 git-tpl never queries GitHub, has no registry and resolves no names: `git tpl init` takes a Git URL and clones it.
-A template without the topic works exactly as well — it is just harder to come across.
+A template without the topics works exactly as well — it is just harder to come across.
