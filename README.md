@@ -87,10 +87,13 @@ Later, when the template moves on:
 
 ```sh
 git tpl status   # has the template changed?
-git tpl update   # advance refs/tpl/<id> — your worktree is NOT touched
+git tpl update   # advance refs/tpl/<id> — rendered files are not applied
 git tpl diff     # what would change
 git tpl merge    # take it
 ```
+
+`update` leaves `HEAD`, the index, and rendered worktree files untouched.
+Changed answers or composed child locks can update `.config/git.tpl.toml` as an unstaged edit.
 
 Have an agent do this for you? See the [AI agent skill](https://noirbizarre.github.io/git-tpl/usage/skill/) —
 `skills/git-tpl/SKILL.md` in this repository.

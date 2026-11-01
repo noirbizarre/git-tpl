@@ -54,15 +54,16 @@ That works on an empty repository and on a project that already has files — se
 Later, when the template moves on:
 
 ```sh
-git tpl update   # advances refs/tpl/<id> — your worktree is NOT touched
+git tpl update   # advances refs/tpl/<id> — rendered files are not applied
 git tpl diff     # what would change
 git tpl merge    # take it
 ```
 
 ## Two things worth knowing up front
 
-**`git tpl update` never touches your branch.** Not the worktree, not the index, not `HEAD`.
-It writes a Git tree directly and moves one ref.
+**`git tpl update` leaves `HEAD`, the index, and rendered worktree files untouched.**
+It writes a Git tree directly and advances the rendered ref.
+Changed answers or composed child locks can update `.config/git.tpl.toml` as an unstaged edit.
 You decide when to merge, and merging is an ordinary Git operation you can abort.
 
 **Template refs are not pushed automatically.** A contributor cloning the project does not need template state to

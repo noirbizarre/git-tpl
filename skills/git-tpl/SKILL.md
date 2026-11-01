@@ -115,8 +115,9 @@ do not assume it is preinstalled.
 3. **Preview before committing.**
    `init`, `update`, `fetch`, and `push` all accept `--dry-run` (the JSON payload gains `"dryRun": true`) —
    use it on an unfamiliar template or repository before acting for real.
-4. **`update` alone changes nothing you can see.** It only advances `refs/tpl/<id>`.
-   Follow it with `git tpl diff` to preview and `git tpl merge` to apply — skipping the merge leaves the update inert.
+4. **`update` does not apply rendered files.** It advances `refs/tpl/<id>` while preserving `HEAD` and the index.
+   Semantic answer or child-lock changes can also leave an unstaged `.config/git.tpl.toml` edit; report it.
+   Follow it with `git tpl diff` to preview and `git tpl merge` to apply rendered changes.
 5. **A migration can ride along with an `update`.** `migrations[]` is empty on almost every update; when it isn't,
    the template crossed a version boundary declared under its own `migrations/` directory (ADR-024). Read each
     entry's non-null `message` before merging — it is meant to be shown once, the same as `init`'s `note`.
@@ -275,8 +276,8 @@ Then ask whether to proceed. Only on a yes:
 git tpl merge --json
 ```
 
-If the user declines, leave the ref where it is — `update` already advanced it, which changes nothing they can see —
-and say so.
+If the user declines, leave the advanced ref where it is and explain that rendered changes remain unapplied.
+Report any unstaged answer or child-lock edits that update saved in `.config/git.tpl.toml`.
 
 ### Resolve a merge conflict
 
