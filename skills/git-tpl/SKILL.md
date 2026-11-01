@@ -276,6 +276,9 @@ Then ask whether to proceed. Only on a yes:
 git tpl merge --json
 ```
 
+The merge wrapper uses libgit2 and does not execute configured external `merge.<name>.driver` commands.
+If the project depends on those drivers, use native `git merge refs/tpl/<id>` after the same user confirmation.
+
 If the user declines, leave the advanced ref where it is and explain that rendered changes remain unapplied.
 Report any unstaged answer or child-lock edits that update saved in `.config/git.tpl.toml`.
 

@@ -13,9 +13,11 @@ git tpl merge --abort
 git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
-That is the operation.
-`git tpl merge` looks up the ref name and uses a conventional message; everything else is libgit2's merge, which
-is Git's merge.
+Both merge the rendered ref into your branch.
+`git tpl merge` looks up the ref name, uses a conventional message, and delegates merging to libgit2.
+Its configuration support differs from native Git: it does not run configured external
+`merge.<name>.driver` commands from `.gitattributes`.
+Use plain `git merge refs/tpl/<id>` when your repository requires those drivers.
 
 Which means:
 
@@ -24,7 +26,7 @@ Which means:
 - `git merge --abort` works
 - `git rerere` works
 - your `merge.tool` works
-- `.gitattributes` merge drivers work
+- libgit2's built-in merge attribute behavior applies; configured external merge drivers require native Git
 
 git-tpl implements **no** conflict resolution of its own.
 Not a custom three-way merge, not patch replay, not rename detection, not heuristics.
