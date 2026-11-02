@@ -61,12 +61,17 @@ Neither starts Git's display tools or pager.
 
 ## The plain Git equivalent
 
+For compatible, conflict-free merges, this is an approximate native-Git equivalent:
+
 ```sh
 git diff HEAD "$(git merge-tree --write-tree HEAD refs/tpl/rust-library-template)"
 ```
 
-Identical.
-`git tpl diff` looks up the ref name and runs the merge for you; that is the whole of what it adds.
+`git tpl diff` computes its preview with the backend merge engine, which can differ from native Git
+and does not run external merge drivers.
+Native Git owns only the completed preview's presentation.
+The recipe above assumes `merge-tree` succeeds without conflicts;
+conflict output can contain more than a tree ID and cannot be passed verbatim as a revision.
 Pass `-- <path>` to narrow.
 Use whichever you prefer; nothing about git-tpl requires its own diff command.
 
