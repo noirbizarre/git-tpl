@@ -672,9 +672,12 @@ pub struct RenderedFiles {
 }
 
 /// A rendered state, before it is committed.
-pub struct Render {
+///
+/// Production owns its resolved input; migration cases borrow the suite's captured
+/// input so a second resolution cannot change what an update is testing.
+pub struct Render<T = Resolved> {
     /// The resolved template.
-    pub template: Resolved,
+    pub template: T,
     /// The resolved context.
     pub context: Context,
     /// The rendered tree.
@@ -1317,6 +1320,53 @@ pub fn init(
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<InitOutcome, OpError> {
+    init_using(
+        project,
+        project_root,
+        source,
+        reference,
+        explicit_id,
+        supplied,
+        merge_after,
+        force,
+        strict_answers,
+        |config, supplied| {
+            // Storage rebasing must not change init's consent/default lookup identity.
+            let location = crate::config::source_location(&config.template.source, project_root);
+            let files = render_files_from_location(
+                Target {
+                    source,
+                    ..Target::from_config(config, dirty)
+                },
+                &location,
+                Some((project, project_root)),
+                supplied,
+                user,
+                access,
+                answering,
+                trust,
+                None,
+            )?;
+            rendered_tree(project, files)
+        },
+    )
+}
+
+// The harness supplies captured revisions here, while init retains ownership of every
+// publication and attachment step. Resolving again would lose a suite's dirty snapshot.
+#[allow(clippy::too_many_arguments)]
+fn init_using<T: std::borrow::Borrow<Resolved>>(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    source: &str,
+    reference: Option<String>,
+    explicit_id: Option<&str>,
+    supplied: crate::answers::SuppliedAnswers,
+    merge_after: bool,
+    force: bool,
+    strict_answers: bool,
+    render: impl FnOnce(&Config, crate::answers::SuppliedAnswers) -> Result<Render<T>, OpError>,
+) -> Result<InitOutcome, OpError> {
     // Serialize cooperating initializers/updaters through configuration persistence,
     // including the identical-tree path that has no new commit to publish.
     let _operation = project.lock_template_operation()?;
@@ -1351,24 +1401,8 @@ pub fn init(
     // being collected, and must not silently become this invocation's parent.
     let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
 
-    let location = crate::config::source_location(&config.template.source, project_root);
-    // Init's consent/default lookup belongs to the source the caller supplied; later
-    // operations use the configured spelling. Rebasing is a storage decision, not new consent.
-    let files = render_files_from_location(
-        Target {
-            source,
-            ..Target::from_config(&config, dirty)
-        },
-        &location,
-        Some((project, project_root)),
-        supplied,
-        user,
-        access,
-        answering,
-        trust,
-        None,
-    )?;
-    let mut rendered = rendered_tree(project, files)?;
+    let mut rendered = render(&config, supplied)?;
+    let template = rendered.template.borrow();
     rendered.provenance.source = config.template.source.clone();
 
     // Before the ref is created, not after: `--force` re-renders onto an
@@ -1377,7 +1411,7 @@ pub fn init(
     enforce_strict_answers(
         strict_answers,
         &rendered.ignored_answers,
-        rendered.template.manifest.questions.keys().cloned(),
+        template.manifest.questions.keys().cloned(),
     )?;
 
     // Before the ref, before the configuration, before the merge. A `note_file`
@@ -1442,7 +1476,7 @@ pub fn init(
                  Initial rendering of the template attached by `git tpl init`.\n\
                  Records the template source and the answers used to render it.\n\
                  See {CONFIG_PATH}.\n",
-                rendered.template.manifest.name,
+                template.manifest.name,
                 project
                     .head_branch()?
                     .unwrap_or_else(|| "the branch".into())
@@ -1482,7 +1516,7 @@ pub fn init(
                 "chore(tpl): attach the {} template\n\n\
                  Records the template source and the answers used to render it.\n\
                  See {CONFIG_PATH}.\n",
-                rendered.template.manifest.name
+                template.manifest.name
             ))?;
             true
         }
@@ -1504,15 +1538,12 @@ pub fn init(
         merge,
         config_path,
         config_committed,
-        revision_description: describe_revision(
-            &rendered.template.reference,
-            rendered.template.revision,
-        ),
-        reference: rendered.template.reference.clone(),
-        revision: rendered.template.revision,
-        dirty: rendered.template.dirty,
+        revision_description: describe_revision(&template.reference, template.revision),
+        reference: template.reference.clone(),
+        revision: template.revision,
+        dirty: template.dirty,
         ignored_answers: rendered.ignored_answers,
-        ignored: rendered.template.ignored,
+        ignored: template.ignored.clone(),
         note,
         remotes,
     })
@@ -1529,13 +1560,16 @@ pub fn init(
 /// the rendered tree it could only be resolved after the merge, and failing an
 /// `init` that had already written to the user's repository would have been a
 /// worse outcome than showing nothing.
-fn template_note(rendered: &Render) -> Result<Option<String>, OpError> {
-    let manifest = &rendered.template.manifest;
+fn template_note<T: std::borrow::Borrow<Resolved>>(
+    rendered: &Render<T>,
+) -> Result<Option<String>, OpError> {
+    let template = rendered.template.borrow();
+    let manifest = &template.manifest;
     if manifest.note.is_none() && manifest.note_file.is_none() {
         return Ok(None);
     }
 
-    let partials = rendered.template.partials()?;
+    let partials = template.partials()?;
 
     let Some(declared) = &manifest.note_file else {
         return manifest
@@ -1559,17 +1593,10 @@ fn template_note(rendered: &Render) -> Result<Option<String>, OpError> {
     // Repository-root-relative, read from the whole template tree rather than
     // the rendered subtree — the same namespace partials live in. The note is
     // read from the template and never written into the project.
-    let Some(bytes) = rendered
-        .template
-        .repo
-        .read_path(rendered.template.tree, path)?
-    else {
+    let Some(bytes) = template.repo.read_path(template.tree, path)? else {
         return Err(OpError::MissingNoteFile {
             path: path.to_string(),
-            revision_description: describe_revision(
-                &rendered.template.reference,
-                rendered.template.revision,
-            ),
+            revision_description: describe_revision(&template.reference, template.revision),
         });
     };
 
@@ -1599,11 +1626,12 @@ fn template_note(rendered: &Render) -> Result<Option<String>, OpError> {
 /// only validates the *shape* of `message`/`message_file`; evaluating either
 /// against a project's answers needs the [`Context`] this function has and
 /// [`crate::migration`] deliberately does not.
-fn migration_message(
+fn migration_message<T: std::borrow::Borrow<Resolved>>(
     migration: &Migration,
-    rendered: &Render,
+    rendered: &Render<T>,
     partials: &std::sync::Arc<Partials>,
 ) -> Result<Option<String>, OpError> {
+    let template = rendered.template.borrow();
     let Some(declared) = &migration.message_file else {
         return migration
             .message
@@ -1625,18 +1653,11 @@ fn migration_message(
         return Ok(None);
     }
 
-    let Some(bytes) = rendered
-        .template
-        .repo
-        .read_path(rendered.template.tree, path)?
-    else {
+    let Some(bytes) = template.repo.read_path(template.tree, path)? else {
         return Err(OpError::MissingMigrationMessageFile {
             migration: migration.path.clone(),
             path: path.to_string(),
-            revision_description: describe_revision(
-                &rendered.template.reference,
-                rendered.template.revision,
-            ),
+            revision_description: describe_revision(&template.reference, template.revision),
         });
     };
 
@@ -1657,19 +1678,19 @@ fn migration_message(
 /// Find migrations crossed by this render without moving any project ref.
 /// Dry-run must use the same discovery as update or a message-only migration
 /// is incorrectly reported as an unchanged rendering.
-pub fn discover_update_migrations(
-    rendered: &Render,
+pub fn discover_update_migrations<T: std::borrow::Borrow<Resolved>>(
+    rendered: &Render<T>,
     previous: Option<&Recorded>,
 ) -> Result<Vec<AppliedMigration>, OpError> {
+    let template = rendered.template.borrow();
     let mut migrations = Vec::new();
     if let Some(old_commit) = previous.and_then(|recorded| recorded.revision) {
-        let new_tree = rendered.template.tree;
-        let Some(old_tree) = rendered.template.repo.commit_tree_if_exists(old_commit)? else {
+        let new_tree = template.tree;
+        let Some(old_tree) = template.repo.commit_tree_if_exists(old_commit)? else {
             // The rendered ref stores output, not the source's migration files.
             // With no migrations at the new revision there is nothing to miss;
             // otherwise guessing would silently drop a move or repeat one.
-            if rendered
-                .template
+            if template
                 .repo
                 .list_tree(new_tree)?
                 .iter()
@@ -1683,9 +1704,9 @@ pub fn discover_update_migrations(
             return Ok(migrations);
         };
         if old_tree != new_tree {
-            let partials = rendered.template.partials()?;
+            let partials = template.partials()?;
             for (path, bytes) in
-                migration::discover_new(rendered.template.repo.as_ref(), old_tree, new_tree)?
+                migration::discover_new(template.repo.as_ref(), old_tree, new_tree)?
             {
                 let text = String::from_utf8(bytes)
                     .map_err(|_| OpError::MigrationFileNotUtf8 { path: path.clone() })?;
@@ -1706,16 +1727,17 @@ pub fn discover_update_migrations(
 ///
 /// Never fetches and never pushes — ADR-019's closure rule admits the addition
 /// and nothing beyond it.
-fn add_remotes(
+fn add_remotes<T: std::borrow::Borrow<Resolved>>(
     project: &dyn GitBackend,
-    rendered: &Render,
+    rendered: &Render<T>,
 ) -> Result<Vec<DeclaredRemote>, OpError> {
-    let declared = &rendered.template.manifest.remotes;
+    let template = rendered.template.borrow();
+    let declared = &template.manifest.remotes;
     if declared.is_empty() {
         return Ok(Vec::new());
     }
 
-    let partials = rendered.template.partials()?;
+    let partials = template.partials()?;
     let mut remotes = Vec::with_capacity(declared.len());
 
     for (name, url) in declared {
@@ -1906,6 +1928,38 @@ pub fn update(
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<UpdateOutcome, OpError> {
+    update_using(
+        project,
+        project_root,
+        reference,
+        overrides,
+        strict_answers,
+        |config, supplied| {
+            render(
+                project,
+                project_root,
+                config,
+                supplied,
+                dirty,
+                user,
+                access,
+                answering,
+                trust,
+            )
+        },
+    )
+}
+
+// Both callers publish through this path so tests cannot bypass locking, provenance,
+// configuration concurrency checks or append-only ref publication.
+fn update_using<T: std::borrow::Borrow<Resolved>>(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    reference: Option<&str>,
+    overrides: crate::answers::SuppliedAnswers,
+    strict_answers: bool,
+    render: impl FnOnce(&Config, crate::answers::SuppliedAnswers) -> Result<Render<T>, OpError>,
+) -> Result<UpdateOutcome, OpError> {
     let _operation = project.lock_template_operation()?;
     let mut config = Config::load(project_root)?;
     let initial_config = config.clone();
@@ -1923,17 +1977,8 @@ pub fn update(
     let ref_name = id.ref_name();
     let tip = project.resolve_ref(&ref_name)?;
 
-    let rendered = render(
-        project,
-        project_root,
-        &config,
-        supplied,
-        dirty,
-        user,
-        access,
-        answering,
-        trust,
-    )?;
+    let rendered = render(&config, supplied)?;
+    let template = rendered.template.borrow();
 
     enforce_strict_answers(
         strict_answers,
@@ -1943,7 +1988,7 @@ pub fn update(
             .filter(|key| current_keys.contains(*key))
             .cloned()
             .collect::<Vec<_>>(),
-        rendered.template.manifest.questions.keys().cloned(),
+        template.manifest.questions.keys().cloned(),
     )?;
 
     let previous = tip.map(|oid| project.commit(oid)).transpose()?;
@@ -1967,12 +2012,11 @@ pub fn update(
     // Every newly discovered migration's moves, in file order, applied
     // against the ref's current tip — never against `rendered.tree`, which
     // has no notion of where a path used to be.
-    let all_moves: Vec<migration::Move> = migrations
+    let all_moves = migrations
         .iter()
-        .flat_map(|m| m.moves.iter().cloned())
-        .collect();
+        .flat_map(|m| m.moves.iter().map(|mv| (Some(m.path.as_str()), mv)));
     let moved_tree = match &previous {
-        Some(previous) => migration::apply_moves(project, previous.tree, &all_moves)?,
+        Some(previous) => migration::apply_ordered_moves(project, previous.tree, all_moves)?,
         None => None,
     };
 
@@ -2020,17 +2064,14 @@ pub fn update(
             config.save(project_root)?;
         }
         return Ok(UpdateOutcome::UpToDate {
-            revision_description: describe_revision(
-                &rendered.template.reference,
-                rendered.template.revision,
-            ),
-            reference: rendered.template.reference.clone(),
-            revision: rendered.template.revision,
-            dirty: rendered.template.dirty,
+            revision_description: describe_revision(&template.reference, template.revision),
+            reference: template.reference.clone(),
+            revision: template.revision,
+            dirty: template.dirty,
             answers_changed,
             composed_changed,
             ignored_answers: rendered.ignored_answers,
-            ignored: rendered.template.ignored,
+            ignored: template.ignored.clone(),
         });
     }
 
@@ -2090,20 +2131,17 @@ pub fn update(
         previous_reference: recorded_previous.as_ref().and_then(|r| r.reference.clone()),
         previous_revision: recorded_previous.as_ref().and_then(|r| r.revision),
         previous_dirty: recorded_previous.as_ref().map(|r| r.dirty),
-        revision_description: describe_revision(
-            &rendered.template.reference,
-            rendered.template.revision,
-        ),
-        reference: rendered.template.reference.clone(),
-        revision: rendered.template.revision,
-        dirty: rendered.template.dirty,
+        revision_description: describe_revision(&template.reference, template.revision),
+        reference: template.reference.clone(),
+        revision: template.revision,
+        dirty: template.dirty,
         answers_changed,
         composed_changed,
         started_new_history,
         migrations,
         moved_commit,
         ignored_answers: rendered.ignored_answers,
-        ignored: rendered.template.ignored,
+        ignored: template.ignored.clone(),
     })
 }
 

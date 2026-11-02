@@ -37,6 +37,17 @@ For `tpl::config::changed`, review configuration edited during prompting and ret
 For `tpl::compose::child_failed`, inspect JSON `error.causes` for nested stable codes and actionable help.
 Template test `expect.error` can match those inner codes.
 
+Template tests may declare `[migration]` with required `from` and optional `to` references in the local template.
+Without `to`, the destination is the suite target, including its dirty tree.
+`migration.answers` supplies old answers (omission copies top-level answers); top-level answers override recorded ones.
+`migration.files` contains literal text writes and `migration.absent` existing-file deletions, committed before update.
+Existing expectations and snapshots inspect the merged project, excluding harness attachment config; conflicts fail.
+`expect.migrations` asserts exact ordered discovery paths; `expect.messages` asserts substrings keyed by migration path.
+`expect.error` matches destination update codes only; old-state/setup failures cannot satisfy it.
+JSON migration failures carry `from`, `to`, `phase`, crossed `migrations`, and a nested `failure`.
+One case tests one direct update; use explicit `to` cases for intermediate upgrades.
+`--skip-commands` still migrates; `--write` performs the declarative upgrade but no commands or expectations.
+
 `lint` compiles effective inherited output and all retained partial declarations, including shadowed/unimported ones.
 Removed/overridden output and binary payloads are excluded; other static rules keep their existing scope.
 
