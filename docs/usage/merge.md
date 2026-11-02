@@ -1,5 +1,7 @@
 # `git tpl merge`
 
+Detached `HEAD` supports both fast-forward and merge-commit updates, with the same safe-checkout protections.
+
 Merge `refs/tpl/<id>` into the current branch.
 
 ```sh

@@ -72,13 +72,14 @@ impl LibGit2 {
         let branch = head
             .symbolic_target()
             .map_err(|e| backend("read symbolic HEAD", &e))?
-            .ok_or_else(|| GitError::Backend {
-                context: "fast-forward the branch".into(),
-                reason: "HEAD is detached".into(),
-            })?;
-        transaction
-            .lock_ref(branch)
-            .map_err(|e| backend("lock the branch", &e))?;
+            .unwrap_or("HEAD");
+        // Detached HEAD is already locked above; only symbolic HEAD needs
+        // a second lock on the branch whose target will actually advance.
+        if branch != "HEAD" {
+            transaction
+                .lock_ref(branch)
+                .map_err(|e| backend("lock the branch", &e))?;
+        }
         if self.resolve_ref(branch)? != expected {
             return Err(GitError::Backend {
                 context: "fast-forward the branch".into(),
