@@ -28,6 +28,7 @@ fn main() -> ExitCode {
     install_diagnostic_hook(&cli);
 
     let result = match cli.command {
+        Command::Cache(args) => commands::cache(args, &cli.global),
         // Every command returns its own exit code. `status` is the only one
         // that returns anything but SUCCESS, but splitting the authority — the
         // code in `status` and in `main` for the rest — is how the two come to

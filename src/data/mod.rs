@@ -21,6 +21,7 @@ pub mod repo;
 pub use format::Format;
 pub use repo::GitLocation;
 
+use crate::git::cache::{Access, CacheError, Lease};
 use crate::git::libgit2::LibGit2;
 use crate::git::{GitBackend, Oid};
 use crate::template::{DataSourceDecl, Value};
@@ -132,6 +133,20 @@ impl SourceKind {
 /// Errors from loading data.
 #[derive(Debug, Error, Diagnostic)]
 pub enum DataError {
+    /// Offline policy or persistent source storage failed.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Cache(#[from] CacheError),
+    /// HTTP is deliberately unavailable offline, even with a checksum.
+    #[error("cannot load HTTP data source `{name}` while offline")]
+    #[diagnostic(
+        code(tpl::data::offline),
+        help("Retry without --offline, or use a local or cached commit-pinned Git source.")
+    )]
+    Offline {
+        /// Data declaration that requested HTTP access.
+        name: String,
+    },
     /// The source could not be read.
     //
     // The location and the reason go in the `help`, not just the fields: a
@@ -502,16 +517,12 @@ pub struct TemplateTree<'a> {
     pub reference: String,
 }
 
-/// A data repository cloned for this run.
+/// A data repository and its revision frozen for this run.
 struct GitClone {
-    // Declared before `dir`, and the order is load-bearing: struct fields drop
-    // in declaration order, so the repository releases its pack files before
-    // the directory holding them is removed. Reversed, Windows refuses the
-    // removal and leaves the clone behind in $TMPDIR.
+    // Release pack handles before the lease allows maintenance to remove their directory.
     repo: LibGit2,
-    // Never read: held only so the directory outlives the repository reading
-    // out of it.
-    _dir: tempfile::TempDir,
+    _lease: Option<Lease>,
+    revision: Oid,
 }
 
 /// A declaration's expression-bearing fields, already rendered.
@@ -555,6 +566,7 @@ enum ResourceKey {
 /// data-backed choices on a conditional branch without imposing the cost on
 /// everyone.
 pub struct Loader<'a> {
+    access: Access,
     // Index `0` is the template actually resolved; index `i + 1` is the
     // ancestor `data_origin`'s value `i` names. A template with no
     // `[extends]` always has exactly one entry here.
@@ -579,11 +591,8 @@ pub struct Loader<'a> {
     // sources opens one connection pool rather than one per source. `None` for
     // the overwhelmingly common template that has no remote data at all.
     agent: Option<ureq::Agent>,
-    // Cloned on first use and reused within one render, keyed by `repo@ref`, so
-    // a template reading three files out of one data repository clones once.
-    // Nothing is kept between runs, for the reason `ops::resolve` gives: a
-    // stale cache silently rendering old data is a far worse failure than a
-    // slow clone.
+    // Freeze each repo/ref once so separate file reads cannot follow a branch mid-render.
+    // Objects persist across runs; mutable names still require a fresh online lookup.
     clones: BTreeMap<(String, String), GitClone>,
 }
 
@@ -599,6 +608,7 @@ impl<'a> Loader<'a> {
     /// remember to close the gate.
     pub fn new(template: TemplateTree<'a>, project_root: Option<PathBuf>) -> Self {
         Self {
+            access: Access::new(None, false),
             templates: vec![template],
             data_origin: BTreeMap::new(),
             project_root,
@@ -608,6 +618,12 @@ impl<'a> Loader<'a> {
             agent: None,
             clones: BTreeMap::new(),
         }
+    }
+
+    /// Share source acquisition policy with the template that owns this loader.
+    pub fn with_access(mut self, access: Access) -> Self {
+        self.access = access;
+        self
     }
 
     /// Extend a loader with an `[extends]` chain's own ancestor trees.
@@ -837,9 +853,8 @@ impl<'a> Loader<'a> {
 
     /// Read a file out of another repository's tree, at a resolved revision.
     ///
-    /// The clone is temporary and is not kept between runs. It carries the
-    /// user's SSH agent and credential helper, which is precisely why it is
-    /// behind the same gate an HTTP fetch is.
+    /// Acquisitions use the user's SSH agent and credential helper, which is
+    /// why even warm source objects remain behind the same gate as HTTP data.
     fn read_git_file(
         &mut self,
         name: &str,
@@ -861,17 +876,31 @@ impl<'a> Loader<'a> {
             // `contains_key` then `insert` rather than `entry`, whose closure
             // cannot be fallible — and both of these steps can fail.
             //
-            // Created here rather than in `new`, so a template with no git data
-            // never pays for a temporary directory it does not use.
-            let dir = tempfile::tempdir()
-                .map_err(|e| fail(format!("could not create a temporary directory: {e}")))?;
-            let cloned =
-                LibGit2::clone_bare(&location.repo, dir.path()).map_err(|e| fail(e.to_string()))?;
+            // Acquire lazily: unused declarations must not create storage or require network access.
+            let (repo, revision, lease) =
+                if let Some(path) = crate::refs::local_path(&location.repo) {
+                    let repo = LibGit2::open(&path).map_err(|error| fail(error.to_string()))?;
+                    let revision = repo
+                        .resolve_revision(&location.reference, &location.repo)
+                        .map_err(|error| fail(error.to_string()))?;
+                    (repo, revision, None)
+                } else {
+                    let acquired = self
+                        .access
+                        .acquire(&location.repo, Some(&location.reference), false)
+                        .map_err(|error| match error {
+                            // Existing Git-data failures keep their public load diagnostic; policy failures stay typed.
+                            CacheError::Git(error) => fail(error.to_string()),
+                            error => DataError::Cache(error),
+                        })?;
+                    (acquired.repo, acquired.revision, Some(acquired.lease))
+                };
             self.clones.insert(
                 key.clone(),
                 GitClone {
-                    repo: cloned,
-                    _dir: dir,
+                    repo,
+                    _lease: lease,
+                    revision,
                 },
             );
         }
@@ -880,10 +909,7 @@ impl<'a> Loader<'a> {
         // blob is owned, so nothing borrowed from `self` outlives it and the
         // caller's `self.provenance.push` needs no dance.
         let clone = self.clones.get(&key).expect("just inserted");
-        let revision = clone
-            .repo
-            .resolve_revision(&location.reference, &location.repo)
-            .map_err(|e| fail(e.to_string()))?;
+        let revision = clone.revision;
         let tree = clone
             .repo
             .commit_tree(revision)
@@ -931,6 +957,9 @@ impl<'a> Loader<'a> {
     /// substituting a cached copy, an empty table, or the last known value.
     fn fetch(&mut self, name: &str, url: &str) -> Result<Vec<u8>, DataError> {
         self.authorised(name, url)?;
+        if self.access.offline {
+            return Err(DataError::Offline { name: name.into() });
+        }
 
         // `kind = "remote"` can be declared on any string, so the scheme is
         // checked here rather than relying on the inference that a declared

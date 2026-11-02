@@ -70,12 +70,12 @@ will not be one.
 **Never executable.** The file is parsed as TOML, JSON or YAML into plain values.
 No hook, no submodule, no `.gitattributes` filter in the data repository is run.
 
-**Cloned at most once per render, and never cached between runs.** Two sources naming the same `repo@ref` share
-one clone.
-Nothing survives the process: a stale cache silently rendering yesterday's data is a far worse failure than a
-slow clone.
-
-**Bare, temporary, and discarded.** The clone lands in a temporary directory and is removed when the render ends.
+**Source objects persist between runs.** Two sources naming the same `repo@ref` share a resolved commit within a render.
+The bare [Git cache](../usage/cache.md) reuses fetched objects across invocations.
+Branches, tags and abbreviated IDs still resolve freshly online; a failed refresh never uses a stale mapping.
+Full commit IDs can use complete cached objects without network access.
+`--offline` requires cached full commits for URL sources, including `file://`, and still requires consent.
+Plain filesystem repositories are opened locally.
 
 ## Confirmation
 
@@ -98,6 +98,7 @@ Granting it:
 
 A refused source is [`tpl::data::untrusted`](../reference/diagnostics.md), and the render stops.
 It does not proceed with the data missing.
+The same confirmation is required for warm cache hits; retained objects do not imply authorization.
 
 ## Provenance
 
@@ -131,6 +132,7 @@ See [Reproducibility](reproducibility.md).
 | The repository could not be cloned, the ref did not resolve, or the path is not in the tree | `tpl::data::load` |
 | The file is not valid in its format | `tpl::data::parse` |
 | The clone was not authorised | `tpl::data::untrusted` |
+| Offline resolution needs a full ID, or its objects are absent | `tpl::cache::offline_reference`, `tpl::cache::offline_miss` |
 
 A failure stops the render.
 There is no fallback to a cached copy, an empty table, or the last known value — the rendered tree becomes a

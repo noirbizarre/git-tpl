@@ -188,6 +188,7 @@ fn preview(
         true,
         answers.strict_answers,
         &ctx.user,
+        &ctx.access,
         answering(answers, preferences.interactive, &mut prompter),
         trust(answers, false, preferences.interactive, &mut confirmer),
     )

@@ -42,6 +42,7 @@ fn files_staged_during_the_questionnaire_never_enter_an_attachment_commit() {
             false,
             false,
             &Default::default(),
+            &tpl::git::cache::Access::new(None, false),
             Answering::Interactive(&mut prompter),
             Trust::always(),
         );

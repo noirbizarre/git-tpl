@@ -30,6 +30,7 @@ pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             dirty: args.dirty,
         },
         &ctx.user,
+        &ctx.access,
     )?;
 
     // Policy is applied here and not in `ops`: which findings fail this run is

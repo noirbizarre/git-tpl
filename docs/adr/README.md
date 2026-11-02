@@ -53,3 +53,4 @@ explains the code that existed.
 | [042](042-explicit-lint-syntax.md) | Lint compiles effective inherited output and every retained partial declaration |
 | [043](043-project-relative-sources.md) | Configured local sources are rooted at the project, independently of ref identity |
 | [044](044-symlink-artifacts.md) | Rendered artifacts and snapshot manifests preserve symbolic-link modes and opaque targets |
+| [045](045-source-object-cache.md) | Git source objects persist locally while symbolic refs resolve freshly |

@@ -73,6 +73,7 @@ fn concurrent_publication_refuses_stale_created_and_deleted_tips_without_saving_
                 false,
                 false,
                 &Default::default(),
+                &tpl::git::cache::Access::new(None, false),
                 Answering::Interactive(&mut prompter),
                 Trust::always(),
             )
@@ -86,6 +87,7 @@ fn concurrent_publication_refuses_stale_created_and_deleted_tips_without_saving_
                 false,
                 false,
                 &Default::default(),
+                &tpl::git::cache::Access::new(None, false),
                 Answering::Interactive(&mut prompter),
                 Trust::always(),
             )
@@ -173,6 +175,7 @@ fn configuration_edited_during_prompting_is_preserved_without_publishing_a_rende
         false,
         false,
         &Default::default(),
+        &tpl::git::cache::Access::new(None, false),
         Answering::Interactive(&mut prompter),
         Trust::always(),
     );
@@ -449,6 +452,14 @@ fn missing_source_history_with_migrations_is_an_actionable_refusal() {
         "000-move.toml",
         "[[moves]]\nfrom = \"README.md\"\nto = \"docs/README.md\"\n",
     );
+    // Retained source objects can preserve migration history after upstream rewrites.
+    tpl(
+        &world.project,
+        &["update", "--ref", "main", "--defaults", "--dry-run"],
+    )
+    .success();
+    // A cold cache must still explain when that historical commit is unavailable upstream.
+    tpl(&world.project, &["cache", "clear"]).success();
     let before = world.project.rev_parse(&world.ref_name());
     let before_state = world.project.working_state();
 

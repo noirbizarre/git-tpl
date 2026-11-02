@@ -55,6 +55,7 @@ pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             record_durations: args.record_durations,
         },
         &ctx.user,
+        &ctx.access,
         &mut progress,
     )?;
     // Clears any spinner before the final report prints, so its last

@@ -22,6 +22,10 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     });
 
     let mut config = tpl::config::Config::load(&ctx.root)?;
+    if preferences.auto_push {
+        ctx.access
+            .online("update with push (including tpl.autoPush)")?;
+    }
     // `--ref` renders a different revision for this run only. It deliberately
     // does not rewrite the configuration: "show me what v2 would look like" is
     // a question, not a decision.
@@ -49,6 +53,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         args.dirty,
         args.answers.strict_answers,
         &ctx.user,
+        &ctx.access,
         answering(&args.answers, preferences.interactive, &mut prompter),
         trust(
             &args.answers,
@@ -297,6 +302,7 @@ fn dry_run(
         answers,
         args.dirty,
         &ctx.user,
+        &ctx.access,
         answering(&args.answers, interactive, &mut prompter),
         trust(&args.answers, args.trust, interactive, &mut confirmer),
     )?;

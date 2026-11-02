@@ -104,6 +104,7 @@ fn each_visible_command_gets_its_own_page() {
         "fetch",
         "push",
         "completion",
+        "cache",
     ] {
         assert!(
             pages.join(format!("git-tpl-{command}.1")).is_file(),

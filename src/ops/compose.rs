@@ -97,11 +97,14 @@ fn valid_id(name: &str) -> bool {
 }
 
 /// Render each child's ordered module list, allowing different lists to share an ID.
+// Acquisition policy is invocation-owned, independent of child trust and recorded revision locks.
+#[allow(clippy::too_many_arguments)]
 pub fn render(
     entries: &[ComposeDecl],
     context: &Context,
     partials: &Arc<Partials>,
     user: &UserConfig,
+    access: &crate::git::cache::Access,
     trust: &mut Trust<'_>,
     parent: &mut Vec<Rendered>,
     recorded: Option<&[ComposedRevision]>,
@@ -191,6 +194,7 @@ pub fn render(
                 dirty: false,
             },
             user,
+            access,
             trust,
         )
         .map_err(|error| ComposeError::Child {

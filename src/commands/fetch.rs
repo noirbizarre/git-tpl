@@ -9,6 +9,7 @@ use crate::theme::{command, muted};
 
 pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
+    ctx.access.online("fetch")?;
     let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
         remote: args.remote.as_deref(),
         ..Default::default()

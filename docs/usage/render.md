@@ -1,5 +1,10 @@
 # `git tpl render`
 
+Git source objects are [cached across runs](cache.md); branches and tags still resolve freshly online.
+Use global `--offline` with cached full commit IDs to render without network access.
+HTTP data is unavailable offline, and every ancestor, composed child and Git data source actually used must also be local
+or reference a cached full commit.
+
 Symbolic links retain Git mode `120000` and their exact target bytes.
 Targets are never interpolated, including for `.jinja` links; output path rendering still strips that suffix.
 `--dirty` reads links without following dangling or directory targets.

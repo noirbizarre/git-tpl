@@ -26,6 +26,7 @@ use crate::data::{
     declared_remotes,
 };
 use crate::eval::{DefaultsOnly, EvalError, Evaluation, Partials, Prompter};
+use crate::git::cache::{Access, CacheError};
 use crate::git::{
     AheadBehind, Change, FileMode, FileStat, GitBackend, GitError, MergeOutcome, Oid,
 };
@@ -50,6 +51,10 @@ pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Ve
 /// Errors from any operation.
 #[derive(Debug, Error, Diagnostic)]
 pub enum OpError {
+    /// Source object storage or explicit offline policy failed.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Cache(#[from] CacheError),
     /// The applied template's source history cannot be determined.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -715,8 +720,8 @@ impl<'a> Target<'a> {
 ///
 /// [`RenderedFiles`] is this plus the [`Resolved`] that produced it. The two
 /// are split so that a caller with many answer sets — [`testing::run`] — can
-/// resolve once: [`resolve::resolve`] makes a fresh temporary clone every call,
-/// so a resolution per answer set costs a clone each and, worse, could render
+/// resolve once: separate invocations refresh mutable refs independently,
+/// so a resolution per answer set costs a lookup each and, worse, could render
 /// two answer sets against two different revisions if the branch moved between
 /// them.
 pub struct RenderedOnce {
@@ -788,10 +793,13 @@ pub fn render_files(
     project: Option<(&dyn GitBackend, &Path)>,
     supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
+    access: &Access,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<RenderedFiles, OpError> {
-    render_files_with_composed(target, project, supplied, user, answering, trust, None)
+    render_files_with_composed(
+        target, project, supplied, user, access, answering, trust, None,
+    )
 }
 
 /// Render the historical child commits named by a rendered ref instead of following their configured branches.
@@ -801,13 +809,14 @@ pub fn render_files_with_composed(
     project: Option<(&dyn GitBackend, &Path)>,
     supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
+    access: &Access,
     answering: Answering<'_>,
     trust: Trust<'_>,
     composed: Option<&[ComposedRevision]>,
 ) -> Result<RenderedFiles, OpError> {
     let location = target.source;
     render_files_from_location(
-        target, location, project, supplied, user, answering, trust, composed,
+        target, location, project, supplied, user, access, answering, trust, composed,
     )
 }
 
@@ -819,6 +828,7 @@ fn render_files_from_location(
     project: Option<(&dyn GitBackend, &Path)>,
     supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
+    access: &Access,
     answering: Answering<'_>,
     mut trust: Trust<'_>,
     composed: Option<&[ComposedRevision]>,
@@ -835,6 +845,7 @@ fn render_files_from_location(
             dirty: target.dirty,
         },
         user,
+        access,
         &mut trust,
     )?;
 
@@ -951,6 +962,7 @@ pub fn render_resolved_with_composed(
     let mut template_trees = template.template_trees();
     let own_tree = template_trees.remove(0);
     let mut loader = Loader::new(own_tree, project.map(|(_, root)| root.to_path_buf()))
+        .with_access(template.access.clone())
         .with_decisions(decisions);
     if template.has_ancestors() {
         loader = loader.with_ancestors(template_trees, template.data_origin().clone());
@@ -1021,6 +1033,7 @@ pub fn render_resolved_with_composed(
             &context,
             &partials,
             user,
+            &template.access,
             &mut trust,
             &mut files,
             recorded_composed,
@@ -1064,6 +1077,7 @@ pub fn render(
     supplied: crate::answers::SuppliedAnswers,
     dirty: bool,
     user: &UserConfig,
+    access: &Access,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<Render, OpError> {
@@ -1074,6 +1088,7 @@ pub fn render(
         Some((project, project_root)),
         supplied,
         user,
+        access,
         answering,
         trust,
         None,
@@ -1083,7 +1098,7 @@ pub fn render(
 }
 
 fn rendered_tree(project: &dyn GitBackend, rendered: RenderedFiles) -> Result<Render, OpError> {
-    // Blobs are read from the template repository — often a temporary clone —
+    // Blobs are read from the template repository — often a leased source cache —
     // and written into the project, which is where the ref will point.
     let tree = write_tree(project, &rendered.files)?;
 
@@ -1298,6 +1313,7 @@ pub fn init(
     force: bool,
     strict_answers: bool,
     user: &UserConfig,
+    access: &Access,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<InitOutcome, OpError> {
@@ -1347,6 +1363,7 @@ pub fn init(
         Some((project, project_root)),
         supplied,
         user,
+        access,
         answering,
         trust,
         None,
@@ -1885,6 +1902,7 @@ pub fn update(
     dirty: bool,
     strict_answers: bool,
     user: &UserConfig,
+    access: &Access,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<UpdateOutcome, OpError> {
@@ -1912,6 +1930,7 @@ pub fn update(
         supplied,
         dirty,
         user,
+        access,
         answering,
         trust,
     )?;
@@ -2136,6 +2155,7 @@ pub fn status(
     project_root: &Path,
     preferences: &Preferences,
     user: &UserConfig,
+    access: &Access,
     dirty: bool,
 ) -> Result<Status, OpError> {
     let config = Config::load(project_root)?;
@@ -2176,6 +2196,7 @@ pub fn status(
             dirty,
         },
         user,
+        access,
         &mut trust,
     )
     .ok();
@@ -2314,6 +2335,7 @@ pub fn render_preview(
     dirty: bool,
     strict_answers: bool,
     user: &UserConfig,
+    access: &Access,
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<Preview, OpError> {
@@ -2334,6 +2356,7 @@ pub fn render_preview(
         supplied,
         dirty,
         user,
+        access,
         answering,
         trust,
     )?;
@@ -2392,9 +2415,9 @@ pub struct Linted {
 /// `[extends]` ancestor outside `[trust]` refuses outright — unlike `status`,
 /// which tolerates the whole resolution failing, `lint` has nothing useful to
 /// say without one.
-pub fn lint(request: Request<'_>, user: &UserConfig) -> Result<Linted, OpError> {
+pub fn lint(request: Request<'_>, user: &UserConfig, access: &Access) -> Result<Linted, OpError> {
     let mut trust = Trust::refuse();
-    let template = resolve::resolve(request, user, &mut trust)?;
+    let template = resolve::resolve(request, user, access, &mut trust)?;
 
     // Other static rules retain their leaf-only scope. Syntax additionally
     // checks effective inherited output and every retained partial (ADR-042).
@@ -2477,9 +2500,13 @@ pub struct Questionnaire {
 ///
 /// No `--trust` of its own and prompts for nothing, same as `lint`: an
 /// `[extends]` ancestor outside `[trust]` refuses outright.
-pub fn questions(request: Request<'_>, user: &UserConfig) -> Result<Questionnaire, OpError> {
+pub fn questions(
+    request: Request<'_>,
+    user: &UserConfig,
+    access: &Access,
+) -> Result<Questionnaire, OpError> {
     let mut trust = Trust::refuse();
-    let template = resolve::resolve(request, user, &mut trust)?;
+    let template = resolve::resolve(request, user, access, &mut trust)?;
     let graph = Graph::build(&template.manifest)?;
 
     let order: Vec<String> = graph
@@ -2506,7 +2533,9 @@ fn static_template_choices(
 ) -> Result<BTreeMap<String, Vec<crate::template::Choice>>, OpError> {
     let mut trees = template.template_trees();
     let own = trees.remove(0);
-    let mut loader = Loader::new(own, None).with_ancestors(trees, template.data_origin().clone());
+    let mut loader = Loader::new(own, None)
+        .with_access(template.access.clone())
+        .with_ancestors(trees, template.data_origin().clone());
     let mut context = crate::context::Context::new();
     let mut resolved = BTreeMap::new();
     for name in order {

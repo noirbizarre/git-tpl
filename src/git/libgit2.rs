@@ -199,6 +199,145 @@ impl LibGit2 {
         Ok(Self { repo })
     }
 
+    /// Initialize disposable object storage without persisting a credential-bearing remote URL.
+    pub fn init_source_cache(path: &Path) -> Result<Self, GitError> {
+        let repo = Repository::init_bare(path).map_err(|e| GitError::Backend {
+            context: format!("initialize source cache at {}", path.display()),
+            reason: e.message().into(),
+        })?;
+        Ok(Self { repo })
+    }
+
+    /// Refresh the namespace read by revision lookup, never an older shadow branch.
+    fn refresh_source_impl(&self, url: &str, exact: Option<Oid>) -> Result<(), GitError> {
+        let mut remote = self
+            .repo
+            .remote_anonymous(url)
+            .map_err(|e| translate_remote(url, None, &e))?;
+        let mut options = FetchOptions::new();
+        // As for clone_bare, an OS error before transfer is not evidence of a cache write failure.
+        let receiving = Rc::new(Cell::new(false));
+        let progress = Rc::clone(&receiving);
+        let mut callbacks = credential_callbacks(url);
+        callbacks.transfer_progress(move |_| {
+            progress.set(true);
+            true
+        });
+        options.remote_callbacks(callbacks);
+        // FETCH_HEAD would persist the requested URL, including embedded access tokens.
+        options.update_fetchhead(false);
+        options.download_tags(AutotagOption::None);
+        remote
+            .fetch(
+                &["+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"],
+                Some(&mut options),
+                Some("git-tpl: refresh source objects"),
+            )
+            .map_err(|e| translate_remote(url, receiving.get().then_some(self.repo.path()), &e))?;
+        let advertised: std::collections::BTreeSet<String> = remote
+            .list()
+            .map_err(|e| translate_remote(url, None, &e))?
+            .iter()
+            .map(|head| head.name().to_owned())
+            .collect();
+        let default = remote
+            .default_branch()
+            .ok()
+            .and_then(|name| name.as_str().ok().map(str::to_owned));
+        // Explicit deletion includes tags: auto-follow/prune defaults leave moved or deleted pins stale.
+        let names: Vec<String> = self
+            .repo
+            .references()
+            .map_err(|e| GitError::Backend {
+                context: "list source cache refs".into(),
+                reason: e.message().into(),
+            })?
+            .filter_map(Result::ok)
+            .filter_map(|r| r.name().ok().map(str::to_owned))
+            .filter(|name| {
+                (name.starts_with("refs/heads/") || name.starts_with("refs/tags/"))
+                    && !advertised.contains(name)
+            })
+            .collect();
+        for name in names {
+            self.repo
+                .find_reference(&name)
+                .and_then(|mut r| r.delete())
+                .map_err(|e| GitError::Backend {
+                    context: format!("prune source reference {name}"),
+                    reason: e.message().into(),
+                })?;
+        }
+        if let Some(default) = default {
+            self.repo
+                .set_head(&default)
+                .map_err(|e| GitError::Backend {
+                    context: "update source default branch".into(),
+                    reason: e.message().into(),
+                })?;
+        } else {
+            // A deleted/default-less HEAD must not retain the previous branch's meaning.
+            self.repo
+                .set_head("refs/heads/__git_tpl_no_default__")
+                .map_err(|e| GitError::Backend {
+                    context: "clear source default branch".into(),
+                    reason: e.message().into(),
+                })?;
+        }
+        if let Some(oid) = exact
+            && !self.complete_commit(oid)?
+        {
+            receiving.set(false);
+            remote
+                .fetch(
+                    &[&oid.to_hex()],
+                    Some(&mut options),
+                    Some("git-tpl: fetch source commit"),
+                )
+                .map_err(|e| {
+                    if e.code() == ErrorCode::NotFound {
+                        GitError::NoSuchRevision {
+                            origin: url.into(),
+                            reference: oid.to_hex(),
+                        }
+                    } else {
+                        translate_remote(url, receiving.get().then_some(self.repo.path()), &e)
+                    }
+                })?;
+        }
+        Ok(())
+    }
+
+    /// A commit alone is insufficient for an offline hit after an interrupted transfer.
+    fn complete_commit_impl(&self, oid: Oid) -> Result<bool, GitError> {
+        let Ok(commit) = self
+            .repo
+            .find_commit(git2::Oid::from_bytes(oid.as_bytes()).expect("OID length"))
+        else {
+            return Ok(false);
+        };
+        let Ok(tree) = commit.tree() else {
+            return Ok(false);
+        };
+        let mut complete = true;
+        let walked = tree.walk(git2::TreeWalkMode::PreOrder, |_, entry| {
+            // Gitlinks refer to another repository and intentionally have no local object.
+            if entry.filemode() != 0o160000 && self.repo.find_object(entry.id(), None).is_err() {
+                complete = false;
+                return git2::TreeWalkResult::Abort;
+            }
+            git2::TreeWalkResult::Ok
+        });
+        if !complete {
+            return Ok(false);
+        }
+        walked.map_err(|e| GitError::Backend {
+            context: "validate cached source tree".into(),
+            reason: e.message().into(),
+        })?;
+        Ok(complete)
+    }
+
     /// Clone a template repository into `into`, as a bare mirror.
     ///
     /// The callbacks are here to attribute a failure, not to report progress.
@@ -294,6 +433,13 @@ impl LibGit2 {
 }
 
 impl GitBackend for LibGit2 {
+    fn refresh_source(&self, url: &str, exact: Option<Oid>) -> Result<(), GitError> {
+        self.refresh_source_impl(url, exact)
+    }
+
+    fn complete_commit(&self, oid: Oid) -> Result<bool, GitError> {
+        self.complete_commit_impl(oid)
+    }
     fn lock_template_operation(&self) -> Result<TemplateOperationGuard, GitError> {
         // repo.path() is worktree-private for linked worktrees: their project
         // configurations are separate even though rendered refs are shared (CAS).

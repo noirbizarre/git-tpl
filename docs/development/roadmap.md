@@ -40,18 +40,12 @@ logic, a second template engine, code execution from templates, runtime values i
 implicit/default ref pushing and fetching, Copier compatibility.
 Explicit `tpl.autoPush` or `update --push` consent is supported; fetching remains explicit.
 
-Two more are deliberate trade-offs rather than non-goals, and both have the same shape:
+**Git source objects are cached, symbolic refs are fresh.** Repeated acquisition now reuses source objects across runs.
+Branches, tags and default branches refresh online; cached full commits support offline use.
+See [the cache commands](../usage/cache.md) and [ADR-045](../adr/045-source-object-cache.md).
 
-**The template is cloned fresh on every run.** Correct and slow for a large remote template.
-A cache would need invalidation, and a stale cache silently rendering an old template is a far worse failure than
-a slow fetch — so this stays until it actually hurts.
-
-**A remote data source is fetched on every run.** Once per run, never cached between runs, for the same reason.
+**An HTTP data source is fetched on every run.** Once per run, never cached between runs.
 `sha256` is the answer for anyone who needs the bytes to be the same ones.
-
-Both are cost, knowingly paid, in a tool whose whole premise is reproducibility.
-If you need them changed, the case to make is that the cost has become real — not that the fetch is redundant,
-which is understood.
 
 ## Changing your mind, or ours
 

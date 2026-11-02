@@ -38,6 +38,23 @@ fn help_works_without_a_repository_or_manual_pages() {
 }
 
 #[test]
+fn cache_help_exposes_management_and_global_network_policy() {
+    let output = help(&["help", "cache"], &[]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    for option in [
+        "list",
+        "fetch",
+        "clear",
+        "prune",
+        "--offline",
+        "--cache-dir",
+    ] {
+        assert!(text.contains(option), "{text}");
+    }
+}
+
+#[test]
 fn help_uses_the_shared_color_environment_precedence() {
     for (env, colored) in [
         (vec![], false),

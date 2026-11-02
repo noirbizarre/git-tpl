@@ -294,6 +294,11 @@ Two shapes, so a stray copy of one is never mistaken for the other.
 
 ## Git configuration
 
+Git source-object storage is machine-local and controlled by `--cache-dir`, `GIT_TPL_CACHE_DIR`,
+or `$XDG_CACHE_HOME/git-tpl` (falling back to `~/.cache/git-tpl`).
+It is not recorded in project configuration.
+See [cache location, freshness, offline behavior and maintenance](usage/cache.md).
+
 Local, per-user, per-repository behaviour.
 All keys are under `tpl.`.
 
@@ -362,6 +367,8 @@ See [`git tpl diff`](usage/diff.md#your-git-display-settings) for pager and diff
 | Variable | Read for |
 |---|---|
 | `XDG_CONFIG_HOME` | Where `git-tpl/config.toml` and the global ignore file live. Honoured only when **absolute**; an empty or relative value is unset, per the XDG specification. |
+| `XDG_CACHE_HOME` | Absolute cache home; Git source objects live under `git-tpl`. Relative or empty values are ignored. |
+| `GIT_TPL_CACHE_DIR` | Absolute Git source cache root; `--cache-dir` takes precedence. |
 | `HOME` | The fallback for the above: `$HOME/.config`. Also where default SSH keys (`~/.ssh/id_ed25519` and the rest) are looked up when a git remote needs authenticating. |
 | `USERPROFILE` | The Windows fallback for `HOME`, and the one libgit2 itself uses. Git for Windows usually exports `HOME`, but nothing guarantees it. |
 | `NO_COLOR` | [no-color.org](https://no-color.org). Presence is the signal, whatever the value. |

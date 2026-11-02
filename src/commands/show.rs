@@ -26,6 +26,7 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             true,
             args.answers.strict_answers,
             &ctx.user,
+            &ctx.access,
             answering(&args.answers, preferences.interactive, &mut prompter),
             trust(
                 &args.answers,

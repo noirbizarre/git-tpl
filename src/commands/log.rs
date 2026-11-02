@@ -17,7 +17,13 @@ pub fn run(args: LogArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     } else {
         Some(args.max_count.unwrap_or(20))
     };
-    let log = log::log(&ctx.repo, &ctx.root, args.reference.as_deref(), max_count)?;
+    let log = log::log(
+        &ctx.repo,
+        &ctx.root,
+        args.reference.as_deref(),
+        max_count,
+        &ctx.access,
+    )?;
     if global.json {
         println!("{}", crate::report::success(json(&log)));
     } else {

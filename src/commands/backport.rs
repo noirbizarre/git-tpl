@@ -92,6 +92,7 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         &args.paths,
         &args.exclude,
         &ctx.user,
+        &ctx.access,
         answering,
         trust,
         unsubstitute,
