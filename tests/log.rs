@@ -211,7 +211,12 @@ fn a_dirty_applied_template_has_no_exact_source_history_boundary() {
 
 #[test]
 fn committing_the_dirty_snapshot_restores_source_history_without_changing_output() {
-    let world = World::new();
+    // The standard fixture has an index-only executable bit on Windows.
+    // Use mode-neutral files so tree equality tests provenance, not mode capture.
+    let world = World::with_template(
+        "name = 'provenance'\n",
+        &[("README.md", "unchanged output\n")],
+    );
     world
         .template
         .repo
