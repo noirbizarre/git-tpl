@@ -171,6 +171,11 @@ Its `--json` field carries the raw text, since a `--json` consumer is not a term
 Whether its declared moves actually apply — whether `from` exists in your project's previous rendering — can only
 be known at `update` time, and a mismatch there is refused before any commit is written.
 
+Template authors can exercise this with declarative [migration test cases](test.md#migration-cases).
+They initialize a known old revision, commit optional local customisations, update and merge,
+then assert the resulting project paths, contents and migration messages.
+Use both direct jumps and explicit intermediate destinations to verify upgrades across multiple revisions.
+
 ## When there is no ref to advance
 
 `update` needs `refs/tpl/<id>` to hang the new commit from.

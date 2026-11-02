@@ -56,6 +56,7 @@ absent = [".github/workflows/ci.yml"]
 | `commands` | Setup, checks and teardown run around the rendering. See [Commands](#commands). |
 | `git` | Whether the sandbox `commands` runs in is an isolated Git repository, seeded with one commit. `false`/absent unless set. See [Git sandbox](#git-sandbox). |
 | `snapshot` | Whether this case is written and compared against a recorded snapshot. `false` unless set. See [Snapshots](#snapshots). |
+| `migration` | Initialize an old project, update and merge it, then assert the result. See [Migration cases](#migration-cases). |
 
 A path named in `expect.contains` or `expect.lacks` that the rendering never produces is a failure either way —
 never a pass, vacuous or otherwise.
@@ -108,9 +109,114 @@ The code is matched anywhere in the failure's cause chain.
 that is usually the one worth naming.
 Either passes.
 
-A case with `error` cannot also have `files`, `absent`, `contains` or `lacks` — there is no rendering for them to
+A case with `error` cannot also have output or migration expectations — there is no successful result for them to
 describe.
 Split it into two cases.
+
+## Migration cases
+
+A migration case exercises a real project upgrade, including committed project-local changes:
+
+```toml
+# tests/readme-move.toml
+snapshot = true
+
+[answers]
+project_name = "widget"
+
+[migration]
+from = "v1"
+# to = "v2"  # optional; defaults to this suite's target
+absent = ["obsolete.txt"]
+
+[migration.answers]
+project_name = "old-widget"
+
+[migration.files]
+"README.md" = "# My project\n\nA project-local customisation.\n"
+"local-only.txt" = "Keep this file.\n"
+
+[expect]
+files = ["docs/README.md", "local-only.txt"]
+absent = ["README.md", "obsolete.txt"]
+migrations = ["migrations/010-readme.toml"]
+
+[expect.contains]
+"docs/README.md" = "project-local customisation"
+
+[expect.messages]
+"migrations/010-readme.toml" = ["README", "widget"]
+```
+
+`from` is a required branch, tag or commit in the template's local repository.
+`to`, if supplied, also names a committed revision there.
+Without `to`, the destination is the suite's resolved target: the current working tree by default,
+or the revision selected by `--ref`.
+The suite target supplies case files and snapshots even when a case selects a different destination.
+Keep old revisions available in your checkout; a shallow clone may need more history or tags.
+
+The runner initializes an isolated Git project from `from`, applies and commits the literal local edits,
+runs the production update flow, then merges the updated template ref with the Git backend.
+The expectations and snapshot inspect that **merged project**, including local-only files.
+They exclude the harness's attachment file `.config/git.tpl.toml` and Git metadata.
+Any merge conflict fails the case and identifies Git's conflicting paths.
+
+`migration.answers` supplies old-state answers.
+If omitted, it copies the top-level `answers`; an explicit empty table supplies no old answers.
+Initialization records defaults as usual, then top-level `answers` overrides those recorded answers during update.
+Both hand-authored answer sets are strict against their respective revisions.
+Old recorded questions removed by the destination are tolerated, as with an ordinary update.
+Each endpoint uses the case's `trust` setting for its own declared data sources.
+Ancestor and composed-child repository access still follows the ordinary trust rules.
+
+`migration.files` maps project-relative paths to literal UTF-8 contents; there is no interpolation.
+It adds or replaces files, preserving an existing regular file's executable bit.
+Replacing a symlink creates an ordinary text file without following its target.
+`migration.absent` deletes named existing files; a missing deletion is a setup failure.
+Unsafe paths, Git metadata, attachment configuration and overlapping edits are rejected.
+
+`expect.migrations` requires the exact discovered paths in application order.
+Omit it to make no discovery assertion; use `[]` to require no newly crossed migrations.
+`expect.messages` maps migration paths to a string or nonempty array of substrings in their evaluated messages.
+A missing migration or message fails the assertion.
+These are template-authored messages; git-tpl diagnostic failures are still asserted only by stable code.
+Migration-specific expectations require a `[migration]` section.
+
+For negative cases, `expect.error` matches a destination **update** failure's diagnostic cause chain.
+Failure to resolve or initialize the old state, invalid local edits and merge conflicts cannot satisfy it.
+As in render cases, it cannot be combined with successful-output expectations, snapshots,
+or `commands.rendered`/`commands.after`.
+
+### Intermediate migrations
+
+Each case performs one direct endpoint update.
+New migration files are discovered by comparing the old and destination template trees,
+then applied in path order, with moves in declaration order.
+Moves operate on the running old rendered tree; messages use the destination answers.
+The runner does not render every historical intermediate revision.
+
+Test `v1` → current to cover a skipped-version jump and chained moves.
+Add separate cases with `from = "v1", to = "v2"` and `from = "v2"` to cover individual upgrade boundaries.
+A file introduced only in a skipped intermediate rendering cannot be moved from the starting tree.
+That is a real update failure, and a direct-jump case exposes it.
+
+### Commands and recording
+
+Migration cases always need isolated Git, including under `--skip-commands` and with `git = false` or omitted.
+`git = true` or a Git identity table configures this same repository.
+Its checkout defaults pin `core.autocrlf = false` and `core.eol = lf`
+so ambient line-ending conversion cannot make the merged project appear dirty to commands.
+`commands.before` runs before old-project initialization; declare committed customisations in `migration.files`
+and `migration.absent`.
+`commands.rendered` sees the completed merged project, `after` follows assertions,
+and `finally` runs even after preparation, update or merge failures.
+Command edits do not change the immutable tree used by expectations and snapshots.
+
+`--write` runs the declarative upgrade to obtain a snapshot, but runs no commands or expectations.
+Cases without `snapshot = true` are skipped.
+Preparation, update and merge must succeed before anything is recorded.
+Only snapshot files are written into the template checkout, unstaged.
+See [ADR-046](../adr/046-declarative-migration-tests.md) for the contract.
 
 ## Commands
 

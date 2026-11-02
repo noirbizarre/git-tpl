@@ -92,6 +92,16 @@ struct RawMigration {
 /// Errors from parsing or applying a migration.
 #[derive(Debug, Error, Diagnostic)]
 pub enum MigrationError {
+    /// Preserve the file that owns a move without changing its stable diagnostic code.
+    #[error("migration `{path}`: {source}")]
+    #[diagnostic(forward(source))]
+    AtMigration {
+        /// The declaring migration file.
+        path: String,
+        /// The actionable move failure.
+        #[source]
+        source: Box<MigrationError>,
+    },
     /// The file is not valid TOML, or does not match the schema.
     #[error("invalid migration in `{path}`: {message}")]
     #[diagnostic(code(tpl::migration::parse))]
@@ -312,6 +322,16 @@ pub fn apply_moves(
     base_tree: Oid,
     moves: &[Move],
 ) -> Result<Option<Oid>, MigrationError> {
+    apply_ordered_moves(project, base_tree, moves.iter().map(|mv| (None, mv)))
+}
+
+/// Apply moves with their declaring paths, retaining attribution across chained migrations.
+pub(crate) fn apply_ordered_moves<'a>(
+    project: &dyn GitBackend,
+    base_tree: Oid,
+    moves: impl IntoIterator<Item = (Option<&'a str>, &'a Move)>,
+) -> Result<Option<Oid>, MigrationError> {
+    let moves: Vec<_> = moves.into_iter().collect();
     if moves.is_empty() {
         return Ok(None);
     }
@@ -322,18 +342,25 @@ pub fn apply_moves(
         .map(|entry| (entry.path, (entry.oid, entry.mode)))
         .collect();
 
-    for mv in moves {
+    for (path, mv) in moves {
+        let attributed = |source| match path {
+            Some(path) => MigrationError::AtMigration {
+                path: path.to_string(),
+                source: Box::new(source),
+            },
+            None => source,
+        };
         let Some(moved) = entries.remove(&mv.from) else {
-            return Err(MigrationError::MoveSourceMissing {
+            return Err(attributed(MigrationError::MoveSourceMissing {
                 from: mv.from.clone(),
                 to: mv.to.clone(),
-            });
+            }));
         };
         if entries.contains_key(&mv.to) {
-            return Err(MigrationError::MoveTargetExists {
+            return Err(attributed(MigrationError::MoveTargetExists {
                 from: mv.from.clone(),
                 to: mv.to.clone(),
-            });
+            }));
         }
         entries.insert(mv.to.clone(), moved);
     }

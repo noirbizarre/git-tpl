@@ -657,6 +657,31 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
     let mut say = |text: String| lines.push(format!("    {text}"));
 
     match failure {
+        Failure::Migration {
+            from,
+            to,
+            phase,
+            migrations,
+            failure,
+        } => {
+            say(format!(
+                "migration {from} → {to} [{phase}]; crossed: {}",
+                migrations.join(", ")
+            ));
+            lines.extend(failure_lines(theme, failure, verbose));
+        }
+        Failure::MigrationAssertion {
+            assertion,
+            path,
+            message,
+        } => {
+            say(format!(
+                "{assertion}{}: {message}",
+                path.as_ref()
+                    .map(|path| format!(" `{path}`"))
+                    .unwrap_or_default()
+            ));
+        }
         Failure::MissingFile { path, closest } => {
             say(format!("missing file      {path}"));
             if let Some(near) = closest {
@@ -857,6 +882,23 @@ fn snapshot_change_json(change: &SnapshotChange) -> serde_json::Value {
 /// emit. Renaming one is a breaking change.
 fn failure_json(failure: &Failure) -> serde_json::Value {
     match failure {
+        Failure::Migration {
+            from,
+            to,
+            phase,
+            migrations,
+            failure,
+        } => serde_json::json!({
+            "kind": "migration", "from": from, "to": to, "phase": phase,
+            "migrations": migrations, "failure": failure_json(failure),
+        }),
+        Failure::MigrationAssertion {
+            assertion,
+            path,
+            message,
+        } => serde_json::json!({
+            "kind": "migrationAssertion", "assertion": assertion, "path": path, "message": message,
+        }),
         Failure::MissingFile { path, closest } => serde_json::json!({
             "kind": "missingFile", "path": path, "closest": closest,
         }),

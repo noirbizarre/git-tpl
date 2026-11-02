@@ -4,7 +4,8 @@
 //! list of commands, and since ADR-028 whether it trusts the template's own
 //! declared remote data sources — written in the template repository and read
 //! by the same parsers `--answers-from` uses. The assertion vocabulary is
-//! closed to `files`, `absent`, `contains`, `lacks`, `error` and a snapshot. A
+//! closed to path/text expectations, diagnostic codes, snapshots, and migration
+//! discovery/messages (ADR-046). Migration cases update and merge a real project. A
 //! case's `[commands]` are the one place invariant 5 has a narrow, deliberate
 //! exception — the harness spawns the process, never a `render`, `init` or an
 //! `update`. See ADR-016, ADR-027, ADR-028 and ADR-030.
@@ -35,6 +36,9 @@ use crate::render::Rendered;
 use crate::suggest::closest;
 use crate::template::{Value, is_expression};
 use crate::userconfig::UserConfig;
+
+mod migrations;
+pub use migrations::MigrationCase;
 
 /// The directory cases are read from when `--tests` does not say otherwise.
 pub const DEFAULT_TESTS_DIR: &str = "tests";
@@ -311,6 +315,8 @@ pub enum TestingError {
 /// and [`Value`] is `#[serde(untagged)]`, which makes a derived impl guess.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Case {
+    /// A real old-project update and merge instead of a single rendering (ADR-046).
+    pub migration: Option<MigrationCase>,
     /// The case name: the file stem, which is what a filter matches and what
     /// names the snapshot directory.
     pub name: String,
@@ -318,7 +324,7 @@ pub struct Case {
     pub path: String,
     /// The answers to render with.
     pub answers: BTreeMap<String, Value>,
-    /// What the rendering must look like.
+    /// What the rendering or migrated project must look like.
     pub expect: Expect,
     /// What to run before, around and after the rendering. See ADR-027.
     pub commands: Commands,
@@ -353,6 +359,10 @@ pub struct Case {
 /// which is why a case with no `[expect]` block is valid rather than useless.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Expect {
+    /// Exact discovery order; omission differs from explicitly expecting no migrations.
+    pub migrations: Option<Vec<String>>,
+    /// Substrings in evaluated migration messages, keyed by migration path.
+    pub messages: BTreeMap<String, Vec<String>>,
     /// Paths the rendering must contain.
     pub files: Vec<String>,
     /// Paths the rendering must not contain.
@@ -369,7 +379,7 @@ pub struct Expect {
     /// does not mention X" must not go green because the file stopped
     /// rendering entirely.
     pub lacks: BTreeMap<String, Vec<String>>,
-    /// A diagnostic code the render must fail with.
+    /// A diagnostic code the render (or migration's destination update) must fail with.
     ///
     /// Present makes this a *failure* case: a successful render fails it. A
     /// code and never a message, because messages are expected to improve and
@@ -713,17 +723,25 @@ impl Case {
         for key in table.keys() {
             if !matches!(
                 key.as_str(),
-                "answers" | "trust" | "expect" | "commands" | "snapshot" | "git"
+                "answers" | "trust" | "expect" | "commands" | "snapshot" | "git" | "migration"
             ) {
                 let hint = closest(
                     key,
-                    ["answers", "trust", "expect", "commands", "snapshot", "git"],
+                    [
+                        "answers",
+                        "trust",
+                        "expect",
+                        "commands",
+                        "snapshot",
+                        "git",
+                        "migration",
+                    ],
                 )
                 .map(|near| format!(" Did you mean `{near}`?"))
                 .unwrap_or_default();
                 return Err(shape(format!(
                     "`{key}` is not a test case key.{hint} \
-                     A case has `answers`, `trust`, `expect`, `commands`, `snapshot` and `git`."
+                     A case has `answers`, `trust`, `expect`, `commands`, `snapshot`, `git` and `migration`."
                 )));
             }
         }
@@ -827,7 +845,18 @@ impl Case {
             ));
         }
 
+        let migration = table
+            .get("migration")
+            .map(|value| MigrationCase::parse(value, &answers, &shape))
+            .transpose()?;
+        if migration.is_none() && (expect.migrations.is_some() || !expect.messages.is_empty()) {
+            return Err(shape(
+                "`expect.migrations` and `expect.messages` require `[migration]`.".into(),
+            ));
+        }
+
         Ok(Case {
+            migration,
             name: name.to_string(),
             path: path.to_string(),
             answers,
@@ -848,14 +877,25 @@ impl Expect {
         for key in table.keys() {
             if !matches!(
                 key.as_str(),
-                "files" | "absent" | "contains" | "lacks" | "error"
+                "files" | "absent" | "contains" | "lacks" | "error" | "migrations" | "messages"
             ) {
-                let hint = closest(key, ["files", "absent", "contains", "lacks", "error"])
-                    .map(|near| format!(" Did you mean `{near}`?"))
-                    .unwrap_or_default();
+                let hint = closest(
+                    key,
+                    [
+                        "files",
+                        "absent",
+                        "contains",
+                        "lacks",
+                        "error",
+                        "migrations",
+                        "messages",
+                    ],
+                )
+                .map(|near| format!(" Did you mean `{near}`?"))
+                .unwrap_or_default();
                 return Err(shape(format!(
                     "`expect.{key}` is not an expectation.{hint} \
-                     A case may expect `files`, `absent`, `contains`, `lacks` or `error`."
+                     A case may expect `files`, `absent`, `contains`, `lacks`, `error`, `migrations` or `messages`."
                 )));
             }
         }
@@ -864,6 +904,16 @@ impl Expect {
         let absent = string_array(table.get("absent"), "expect.absent", shape)?;
         let contains = substring_map(table, "contains", "expected text", shape)?;
         let lacks = substring_map(table, "lacks", "forbidden text", shape)?;
+        let migrations = table
+            .get("migrations")
+            .map(|_| string_array(table.get("migrations"), "expect.migrations", shape))
+            .transpose()?;
+        let messages = substring_map(table, "messages", "expected message text", shape)?;
+        if messages.values().any(Vec::is_empty) {
+            return Err(shape(
+                "`expect.messages` needs at least one substring per migration.".into(),
+            ));
+        }
 
         let error = match table.get("error") {
             None => None,
@@ -896,16 +946,20 @@ impl Expect {
             && (!files.is_empty()
                 || !absent.is_empty()
                 || !contains.is_empty()
-                || !lacks.is_empty())
+                || !lacks.is_empty()
+                || migrations.is_some()
+                || !messages.is_empty())
         {
             return Err(shape(
                 "`expect.error` says the render fails, so there is no rendering for \
-                 `files`, `absent`, `contains` or `lacks` to describe. Split them into two cases."
+                 output or migration expectations to describe. Split them into two cases."
                     .to_string(),
             ));
         }
 
         Ok(Expect {
+            migrations,
+            messages,
             files,
             absent,
             contains,
@@ -1008,6 +1062,28 @@ fn string_map(
 /// and the author fixes them together rather than one per invocation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Failure {
+    /// Preserve endpoint, stage and migration attribution for every underlying mismatch.
+    Migration {
+        /// The old reference selected by the case.
+        from: String,
+        /// The destination reference selected by the case or suite.
+        to: String,
+        /// Preparation, update, merge, or assertion phase.
+        phase: String,
+        /// Discovered migration paths, in application order.
+        migrations: Vec<String>,
+        /// The specific assertion or operational failure.
+        failure: Box<Failure>,
+    },
+    /// A migration-specific expectation was not met.
+    MigrationAssertion {
+        /// The expectation key or integration stage.
+        assertion: String,
+        /// The migration or merged file path, when applicable.
+        path: Option<String>,
+        /// Expected and actual values, or the merge conflict explanation.
+        message: String,
+    },
     /// `expect.files` named a path the rendering does not have.
     MissingFile {
         /// The path that is missing.
@@ -1427,6 +1503,7 @@ pub fn run(
     // without ever consulting that list — a config file on the machine
     // running the suite must not be able to turn a `trust = false` case into
     // a pass, or a `trust = true` case into a surprise on someone else's.
+    let resolution_user = user;
     let user = &UserConfig {
         trust: crate::userconfig::Trust::default(),
         ..user.clone()
@@ -1437,18 +1514,34 @@ pub fn run(
         let decisions = if case.trust { &trusted } else { &untrusted };
         progress.case_started(&case.name);
         let started = std::time::Instant::now();
-        let mut outcome = run_case(
-            &template,
-            target.source,
-            tests_dir,
-            case,
-            options.write,
-            options.run_commands,
-            user,
-            decisions,
-            options.color,
-            progress,
-        )?;
+        let mut outcome = if case.migration.is_some() && (!options.write || case.snapshot) {
+            migrations::run_case(
+                &template,
+                target.source,
+                target.root,
+                tests_dir,
+                case,
+                options.write,
+                options.run_commands,
+                resolution_user,
+                user,
+                options.color,
+                progress,
+            )?
+        } else {
+            run_case(
+                &template,
+                target.source,
+                tests_dir,
+                case,
+                options.write,
+                options.run_commands,
+                user,
+                decisions,
+                options.color,
+                progress,
+            )?
+        };
         // `u128` → `u64`: a case running longer than 584 million years is
         // not a truncation bug worth a `Result` for.
         outcome.duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -1898,7 +1991,7 @@ fn run_case(
 /// anything asks for a signature, and Git's own precedence — local always
 /// outranks global and system — makes it authoritative regardless of what
 /// either ambient level says. See ADR-033 and issue #155.
-fn init_git_sandbox(cwd: &Path, git: &GitSandbox) -> Result<(), GitError> {
+fn init_git_sandbox(cwd: &Path, git: &GitSandbox) -> Result<LibGit2, GitError> {
     let repo = LibGit2::init_isolated(cwd)?;
     repo.set_config_str("user.name", &git.user_name)?;
     repo.set_config_str("user.email", &git.user_email)?;
@@ -1915,7 +2008,7 @@ fn init_git_sandbox(cwd: &Path, git: &GitSandbox) -> Result<(), GitError> {
     // something like `pdm-backend`'s `source = "scm"` needs a commit to
     // describe from, not merely a `.git` directory.
     repo.set_ref("refs/heads/main", seed, "tpl: seed the isolated sandbox")?;
-    Ok(())
+    Ok(repo)
 }
 
 /// Where `GIT_CONFIG_GLOBAL` points a case's own `[commands]` at, when it

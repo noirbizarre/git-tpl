@@ -2,6 +2,8 @@
 
 **Status:** accepted
 
+[ADR-046](046-declarative-migration-tests.md) extends cases with declarative project upgrades and migration assertions.
+
 ## Context
 
 A template author had no way to say *"given these answers, this is what comes out"* except to render into a

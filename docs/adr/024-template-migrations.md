@@ -2,6 +2,8 @@
 
 **Status:** accepted
 
+The migration-test deferral below is superseded by [ADR-046](046-declarative-migration-tests.md).
+
 **Relates to:**
 [ADR-002](002-no-custom-reconciliation.md),
 [ADR-005](005-append-only-refs.md),
