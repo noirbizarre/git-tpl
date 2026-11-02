@@ -85,9 +85,10 @@ git init demo && cd demo
 git tpl init ~/src/my-template --defaults
 ```
 
-`--defaults` takes every default without prompting. After editing the template, run
-`git tpl update --defaults` in the scratch project to render it again;
-use `git tpl init ~/src/my-template --defaults --force` if you need to re-answer its questions.
+`--defaults` takes every default without prompting.
+After editing the template, run `git tpl update --dirty --defaults` to try its uncommitted contents,
+or commit the changes and run `git tpl update --defaults`.
+Use `git tpl init ~/src/my-template --force` to re-answer questions interactively after committing the template.
 Delete the directory when done.
 
 To exercise a specific answer combination:
