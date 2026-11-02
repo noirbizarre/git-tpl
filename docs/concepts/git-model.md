@@ -174,7 +174,9 @@ configuration gets a small commit of its own; it cannot go into `G0`, which is t
 byte-identical to the rendering.
 See [ADR-021](../adr/021-attachment-in-the-merge-commit.md).
 
-If you would rather wire it up yourself, `git tpl init --no-merge` stops after creating the ref.
+If you would rather merge the output yourself, `git tpl init --no-merge` creates the rendered ref
+and commits the attachment configuration on your current branch, advancing `HEAD`.
+It skips only the rendered-output merge.
 
 This is also how a project that already has files joins a template.
 There is no second command for it: the same merge runs, and Git reconciles the two sides by content rather than by
