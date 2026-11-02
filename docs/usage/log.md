@@ -86,8 +86,9 @@ This is not a symmetric difference or a list of removals when downgrading.
 
 ## Source access and scope
 
-A local source is opened in place; a remote source is cloned into a temporary directory.
-Inspection can therefore require network access.
+A local source is opened in place; a remote source uses the persistent bare [source cache](cache.md).
+Inspection can require network access to refresh mutable references or obtain missing source objects.
+Cached source objects remain until cache maintenance removes them.
 Missing historical source objects, including rewritten history or an incomplete local clone, produce an actionable error.
 
 The project branch, index, worktree, configuration and refs are unchanged.

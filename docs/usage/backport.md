@@ -110,8 +110,8 @@ Either way it is `git am` that applies the patch, in your clone, where `git am -
 be one.
 Two reasons, both structural:
 
-- A template resolved from a remote is a throwaway clone in a temporary directory. Writing into it writes into a
-  directory about to be deleted.
+- A remote template is acquired through the persistent bare [source cache](cache.md).
+  That cache is acquisition storage, not an editable upstream checkout where a patch should be reviewed.
 - Applying a patch is reconciliation, and git-tpl contributes none of its own — see
   [ADR-002](../adr/002-no-custom-reconciliation.md). `git am` already does it, better, in the repository where
   you can review the result.
