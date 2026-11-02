@@ -23,6 +23,7 @@ Personal defaults also seed standalone interactive `render` and `context`, but n
 `status.renderingCount` counts provenance-bearing renderings, excluding intermediate migration rename commits.
 On `diff` and `show`, answer flags require `--dirty`; ordinary inspection never renders answer overrides.
 `show` fails with `tpl::ops::stdout_failed` on output write/flush errors, except deliberately closed pipes.
+For `tpl::manifest::invalid_compose`, supply `source`, `ref`, and a `from` naming a list question.
 
 Git source objects persist across invocations; mutable refs refresh online with no stale fallback.
 Use global `--offline` only with cached full commit IDs for every URL source actually used, including ancestors/children/data.

@@ -134,7 +134,7 @@ pub enum ManifestError {
     #[error("`[[compose]]`: {reason}")]
     #[diagnostic(
         code(tpl::manifest::invalid_compose),
-        help("supply a source, pinned rev and a `from` naming a string question")
+        help("supply a source, ref and a `from` naming a list question")
     )]
     InvalidCompose {
         /// The malformed declaration.
