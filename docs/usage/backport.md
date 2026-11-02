@@ -1,5 +1,7 @@
 # `git tpl backport`
 
+Hunk IDs include both complete file contents, so even a distant edit invalidates a previously listed selection.
+
 Only files owned by the attached leaf template can be backported.
 Symbolic-link target changes and file/link conversions fail with `tpl::backport::symlink`, including hunk listings.
 Change links directly in their owning template.
