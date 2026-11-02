@@ -459,6 +459,10 @@ impl GitBackend for LibGit2 {
         Ok(TemplateOperationGuard { _file: file })
     }
 
+    fn git_dir(&self) -> PathBuf {
+        self.repo.path().to_path_buf()
+    }
+
     fn workdir(&self) -> Result<PathBuf, GitError> {
         self.repo
             .workdir()

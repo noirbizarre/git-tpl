@@ -124,7 +124,26 @@ fn display(
     color: ColorChoice,
 ) -> Result<(), OpError> {
     let mut command = Command::new("git");
-    command.current_dir(&ctx.root).arg("diff");
+    // Presentation must use the same repository as the completed preview,
+    // even when invoked from a Git hook with repository-selection variables.
+    for key in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_COMMON_DIR",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_INDEX_FILE",
+        "GIT_NAMESPACE",
+    ] {
+        command.env_remove(key);
+    }
+    command
+        .current_dir(&ctx.root)
+        .arg("--git-dir")
+        .arg(ctx.repo.git_dir())
+        .arg("--work-tree")
+        .arg(&ctx.root)
+        .arg("diff");
     if args.stat {
         command.arg("--stat");
     }

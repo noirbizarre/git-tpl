@@ -2,6 +2,7 @@
 
 Answer flags (`--answer`, `--answers-from`, `--defaults`, `--strict-answers`) require `--dirty`.
 The ordinary preview uses an existing rendering and cannot apply answer overrides.
+Native presentation is bound to the preview repository, including when ambient Git variables select another repository.
 
 What merging the template would change.
 

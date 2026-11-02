@@ -585,6 +585,9 @@ pub trait GitBackend {
     /// The repository's working directory.
     fn workdir(&self) -> Result<PathBuf, GitError>;
 
+    /// The opened repository's administrative directory, including linked-worktree identity.
+    fn git_dir(&self) -> PathBuf;
+
     /// Whether the repository has no commits yet.
     fn is_empty(&self) -> Result<bool, GitError>;
 

@@ -5,6 +5,27 @@
 
 mod common;
 
+#[test]
+fn native_diff_uses_the_preview_repository_despite_ambient_git_selection() {
+    let world = common::World::new();
+    world.init(&[]).success();
+    world.move_template();
+    common::tpl(&world.project, &["update", "--defaults"]).success();
+    let other = common::Repo::init("other");
+    other.write("unrelated", "other repository");
+    other.commit_all("unrelated root");
+    let git_dir = other.path.join(".git");
+    common::tpl_with_env(
+        &world.project,
+        &["diff", "--stat"],
+        &[
+            ("GIT_DIR", git_dir.to_str().unwrap()),
+            ("GIT_WORK_TREE", other.path.to_str().unwrap()),
+        ],
+    )
+    .success();
+}
+
 use common::{World, tpl};
 
 #[test]
