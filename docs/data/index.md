@@ -1,5 +1,8 @@
 # Data sources
 
+Template-local paths preserve dot-prefixed filenames such as `.settings.toml`.
+They are relative to the repository root; absolute paths and parent-directory traversal are rejected.
+
 Within a render, declarations sharing a resource reuse its bytes.
 Each declaration still requires its own authorization, checksum and format validation,
 and contributes its own provenance entry in load order.

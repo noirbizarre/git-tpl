@@ -8,6 +8,45 @@ mod common;
 
 use common::{Template, World, tpl_outside};
 
+#[test]
+fn template_data_paths_preserve_hidden_filenames_and_reject_traversal() {
+    for path in [
+        ".settings.toml",
+        "./.settings.toml",
+        "././.settings.toml",
+        "../settings.toml",
+        "/settings.toml",
+    ] {
+        let world = World::new();
+        world.template.repo.write(
+            "template.toml",
+            &format!("name = 'paths'\nroot = 'output'\n[data.settings]\nkind = 'template'\nsource = '{path}'\n"),
+        );
+        world
+            .template
+            .repo
+            .write(".settings.toml", "name = 'hidden'\n");
+        world
+            .template
+            .repo
+            .write("settings.toml", "name = 'visible'\n");
+        world
+            .template
+            .repo
+            .write("output/name.jinja", "{{ data.settings.name }}");
+        world.template.repo.commit_all("data paths");
+        if path.starts_with("../") || path.starts_with('/') {
+            assert_eq!(
+                world.init(&["--json"]).failure().error_code(),
+                "tpl::data::load"
+            );
+        } else {
+            world.init(&[]).success();
+            assert_eq!(world.project.read("name"), "hidden");
+        }
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn committed_and_dirty_symlinks_preserve_modes_and_opaque_targets() {
