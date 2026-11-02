@@ -51,6 +51,16 @@ pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Ve
 /// Errors from any operation.
 #[derive(Debug, Error, Diagnostic)]
 pub enum OpError {
+    /// A raw payload could not be delivered to the caller.
+    #[error("could not write to stdout")]
+    #[diagnostic(
+        code(tpl::ops::stdout_failed),
+        help("reason: {reason}\ncheck the output destination or receiving process and retry")
+    )]
+    StdoutFailed {
+        /// The write or flush failure.
+        reason: String,
+    },
     /// Source object storage or explicit offline policy failed.
     #[error(transparent)]
     #[diagnostic(transparent)]

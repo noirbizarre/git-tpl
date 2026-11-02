@@ -190,6 +190,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::ops::no_such_directory` | `init`'s destination does not exist. Create it, or pass `--init` to create it and the repository. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
 | `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
+| `tpl::ops::stdout_failed` | Raw output could not be written or flushed. Check the destination or receiving process. |
 
 ## Backport
 

@@ -22,6 +22,7 @@ A dirty-to-clean update can create a provenance-only commit even when rendered b
 Personal defaults also seed standalone interactive `render` and `context`, but never noninteractive rendering.
 `status.renderingCount` counts provenance-bearing renderings, excluding intermediate migration rename commits.
 On `diff` and `show`, answer flags require `--dirty`; ordinary inspection never renders answer overrides.
+`show` fails with `tpl::ops::stdout_failed` on output write/flush errors, except deliberately closed pipes.
 
 Git source objects persist across invocations; mutable refs refresh online with no stale fallback.
 Use global `--offline` only with cached full commit IDs for every URL source actually used, including ancestors/children/data.
