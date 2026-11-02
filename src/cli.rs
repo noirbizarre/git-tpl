@@ -603,6 +603,10 @@ pub struct StatusArgs {
 
 /// `git tpl diff`
 #[derive(Debug, clap::Args)]
+#[command(mut_arg("answers", |arg| arg.requires("dirty")))]
+#[command(mut_arg("answers_from", |arg| arg.requires("dirty")))]
+#[command(mut_arg("defaults", |arg| arg.requires("dirty")))]
+#[command(mut_arg("strict_answers", |arg| arg.requires("dirty")))]
 pub struct DiffArgs {
     /// Summarise instead of printing the patch
     #[arg(long)]
@@ -641,6 +645,10 @@ pub struct DiffArgs {
 
 /// `git tpl show`
 #[derive(Debug, clap::Args)]
+#[command(mut_arg("answers", |arg| arg.requires("dirty")))]
+#[command(mut_arg("answers_from", |arg| arg.requires("dirty")))]
+#[command(mut_arg("defaults", |arg| arg.requires("dirty")))]
+#[command(mut_arg("strict_answers", |arg| arg.requires("dirty")))]
 pub struct ShowArgs {
     /// Read from the template's working tree rather than the rendered ref
     #[arg(long)]

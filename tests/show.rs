@@ -5,6 +5,27 @@ mod common;
 use common::{World, tpl};
 
 #[test]
+fn inspection_rejects_answer_flags_without_a_dirty_render() {
+    let world = World::new();
+    world.init(&[]).success();
+    for command in ["diff", "show"] {
+        for flags in [
+            vec!["--answer", "malformed"],
+            vec!["--answers-from", "absent.toml"],
+            vec!["--defaults"],
+            vec!["--strict-answers"],
+        ] {
+            let mut args = vec![command];
+            if command == "show" {
+                args.push("README.md");
+            }
+            args.extend(flags);
+            tpl(&world.project, &args).code(2).says("--dirty");
+        }
+    }
+}
+
+#[test]
 fn show_prints_the_template_version_of_a_file() {
     let world = World::new();
     world.init(&[]).success();

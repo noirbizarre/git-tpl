@@ -1,5 +1,8 @@
 # `git tpl diff`
 
+Answer flags (`--answer`, `--answers-from`, `--defaults`, `--strict-answers`) require `--dirty`.
+The ordinary preview uses an existing rendering and cannot apply answer overrides.
+
 What merging the template would change.
 
 For the template's source commit messages, use [`git tpl log [REF]`](log.md).

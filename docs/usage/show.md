@@ -1,5 +1,8 @@
 # `git tpl show`
 
+Answer flags (`--answer`, `--answers-from`, `--defaults`, `--strict-answers`) require `--dirty`.
+The ordinary inspection path reads an existing rendering and cannot apply answer overrides.
+
 Dirty previews warn about unknown answer keys on stderr, including with `--quiet` or `--json`.
 The file bytes on stdout remain unchanged; `--strict-answers` turns unknown invocation keys into failures.
 
