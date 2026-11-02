@@ -231,6 +231,10 @@ pub(super) fn run_case(
         cwd,
         case.git.as_ref().unwrap_or(&GitSandbox::default_identity()),
     )?;
+    // libgit2 can inherit Windows/global checkout conversion even when command
+    // children ignore global config. Pin both sides to avoid a spuriously dirty merge.
+    project.set_config_bool("core.autocrlf", false)?;
+    project.set_config_str("core.eol", "lf")?;
     let template_root = suite.repo.workdir()?;
     let enabled = run_commands && !write;
     let mut failures = Vec::new();

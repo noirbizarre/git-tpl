@@ -204,6 +204,8 @@ That is a real update failure, and a direct-jump case exposes it.
 
 Migration cases always need isolated Git, including under `--skip-commands` and with `git = false` or omitted.
 `git = true` or a Git identity table configures this same repository.
+Its checkout defaults pin `core.autocrlf = false` and `core.eol = lf`
+so ambient line-ending conversion cannot make the merged project appear dirty to commands.
 `commands.before` runs before old-project initialization; declare committed customisations in `migration.files`
 and `migration.absent`.
 `commands.rendered` sees the completed merged project, `after` follows assertions,

@@ -411,6 +411,15 @@ name = "old"
 fn migration_commands_share_the_project_repository_and_finally_runs_every_entry_after_failure() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(dir.path());
+    // libgit2 reads XDG Git configuration rather than native Git's GIT_CONFIG_GLOBAL.
+    // Reproduce Windows checkout defaults on every platform: commands must still see a clean project.
+    let git_config = template.repo.config_home().join("git");
+    std::fs::create_dir_all(&git_config).unwrap();
+    std::fs::write(
+        git_config.join("config"),
+        "[core]\n\tautocrlf = true\n\teol = crlf\n",
+    )
+    .unwrap();
     case(
         &template,
         "commands",
