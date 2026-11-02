@@ -237,7 +237,7 @@ impl TrustGate for Confirmer {
         }
         if requests.iter().any(|r| r.kind == SourceKind::Git) {
             eprintln!(
-                "A repository is cloned with your Git credentials, read, and discarded. \
+                "A repository is fetched with your Git credentials; its objects are retained in the local cache. \
                  Nothing in it is executed."
             );
         }

@@ -1,6 +1,7 @@
 //! One module per subcommand.
 
 mod backport;
+mod cache;
 mod completion;
 mod context;
 mod diff;
@@ -19,6 +20,7 @@ mod test;
 mod update;
 
 pub use backport::run as backport;
+pub use cache::run as cache;
 pub use completion::run as completion;
 pub use context::run as context;
 pub use diff::run as diff;
@@ -104,6 +106,7 @@ impl Reporter {
 /// The user configuration is still read: `[defaults]`, `[shortcuts]` and
 /// `[trust]` all apply to a template resolved on its own.
 pub struct Standalone {
+    pub access: tpl::git::cache::Access,
     /// How to talk.
     pub out: Reporter,
     /// The user's own preferences, read once per command.
@@ -114,6 +117,7 @@ impl Standalone {
     /// Everything a project-free command needs.
     pub fn new(global: &GlobalArgs) -> Result<Self, OpError> {
         Ok(Self {
+            access: access(global)?,
             out: Reporter {
                 theme: Theme::resolve(global.color),
                 global: global.clone(),
@@ -131,6 +135,7 @@ impl Standalone {
 /// project's most-used type name is how a reader ends up looking for `answers`
 /// on the wrong one.
 pub struct Session {
+    pub access: tpl::git::cache::Access,
     /// The repository the command runs against.
     pub repo: LibGit2,
     /// Its working directory — where `.config/git.tpl.toml` lives.
@@ -168,6 +173,7 @@ impl Session {
         let repo = LibGit2::discover(path)?;
         let root = repo.workdir()?;
         Ok(Self {
+            access: access(global)?,
             repo,
             root,
             out: Reporter {
@@ -177,6 +183,29 @@ impl Session {
             user: UserConfig::load()?,
         })
     }
+}
+
+/// Resolve machine-owned storage outside rendering; it never enters template context.
+pub fn access(global: &GlobalArgs) -> Result<tpl::git::cache::Access, OpError> {
+    let root = if let Some(path) = &global.cache_dir {
+        if !path.is_absolute() {
+            return Err(OpError::InvalidArgument {
+                message: "--cache-dir/GIT_TPL_CACHE_DIR must be an absolute path".into(),
+            });
+        }
+        Some(path.clone())
+    } else {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .map(|path| path.join("git-tpl"))
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .or_else(|| std::env::var_os("USERPROFILE"))
+                    .map(|home| PathBuf::from(home).join(".cache/git-tpl"))
+            })
+    };
+    Ok(tpl::git::cache::Access::new(root, global.offline))
 }
 
 /// The current directory, or an error that says which step failed.

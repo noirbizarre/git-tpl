@@ -47,6 +47,7 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         None,
         supplied,
         &ctx.user,
+        &ctx.access,
         answering(&args.answers, true, &mut prompter),
         trust(&args.answers, args.trust, true, &mut confirmer),
     )?;

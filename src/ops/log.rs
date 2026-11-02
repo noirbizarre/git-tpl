@@ -129,6 +129,7 @@ pub fn log(
     project_root: &Path,
     reference: Option<&str>,
     max_count: Option<usize>,
+    access: &crate::git::cache::Access,
 ) -> Result<Log, OpError> {
     let (id, ref_name) = identify(project_root)?;
     let tip = require_tip(project, &ref_name)?;
@@ -165,7 +166,9 @@ pub fn log(
     let applied_revision = recorded.revision.ok_or_else(invalid)?;
     // History remains useful before template.toml existed, or while its latest version is invalid.
     let location = crate::config::source_location(&source, project_root);
-    let opened = resolve::open_repository(&location)?;
+    let applied_id = applied_revision.to_hex();
+    let opened =
+        resolve::open_repository(&location, reference.or(Some(&applied_id)), false, access)?;
     let repo = &opened.repo;
     repo.commit(applied_revision)
         .map_err(|error| LogError::MissingCommit {
@@ -174,7 +177,10 @@ pub fn log(
             reason: error.to_string(),
         })?;
     let target_revision = match reference {
-        Some(reference) => repo.resolve_revision(reference, &source)?,
+        Some(reference) => match &opened.resolved {
+            Some((_, revision)) => *revision,
+            None => repo.resolve_revision(reference, &source)?,
+        },
         None => applied_revision,
     };
     let target_descends_from_applied = repo.is_ancestor(applied_revision, target_revision)?;

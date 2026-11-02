@@ -52,6 +52,7 @@ nav = [
     { "merge" = "usage/merge.md" },
     { "backport" = "usage/backport.md" },
     { "fetch" = "usage/fetch.md" },
+    { "cache" = "usage/cache.md" },
     { "push" = "usage/push.md" },
     { "Shell completion" = "usage/completion.md" },
     { "AI agent skill" = "usage/skill.md" },

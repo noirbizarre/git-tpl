@@ -512,6 +512,9 @@ fn run_tpl(
     // written there — and `[defaults]` would change what a prompt returns.
     // `HOME` goes too, since it is the fallback the resolution uses.
     command.env("XDG_CONFIG_HOME", config_home);
+    command.env("XDG_CACHE_HOME", config_home.join("cache"));
+    command.env_remove("GIT_TPL_CACHE_DIR");
+    command.env_remove("USERPROFILE");
     command.env_remove("HOME");
     // The binary opens the repository at `cwd`; an inherited `GIT_DIR` from a
     // `git rebase --exec` or a hook would point it somewhere else entirely.

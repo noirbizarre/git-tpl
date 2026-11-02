@@ -31,6 +31,13 @@ pub struct Cli {
 /// Flags accepted before or after the subcommand.
 #[derive(Debug, Clone, clap::Args)]
 pub struct GlobalArgs {
+    /// Prohibit network access; remote sources require cached full commit IDs
+    #[arg(long, global = true)]
+    pub offline: bool,
+
+    /// Source object cache directory
+    #[arg(long, global = true, env = "GIT_TPL_CACHE_DIR", value_name = "DIR")]
+    pub cache_dir: Option<PathBuf>,
     /// Print more detail
     #[arg(short, long, global = true, action = ArgAction::Count)]
     pub verbose: u8,
@@ -68,6 +75,8 @@ pub enum ColorChoice {
 /// The commands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Inspect, refresh, or remove cached source repositories
+    Cache(CacheArgs),
     /// Attach a template to this repository and render it
     Init(InitArgs),
 
@@ -123,6 +132,28 @@ pub enum Command {
     // writes are there to make work.
     #[command(hide = true)]
     Man(ManArgs),
+}
+
+/// Repository cache maintenance, independent of a project.
+#[derive(Debug, clap::Args)]
+pub struct CacheArgs {
+    #[command(subcommand)]
+    pub command: CacheCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CacheCommand {
+    /// List cached repositories and their disk usage
+    List,
+    /// Fetch current source branches and tags into the cache
+    Fetch { source: String },
+    /// Clear one source, or all inactive repositories
+    Clear { source: Option<String> },
+    /// Remove repositories unused for an age in days
+    Prune {
+        #[arg(long, default_value_t = 30, value_name = "DAYS")]
+        older_than: u64,
+    },
 }
 
 /// `git tpl log`

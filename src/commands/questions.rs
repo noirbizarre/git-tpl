@@ -30,6 +30,7 @@ pub fn run(args: QuestionsArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             dirty: args.dirty,
         },
         &ctx.user,
+        &ctx.access,
     )?;
 
     let manifest = &template.manifest;

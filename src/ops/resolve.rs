@@ -17,6 +17,7 @@ use super::Trust;
 use super::extends::{self, ExtendsError};
 use crate::data::{Decision, REMOTE_LIMIT_BYTES, RemoteRequest, SourceKind, TemplateTree};
 use crate::eval::Partials;
+use crate::git::cache::{Access, CacheError, Lease};
 use crate::git::libgit2::LibGit2;
 use crate::git::{GitBackend, GitError, Oid, TreeEntry};
 use crate::provenance::{ExtendsProvenance, WORKTREE_REF};
@@ -27,6 +28,10 @@ use crate::userconfig::UserConfig;
 /// Errors from resolving a template.
 #[derive(Debug, Error, Diagnostic)]
 pub enum ResolveError {
+    /// Persistent source acquisition failed.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    SourceCache(#[from] CacheError),
     /// The template could not be fetched or opened.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -92,7 +97,7 @@ struct Layer {
     reference: String,
     dirty: bool,
     ignored: Vec<String>,
-    _cache: Option<tempfile::TempDir>,
+    _cache: Option<Lease>,
 }
 
 /// An ancestor above the leaf in an `[extends]` chain.
@@ -111,11 +116,13 @@ struct Ancestor {
     /// Repository-root-relative paths this ancestor's own child asked to
     /// remove from the merge (`[extends].remove`).
     removed: Vec<String>,
-    _cache: Option<tempfile::TempDir>,
+    _cache: Option<Lease>,
 }
 
 /// A template, resolved to a revision and ready to render.
 pub struct Resolved {
+    /// Invocation policy shared with data and composed children, never rendered context.
+    pub access: Access,
     /// The repository holding it. Kept alive because trees are read from it.
     ///
     /// Boxed as a trait object: `resolve` is the one place that has to choose
@@ -160,8 +167,8 @@ pub struct Resolved {
     /// question currently in effect. Absent for one this template's own
     /// manifest declares or overrides. See [`Resolved::question_origin`].
     question_origin: BTreeMap<String, usize>,
-    /// Kept so the temporary clone outlives the resolution.
-    _cache: Option<tempfile::TempDir>,
+    /// Prevents pruning source objects while this resolution still reads them.
+    _cache: Option<Lease>,
 }
 
 impl Resolved {
@@ -336,6 +343,7 @@ pub struct Request<'a> {
 pub fn resolve(
     request: Request<'_>,
     user: &UserConfig,
+    access: &Access,
     trust: &mut Trust<'_>,
 ) -> Result<Resolved, ResolveError> {
     let leaf = resolve_layer(
@@ -344,12 +352,13 @@ pub fn resolve(
         request.root,
         request.dirty,
         false,
+        access,
     )?;
 
     // A template with no `[extends]` is a chain of one: its own manifest is
     // already the effective one, and there is nothing to fold.
     let (ancestors, manifest, data_origin, question_origin) = if leaf.manifest.extends.is_some() {
-        resolve_ancestors(&leaf, request.source, user, trust)?
+        resolve_ancestors(&leaf, request.source, user, access, trust)?
     } else {
         (
             Vec::new(),
@@ -360,6 +369,7 @@ pub fn resolve(
     };
 
     Ok(Resolved {
+        access: access.clone(),
         repo: leaf.repo,
         manifest,
         tree: leaf.tree,
@@ -389,6 +399,7 @@ fn resolve_layer(
     root_override: Option<&str>,
     dirty: bool,
     pinned: bool,
+    access: &Access,
 ) -> Result<Layer, ResolveError> {
     let local = local_path(source);
 
@@ -398,7 +409,11 @@ fn resolve_layer(
         });
     }
 
-    let OpenedRepository { repo, cache } = open_repository(source)?;
+    let OpenedRepository {
+        repo,
+        cache,
+        resolved,
+    } = open_repository(source, reference, pinned, access)?;
 
     let (revision, tree, reference, dirty, ignored) = if dirty {
         let path = local.as_ref().expect("checked above");
@@ -414,9 +429,15 @@ fn resolve_layer(
     } else {
         let reference = match reference {
             Some(reference) => reference.to_string(),
-            None => repo.default_branch()?,
+            None => match &resolved {
+                Some((reference, _)) => reference.clone(),
+                None => repo.default_branch()?,
+            },
         };
-        let revision = if pinned {
+        let revision = if let Some((_, revision)) = resolved {
+            // Acquisition froze this name under the cache mutation lock.
+            revision
+        } else if pinned {
             repo.resolve_pin(&reference, source)?
                 .ok_or_else(|| ExtendsError::Unpinned {
                     origin: source.into(),
@@ -475,30 +496,44 @@ fn resolve_layer(
     })
 }
 
-/// Keeps a temporary clone alive without requiring a valid template manifest.
+/// Keeps source objects leased without requiring a valid template manifest.
 pub(crate) struct OpenedRepository {
     pub(crate) repo: Box<dyn GitBackend>,
-    pub(crate) cache: Option<tempfile::TempDir>,
+    pub(crate) cache: Option<Lease>,
+    pub(crate) resolved: Option<(String, Oid)>,
 }
 
 /// Open source history independently of rendering, inheritance and data loading.
-pub(crate) fn open_repository(source: &str) -> Result<OpenedRepository, ResolveError> {
+pub(crate) fn open_repository(
+    source: &str,
+    reference: Option<&str>,
+    pinned: bool,
+    access: &Access,
+) -> Result<OpenedRepository, ResolveError> {
     match local_path(source) {
         // Opening in place preserves local branches and uncommitted input for dirty rendering.
         Some(path) => Ok(OpenedRepository {
             repo: Box::new(LibGit2::open(&path)?),
             cache: None,
+            resolved: None,
         }),
         None => {
-            // A fresh clone avoids silently inspecting or rendering a stale cached revision.
-            let dir = tempfile::tempdir().map_err(|source| ResolveError::Cache {
-                path: std::env::temp_dir(),
-                source,
-            })?;
-            let repo = LibGit2::clone_bare(source, dir.path())?;
+            let acquired =
+                access
+                    .acquire(source, reference, pinned)
+                    .map_err(|error| match error {
+                        CacheError::Unpinned { reference } => {
+                            ResolveError::Extends(ExtendsError::Unpinned {
+                                origin: source.into(),
+                                rev: reference,
+                            })
+                        }
+                        other => ResolveError::SourceCache(other),
+                    })?;
             Ok(OpenedRepository {
-                repo: Box::new(repo),
-                cache: Some(dir),
+                repo: Box::new(acquired.repo),
+                cache: Some(acquired.lease),
+                resolved: Some((acquired.reference, acquired.revision)),
             })
         }
     }
@@ -526,6 +561,7 @@ fn resolve_ancestors(
     leaf: &Layer,
     leaf_source: &str,
     user: &UserConfig,
+    access: &Access,
     trust: &mut Trust<'_>,
 ) -> Result<AncestorChain, ResolveError> {
     let mut ancestors: Vec<Ancestor> = Vec::new();
@@ -552,7 +588,14 @@ fn resolve_ancestors(
         // is no way to list the whole chain before any of it is reached.
         confirm_ancestor(&declared.source, ancestors.len(), user, trust)?;
 
-        let layer = resolve_layer(&declared.source, Some(&declared.rev), None, false, true)?;
+        let layer = resolve_layer(
+            &declared.source,
+            Some(&declared.rev),
+            None,
+            false,
+            true,
+            access,
+        )?;
 
         let key = (declared.source.clone(), layer.revision);
         path.push(declared.source.clone());
@@ -766,6 +809,7 @@ mod tests {
                 dirty: true,
             },
             &user,
+            &Access::new(None, false),
             &mut trust,
         );
 

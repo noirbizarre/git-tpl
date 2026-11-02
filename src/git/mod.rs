@@ -8,6 +8,7 @@
 // `.gitignore` evaluation is ours rather than libgit2's, because libgit2 will
 // not let a negation override a lower-precedence ignore file — see ADR-017.
 // Private: it answers a question only the working-tree walk asks.
+pub mod cache;
 mod ignore;
 pub mod libgit2;
 
@@ -572,6 +573,11 @@ pub struct TemplateOperationGuard {
 /// creating and cloning a repository are the exception, and stay inherent —
 /// they produce a backend rather than use one.
 pub trait GitBackend {
+    /// Refresh disposable source heads, tags and default HEAD using the requested transport.
+    fn refresh_source(&self, url: &str, exact: Option<Oid>) -> Result<(), GitError>;
+
+    /// Whether the commit and its renderable tree/blob closure are available locally.
+    fn complete_commit(&self, oid: Oid) -> Result<bool, GitError>;
     /// Serialize template operations in this worktree through configuration persistence.
     /// Lock contention returns [`GitError::RepositoryBusy`] without waiting.
     fn lock_template_operation(&self) -> Result<TemplateOperationGuard, GitError>;

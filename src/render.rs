@@ -202,7 +202,7 @@ pub struct Rendered {
 ///
 /// The source and destination repositories are separate parameters because they
 /// genuinely are separate: the template's blobs live in the template
-/// repository — often a temporary clone — while the rendered tree must be
+/// repository — often a leased source cache — while the rendered tree must be
 /// written into the project, which is where the ref will point.
 pub fn render_tree(
     template: &dyn GitBackend,

@@ -1,5 +1,9 @@
 # `git tpl update`
 
+Source objects use the [Git cache](cache.md); mutable refs refresh online and never fall back to stale names.
+Global `--offline` requires local sources or cached full commit IDs for every source actually used.
+Publication through `--push` or `tpl.autoPush` is refused before the rendered ref advances when offline.
+
 Concurrent init/update operations in one worktree are refused until the first finishes saving configuration.
 A changed ref or configuration discovered after prompting is refused rather than overwriting the newer state.
 

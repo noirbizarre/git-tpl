@@ -179,10 +179,8 @@ hex = "0.4"
 # the default byte/char granularity would split a `\r\n` or a combining sequence
 # and hand back a byte range that is not a character boundary.
 similar = { version = "3.2", features = ["unicode"] }
-# A remote template is cloned into a fresh temporary directory per run.
-# Caching between runs would be faster, but a stale cache silently rendering an
-# old template is a far worse failure than a slow fetch — in a tool whose whole
-# premise is reproducibility.
+# Stage source caches and metadata before atomic publication; test output and
+# snapshot updates also need temporary storage. Source refs still refresh online.
 tempfile = "3"
 # Word-splitting for a `git tpl test` case's `[commands]` entries — quotes and
 # backslash escapes honoured, nothing else: no pipe, no glob, no redirection,

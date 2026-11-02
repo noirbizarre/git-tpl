@@ -1195,6 +1195,7 @@ fn backport_picking(
         &[],
         &[],
         &tpl::userconfig::UserConfig::default(),
+        &tpl::git::cache::Access::new(None, false),
         tpl::ops::Answering::defaults(),
         tpl::ops::Trust::refuse(),
         tpl::ops::Unsubstitute::Never,

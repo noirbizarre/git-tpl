@@ -1328,6 +1328,7 @@ pub fn run(
     target: Target<'_>,
     options: RunOptions<'_>,
     user: &UserConfig,
+    access: &crate::git::cache::Access,
     progress: &mut dyn Progress,
 ) -> Result<Report, OpError> {
     // Checked before anything is resolved, and unconditionally — not only for
@@ -1356,6 +1357,7 @@ pub fn run(
             dirty: target.dirty,
         },
         user,
+        access,
         &mut trust,
     )?;
 

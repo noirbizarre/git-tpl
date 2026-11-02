@@ -42,7 +42,15 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         // Expanded here, at the edge, and not in `ops`. See the comment on the
         // non-dry-run expansion below — the same rule applies to a preview.
         let template = base.user.expand(&args.template).into_owned();
-        let payload = dry_run(&base.out, &base.user, project, &args, &template, answers)?;
+        let payload = dry_run(
+            &base.out,
+            &base.user,
+            &base.access,
+            project,
+            &args,
+            &template,
+            answers,
+        )?;
         if global.json {
             println!("{}", crate::report::success(payload));
         }
@@ -100,6 +108,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         args.force,
         args.answers.strict_answers,
         &ctx.user,
+        &ctx.access,
         answering(&args.answers, preferences.interactive, &mut prompter),
         trust(
             &args.answers,
@@ -311,6 +320,7 @@ fn write_failed(path: &Path, error: &std::io::Error) -> OpError {
 fn dry_run(
     out: &Reporter,
     user: &UserConfig,
+    access: &tpl::git::cache::Access,
     project: Option<(&dyn GitBackend, &Path)>,
     args: &InitArgs,
     source: &str,
@@ -331,6 +341,7 @@ fn dry_run(
             dirty: args.dirty,
         },
         user,
+        access,
         &mut preview_trust,
     )?;
     let graph = tpl::graph::Graph::build(&template.manifest)?;

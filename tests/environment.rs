@@ -15,6 +15,67 @@ use std::process::Command;
 
 use common::{World, tpl};
 
+#[test]
+fn cache_location_obeys_explicit_override_environment_and_xdg_precedence() {
+    let repo = common::Repo::init("location");
+    let root = tempfile::tempdir().unwrap();
+    let explicit = root.path().join("explicit");
+    let env_root = root.path().join("environment");
+    let xdg = root.path().join("xdg");
+    let list = |args: &[&str], env: &[(&str, &str)]| {
+        common::tpl_with_env(&repo, args, env).success().json()
+    };
+    let env = [
+        ("GIT_TPL_CACHE_DIR", env_root.to_str().unwrap()),
+        ("XDG_CACHE_HOME", xdg.to_str().unwrap()),
+    ];
+    assert_eq!(
+        list(
+            &[
+                "--json",
+                "--cache-dir",
+                explicit.to_str().unwrap(),
+                "cache",
+                "list"
+            ],
+            &env
+        )["root"],
+        explicit.to_str().unwrap()
+    );
+    assert_eq!(
+        list(&["--json", "cache", "list"], &env)["root"],
+        env_root.to_str().unwrap()
+    );
+    assert_eq!(
+        list(
+            &["--json", "cache", "list"],
+            &[("XDG_CACHE_HOME", xdg.to_str().unwrap())]
+        )["root"],
+        xdg.join("git-tpl").to_str().unwrap()
+    );
+    assert_eq!(
+        list(
+            &["--json", "cache", "list"],
+            &[
+                ("XDG_CACHE_HOME", "relative"),
+                ("HOME", root.path().to_str().unwrap())
+            ]
+        )["root"],
+        root.path().join(".cache/git-tpl").to_str().unwrap()
+    );
+    let invalid = common::tpl_with_env(
+        &repo,
+        &["--json", "cache", "list"],
+        &[("GIT_TPL_CACHE_DIR", "relative")],
+    )
+    .failure();
+    assert_eq!(invalid.error_code(), "tpl::ops::invalid_argument");
+    assert!(
+        !explicit.exists() && !env_root.exists() && !xdg.exists(),
+        "listing absent caches creates no storage"
+    );
+}
+
 /// Re-run the canary below with the environment Git would have given us, and
 /// require it to pass. This is the reproduction from #14 reduced to one
 /// process: before `scrub_git_env` existed it failed, and it fails again the
