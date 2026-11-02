@@ -18,7 +18,7 @@ git tpl --json questions ./template | jq '.questions[] | select(.when == null) |
 
 ## The global flags
 
-Four flags are accepted by every command, before or after the subcommand:
+Six flags are accepted by every command, before or after the subcommand:
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -26,6 +26,11 @@ Four flags are accepted by every command, before or after the subcommand:
 | `-q`, `--quiet` | off | Suppress everything but errors and warnings. The exit code still says what happened. |
 | `-v`, `--verbose` | off | More detail. Repeatable — `-vv` for more again. |
 | `--color <auto\|always\|never>` | `auto` | Auto-detect git-tpl's colors; native `diff` display follows Git's configuration. |
+| `--offline` | off | Disable network acquisition; require local or already cached immutable sources. |
+| `--cache-dir <PATH>` | platform cache | Override the source-object cache directory; the path must be absolute. |
+
+`--cache-dir` takes precedence over `GIT_TPL_CACHE_DIR`, which takes precedence over the platform default.
+See [cache location and offline policy](../usage/cache.md) for the full rules.
 
 A warning is deliberately louder than the rest: neither `--quiet` nor `--json` suppresses one, because a warning
 names something the caller is getting wrong right now.
