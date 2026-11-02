@@ -327,6 +327,8 @@ fn dry_run(
         .as_ref()
         .and_then(|commit| tpl::provenance::Provenance::parse(&commit.message));
     let migrations = ops::discover_update_migrations(&rendered, recorded.as_ref())?;
+    // A successful preflight must reject the same impossible moves as update.
+    ops::plan_migration_moves(&ctx.repo, previous_tree, &migrations)?;
     let child_changed = recorded
         .as_ref()
         .is_some_and(|previous| previous.composed != rendered.provenance.composed);

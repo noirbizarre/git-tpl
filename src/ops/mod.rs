@@ -2012,13 +2012,7 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
     // Every newly discovered migration's moves, in file order, applied
     // against the ref's current tip — never against `rendered.tree`, which
     // has no notion of where a path used to be.
-    let all_moves = migrations
-        .iter()
-        .flat_map(|m| m.moves.iter().map(|mv| (Some(m.path.as_str()), mv)));
-    let moved_tree = match &previous {
-        Some(previous) => migration::apply_ordered_moves(project, previous.tree, all_moves)?,
-        None => None,
-    };
+    let moved_tree = plan_migration_moves(project, previous.as_ref().map(|p| p.tree), &migrations)?;
 
     // Identical output, and nothing newly crossed. Committing would add a
     // commit that changes nothing, which the user would then have to merge
@@ -2325,6 +2319,21 @@ pub fn status(
         worktree_clean: project.is_clean()?,
         rendering_count,
     })
+}
+
+/// Validate moves against the old rendering, also for previews that publish nothing.
+pub fn plan_migration_moves(
+    project: &dyn GitBackend,
+    previous_tree: Option<Oid>,
+    migrations: &[AppliedMigration],
+) -> Result<Option<Oid>, OpError> {
+    let moves = migrations
+        .iter()
+        .flat_map(|m| m.moves.iter().map(|mv| (Some(m.path.as_str()), mv)));
+    match previous_tree {
+        Some(tree) => Ok(migration::apply_ordered_moves(project, tree, moves)?),
+        None => Ok(None),
+    }
 }
 
 /// How many commits the rendered ref holds.

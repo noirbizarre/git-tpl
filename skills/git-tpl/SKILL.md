@@ -18,6 +18,7 @@ metadata:
 # git-tpl
 
 A dirty-to-clean update can create a provenance-only commit even when rendered bytes are unchanged.
+`update --dry-run` validates migration moves without publishing commits or saving configuration.
 
 Git source objects persist across invocations; mutable refs refresh online with no stale fallback.
 Use global `--offline` only with cached full commit IDs for every URL source actually used, including ancestors/children/data.
