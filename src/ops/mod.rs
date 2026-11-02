@@ -976,12 +976,17 @@ pub fn render_resolved_with_composed(
     // value reaching the tree would end invariant 2. A derived seed is still
     // just a seed: widening what a `default_from` may read does not widen where
     // the result may go, and both guards stay exactly here.
-    let seeds = match project {
+    let mut seeds = match project {
         Some((repo, _)) if answering.is_interactive() => {
             prompt_seeds(repo, &template.manifest, user)?
         }
         _ => BTreeMap::new(),
     };
+    // Personal preferences do not require a repository, unlike Git-derived
+    // seeds. Neither may enter a noninteractive render without confirmation.
+    if answering.is_interactive() {
+        apply_user_defaults(&mut seeds, &template.manifest, user);
+    }
 
     // Read once, up front, and shared by the manifest expressions below and the
     // file rendering further down — one environment, one set of importable
