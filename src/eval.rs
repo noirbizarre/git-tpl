@@ -320,6 +320,7 @@ pub fn resolve(
                             && let Some(default) =
                                 resolve_default(&node.key, question, &context, partials)?
                         {
+                            validate_type(&node.key, question, &default)?;
                             context.set_gated_default(&node.key, default);
                         }
                         continue;
@@ -352,6 +353,9 @@ pub fn resolve(
                     )?,
                 };
 
+                // Defaults and custom prompters must obey the same schema as
+                // replayed answers, or a successful init can fail on update.
+                validate_type(&node.key, question, &answer)?;
                 validate_choice(&node.key, question, &answer, choices.as_deref())?;
                 // Deliberately here rather than in the prompter: this covers
                 // the supplied branch too, which is where an answer replayed
@@ -484,6 +488,18 @@ fn coerce(
         expected: question.kind.type_name().to_string(),
         found: value.type_name().to_string(),
     })
+}
+
+fn validate_type(name: &str, question: &Question, value: &Value) -> Result<(), EvalError> {
+    if question.kind.accepts(value) {
+        Ok(())
+    } else {
+        Err(EvalError::WrongType {
+            question: name.to_string(),
+            expected: question.kind.type_name().to_string(),
+            found: value.type_name().to_string(),
+        })
+    }
 }
 
 /// Check an answer is among the offered choices.

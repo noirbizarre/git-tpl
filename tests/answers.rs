@@ -9,6 +9,24 @@ mod common;
 use common::{World, tpl};
 
 #[test]
+fn invalid_defaults_are_rejected_before_they_can_be_recorded() {
+    for default in ["'8080'", "'{{ \"8080\" }}'"] {
+        let world = World::new();
+        world.template.repo.write(
+            "template.toml",
+            &format!("name = 'typed'\nroot = 'output'\n[questions.port]\ntype = 'integer'\ndefault = {default}\n"),
+        );
+        world.template.repo.write("output/out.jinja", "{{ port }}");
+        world.template.repo.commit_all("invalid default");
+        assert_eq!(
+            world.init(&["--json"]).failure().error_code(),
+            "tpl::eval::wrong_type"
+        );
+        assert!(!world.project.path.join(".config/git.tpl.toml").exists());
+    }
+}
+
+#[test]
 fn structured_strings_are_not_coerced_but_cli_text_is() {
     for (kind, text) in [("integer", "42"), ("boolean", "true"), ("list", "[\"a\"]")] {
         let world = World::new();

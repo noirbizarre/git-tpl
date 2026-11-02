@@ -1,5 +1,8 @@
 # Questions
 
+Defaults must have the question's declared type, including defaults produced by expressions.
+An incorrectly typed default is rejected before it can be rendered or recorded for a later update.
+
 Questions collect the values a template needs.
 They are declared in `template.toml` under `[questions.<name>]`.
 
