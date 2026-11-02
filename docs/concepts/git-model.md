@@ -126,6 +126,7 @@ If the rendered tree is byte-identical to the current tip, `update` normally mak
 A newly crossed migration still needs a commit to advance its provenance, and a changed
 [composed child revision](../templates/composition.md) can require a provenance-only commit so its pinned commit
 is recorded even when its rendered output is unchanged.
+Committing an exact previously dirty snapshot also requires a provenance-only commit to record its clean boundary.
 
 Occasionally `update` adds two commits rather than one: a template [migration](../usage/update.md#migrations) that
 moves a file gets a content-identical rename commit first, so that a later `git merge` — plain, never one git-tpl

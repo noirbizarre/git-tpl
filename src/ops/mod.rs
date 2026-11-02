@@ -2031,6 +2031,11 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
     let child_changed = recorded_previous
         .as_ref()
         .is_some_and(|previous| previous.composed != rendered.provenance.composed);
+    // Committing an exact dirty snapshot changes provenance, not output bytes.
+    // Record the clean boundary so source-history inspection can recover.
+    let became_clean = recorded_previous
+        .as_ref()
+        .is_some_and(|previous| previous.dirty && !rendered.provenance.dirty);
     let composed: Vec<_> = rendered
         .provenance
         .composed
@@ -2046,7 +2051,7 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
         }
         .into());
     }
-    if migrations.is_empty() && identical && !child_changed {
+    if migrations.is_empty() && identical && !child_changed && !became_clean {
         let answers_changed = config.answers != *rendered.context.answers();
         if composed_changed || answers_changed {
             if let Some(tip) = tip {

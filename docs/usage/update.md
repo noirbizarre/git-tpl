@@ -1,5 +1,8 @@
 # `git tpl update`
 
+A clean update after committing an exact dirty template snapshot records clean provenance even if output is unchanged.
+This lets source-history inspection recover after the resulting commit is merged.
+
 Source objects use the [Git cache](cache.md); mutable refs refresh online and never fall back to stale names.
 Global `--offline` requires local sources or cached full commit IDs for every source actually used.
 Publication through `--push` or `tpl.autoPush` is refused before the rendered ref advances when offline.

@@ -209,6 +209,41 @@ fn a_dirty_applied_template_has_no_exact_source_history_boundary() {
     assert_eq!(output["error"]["code"], "tpl::log::dirty");
 }
 
+#[test]
+fn committing_the_dirty_snapshot_restores_source_history_without_changing_output() {
+    let world = World::new();
+    world
+        .template
+        .repo
+        .write("template/extra.txt", "uncommitted");
+    world.init(&["--dirty"]).success();
+    let before = world.project.rev_parse(&world.ref_name());
+    let tree = world
+        .project
+        .rev_parse(&format!("{}^{{tree}}", world.ref_name()));
+    world.template.repo.commit_all("commit exact snapshot");
+    let preview = tpl(
+        &world.project,
+        &["--json", "update", "--defaults", "--dry-run"],
+    )
+    .success()
+    .json();
+    assert_eq!(preview["result"], "wouldUpdate");
+    tpl(&world.project, &["update", "--defaults"]).success();
+    let after = world.project.rev_parse(&world.ref_name());
+    assert_ne!(before, after);
+    assert_eq!(
+        world
+            .project
+            .rev_parse(&format!("{}^{{tree}}", world.ref_name())),
+        tree
+    );
+    tpl(&world.project, &["merge"]).success();
+    tpl(&world.project, &["--json", "log"]).success();
+    tpl(&world.project, &["update", "--defaults"]).success();
+    assert_eq!(world.project.rev_parse(&world.ref_name()), after);
+}
+
 /// Hand-authored/migration-only rendered commits must not silently select an older boundary.
 fn apply_message(world: &World, message: &str) {
     let parent = world.project.rev_parse(&world.ref_name());
