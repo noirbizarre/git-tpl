@@ -27,6 +27,8 @@ For `tpl::manifest::invalid_compose`, supply `source`, `ref`, and a `from` namin
 Backport hunk IDs bind to both complete file contents; re-list after any edit, including distant changes.
 Native diff presentation uses the opened project repository regardless of ambient repository-selection variables.
 Merge supports detached `HEAD`, including fast-forward updates, without attaching it to a branch.
+Data acquisition follows actual expression access, including short-circuiting and skipped questions/paths.
+`context --eval` can demand otherwise unused data; a context dump evaluates all computed values, then shows loaded data.
 
 Git source objects persist across invocations; mutable refs refresh online with no stale fallback.
 Use global `--offline` only with cached full commit IDs for every URL source actually used, including ancestors/children/data.

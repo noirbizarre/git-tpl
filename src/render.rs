@@ -29,6 +29,10 @@ const BINARY_SNIFF_LEN: usize = 8192;
 /// Errors from rendering.
 #[derive(Debug, Error, Diagnostic)]
 pub enum RenderError {
+    /// Data acquisition keeps its own actionable diagnostic instead of becoming a syntax error.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Evaluation(#[from] EvalError),
     /// A file's contents failed to render.
     #[error("failed to render `{path}`")]
     #[diagnostic(code(tpl::render::content))]
@@ -170,7 +174,7 @@ pub struct Rendered {
     pub path: String,
     /// The template entry this was rendered from, `.jinja` suffix intact.
     ///
-    /// The only inverse of [`render_path`] there can be. It cannot be
+    /// The only inverse of [`render_path_with`] there can be. It cannot be
     /// recovered by recomputation: a path segment that renders empty erases
     /// its whole subtree, and a piece rendering to `.` or fanning out across
     /// `/` vanishes from — or reshapes — the output without erasing anything
@@ -245,12 +249,20 @@ pub fn render_entries(
     partials: &Arc<Partials>,
     undefined: Undefined,
 ) -> Result<Vec<Rendered>, RenderError> {
+    render_entries_evaluating(template, entries, &mut |text, location| {
+        render_string_with(text, context, location, partials, undefined)
+    })
+}
+
+pub(crate) fn render_entries_evaluating(
+    template: &dyn GitBackend,
+    entries: &[TreeEntry],
+    evaluate: &mut dyn FnMut(&str, &str) -> Result<String, EvalError>,
+) -> Result<Vec<Rendered>, RenderError> {
     render_indexed(
         entries.iter().map(|entry| (entry, 0)).collect(),
         |_origin, oid| template.read_blob(oid),
-        context,
-        partials,
-        undefined,
+        evaluate,
     )
 }
 
@@ -284,15 +296,23 @@ pub fn render_layered_entries(
     partials: &Arc<Partials>,
     undefined: Undefined,
 ) -> Result<Vec<Rendered>, RenderError> {
+    render_layered_evaluating(repos, entries, &mut |text, location| {
+        render_string_with(text, context, location, partials, undefined)
+    })
+}
+
+pub(crate) fn render_layered_evaluating(
+    repos: &[&dyn GitBackend],
+    entries: &[LayeredEntry],
+    evaluate: &mut dyn FnMut(&str, &str) -> Result<String, EvalError>,
+) -> Result<Vec<Rendered>, RenderError> {
     render_indexed(
         entries
             .iter()
             .map(|layered| (&layered.entry, layered.origin))
             .collect(),
         |origin, oid| repos[origin].read_blob(oid),
-        context,
-        partials,
-        undefined,
+        evaluate,
     )
 }
 
@@ -305,9 +325,7 @@ pub fn render_layered_entries(
 fn render_indexed(
     mut entries: Vec<(&TreeEntry, usize)>,
     read_blob: impl Fn(usize, Oid) -> Result<Vec<u8>, crate::git::GitError>,
-    context: &Context,
-    partials: &Arc<Partials>,
-    undefined: Undefined,
+    evaluate: &mut dyn FnMut(&str, &str) -> Result<String, EvalError>,
 ) -> Result<Vec<Rendered>, RenderError> {
     // Sorted input in, sorted output out. Rendering can reorder paths — a
     // templated segment may render to anything — so the result is re-sorted
@@ -324,7 +342,7 @@ fn render_indexed(
             continue;
         }
 
-        let Some(path) = render_path(&entry.path, context, partials, undefined)? else {
+        let Some(path) = render_path_with(&entry.path, evaluate)? else {
             // A segment rendered empty, so this entry — and, for a directory,
             // everything beneath it — is skipped. That is how a template makes
             // a whole subtree conditional.
@@ -341,10 +359,16 @@ fn render_indexed(
 
         let content = if templated {
             let text = String::from_utf8_lossy(&source);
-            render_string_with(&text, context, &entry.path, partials, undefined)
-                .map_err(|source| RenderError::Content {
-                    path: entry.path.clone(),
-                    source,
+            evaluate(&text, &entry.path)
+                .map_err(|source| {
+                    if matches!(source, EvalError::Data(_)) {
+                        RenderError::Evaluation(source)
+                    } else {
+                        RenderError::Content {
+                            path: entry.path.clone(),
+                            source,
+                        }
+                    }
                 })?
                 .into_bytes()
         } else {
@@ -421,11 +445,9 @@ pub fn validate_paths(files: &[Rendered]) -> Result<(), RenderError> {
 /// The actual danger was never `/` — it is `..` (a request to write outside
 /// the render root) and `\` (a separator Git itself treats differently
 /// across platforms). Both are rejected unconditionally, at any position.
-fn render_path(
+fn render_path_with(
     path: &str,
-    context: &Context,
-    partials: &Arc<Partials>,
-    undefined: Undefined,
+    evaluate: &mut dyn FnMut(&str, &str) -> Result<String, EvalError>,
 ) -> Result<Option<String>, RenderError> {
     // Strip the suffix before rendering, so a templated directory name ending
     // in `.jinja` is not mistaken for a template file.
@@ -437,13 +459,16 @@ fn render_path(
 
     let mut segments = Vec::new();
     for (raw_index, segment) in raw.into_iter().enumerate() {
-        let rendered =
-            render_string_with(segment, context, path, partials, undefined).map_err(|source| {
+        let rendered = evaluate(segment, path).map_err(|source| {
+            if matches!(source, EvalError::Data(_)) {
+                RenderError::Evaluation(source)
+            } else {
                 RenderError::Path {
                     path: path.to_string(),
                     source,
                 }
-            })?;
+            }
+        })?;
         let rendered = rendered.trim().to_string();
 
         if rendered.is_empty() {

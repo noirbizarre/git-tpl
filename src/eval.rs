@@ -13,12 +13,13 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use crate::context::Context;
-use crate::data::{DataError, Loader, Rendered};
+use crate::data::{DataError, Loader};
 use crate::graph::{Graph, NodeKind};
 use crate::seed::SeedContext;
-use crate::template::{
-    Choice, Manifest, Question, QuestionKind, Value, computed_expression, is_expression,
-};
+use crate::template::{Choice, Manifest, Question, QuestionKind, Value, is_expression};
+
+mod demand;
+pub(crate) use demand::Session;
 
 /// Errors from evaluating a template.
 #[derive(Debug, Error, Diagnostic)]
@@ -220,6 +221,17 @@ pub fn resolve(
     loader: &mut Loader<'_>,
     prompter: &mut dyn Prompter,
 ) -> Result<Context, EvalError> {
+    let mut session = resolve_session(evaluation, loader, prompter)?;
+    // Explicit context inspection requests computed values, unlike rendering.
+    session.computed()?;
+    Ok(session.finish())
+}
+
+pub(crate) fn resolve_session<'a, 'repo>(
+    evaluation: Evaluation<'a>,
+    loader: &'a mut Loader<'repo>,
+    prompter: &mut dyn Prompter,
+) -> Result<Session<'a, 'repo>, EvalError> {
     let Evaluation {
         manifest,
         graph,
@@ -228,71 +240,13 @@ pub fn resolve(
         partials,
     } = evaluation;
 
-    let mut context = Context::new().with_template(manifest.metadata());
+    let mut session = Session::new(manifest, loader, partials);
 
     for node in graph.order() {
         match node.kind {
-            NodeKind::Data => {
-                let Some(decl) = manifest.data.get(&node.key) else {
-                    continue;
-                };
-                // The source may itself be an expression, so it is rendered
-                // against the context as it stands. The graph guarantees
-                // everything it references is already resolved — including
-                // through `ref` and `path`, which are expressions too.
-                let resolved = render_string(
-                    &decl.source,
-                    &context,
-                    &format!("data.{}", node.key),
-                    partials,
-                )?;
-                // The locations name the TOML keys the author wrote, `ref` and
-                // not the Rust field's `reference`, because these strings end
-                // up in the diagnostic.
-                let reference = decl
-                    .reference
-                    .as_deref()
-                    .map(|r| {
-                        render_string(r, &context, &format!("data.{}.ref", node.key), partials)
-                    })
-                    .transpose()?;
-                let path = decl
-                    .path
-                    .as_deref()
-                    .map(|p| {
-                        render_string(p, &context, &format!("data.{}.path", node.key), partials)
-                    })
-                    .transpose()?;
-                let value = loader.load(
-                    &node.key,
-                    decl,
-                    Rendered {
-                        source: &resolved,
-                        reference: reference.as_deref(),
-                        path: path.as_deref(),
-                    },
-                )?;
-                context.set_data(&node.key, value);
-            }
-
-            NodeKind::Computed => {
-                let Some(declared) = manifest.computed.get(&node.key) else {
-                    continue;
-                };
-                let value = match computed_expression(declared) {
-                    Some(expression) => evaluate(
-                        expression,
-                        &context,
-                        &format!("computed.{}", node.key),
-                        partials,
-                    )?,
-                    // A literal keeps its TOML type verbatim, exactly as a
-                    // question's literal default does: no engine, no round trip
-                    // through a string, so `line_length = 100` stays an integer.
-                    None => declared.clone(),
-                };
-                context.set_computed(&node.key, value);
-            }
+            // The graph describes possible dependencies, not executed branches.
+            // Declarations are materialized only when an expression reads them.
+            NodeKind::Data | NodeKind::Computed => continue,
 
             NodeKind::Question => {
                 let Some(question) = manifest.questions.get(&node.key) else {
@@ -304,12 +258,14 @@ pub fn resolve(
                 // a template distinguish "not applicable" from "declined" with
                 // `cli is defined`.
                 if let Some(when) = &question.when {
-                    let condition = evaluate(
-                        when,
-                        &context,
-                        &format!("questions.{}.when", node.key),
-                        partials,
-                    )?;
+                    let condition = session.run(|context| {
+                        evaluate(
+                            when,
+                            context,
+                            &format!("questions.{}.when", node.key),
+                            partials,
+                        )
+                    })?;
                     if !condition.is_truthy() {
                         // Opt-in (issue #117, ADR-025): still not asked and
                         // still not an answer, but a file body reading this
@@ -317,17 +273,30 @@ pub fn resolve(
                         // nothing, for an author who has decided the two
                         // never need to differ here.
                         if question.default_when_skipped
-                            && let Some(default) =
-                                resolve_default(&node.key, question, &context, partials)?
+                            && let Some(default) = session.run(|context| {
+                                resolve_default(&node.key, question, context, partials)
+                            })?
                         {
                             validate_type(&node.key, question, &default)?;
-                            context.set_gated_default(&node.key, default);
+                            session.context.set_gated_default(&node.key, default);
                         }
                         continue;
                     }
                 }
 
-                let choices = resolve_choices(&node.key, question, &context)?;
+                if let Some(reference) = &question.choices_from {
+                    if let Some(key) = reference
+                        .strip_prefix("data.")
+                        .and_then(|s| s.split('.').next())
+                    {
+                        session.ensure(crate::context::Name::data(key))?;
+                    } else if let Some(key) = reference.split('.').next()
+                        && manifest.computed.contains_key(key)
+                    {
+                        session.ensure(crate::context::Name::computed(key))?;
+                    }
+                }
+                let choices = resolve_choices(&node.key, question, &session.context)?;
 
                 // Nothing left to offer. Treated exactly as a false `when`:
                 // the question is not asked and gets no value, so `x is
@@ -340,7 +309,12 @@ pub fn resolve(
                     continue;
                 }
 
-                let default = resolve_default(&node.key, question, &context, partials)?;
+                let default = if supplied.contains_key(&node.key) {
+                    None
+                } else {
+                    session
+                        .run(|context| resolve_default(&node.key, question, context, partials))?
+                };
 
                 let answer = match supplied.get(&node.key) {
                     Some(value) => coerce(&node.key, question, value)?,
@@ -362,12 +336,12 @@ pub fn resolve(
                 // from `.config/git.tpl.toml` by `update` arrives.
                 validate_pattern(&node.key, question, &answer)?;
                 validate_list(&node.key, question, &answer)?;
-                context.set_answer(&node.key, answer);
+                session.context.set_answer(&node.key, answer);
             }
         }
     }
 
-    Ok(context)
+    Ok(session)
 }
 
 /// Resolve a question's choices, from `choices` or `choices_from`.

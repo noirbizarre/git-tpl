@@ -23,19 +23,19 @@ pub fn run(args: ContextArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let mut prompter = Interactive;
     let mut confirmer = Confirmer;
 
-    let rendered = ops::render_files(
+    let rendered = ops::render_context(
         Target {
             source: &source,
             reference: args.r#ref.as_deref(),
             root: args.root.as_deref(),
             dirty: args.dirty,
         },
-        None,
         supplied(&args.answers)?,
         &ctx.user,
         &ctx.access,
         answering(&args.answers, true, &mut prompter),
         trust(&args.answers, args.trust, true, &mut confirmer),
+        args.eval.as_deref(),
     )?;
 
     enforce_strict_answers(

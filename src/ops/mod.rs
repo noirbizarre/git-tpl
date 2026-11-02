@@ -34,7 +34,7 @@ use crate::gitconfig::{Preferences, push_refspec, seed};
 use crate::graph::{Graph, GraphError};
 use crate::provenance::{ComposedRevision, Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
-use crate::render::{RenderError, Rendered, render_entries, render_layered_entries, write_tree};
+use crate::render::{RenderError, Rendered, write_tree};
 use crate::seed::SeedContext;
 use crate::template::{MANIFEST_NAME, Manifest, Value};
 use crate::userconfig::UserConfig;
@@ -829,7 +829,16 @@ pub fn render_files_with_composed(
 ) -> Result<RenderedFiles, OpError> {
     let location = target.source;
     render_files_from_location(
-        target, location, project, supplied, user, access, answering, trust, composed,
+        target,
+        location,
+        project,
+        supplied,
+        user,
+        access,
+        answering,
+        trust,
+        composed,
+        Preparation::Files,
     )
 }
 
@@ -845,6 +854,7 @@ fn render_files_from_location(
     answering: Answering<'_>,
     mut trust: Trust<'_>,
     composed: Option<&[ComposedRevision]>,
+    preparation: Preparation,
 ) -> Result<RenderedFiles, OpError> {
     // A reborrow, not a move: `resolve` confirms an `[extends]` ancestor's
     // source (if any), and `render_resolved` below still needs the same
@@ -862,7 +872,7 @@ fn render_files_from_location(
         &mut trust,
     )?;
 
-    let rendered = render_resolved_with_composed(
+    let rendered = render_resolved_preparing(
         &template,
         target.source,
         project,
@@ -871,6 +881,8 @@ fn render_files_from_location(
         answering,
         trust,
         composed,
+        preparation,
+        |_| Ok(()),
     )?;
 
     Ok(RenderedFiles {
@@ -910,9 +922,100 @@ pub fn render_resolved_with_composed(
     project: Option<(&dyn GitBackend, &Path)>,
     supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+    recorded_composed: Option<&[ComposedRevision]>,
+) -> Result<RenderedOnce, OpError> {
+    render_resolved_preparing(
+        template,
+        source,
+        project,
+        supplied,
+        user,
+        answering,
+        trust,
+        recorded_composed,
+        match project {
+            Some((_, root)) if Config::exists_in(root) => Preparation::Update,
+            Some(_) => Preparation::Init,
+            None => Preparation::Files,
+        },
+        |_| Ok(()),
+    )
+}
+
+/// Inspect with an explicit demand root while the scoped loader is still alive.
+#[allow(clippy::too_many_arguments)]
+pub fn render_context(
+    target: Target<'_>,
+    supplied: crate::answers::SuppliedAnswers,
+    user: &UserConfig,
+    access: &Access,
+    answering: Answering<'_>,
+    mut trust: Trust<'_>,
+    expression: Option<&str>,
+) -> Result<RenderedFiles, OpError> {
+    let template = resolve::resolve(
+        Request {
+            source: target.source,
+            reference: target.reference,
+            root: target.root,
+            dirty: target.dirty,
+        },
+        user,
+        access,
+        &mut trust,
+    )?;
+    let partials = template.partials()?;
+    let rendered = render_resolved_preparing(
+        &template,
+        target.source,
+        None,
+        supplied,
+        user,
+        answering,
+        trust,
+        None,
+        Preparation::Files,
+        |session| {
+            if let Some(expression) = expression {
+                session.run(|context| {
+                    crate::eval::evaluate(expression, context, "--eval", &partials)
+                })?;
+            } else {
+                session.computed()?;
+            }
+            Ok(())
+        },
+    )?;
+    Ok(RenderedFiles {
+        template,
+        context: rendered.context,
+        files: rendered.files,
+        provenance: rendered.provenance,
+        ignored_answers: rendered.ignored_answers,
+    })
+}
+
+#[derive(Clone, Copy)]
+enum Preparation {
+    Files,
+    Init,
+    Update,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_resolved_preparing(
+    template: &Resolved,
+    source: &str,
+    project: Option<(&dyn GitBackend, &Path)>,
+    supplied: crate::answers::SuppliedAnswers,
+    user: &UserConfig,
     mut answering: Answering<'_>,
     mut trust: Trust<'_>,
     recorded_composed: Option<&[ComposedRevision]>,
+    preparation: Preparation,
+    prepare: impl FnOnce(&mut crate::eval::Session<'_, '_>) -> Result<(), OpError>,
 ) -> Result<RenderedOnce, OpError> {
     // Built and validated before anything is prompted: a cycle or a typo
     // discovered after six answered questions is the worst possible time.
@@ -1003,7 +1106,7 @@ pub fn render_resolved_with_composed(
     // names, so a macro usable in a `.jinja` file is usable in a `computed`.
     let partials = template.partials()?;
 
-    let context = crate::eval::resolve(
+    let mut session = crate::eval::resolve_session(
         Evaluation {
             manifest: &template.manifest,
             graph: &graph,
@@ -1030,20 +1133,65 @@ pub fn render_resolved_with_composed(
     // unchanged; one with a chain merges every layer's entries first
     // (`Resolved::entries`) and reads each blob from the repository that
     // actually declared it.
+    let mut evaluate_body = |text: &str, location: &str| {
+        session.run(|context| {
+            crate::eval::render_string_with(text, context, location, &partials, undefined)
+        })
+    };
     let mut files = if template.has_ancestors() {
         let entries = template.entries()?;
         let repos = template.repos();
-        render_layered_entries(&repos, &entries, &context, &partials, undefined)?
+        crate::render::render_layered_evaluating(&repos, &entries, &mut evaluate_body)?
     } else {
         let entries = template.own_entries()?;
-        render_entries(
+        crate::render::render_entries_evaluating(
             template.repo.as_ref(),
             &entries,
-            &context,
-            &partials,
-            undefined,
+            &mut evaluate_body,
         )?
     };
+
+    // Prepare parent expressions before acquiring children: retrying composition
+    // would repeat child prompts and network work, not just pure evaluation.
+    for entry in &template.manifest.compose {
+        session.run(|context| {
+            crate::eval::render_string_with(
+                &entry.source,
+                context,
+                "compose.source",
+                &partials,
+                crate::eval::Undefined::Strict,
+            )
+        })?;
+    }
+    prepare(&mut session)?;
+    if let Some((repo, root)) = project {
+        // Display metadata is evaluated while acquisition is still scoped and
+        // before callers can publish a ref or mutate the attachment.
+        if matches!(preparation, Preparation::Init) {
+            session.run(|context| template_note_context(template, context))?;
+            for (name, url) in &template.manifest.remotes {
+                session.run(|context| {
+                    crate::eval::render_string(url, context, &format!("remotes.{name}"), &partials)
+                })?;
+            }
+        }
+        if matches!(preparation, Preparation::Update) && Config::path_in(root).exists() {
+            let config = Config::load(root)?;
+            if config.template.source == source {
+                let id = TemplateId::resolve(source, config.template.id.as_deref())?;
+                let previous = repo
+                    .resolve_ref(&id.ref_name())?
+                    .map(|oid| repo.commit(oid))
+                    .transpose()?
+                    .and_then(|commit| Provenance::parse(&commit.message));
+                session.run(|context| {
+                    discover_migrations_context(template, context, previous.as_ref(), source)
+                })?;
+            }
+        }
+    }
+    let context = session.finish();
 
     let composed = if !template.manifest.compose.is_empty() {
         compose::render(
@@ -1099,6 +1247,33 @@ pub fn render(
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<Render, OpError> {
+    render_preparing(
+        project,
+        project_root,
+        config,
+        supplied,
+        dirty,
+        user,
+        access,
+        answering,
+        trust,
+        Preparation::Update,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_preparing(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    config: &Config,
+    supplied: crate::answers::SuppliedAnswers,
+    dirty: bool,
+    user: &UserConfig,
+    access: &Access,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
+    preparation: Preparation,
+) -> Result<Render, OpError> {
     let location = crate::config::source_location(&config.template.source, project_root);
     let rendered = render_files_from_location(
         Target::from_config(config, dirty),
@@ -1110,6 +1285,7 @@ pub fn render(
         answering,
         trust,
         None,
+        preparation,
     )?;
 
     rendered_tree(project, rendered)
@@ -1361,6 +1537,7 @@ pub fn init(
                 answering,
                 trust,
                 None,
+                Preparation::Init,
             )?;
             rendered_tree(project, files)
         },
@@ -1578,7 +1755,13 @@ fn init_using<T: std::borrow::Borrow<Resolved>>(
 fn template_note<T: std::borrow::Borrow<Resolved>>(
     rendered: &Render<T>,
 ) -> Result<Option<String>, OpError> {
-    let template = rendered.template.borrow();
+    template_note_context(rendered.template.borrow(), &rendered.context)
+}
+
+fn template_note_context(
+    template: &Resolved,
+    context: &Context,
+) -> Result<Option<String>, OpError> {
     let manifest = &template.manifest;
     if manifest.note.is_none() && manifest.note_file.is_none() {
         return Ok(None);
@@ -1590,12 +1773,12 @@ fn template_note<T: std::borrow::Borrow<Resolved>>(
         return manifest
             .note
             .as_ref()
-            .map(|text| crate::eval::render_string(text, &rendered.context, "note", &partials))
+            .map(|text| crate::eval::render_string(text, context, "note", &partials))
             .transpose()
             .map_err(Into::into);
     };
 
-    let path = crate::eval::render_string(declared, &rendered.context, "note_file", &partials)?;
+    let path = crate::eval::render_string(declared, context, "note_file", &partials)?;
     let path = path.trim();
 
     // A path that renders to nothing is a template choosing to say nothing for
@@ -1625,7 +1808,7 @@ fn template_note<T: std::borrow::Borrow<Resolved>>(
     // applies to files. Nothing is inferred from the content: an author who
     // wants interpolation names the `.jinja`.
     if path.ends_with(crate::render::TEMPLATE_SUFFIX) {
-        return crate::eval::render_string(&text, &rendered.context, path, &partials)
+        return crate::eval::render_string(&text, context, path, &partials)
             .map(Some)
             .map_err(Into::into);
     }
@@ -1641,24 +1824,22 @@ fn template_note<T: std::borrow::Borrow<Resolved>>(
 /// only validates the *shape* of `message`/`message_file`; evaluating either
 /// against a project's answers needs the [`Context`] this function has and
 /// [`crate::migration`] deliberately does not.
-fn migration_message<T: std::borrow::Borrow<Resolved>>(
+fn migration_message(
     migration: &Migration,
-    rendered: &Render<T>,
+    template: &Resolved,
+    context: &Context,
     partials: &std::sync::Arc<Partials>,
 ) -> Result<Option<String>, OpError> {
-    let template = rendered.template.borrow();
     let Some(declared) = &migration.message_file else {
         return migration
             .message
             .as_ref()
-            .map(|text| {
-                crate::eval::render_string(text, &rendered.context, &migration.path, partials)
-            })
+            .map(|text| crate::eval::render_string(text, context, &migration.path, partials))
             .transpose()
             .map_err(Into::into);
     };
 
-    let path = crate::eval::render_string(declared, &rendered.context, &migration.path, partials)?;
+    let path = crate::eval::render_string(declared, context, &migration.path, partials)?;
     let path = path.trim();
 
     // A path that renders to nothing is the migration choosing to say
@@ -1682,7 +1863,7 @@ fn migration_message<T: std::borrow::Borrow<Resolved>>(
     })?;
 
     if path.ends_with(crate::render::TEMPLATE_SUFFIX) {
-        return crate::eval::render_string(&text, &rendered.context, path, partials)
+        return crate::eval::render_string(&text, context, path, partials)
             .map(Some)
             .map_err(Into::into);
     }
@@ -1697,7 +1878,20 @@ pub fn discover_update_migrations<T: std::borrow::Borrow<Resolved>>(
     rendered: &Render<T>,
     previous: Option<&Recorded>,
 ) -> Result<Vec<AppliedMigration>, OpError> {
-    let template = rendered.template.borrow();
+    discover_migrations_context(
+        rendered.template.borrow(),
+        &rendered.context,
+        previous,
+        &rendered.provenance.source,
+    )
+}
+
+fn discover_migrations_context(
+    template: &Resolved,
+    context: &Context,
+    previous: Option<&Recorded>,
+    source: &str,
+) -> Result<Vec<AppliedMigration>, OpError> {
     let mut migrations = Vec::new();
     if let Some(old_commit) = previous.and_then(|recorded| recorded.revision) {
         let new_tree = template.tree;
@@ -1713,7 +1907,7 @@ pub fn discover_update_migrations<T: std::borrow::Borrow<Resolved>>(
             {
                 return Err(OpError::MissingTemplateRevision {
                     revision: old_commit,
-                    origin: rendered.provenance.source.clone(),
+                    origin: source.to_string(),
                 });
             }
             return Ok(migrations);
@@ -1726,7 +1920,7 @@ pub fn discover_update_migrations<T: std::borrow::Borrow<Resolved>>(
                 let text = String::from_utf8(bytes)
                     .map_err(|_| OpError::MigrationFileNotUtf8 { path: path.clone() })?;
                 let parsed = migration::parse(&text, &path)?;
-                let message = migration_message(&parsed, rendered, &partials)?;
+                let message = migration_message(&parsed, template, context, &partials)?;
                 migrations.push(AppliedMigration {
                     path,
                     message,
@@ -2422,7 +2616,7 @@ pub fn render_preview(
     let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let supplied = merge_answers(config.answers.clone(), overrides);
 
-    let rendered = render(
+    let rendered = render_preparing(
         project,
         project_root,
         &config,
@@ -2432,6 +2626,7 @@ pub fn render_preview(
         access,
         answering,
         trust,
+        Preparation::Files,
     )?;
 
     enforce_strict_answers(

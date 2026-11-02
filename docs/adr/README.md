@@ -55,3 +55,4 @@ explains the code that existed.
 | [044](044-symlink-artifacts.md) | Rendered artifacts and snapshot manifests preserve symbolic-link modes and opaque targets |
 | [045](045-source-object-cache.md) | Git source objects persist locally while symbolic refs resolve freshly |
 | [046](046-declarative-migration-tests.md) | Migration cases assert a real updated and merged project |
+| [047](047-demand-driven-data.md) | Actual expression access controls data acquisition and computed resolution |
