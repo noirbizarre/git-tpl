@@ -159,6 +159,7 @@ impl Access {
         let locks = root.join("locks");
         fs::create_dir_all(&entries).map_err(|e| io(&entries, e))?;
         fs::create_dir_all(&locks).map_err(|e| io(&locks, e))?;
+        #[cfg(unix)]
         private_directory(&root)?;
         let id = key.0.clone();
         let lease_path = locks.join(format!("{id}.lease"));
@@ -458,13 +459,10 @@ fn lock_file(path: &Path) -> Result<File, CacheError> {
         .map_err(|e| io(path, e))
 }
 
+#[cfg(unix)]
 fn private_directory(path: &Path) -> Result<(), CacheError> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|e| io(path, e))?;
-    }
-    Ok(())
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|e| io(path, e))
 }
 
 fn write_metadata(path: &Path, metadata: &Metadata) -> Result<(), CacheError> {
