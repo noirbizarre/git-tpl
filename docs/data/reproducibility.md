@@ -8,18 +8,17 @@ This page is about how much of that answer git-tpl can give.
 **The template.** `ref` resolves to a commit SHA, recorded in the trailers as `Template-Commit`.
 Rendering that revision again gives the same template files.
 
-**A template's parent, if it has one.** `[extends].rev` follows exactly the same rule as `ref` above — a tag or a
-SHA is a pin, a branch is rejected outright, and the resolved commit is recorded as `Template-Extends`, one per
-ancestor. This is not a second rule invented for inheritance; it is the same one, applied to the same kind of
-reference. See [ADR-034](../adr/034-template-inheritance.md).
+**A template's parent, if it has one.** `[extends].rev` accepts tags and commit IDs, rejecting branches.
+Only a full commit ID is immutable: a tag is refreshed online and may move.
+The resolved commit is recorded as `Template-Extends`, one per ancestor.
+See [ADR-034](../adr/034-template-inheritance.md).
 
 **Template data.** Read from the template's Git tree at that same commit, so it is pinned by the template
 revision.
 There is no second thing to pin, and no way for a template's files and its data to drift apart.
 
-**Git data pinned to a tag or a SHA.** Read from another repository's tree at a resolved commit, which is
-recorded.
-A `ref` naming a *branch* is the exception, and belongs in the next section.
+**Git data pinned to a full commit ID.** Read from another repository's tree at that immutable commit.
+A `ref` naming a branch or tag can move and belongs in the next section.
 
 **The answers.** Recorded in `.config/git.tpl.toml`, and digested into `Answers-Digest` so a change is detectable
 without reading the file.
@@ -31,7 +30,7 @@ Given those five, a rendering is reproducible — with one exception.
 
 ## What is not: remote data, or a moving ref
 
-A remote URL can serve different bytes tomorrow, and so can a branch.
+A remote URL can serve different bytes tomorrow, and branches and tags can move.
 Nothing about the template revision constrains either.
 
 Every contributing source is recorded, and for a remote source the digest of the bytes actually received is
@@ -88,14 +87,14 @@ Guaranteeing they will not change is the next section.
     ```toml
     [data.shared]
     source = "https://github.com/acme/tpl-data"
-    ref = "v2.1.0"
+    ref = "4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29"
     path = "licenses.toml"
     ```
 
     Reuses the mechanism the template itself uses, so the pin is a commit SHA and the provenance format already
     describes it.
-    A tag or a SHA is a pin; a branch is not, and is as irreproducible as a URL — the trailer records the commit
-    either way, so a difference is at least always explainable.
+    A full commit ID is immutable; branches and tags refresh online and may move.
+    The trailer records the resolved commit either way, making a difference explainable rather than preventing it.
     See [Git data](git.md).
 
 ## Determinism is the wider property
