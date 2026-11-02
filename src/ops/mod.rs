@@ -2341,17 +2341,23 @@ pub fn plan_migration_moves(
     }
 }
 
-/// How many commits the rendered ref holds.
+/// How many provenance-bearing renderings the ref holds, excluding migration scaffolding.
 fn count_renderings(project: &dyn GitBackend, tip: Oid) -> Result<usize, GitError> {
     let mut count = 0;
     let mut current = Some(tip);
+    let mut visited = 0;
     while let Some(oid) = current {
-        count += 1;
+        let commit = project.commit(oid)?;
+        if Provenance::parse(&commit.message).is_some() {
+            count += 1;
+        }
         // First parent only: the ref is a linear chain of renderings unless the
         // user merged a remote copy into it, and in that case the first-parent
         // count is still the meaningful "how many times did I render?".
-        current = project.commit(oid)?.parents.first().copied();
-        if count > 10_000 {
+        current = commit.parents.first().copied();
+        // The traversal guard counts all commits, including uncounted scaffolding.
+        visited += 1;
+        if visited > 10_000 {
             // A guard, not a limit anyone should reach. Better than looping
             // forever on a malformed ref.
             break;

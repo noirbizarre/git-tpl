@@ -20,6 +20,7 @@ metadata:
 A dirty-to-clean update can create a provenance-only commit even when rendered bytes are unchanged.
 `update --dry-run` validates migration moves without publishing commits or saving configuration.
 Personal defaults also seed standalone interactive `render` and `context`, but never noninteractive rendering.
+`status.renderingCount` counts provenance-bearing renderings, excluding intermediate migration rename commits.
 
 Git source objects persist across invocations; mutable refs refresh online with no stale fallback.
 Use global `--offline` only with cached full commit IDs for every URL source actually used, including ancestors/children/data.
