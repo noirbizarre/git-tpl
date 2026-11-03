@@ -657,6 +657,38 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
     let mut say = |text: String| lines.push(format!("    {text}"));
 
     match failure {
+        Failure::ContextMissing { path, expected } => {
+            say(format!(
+                "context {path:?}: expected {}, got <absent>",
+                expected
+                    .as_ref()
+                    .map(|value| serde_json::to_string(value).expect("context value JSON"))
+                    .unwrap_or_else(|| "a present value".into())
+            ));
+        }
+        Failure::ContextUnexpected { path, actual } => {
+            say(format!(
+                "context {path:?}: expected <absent>, got {}",
+                serde_json::to_string(actual).expect("context value JSON")
+            ));
+        }
+        Failure::ContextMismatch {
+            path,
+            expected,
+            actual,
+        } => {
+            say(format!(
+                "context {path:?}: expected {}, got {}",
+                serde_json::to_string(expected).expect("context value JSON"),
+                serde_json::to_string(actual).expect("context value JSON")
+            ));
+        }
+        Failure::ContextExpression { expression, actual } => {
+            say(format!(
+                "context expression {expression:?}: expected boolean true, got {}",
+                serde_json::to_string(actual).expect("context value JSON")
+            ));
+        }
         Failure::Migration {
             from,
             to,
@@ -882,6 +914,28 @@ fn snapshot_change_json(change: &SnapshotChange) -> serde_json::Value {
 /// emit. Renaming one is a breaking change.
 fn failure_json(failure: &Failure) -> serde_json::Value {
     match failure {
+        Failure::ContextMissing { path, expected } => {
+            let mut result =
+                serde_json::json!({"kind": "contextMissing", "path": path, "actualPresent": false});
+            // Omission means presence-only; an expected null remains a literal JSON null.
+            if let Some(expected) = expected {
+                result["expected"] = serde_json::json!(expected);
+            }
+            result
+        }
+        Failure::ContextUnexpected { path, actual } => serde_json::json!({
+            "kind": "contextUnexpected", "path": path, "actualPresent": true, "actual": actual,
+        }),
+        Failure::ContextMismatch {
+            path,
+            expected,
+            actual,
+        } => serde_json::json!({
+            "kind": "contextMismatch", "path": path, "actualPresent": true, "expected": expected, "actual": actual,
+        }),
+        Failure::ContextExpression { expression, actual } => serde_json::json!({
+            "kind": "contextExpression", "expression": expression, "expected": true, "actual": actual,
+        }),
         Failure::Migration {
             from,
             to,

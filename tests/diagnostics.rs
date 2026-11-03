@@ -105,6 +105,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::config::changed",
     "tpl::config::io",
     "tpl::config::missing",
+    "tpl::config::null_answer",
     "tpl::config::parse",
     "tpl::config::serialise",
     "tpl::data::cancelled",

@@ -20,6 +20,8 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Value {
+    /// An explicitly present null, distinct from a missing context name.
+    Null,
     /// A boolean.
     Bool(bool),
     /// A 64-bit signed integer.
@@ -62,6 +64,7 @@ impl Value {
     /// The type name, for error messages.
     pub fn type_name(&self) -> &'static str {
         match self {
+            Value::Null => "null",
             Value::Bool(_) => "a boolean",
             Value::Integer(_) => "an integer",
             Value::Float(_) => "a float",
@@ -73,10 +76,11 @@ impl Value {
 
     /// Whether the value is truthy, for `when` conditions.
     ///
-    /// Follows Jinja: empty string, empty collection, zero and `false` are
+    /// Follows Jinja: null, empty string, empty collection, zero and `false` are
     /// falsy. Anything else is truthy.
     pub fn is_truthy(&self) -> bool {
         match self {
+            Value::Null => false,
             Value::Bool(b) => *b,
             Value::Integer(i) => *i != 0,
             Value::Float(f) => *f != 0.0,
@@ -129,6 +133,7 @@ impl Value {
     /// `BTreeMap` gives us for free.
     pub fn canonical(&self) -> String {
         match self {
+            Value::Null => "n:".into(),
             Value::Bool(b) => format!("b:{b}"),
             Value::Integer(i) => format!("i:{i}"),
             // Floats are formatted with full precision so that two values that
@@ -153,6 +158,7 @@ impl Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Value::Null => write!(f, "null"),
             Value::Bool(b) => write!(f, "{b}"),
             Value::Integer(i) => write!(f, "{i}"),
             Value::Float(x) => write!(f, "{x}"),
@@ -230,7 +236,7 @@ impl From<toml::Value> for Value {
 impl From<serde_json::Value> for Value {
     fn from(v: serde_json::Value) -> Self {
         match v {
-            serde_json::Value::Null => Value::String(String::new()),
+            serde_json::Value::Null => Value::Null,
             serde_json::Value::Bool(b) => Value::Bool(b),
             serde_json::Value::Number(n) => match n.as_i64() {
                 Some(i) => Value::Integer(i),
@@ -252,10 +258,7 @@ impl From<serde_json::Value> for Value {
 impl From<noyalib::Value> for Value {
     fn from(v: noyalib::Value) -> Self {
         match v {
-            // A YAML null is a written-out absence, unlike a question that was
-            // never asked. Mapping it to the empty string keeps it a value the
-            // template can interpolate, matching what JSON `null` does.
-            noyalib::Value::Null => Value::String(String::new()),
+            noyalib::Value::Null => Value::Null,
             noyalib::Value::Bool(b) => Value::Bool(b),
             noyalib::Value::Number(n) => match n.as_i64() {
                 Some(i) => Value::Integer(i),
@@ -288,6 +291,7 @@ impl From<noyalib::Value> for Value {
 impl From<Value> for minijinja::Value {
     fn from(v: Value) -> Self {
         match v {
+            Value::Null => minijinja::Value::from(()),
             Value::Bool(b) => minijinja::Value::from(b),
             Value::Integer(i) => minijinja::Value::from(i),
             Value::Float(f) => minijinja::Value::from(f),
@@ -317,7 +321,9 @@ impl Value {
         use minijinja::value::ValueKind;
 
         Ok(match v.kind() {
-            ValueKind::Undefined | ValueKind::None => Value::String(String::new()),
+            ValueKind::None => Value::Null,
+            // Preserve lenient undefined conversion without turning missing values into explicit nulls.
+            ValueKind::Undefined => Value::String(String::new()),
             ValueKind::Bool => Value::Bool(v.is_true()),
             ValueKind::Number => {
                 if let Ok(i) = i64::try_from(v.clone()) {
@@ -465,6 +471,7 @@ mod tests {
     }
 
     #[rstest]
+    #[case(Value::Null)]
     #[case(Value::Integer(42))]
     #[case(Value::String("hello".into()))]
     #[case(Value::Array(vec![Value::Integer(1), Value::String("a".into())]))]
@@ -472,6 +479,29 @@ mod tests {
     fn values_survive_a_round_trip_through_minijinja(#[case] original: Value) {
         let mj: minijinja::Value = original.clone().into();
         assert_eq!(Value::from_minijinja(&mj).unwrap(), original);
+    }
+
+    #[test]
+    fn null_is_preserved_recursively_and_never_confused_with_undefined_or_empty_text() {
+        let json = serde_json::json!({"null": null, "items": [null, false, ""]});
+        let value = Value::from(json.clone());
+        assert_eq!(serde_json::to_value(&value).unwrap(), json);
+        assert_eq!(serde_json::from_value::<Value>(json).unwrap(), value);
+        let yaml: noyalib::Value =
+            noyalib::from_str("null: null\nitems: [null, false, '']\n").unwrap();
+        assert_eq!(Value::from(yaml), value);
+        let mj: minijinja::Value = value.clone().into();
+        assert_eq!(Value::from_minijinja(&mj).unwrap(), value);
+        assert_eq!(
+            Value::from_minijinja(&minijinja::Value::UNDEFINED).unwrap(),
+            Value::String(String::new())
+        );
+        assert!(!Value::Null.is_truthy());
+        assert_ne!(
+            Value::Null.canonical(),
+            Value::String(String::new()).canonical()
+        );
+        assert_ne!(Value::Null.canonical(), Value::Bool(false).canonical());
     }
 
     /// Issue #111: `+` on two sequences does not build a `Seq`, it builds

@@ -1,5 +1,11 @@
 # Answers from a file
 
+JSON/YAML answer files preserve null rather than converting it to an empty string.
+Question types remain non-nullable: a null answer fails type validation for an applicable question.
+The CLI text `--answer name=null` remains the string `null` for a string question.
+TOML project configuration cannot store null, including nested nulls; library callers receive
+`tpl::config::null_answer` rather than losing the value during serialization.
+
 Personal `[defaults]` pre-fill interactive prompts in standalone `render` and `context` as well as project commands.
 Repository-derived machine seeds still require a project, and personal defaults never apply under `--defaults`.
 

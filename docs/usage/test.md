@@ -53,6 +53,7 @@ absent = [".github/workflows/ci.yml"]
 | `expect.contains` | Path to the text that must appear in it. A bare string or an array. |
 | `expect.lacks` | Path to the text that must not appear in it. Same shape as `contains`. |
 | `expect.error` | A [diagnostic code](../reference/diagnostics.md) the render must fail with. |
+| `expect.context` | Presence, absence, typed equality and boolean assertions over the resolved context. |
 | `commands` | Setup, checks and teardown run around the rendering. See [Commands](#commands). |
 | `git` | Whether the sandbox `commands` runs in is an isolated Git repository, seeded with one commit. `false`/absent unless set. See [Git sandbox](#git-sandbox). |
 | `snapshot` | Whether this case is written and compared against a recorded snapshot. `false` unless set. See [Snapshots](#snapshots). |
@@ -75,6 +76,69 @@ An answer that names no question fails the case too, with `tpl::answers::unknown
 [Options](#options) below). A case's `[answers]` is hand-authored, not a recorded set that might outlive a dropped
 question, so an unrecognised key here is always the case's own mistake. See
 [ADR-029](../adr/029-test-case-answers-are-strict.md).
+
+## Context assertions
+
+Assert question applicability, defaults, explicit answers and computed values independently of rendered files:
+
+```toml
+[answers]
+feature_enabled = true
+
+[expect.context]
+present = ["feature_label"]
+absent = ["disabled_only"]
+expressions = ["{{ optional_value is defined and optional_value is none }}"]
+
+[expect.context.equals]
+feature_enabled = true
+feature_label = "Default label"
+computed_options = { enabled = false, items = [1, 2] }
+"data.settings.retries" = 3
+```
+
+`present` and `absent` check membership, never truthiness.
+Null, false, zero, empty strings, empty arrays and empty objects are all present values.
+`equals` requires presence and exact typed equality, recursively through arrays and objects.
+An integer differs from a string or float; object member order does not matter and extra members fail equality.
+Expected values are literal: a string containing `{{ ... }}` is still a string.
+
+Paths use dotted table members, such as `computed_options.enabled`, `data.settings.retries` or `template.name`.
+Quote dotted keys in TOML so they remain paths rather than nested expectation tables.
+Empty segments and bare `data`/`template` namespace paths are rejected.
+Use expressions for array indices, literal-dot keys and inspecting namespace objects.
+Each expression must be a whole `{{ ... }}` expression returning boolean true; false and nonboolean results fail.
+
+JSON and YAML cases can express native null equality, including null nested inside objects or arrays:
+
+```json
+{"expect": {"context": {"equals": {"optional_value": null, "payload": [null, false, ""]}}}}
+```
+
+TOML has no null literal; use the defined-and-none expression above.
+Missing names never equal null.
+A false `when` leaves a question absent even if its answer was supplied.
+With `default_when_skipped = true`, the question's default is visible and can be asserted,
+but remains outside recorded answers.
+Skipping because choices resolve to an empty list still leaves the question absent.
+
+Assertions share the render's evaluation session, partials and trust decisions.
+They demand only the computed values or data sources they access, including those unused by output files.
+Even `absent` resolves a declared root before checking: unloaded does not mean absent.
+Data/evaluation errors use the usual render-error reporting; value mismatches accumulate as assertion failures.
+The parent context does not include composed child templates' private contexts.
+
+Context assertions run with `--skip-commands`, without additional generated files or commands.
+`--write` neither checks them nor evaluates their dependencies.
+Migration cases assert the destination update's context with replayed answers and case overrides;
+their file expectations still inspect the merged project.
+Nonempty context assertions cannot be combined with `expect.error`.
+
+Human failures show the path or expression and expected/actual values, with `<absent>` distinct from null and `""`.
+JSON failure kinds are `contextMissing`, `contextUnexpected`, `contextMismatch` and `contextExpression`.
+Path failures carry `path` and `actualPresent`; present values use typed `actual` and equality uses typed `expected`.
+`contextMissing` omits `actual`; it includes `expected` only for equality, including a literal expected null.
+Expression failures carry `expression`, `expected: true` and the typed `actual` result.
 
 ## Options
 
@@ -109,7 +173,7 @@ The code is matched anywhere in the failure's cause chain.
 that is usually the one worth naming.
 Either passes.
 
-A case with `error` cannot also have output or migration expectations — there is no successful result for them to
+A case with `error` cannot also have output, context or migration expectations — there is no successful result to
 describe.
 Split it into two cases.
 

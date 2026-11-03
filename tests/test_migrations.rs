@@ -48,6 +48,51 @@ fn run(template: &Template, args: &[&str]) -> common::Output {
 }
 
 #[test]
+fn context_assertions_inspect_the_destination_update_with_replayed_answers() {
+    let dir = tempfile::tempdir().unwrap();
+    let template = template(dir.path());
+    template.repo.write(
+        "template.toml",
+        &format!("{MANIFEST}\n[computed]\ndestination_only = '{{{{ name }}}}'\n"),
+    );
+    case(
+        &template,
+        "context",
+        r#"
+snapshot = true
+[migration]
+from = "v1"
+[migration.answers]
+name = "recorded"
+[expect.context.equals]
+name = "recorded"
+destination_only = "recorded"
+"#,
+    );
+    run(&template, &["--skip-commands"]).failure();
+    run(&template, &["--write"]).success();
+    run(&template, &["--skip-commands"]).success();
+    case(
+        &template,
+        "context",
+        r#"
+snapshot = true
+[migration]
+from = "v1"
+[expect.context.equals]
+destination_only = "wrong"
+"#,
+    );
+    let result = run(&template, &[]).failure().json();
+    let failure = &result["cases"][0]["failures"][0];
+    assert_eq!(failure["kind"], "migration");
+    assert_eq!(failure["phase"], "assertions");
+    assert_eq!(failure["failure"]["kind"], "contextMismatch");
+    assert_eq!(failure["failure"]["actual"], "demo");
+    run(&template, &["--write"]).success();
+}
+
+#[test]
 fn a_move_preserves_committed_customisations_and_project_owned_files_without_touching_the_caller() {
     let dir = tempfile::tempdir().unwrap();
     let template = template(dir.path());

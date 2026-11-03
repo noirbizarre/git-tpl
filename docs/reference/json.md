@@ -1,5 +1,11 @@
 # JSON output
 
+Template test context assertions report `contextMissing`, `contextUnexpected`, `contextMismatch` and `contextExpression`.
+Path failures include `path` and `actualPresent`; missing values omit `actual` rather than encoding absence as null.
+Equality failures include typed `expected` and, when present, typed `actual`, preserving null recursively.
+Presence-only missing failures omit `expected`; expression failures include `expression`, `expected: true` and `actual`.
+See [context assertions](../usage/test.md#context-assertions).
+
 Render `files` entries retain `executable` (boolean) and add `mode`, an octal string:
 `"100644"`, `"100755"` or `"120000"`.
 For a symbolic link, `bytes` counts its opaque target bytes and `templated` is false.

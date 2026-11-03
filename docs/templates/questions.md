@@ -119,6 +119,10 @@ default = true
 A question whose `when` is false is **not asked, and has no value**.
 It is absent from the context, not null or false.
 
+Null values are preserved in data and computed results, but question types remain non-nullable.
+A null answer or a default expression returning `none` fails the applicable question's type validation.
+See [null and absence](context.md#null-and-absence).
+
 That distinction is deliberate. In a template:
 
 ```jinja

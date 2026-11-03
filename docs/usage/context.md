@@ -1,5 +1,9 @@
 # `git tpl context`
 
+Defined null values remain native null in JSON, distinct from omitted names and empty strings.
+`--eval '{{ value is defined and value is none }}'` checks an explicit null.
+Use native [context assertions](test.md#context-assertions) to include these checks in template test cases.
+
 Show what a template actually sees, and try one expression against it.
 
 ```sh

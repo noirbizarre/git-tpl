@@ -50,6 +50,17 @@ For `tpl::config::changed`, review configuration edited during prompting and ret
 For `tpl::compose::child_failed`, inspect JSON `error.causes` for nested stable codes and actionable help.
 Template test `expect.error` can match those inner codes.
 
+Template tests support `[expect.context]` with `present`/`absent` path arrays,
+an `equals` table of literal typed values, and `expressions` returning boolean true via `{{ ... }}`.
+Paths are dotted table members; use expressions for indexing and quote dotted equality keys in TOML.
+Missing differs from null, false and empty values; JSON/YAML preserve native null, while TOML uses `is none` expressions.
+Skipped questions are absent unless `default_when_skipped` exposes their default; question types remain non-nullable.
+Assertions demand only referenced computed/data values and run with `--skip-commands`; `--write` does not evaluate them.
+JSON failures use `contextMissing`, `contextUnexpected`, `contextMismatch`, or `contextExpression`.
+Path failures carry `actualPresent`; missing values omit `actual`, and typed equality failures include `expected`.
+Migration context assertions inspect the destination update, including replayed answers and overrides.
+For `tpl::config::null_answer`, replace the unrepresentable answer with a non-null value accepted by its question.
+
 Template tests may declare `[migration]` with required `from` and optional `to` references in the local template.
 Without `to`, the destination is the suite target, including its dirty tree.
 `migration.answers` supplies old answers (omission copies top-level answers); top-level answers override recorded ones.
