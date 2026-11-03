@@ -336,13 +336,16 @@ before it is word-split, against two names:
 name = "widget"
 
 [commands]
-rendered = ["{{ env.TEMPLATE_ROOT }}/tests/scripts/check.sh", "{{ answers.name }}"]
+rendered = ["'{{ env.TEMPLATE_ROOT }}/tests/scripts/check.sh' '{{ answers.name }}'"]
 ```
 
 A command with no `{{`/`{%` in it is never templated, so every case written before this existed keeps behaving
 identically. One that references a name that does not exist — `{{ answers.projct_name }}`, a typo — fails that
 command alone, reported the same way a missing program already is, rather than silently spawning it with an empty
 string in place of the mistake.
+
+Each list entry is a complete command, including its arguments.
+The quotes above preserve spaces; values containing quote characters need appropriate word-splitting escapes.
 
 This is not `$VAR` shell expansion: a literal `$FOO` in a command is still passed through unchanged. Only
 `{{ }}`/`{% %}` mean anything, because MiniJinja renders the string — no shell runs, and nothing about the command
@@ -390,9 +393,9 @@ for one invocation, pass `--skip-commands`; to disable them for yourself by defa
 configuration turned off. See [ADR-027](../adr/027-test-case-commands.md) for the full reasoning, including why
 this does not reopen the rule that a *rendered* project — `render`, `init`, `update` — cannot execute anything.
 
-Both also skip a case's [`git`](#git-sandbox): disabling `[commands]` disables everything the sandbox exists to
-serve, not only the four lists themselves — there is nothing left for an isolated repository to prove if nothing
-runs inside it.
+Both also skip an ordinary render case's [`git`](#git-sandbox), since no commands remain to use its sandbox.
+Migration cases still initialize isolated Git and run their migration assertions;
+only their external command lists are disabled.
 
 A case's [`trust`](#trust) rests on the same act of consent, extended to a template's declared remote data sources
 — see [ADR-028](../adr/028-test-case-trust.md).

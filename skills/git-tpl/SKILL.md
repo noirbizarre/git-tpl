@@ -17,6 +17,19 @@ metadata:
 
 # git-tpl
 
+A dirty-to-clean update can create a provenance-only commit even when rendered bytes are unchanged.
+`update --dry-run` validates migration moves without publishing commits or saving configuration.
+Personal defaults also seed standalone interactive `render` and `context`, but never noninteractive rendering.
+`status.renderingCount` counts provenance-bearing renderings, excluding intermediate migration rename commits.
+On `diff` and `show`, answer flags require `--dirty`; ordinary inspection never renders answer overrides.
+`show` fails with `tpl::ops::stdout_failed` on output write/flush errors, except deliberately closed pipes.
+For `tpl::manifest::invalid_compose`, supply `source`, `ref`, and a `from` naming a list question.
+Backport hunk IDs bind to both complete file contents; re-list after any edit, including distant changes.
+Native diff presentation uses the opened project repository regardless of ambient repository-selection variables.
+Merge supports detached `HEAD`, including fast-forward updates, without attaching it to a branch.
+Data acquisition follows actual expression access, including short-circuiting and skipped questions/paths.
+`context --eval` can demand otherwise unused data; a context dump evaluates all computed values, then shows loaded data.
+
 Git source objects persist across invocations; mutable refs refresh online with no stale fallback.
 Use global `--offline` only with cached full commit IDs for every URL source actually used, including ancestors/children/data.
 Local filesystem refs still work; HTTP data and publication (`fetch`, `push`, update `--push`/`tpl.autoPush`) are refused.

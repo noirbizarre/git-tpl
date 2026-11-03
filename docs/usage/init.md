@@ -107,7 +107,8 @@ Two cases cannot be folded that way, because they produce no merge commit to car
 A merge that conflicts commits nothing: the configuration is left staged, for the resolution commit you are about
 to make.
 
-Use `--no-merge` to stop after step 9 and wire it up yourself.
+Use `--no-merge` to skip the rendered-output merge and perform it yourself.
+The attachment configuration still gets its own commit on your current branch, advancing `HEAD`.
 
 `<template>` is any Git URL or local path.
 If you have defined [shortcuts](../configuration.md#shortcuts), a leading `<name>:` is expanded first — and it is

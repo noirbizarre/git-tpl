@@ -126,6 +126,7 @@ If the rendered tree is byte-identical to the current tip, `update` normally mak
 A newly crossed migration still needs a commit to advance its provenance, and a changed
 [composed child revision](../templates/composition.md) can require a provenance-only commit so its pinned commit
 is recorded even when its rendered output is unchanged.
+Committing an exact previously dirty snapshot also requires a provenance-only commit to record its clean boundary.
 
 Occasionally `update` adds two commits rather than one: a template [migration](../usage/update.md#migrations) that
 moves a file gets a content-identical rename commit first, so that a later `git merge` — plain, never one git-tpl
@@ -173,7 +174,9 @@ configuration gets a small commit of its own; it cannot go into `G0`, which is t
 byte-identical to the rendering.
 See [ADR-021](../adr/021-attachment-in-the-merge-commit.md).
 
-If you would rather wire it up yourself, `git tpl init --no-merge` stops after creating the ref.
+If you would rather merge the output yourself, `git tpl init --no-merge` creates the rendered ref
+and commits the attachment configuration on your current branch, advancing `HEAD`.
+It skips only the rendered-output merge.
 
 This is also how a project that already has files joins a template.
 There is no second command for it: the same merge runs, and Git reconciles the two sides by content rather than by

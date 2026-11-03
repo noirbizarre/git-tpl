@@ -72,6 +72,47 @@ fn a_shortcut_named_like_a_scheme_is_refused_when_the_file_is_read() {
 
 // --- [defaults] -------------------------------------------------------------
 
+#[test]
+fn standalone_interactive_prompts_receive_personal_defaults() {
+    struct AcceptSeed;
+    impl tpl::eval::Prompter for AcceptSeed {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &tpl::template::Question,
+            _: Option<&tpl::Value>,
+            seed: Option<&tpl::Value>,
+            _: Option<&[tpl::template::Choice]>,
+        ) -> Result<tpl::Value, tpl::eval::EvalError> {
+            assert_eq!(seed, Some(&tpl::Value::String("personal".into())));
+            Ok(seed.unwrap().clone())
+        }
+    }
+    let world = World::with_template(SEEDED, &[("AUTHORS.jinja", "{{ author }}\n")]);
+    let mut user = tpl::userconfig::UserConfig::default();
+    user.defaults
+        .insert("author".into(), tpl::Value::String("personal".into()));
+    let rendered = tpl::ops::render_files(
+        tpl::ops::Target {
+            source: &world.template.source(),
+            reference: None,
+            root: None,
+            dirty: false,
+        },
+        None,
+        Default::default(),
+        &user,
+        &tpl::git::cache::Access::new(None, false),
+        tpl::ops::Answering::Interactive(&mut AcceptSeed),
+        tpl::ops::Trust::always(),
+    )
+    .unwrap();
+    assert_eq!(
+        rendered.context.answers()["author"],
+        tpl::Value::String("personal".into())
+    );
+}
+
 /// A template whose only question has an answer the user would rather state
 /// once than retype in every project.
 const SEEDED: &str = r#"

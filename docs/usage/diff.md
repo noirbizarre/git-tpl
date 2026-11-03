@@ -1,5 +1,9 @@
 # `git tpl diff`
 
+Answer flags (`--answer`, `--answers-from`, `--defaults`, `--strict-answers`) require `--dirty`.
+The ordinary preview uses an existing rendering and cannot apply answer overrides.
+Native presentation is bound to the preview repository, including when ambient Git variables select another repository.
+
 What merging the template would change.
 
 For the template's source commit messages, use [`git tpl log [REF]`](log.md).
@@ -58,12 +62,17 @@ Neither starts Git's display tools or pager.
 
 ## The plain Git equivalent
 
+For compatible, conflict-free merges, this is an approximate native-Git equivalent:
+
 ```sh
 git diff HEAD "$(git merge-tree --write-tree HEAD refs/tpl/rust-library-template)"
 ```
 
-Identical.
-`git tpl diff` looks up the ref name and runs the merge for you; that is the whole of what it adds.
+`git tpl diff` computes its preview with the backend merge engine, which can differ from native Git
+and does not run external merge drivers.
+Native Git owns only the completed preview's presentation.
+The recipe above assumes `merge-tree` succeeds without conflicts;
+conflict output can contain more than a tree ID and cannot be passed verbatim as a revision.
 Pass `-- <path>` to narrow.
 Use whichever you prefer; nothing about git-tpl requires its own diff command.
 

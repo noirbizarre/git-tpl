@@ -197,6 +197,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::ops::no_such_directory",
     "tpl::ops::no_such_path",
     "tpl::ops::note_file_not_utf8",
+    "tpl::ops::stdout_failed",
     "tpl::ops::write_failed",
     "tpl::refs::invalid",
     "tpl::refs::underivable",

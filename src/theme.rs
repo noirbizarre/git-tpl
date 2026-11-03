@@ -596,6 +596,7 @@ mod tests {
     #[test]
     fn hunks_are_numbered_from_one_and_show_their_body() {
         let listed = [tpl::ops::Hunk {
+            file_digest: String::new(),
             index: 1,
             header: "@@ -4,6 +4,7 @@".to_string(),
             lines: vec![

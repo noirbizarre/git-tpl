@@ -965,6 +965,30 @@ fn a_dry_run_with_nothing_to_do_reports_up_to_date_as_json() {
 }
 
 // --- migrations --------------------------------------------------------
+#[test]
+fn dry_runs_and_updates_reject_the_same_invalid_migration_moves() {
+    for moves in [
+        "[[moves]]\nfrom = 'absent'\nto = 'new'\n",
+        "[[moves]]\nfrom = 'README.md'\nto = 'Cargo.toml'\n",
+        "[[moves]]\nfrom = 'README.md'\nto = 'new'\n[[moves]]\nfrom = 'README.md'\nto = 'other'\n",
+    ] {
+        let world = World::new();
+        world.init(&[]).success();
+        let before = world.project.working_state();
+        let tip = world.project.rev_parse(&world.ref_name());
+        world.add_migration("000-invalid.toml", moves);
+        let dry = tpl(
+            &world.project,
+            &["--json", "update", "--defaults", "--dry-run"],
+        )
+        .failure();
+        let real = tpl(&world.project, &["--json", "update", "--defaults"]).failure();
+        assert_eq!(dry.error_code(), real.error_code());
+        assert!(dry.error_code().starts_with("tpl::migration::"));
+        assert_eq!(world.project.working_state(), before);
+        assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+    }
+}
 //
 // See `docs/adr/024-template-migrations.md`. `World::add_migration` writes
 // directly to the template repository's `migrations/` directory; these

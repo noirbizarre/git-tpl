@@ -414,6 +414,7 @@ pub fn backport(
         answering,
         trust,
         recorded.as_ref().map(|r| r.composed.as_slice()),
+        super::Preparation::Files,
     )?;
 
     // The proof depends on the rendering we hold matching the one the ref

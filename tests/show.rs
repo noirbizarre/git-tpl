@@ -4,6 +4,48 @@ mod common;
 
 use common::{World, tpl};
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_failed_output_destination_makes_show_fail() {
+    let world = World::new();
+    world.init(&[]).success();
+    let output = std::process::Command::new(assert_cmd::cargo::cargo_bin!("git-tpl"))
+        .current_dir(&world.project.path)
+        .args(["show", "README.md"])
+        .env("XDG_CONFIG_HOME", world.project.config_home())
+        .stdout(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap(),
+        )
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("tpl::ops::stdout_failed"));
+}
+
+#[test]
+fn inspection_rejects_answer_flags_without_a_dirty_render() {
+    let world = World::new();
+    world.init(&[]).success();
+    for command in ["diff", "show"] {
+        for flags in [
+            vec!["--answer", "malformed"],
+            vec!["--answers-from", "absent.toml"],
+            vec!["--defaults"],
+            vec!["--strict-answers"],
+        ] {
+            let mut args = vec![command];
+            if command == "show" {
+                args.push("README.md");
+            }
+            args.extend(flags);
+            tpl(&world.project, &args).code(2).says("--dirty");
+        }
+    }
+}
+
 #[test]
 fn show_prints_the_template_version_of_a_file() {
     let world = World::new();

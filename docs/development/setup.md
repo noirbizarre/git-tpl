@@ -141,10 +141,11 @@ These are enforced, not merely intended. Breaking one fails a hook or a test.
 else makes it decorative. The `git-backend-isolation` prek hook is what actually stops that. If you need a Git
 capability the trait lacks, add it to the trait — not a `git2` import.
 
-**`update` does not modify `HEAD`, the index, or render output in the worktree.** An integration test asserts all
-three are unchanged, or change only in the one expected way: `.config/git.tpl.toml` itself, rewritten in place when
-a template question gains a newly recorded answer. The renderer writes to a Git tree builder and never to the
-filesystem, so a rendered file changing is structural — the test exists to keep it that way.
+**`update` does not modify `HEAD`, the index, or render output in the worktree.** Integration tests fingerprint them.
+The one allowed worktree edit is `.config/git.tpl.toml`, saved unstaged when resolved answers or composed child locks
+change semantically, including explicit answer overrides.
+Without a semantic change its exact bytes, comments and formatting are preserved.
+The renderer writes to a Git tree builder and never writes rendered files into the worktree.
 
 **Rendering is deterministic.** A test renders twice and compares trees. See
 [Determinism](../concepts/determinism.md).
@@ -155,9 +156,10 @@ template ref would destroy the merge base a user's branch depends on.
 **No code execution from templates.** No subprocess, no shell, no eval, no HTTP data-source access outside
 `src/data/`; git-backed network access (cloning or fetching a template) is confined to `src/git/libgit2.rs` by the
 `git2`-isolation invariant above.
-The deliberate process-execution exceptions are the test harness's `[commands]` (ADR-027)
-and native Git display of a completed diff preview in `src/commands/diff.rs` (ADR-039).
-Neither is available to a template render.
+The deliberate process-execution exceptions are the test harness's `[commands]` (ADR-027),
+native Git display of a completed diff preview in `src/commands/diff.rs` (ADR-039),
+and explicit native merge-abort recovery in the backend ([ADR-040](../adr/040-native-merge-abort.md)).
+None is available to rendering, init or update.
 
 ## Tests
 

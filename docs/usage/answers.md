@@ -1,5 +1,8 @@
 # Answers from a file
 
+Personal `[defaults]` pre-fill interactive prompts in standalone `render` and `context` as well as project commands.
+Repository-derived machine seeds still require a project, and personal defaults never apply under `--defaults`.
+
 `--answers-from <path>` supplies answers from a TOML, JSON or YAML file, on `git tpl init`, `git tpl update`,
 `git tpl render`, `git tpl context`, and on the `--dirty` previews of `git tpl diff` and `git tpl show`.
 

@@ -327,9 +327,14 @@ fn dry_run(
         .as_ref()
         .and_then(|commit| tpl::provenance::Provenance::parse(&commit.message));
     let migrations = ops::discover_update_migrations(&rendered, recorded.as_ref())?;
+    // A successful preflight must reject the same impossible moves as update.
+    ops::plan_migration_moves(&ctx.repo, previous_tree, &migrations)?;
     let child_changed = recorded
         .as_ref()
         .is_some_and(|previous| previous.composed != rendered.provenance.composed);
+    let became_clean = recorded
+        .as_ref()
+        .is_some_and(|previous| previous.dirty && !rendered.provenance.dirty);
     // Configuration may need lock repair even when rendered provenance has
     // not moved. Predict the same semantic edit as the real update.
     let composed: Vec<_> = rendered
@@ -343,7 +348,11 @@ fn dry_run(
     let revision_description =
         ops::describe_revision(&rendered.template.reference, rendered.template.revision);
 
-    if previous_tree == Some(rendered.tree) && migrations.is_empty() && !child_changed {
+    if previous_tree == Some(rendered.tree)
+        && migrations.is_empty()
+        && !child_changed
+        && !became_clean
+    {
         if answers_changed || composed_changed {
             ctx.out
                 .say("No rendered-ref commit would be made. Recorded answers or child locks would change.");

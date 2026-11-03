@@ -216,8 +216,8 @@ Default content + more
 
 The `<prefix>:` form matters only once the child declares its *own* `base.html.jinja` too, shadowing the
 parent's for a bare reference — the same trap [ADR-012](../adr/012-template-loader.md) built the prefix for.
-From inside that shadow, `parent:base.html.jinja` reaches the parent's original — one layer further out from
-wherever the reference is written, not from the leaf that is actually rendering:
+`parent:base.html.jinja` selects the second declaration of that name in the merged namespace,
+regardless of which file contains the reference:
 
 ```jinja
 {# the parent's base.html.jinja #}
@@ -238,6 +238,12 @@ wherever the reference is written, not from the leaf that is actually rendering:
 
 renders `content` to `Default content + child layer + page layer`: the parent's original, extended once by the
 child's own shadow, extended again by the child's page.
+
+For a three-layer chain `leaf → parent → base` where all three declare `base.html.jinja`,
+a bare `base.html.jinja` selects the leaf and `parent:base.html.jinja` selects the parent.
+That remains true inside the parent's own files: references are not relative to their file's repository.
+Consequently, repeating `extends "parent:base.html.jinja"` in the parent's declaration would select itself;
+use distinct partial names when a deeper chain needs to reach multiple ancestor implementations.
 
 A chain may be several templates deep (a `base`, extended by a language-specific template, extended by a
 project's own), up to a small depth limit, but each template names exactly one parent — no multiple inheritance,

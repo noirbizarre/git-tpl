@@ -4,7 +4,8 @@
 //! same value the template sees. There is no second pass and no second context.
 //! See `docs/adr/007-static-dependency-graph.md`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use crate::template::Value;
 
@@ -79,6 +80,10 @@ impl std::fmt::Display for Name {
 /// The resolved context.
 #[derive(Debug, Clone, Default)]
 pub struct Context {
+    // Only a live evaluation session installs this bridge. MiniJinja objects
+    // own snapshots and record demands; they never borrow repositories.
+    deferred: BTreeSet<Name>,
+    pending: Arc<Mutex<Option<Name>>>,
     answers: BTreeMap<String, Value>,
     computed: BTreeMap<String, Value>,
     data: BTreeMap<String, Value>,
@@ -93,6 +98,18 @@ pub struct Context {
 }
 
 impl Context {
+    pub(crate) fn defer(&mut self, names: impl IntoIterator<Item = Name>) {
+        self.deferred.extend(names);
+    }
+
+    pub(crate) fn take_demand(&self) -> Option<Name> {
+        self.pending.lock().expect("demand slot poisoned").take()
+    }
+
+    pub(crate) fn snapshot(mut self) -> Self {
+        self.deferred.clear();
+        self
+    }
     /// An empty context.
     pub fn new() -> Self {
         Self::default()
@@ -230,13 +247,43 @@ impl Context {
             root.insert(key.clone(), value.clone().into());
         }
 
-        root.insert("data".to_string(), Value::Table(self.data.clone()).into());
+        let missing: BTreeMap<_, _> = self
+            .deferred
+            .iter()
+            .filter(|name| !self.has(name))
+            .filter(|name| name.namespace == Namespace::Data)
+            .map(|name| (name.key.clone(), name.clone()))
+            .collect();
+        let data = self
+            .data
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone().into()))
+            .collect();
+        root.insert(
+            "data".to_string(),
+            minijinja::Value::from_object(DemandMap {
+                values: data,
+                missing,
+                pending: self.pending.clone(),
+            }),
+        );
         root.insert(
             "template".to_string(),
             Value::Table(self.template.clone()).into(),
         );
 
-        minijinja::Value::from_iter(root)
+        let missing = self
+            .deferred
+            .iter()
+            .filter(|name| !self.has(name))
+            .filter(|name| name.namespace == Namespace::Computed)
+            .map(|name| (name.key.clone(), name.clone()))
+            .collect();
+        minijinja::Value::from_object(DemandMap {
+            values: root,
+            missing,
+            pending: self.pending.clone(),
+        })
     }
 
     /// Computed values, by name.
@@ -296,6 +343,39 @@ impl Context {
             hasher.update(canonical.as_bytes());
         }
         format!("sha256:{}", hex::encode(hasher.finalize()))
+    }
+}
+
+#[derive(Debug)]
+struct DemandMap {
+    values: BTreeMap<String, minijinja::Value>,
+    missing: BTreeMap<String, Name>,
+    pending: Arc<Mutex<Option<Name>>>,
+}
+
+impl minijinja::value::Object for DemandMap {
+    fn get_value(self: &Arc<Self>, key: &minijinja::Value) -> Option<minijinja::Value> {
+        let key = key.as_str()?;
+        if let Some(name) = self.missing.get(key) {
+            // Execution after the first missing lookup is speculative. Loading
+            // further names could fetch data from a branch the real value skips.
+            self.pending
+                .lock()
+                .expect("demand slot poisoned")
+                .get_or_insert_with(|| name.clone());
+            return Some(minijinja::Value::UNDEFINED);
+        }
+        self.values.get(key).cloned()
+    }
+
+    fn enumerate(self: &Arc<Self>) -> minijinja::value::Enumerator {
+        let keys: BTreeSet<_> = self
+            .values
+            .keys()
+            .chain(self.missing.keys())
+            .cloned()
+            .collect();
+        minijinja::value::Enumerator::Values(keys.into_iter().map(minijinja::Value::from).collect())
     }
 }
 

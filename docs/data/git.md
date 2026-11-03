@@ -121,7 +121,8 @@ A `ref` naming a branch makes the same template revision render two different tr
 git-tpl records which commit it used, so the difference is always *explainable* — but explaining a difference is
 not the same as not having one.
 
-Pin a tag or a SHA when the rendering has to be reproducible.
+Pin a full commit ID when the rendering has to be reproducible.
+Tags, like branches, refresh online and may move; a tag is a named release reference rather than an immutable pin.
 See [Reproducibility](reproducibility.md).
 
 ## Failures

@@ -1,5 +1,7 @@
 # `git tpl status`
 
+The rendering count excludes internal migration rename commits and other commits without rendering provenance.
+
 What is attached, where it is, and whether anything is pending.
 
 Use [`git tpl log`](log.md) to read source commits up to the applied version,

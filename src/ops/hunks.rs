@@ -42,6 +42,8 @@ const CONTEXT: usize = 3;
 /// hunk the user cannot map back to a line of their file is not reviewable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hunk {
+    /// Digest of both complete file contents, binding approvals to their snapshot.
+    pub file_digest: String,
     /// Position in the file's hunk list, 0-based. What [`Picker`] returns.
     pub index: usize,
     /// The `@@ -a,b +c,d @@` line, in `git diff` form.
@@ -68,7 +70,7 @@ impl Hunk {
     ///
     /// The path is part of the hash so two files with an identical change do
     /// not share an id. Deterministic by construction (invariant 2): it hashes
-    /// text that [`hunks`] derived from the two file contents and nothing else.
+    /// text and full-file fingerprints derived from the two contents and nothing else.
     /// Opaque on purpose — callers copy it, they never build one.
     #[must_use]
     pub fn id(&self, path: &str) -> String {
@@ -78,6 +80,7 @@ impl Hunk {
         // A separator that cannot occur inside a line, so `a` + `bc` and
         // `ab` + `c` do not collide.
         for part in std::iter::once(path)
+            .chain(std::iter::once(self.file_digest.as_str()))
             .chain(std::iter::once(self.header.as_str()))
             .chain(self.lines.iter().map(String::as_str))
         {
@@ -194,6 +197,15 @@ pub enum Picking<'a> {
 /// deselecting it is how a named added file is dropped, and the caller needs no
 /// second code path for it.
 pub(super) fn hunks(rendered: &str, project: &str) -> Vec<Hunk> {
+    use sha2::{Digest, Sha256};
+    let mut fingerprint = Sha256::new();
+    // Length framing prevents a boundary shift between the two files from
+    // sharing a digest. Distant edits must invalidate even an unchanged hunk.
+    for text in [rendered, project] {
+        fingerprint.update((text.len() as u64).to_le_bytes());
+        fingerprint.update(text.as_bytes());
+    }
+    let file_digest = hex::encode(fingerprint.finalize());
     let old = split_lines(rendered);
     let new = split_lines(project);
     let diff = TextDiff::from_slices(&old, &new);
@@ -228,6 +240,7 @@ pub(super) fn hunks(rendered: &str, project: &str) -> Vec<Hunk> {
             }
 
             Hunk {
+                file_digest: file_digest.clone(),
                 index,
                 header: header(&group),
                 lines,
@@ -460,6 +473,9 @@ mod tests {
         let before = hunks(RENDERED, PROJECT);
         let after = hunks(RENDERED, &PROJECT.replace("ONE", "UNO"));
         assert_ne!(before[0].id("notes.md"), after[0].id("notes.md"));
+        // The second hunk itself is unchanged, but its file approval is stale.
+        assert_eq!(before[1].lines, after[1].lines);
+        assert_ne!(before[1].id("notes.md"), after[1].id("notes.md"));
     }
 
     #[test]

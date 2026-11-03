@@ -9,6 +9,32 @@ mod common;
 use common::{World, tpl};
 
 #[test]
+fn detached_head_merges_support_both_ancestry_shapes() {
+    use tpl::git::{GitBackend, LibGit2, Oid};
+    for divergent in [false, true] {
+        let repo = common::Repo::init("detached");
+        repo.write("base", "base");
+        repo.commit_all("base");
+        let base = repo.rev_parse("HEAD");
+        repo.write("incoming", "incoming");
+        repo.commit_all("incoming");
+        let target = Oid::parse(&repo.rev_parse("HEAD")).unwrap();
+        repo.git(&["checkout", "--detach", &base]);
+        if divergent {
+            repo.write("local", "local");
+            repo.commit_all("local");
+        }
+        let backend = LibGit2::discover(&repo.path).unwrap();
+        backend.merge(target, "merge detached", true, &[]).unwrap();
+        assert_eq!(repo.read("incoming"), "incoming");
+        assert!(repo.git(&["rev-parse", "--abbrev-ref", "HEAD"]) == "HEAD");
+        if !divergent {
+            assert_eq!(repo.rev_parse("HEAD"), target.to_hex());
+        }
+    }
+}
+
+#[test]
 fn fast_forward_preserves_local_files_and_publishes_only_after_safe_checkout() {
     use tpl::git::{GitBackend, LibGit2, Oid};
     for obstruction in ["tracked", "untracked", "ignored", "unrelated"] {

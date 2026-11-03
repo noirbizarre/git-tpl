@@ -23,10 +23,14 @@ The type is printed as well as the value.
 
 The expression sees everything a template body sees — answers, computed values, `data`, `template` — so it is
 also how you check that a `choices_from` resolved the way you expected.
+The expression itself is a demand root: it can load data that no rendered file used,
+while its untaken branches remain unloaded.
 
 ## The dump
 
-Without `--eval`, the whole context, split the way the renderer sees it:
+Without `--eval`, the context is split into these sections.
+The dump explicitly evaluates all computed values, including their accessed data dependencies.
+It shows materialized data only; serializing the dump does not load unrelated declarations.
 
 | Section | Contents |
 |---|---|
@@ -34,7 +38,7 @@ Without `--eval`, the whole context, split the way the renderer sees it:
 | `computed` | What `[computed]` produced. |
 | `Gated defaults` (JSON: `gatedDefaults`) | Defaults injected for skipped [`default_when_skipped`](../templates/questions.md#keeping-a-default-when-skipped) questions — not answers. |
 | `template` | `template.name`, `template.description`. |
-| `data` | What each data source parsed to. |
+| `data` | Sources accessed by questions, rendered files or the inspected computed values. |
 | `flat` (JSON only) | Answers, computed values and gated defaults merged, as a body sees them. |
 
 `flat` mirrors the renderer exactly.
@@ -67,9 +71,8 @@ This is a debugging aid, not a rendering concern: `Context` itself carries no su
 
 A `local` data source is resolved relative to the project root, and `context` has no project — like `render`, it
 builds the context in isolation.
-It fails with `tpl::data::needs_project` rather than being resolved against the working directory — that would
-make the same template, the same answers and the same revision report a different context depending on where the
-command was run.
+When accessed, it fails with `tpl::data::needs_project` rather than being resolved against the working directory.
+Otherwise, the same template, answers and revision would report different contexts depending on where the command ran.
 
 Use a `template` source for data that belongs to the template.
 

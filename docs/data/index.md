@@ -1,5 +1,8 @@
 # Data sources
 
+Template-local paths preserve dot-prefixed filenames such as `.settings.toml`.
+They are relative to the repository root; absolute paths and parent-directory traversal are rejected.
+
 Within a render, declarations sharing a resource reuse its bytes.
 Each declaration still requires its own authorization, checksum and format validation,
 and contributes its own provenance entry in load order.
@@ -191,6 +194,12 @@ Three questions using `data.licenses` cause one read.
 
 A source nothing references is never loaded at all — which is why a template can declare a remote source used
 only by one branch of a conditional without making every user pay for it.
+Actual execution controls loading: short-circuited expressions, skipped question defaults and choices,
+and bodies below suppressed paths do not acquire their data.
+Computed values are demand-resolved too, so an unused computed dependency does not force a fetch.
+Trust confirmation still inventories declared network sources together before questions;
+declining an unused source does not fail the render.
+See [ADR-047](../adr/047-demand-driven-data.md) for the evaluation boundary.
 
 ## Failures
 

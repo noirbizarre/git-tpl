@@ -1021,7 +1021,18 @@ impl<'a> Loader<'a> {
     /// repository a self-contained, pinned data source, with no way for a
     /// template's files and its data to drift apart.
     fn read_template_file(&self, name: &str, path: &str) -> Result<Vec<u8>, DataError> {
-        let normalised = path.trim_start_matches("./");
+        repo::check_path(path).map_err(|reason| DataError::Load {
+            name: name.to_string(),
+            location: path.to_string(),
+            kind: SourceKind::TemplateFile,
+            reason,
+        })?;
+        // Strip components, not a character set: `.settings.toml` names a
+        // different file from `settings.toml` and must keep its leading dot.
+        let mut normalised = path;
+        while let Some(rest) = normalised.strip_prefix("./") {
+            normalised = rest;
+        }
         let template = self.template_for(name);
         template
             .repo

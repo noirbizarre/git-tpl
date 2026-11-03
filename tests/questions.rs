@@ -469,7 +469,7 @@ source = "data/absent.toml"
 [computed]
 x = "{{ data.things }}"
 "#,
-        &[("x.txt", "x")],
+        &[("x.txt.jinja", "{{ x }}")],
     );
 
     world
@@ -488,7 +488,7 @@ fn init_names_the_data_source_whose_file_would_not_parse() {
         "name = \"bad\"\n[data.broken]\nsource = \"data/broken.toml\"\n[computed]\nx = \"{{ data.broken }}\"\n",
     );
     template.write("data/broken.toml", "not = = toml\n");
-    template.write("template/x.txt", "x");
+    template.write("template/x.txt.jinja", "{{ x }}");
     template.commit_all("feat: initial");
 
     let project = common::Repo::init_in(dir.path(), "project");

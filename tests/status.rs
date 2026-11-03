@@ -8,6 +8,28 @@
 
 mod common;
 
+#[test]
+fn migration_scaffolding_is_not_counted_as_a_rendering() {
+    let world = common::World::new();
+    world.init(&[]).success();
+    let readme = world.template.repo.read("template/README.md.jinja");
+    world.template.repo.remove("template/README.md.jinja");
+    world
+        .template
+        .repo
+        .write("template/docs/README.md.jinja", &readme);
+    world.template.repo.write("template/extra", "new output");
+    world.add_migration(
+        "000-move.toml",
+        "[[moves]]\nfrom = 'README.md'\nto = 'docs/README.md'\n",
+    );
+    common::tpl(&world.project, &["update", "--defaults"]).success();
+    let status = common::tpl(&world.project, &["--json", "status"])
+        .code(2)
+        .json();
+    assert_eq!(status["renderingCount"], 2);
+}
+
 use common::{World, tpl};
 
 /// The shape before anything has been rendered.

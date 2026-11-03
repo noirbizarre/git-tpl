@@ -279,7 +279,7 @@ fn a_cli_source_is_rebased_to_the_project_and_works_from_subdirectories() {
         &["log", "--json"],
     )
     .success();
-    tpl(&world.project, &["diff", "--defaults"]).success();
+    tpl(&world.project, &["diff"]).success();
 }
 
 #[test]

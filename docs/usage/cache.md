@@ -1,5 +1,7 @@
 # `git tpl cache`
 
+Unused data declarations do not acquire sources, including through unused computed values or untaken conditions.
+
 Git source objects are retained between invocations in bare repositories.
 Templates, inherited ancestors, composed children, Git data, and source history share this storage.
 Rendered output, answers, contexts, and authoritative template state never live here.
