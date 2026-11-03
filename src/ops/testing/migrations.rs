@@ -94,6 +94,7 @@ impl MigrationCase {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_captured<'a>(
     template: &'a Resolved,
     source: &str,
@@ -102,6 +103,8 @@ fn render_captured<'a>(
     supplied: crate::answers::SuppliedAnswers,
     user: &UserConfig,
     trusted: bool,
+    expect: Option<&ContextExpect>,
+    failures: &mut Vec<Failure>,
 ) -> Result<Render<&'a Resolved>, OpError> {
     // Historical endpoints can declare different sources; suite-target decisions cannot be replayed here.
     let decisions = declared_remotes(&template.manifest.data)
@@ -117,14 +120,15 @@ fn render_captured<'a>(
             )
         })
         .collect();
-    let rendered = render_resolved(
+    let rendered = context::render(
         template,
         source,
         Some((project, cwd)),
         supplied,
         user,
-        Answering::defaults(),
         Trust::decided(decisions),
+        expect,
+        failures,
     )?;
     Ok(Render {
         template,
@@ -304,7 +308,19 @@ pub(super) fn run_case(
             true,
             false,
             true,
-            |_, supplied| render_captured(&old, source, &project, cwd, supplied, user, case.trust),
+            |_, supplied| {
+                render_captured(
+                    &old,
+                    source,
+                    &project,
+                    cwd,
+                    supplied,
+                    user,
+                    case.trust,
+                    None,
+                    &mut Vec::new(),
+                )
+            },
         )?;
         if let Some(MergeOutcome::Conflicted { paths }) = initialized.merge {
             for path in paths {
@@ -315,6 +331,7 @@ pub(super) fn run_case(
         phase = "local-edits";
         local_edits(&project, migration)?;
         phase = "update";
+        let mut context_failures = Vec::new();
         let updated = ops::update_using(
             &project,
             cwd,
@@ -330,6 +347,8 @@ pub(super) fn run_case(
                     supplied,
                     user,
                     case.trust,
+                    (!write).then_some(&case.expect.context),
+                    &mut context_failures,
                 )
             },
         );
@@ -406,6 +425,7 @@ pub(super) fn run_case(
             progress,
         );
         if !write {
+            failures.extend(context_failures);
             check(&case.expect, &rendered, &mut failures);
             check_migrations(&case.expect, &migrations, &mut failures);
         }

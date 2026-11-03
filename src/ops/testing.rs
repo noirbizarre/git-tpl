@@ -4,7 +4,7 @@
 //! list of commands, and since ADR-028 whether it trusts the template's own
 //! declared remote data sources — written in the template repository and read
 //! by the same parsers `--answers-from` uses. The assertion vocabulary is
-//! closed to path/text expectations, diagnostic codes, snapshots, and migration
+//! closed to path/text and typed context expectations, diagnostic codes, snapshots, and migration
 //! discovery/messages (ADR-046). Migration cases update and merge a real project. A
 //! case's `[commands]` are the one place invariant 5 has a narrow, deliberate
 //! exception — the harness spawns the process, never a `render`, `init` or an
@@ -26,8 +26,7 @@ use miette::Diagnostic;
 use thiserror::Error;
 
 use super::{
-    Answering, OpError, RenderedOnce, Resolved, Target, Trust, enforce_strict_answers,
-    render_resolved, resolve,
+    Answering, OpError, RenderedOnce, Resolved, Target, Trust, enforce_strict_answers, resolve,
 };
 use crate::data::format::{Format, parse_value};
 use crate::data::{Decision, declared_remotes};
@@ -37,7 +36,9 @@ use crate::suggest::closest;
 use crate::template::{Value, is_expression};
 use crate::userconfig::UserConfig;
 
+mod context;
 mod migrations;
+pub use context::ContextExpect;
 pub use migrations::MigrationCase;
 
 /// The directory cases are read from when `--tests` does not say otherwise.
@@ -359,6 +360,8 @@ pub struct Case {
 /// which is why a case with no `[expect]` block is valid rather than useless.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Expect {
+    /// Assertions over the context visible to the template, independent of output files.
+    pub context: ContextExpect,
     /// Exact discovery order; omission differs from explicitly expecting no migrations.
     pub migrations: Option<Vec<String>>,
     /// Substrings in evaluated migration messages, keyed by migration path.
@@ -877,7 +880,14 @@ impl Expect {
         for key in table.keys() {
             if !matches!(
                 key.as_str(),
-                "files" | "absent" | "contains" | "lacks" | "error" | "migrations" | "messages"
+                "files"
+                    | "absent"
+                    | "contains"
+                    | "lacks"
+                    | "error"
+                    | "migrations"
+                    | "messages"
+                    | "context"
             ) {
                 let hint = closest(
                     key,
@@ -889,18 +899,20 @@ impl Expect {
                         "error",
                         "migrations",
                         "messages",
+                        "context",
                     ],
                 )
                 .map(|near| format!(" Did you mean `{near}`?"))
                 .unwrap_or_default();
                 return Err(shape(format!(
                     "`expect.{key}` is not an expectation.{hint} \
-                     A case may expect `files`, `absent`, `contains`, `lacks`, `error`, `migrations` or `messages`."
+                     A case may expect `files`, `absent`, `contains`, `lacks`, `error`, `migrations`, `messages` or `context`."
                 )));
             }
         }
 
         let files = string_array(table.get("files"), "expect.files", shape)?;
+        let context = ContextExpect::parse(table.get("context"), shape)?;
         let absent = string_array(table.get("absent"), "expect.absent", shape)?;
         let contains = substring_map(table, "contains", "expected text", shape)?;
         let lacks = substring_map(table, "lacks", "forbidden text", shape)?;
@@ -948,16 +960,18 @@ impl Expect {
                 || !contains.is_empty()
                 || !lacks.is_empty()
                 || migrations.is_some()
-                || !messages.is_empty())
+                || !messages.is_empty()
+                || !context.is_empty())
         {
             return Err(shape(
                 "`expect.error` says the render fails, so there is no rendering for \
-                 output or migration expectations to describe. Split them into two cases."
+                 output, context or migration expectations to describe. Split them into two cases."
                     .to_string(),
             ));
         }
 
         Ok(Expect {
+            context,
             migrations,
             messages,
             files,
@@ -1062,6 +1076,36 @@ fn string_map(
 /// and the author fixes them together rather than one per invocation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Failure {
+    /// A required context path does not exist.
+    ContextMissing {
+        /// The dotted context path.
+        path: String,
+        /// Equality target, if this was an equality assertion rather than presence alone.
+        expected: Option<Value>,
+    },
+    /// A context path expected to be absent exists.
+    ContextUnexpected {
+        /// The dotted context path.
+        path: String,
+        /// The present value, including explicit null.
+        actual: Value,
+    },
+    /// A context value differs in type or content.
+    ContextMismatch {
+        /// The dotted context path.
+        path: String,
+        /// The literal expected value.
+        expected: Value,
+        /// The resolved actual value.
+        actual: Value,
+    },
+    /// An expression did not evaluate to the boolean true.
+    ContextExpression {
+        /// The expression as written in the case.
+        expression: String,
+        /// False or a nonboolean value.
+        actual: Value,
+    },
     /// Preserve endpoint, stage and migration attribution for every underlying mismatch.
     Migration {
         /// The old reference selected by the case.
@@ -1819,16 +1863,18 @@ fn run_case(
             // `tpl::eval::unanswered`, which is a true statement about the
             // template.
             progress.case_status(&case.name, Status::Rendering);
-            let rendered = render_resolved(
+            let mut context_failures = Vec::new();
+            let rendered = context::render(
                 template,
                 source,
                 None,
                 crate::answers::typed(case.answers.clone()),
                 user,
-                Answering::defaults(),
                 // Replaying this case's own `trust` field, decided in `run`
                 // without asking anybody. See ADR-028.
                 Trust::decided(decisions.clone()),
+                Some(&case.expect.context),
+                &mut context_failures,
             );
 
             match rendered {
@@ -1897,6 +1943,7 @@ fn run_case(
                                 code: expected.clone(),
                             });
                         } else {
+                            failures.extend(context_failures);
                             check(&case.expect, &rendered_files, &mut failures);
                         }
                         if case.snapshot {
@@ -2064,16 +2111,18 @@ fn run_case_plain(
     // with no default fails as `tpl::eval::unanswered`, which is a true
     // statement about the template.
     progress.case_status(&case.name, Status::Rendering);
-    let rendered = render_resolved(
+    let mut context_failures = Vec::new();
+    let rendered = context::render(
         template,
         source,
         None,
         crate::answers::typed(case.answers.clone()),
         user,
-        Answering::defaults(),
         // Replaying this case's own `trust` field, decided in `run` without
         // asking anybody. See ADR-028.
         Trust::decided(decisions.clone()),
+        (!write).then_some(&case.expect.context),
+        &mut context_failures,
     );
 
     let mut failures = Vec::new();
@@ -2108,6 +2157,7 @@ fn run_case_plain(
                         code: expected.clone(),
                     });
                 } else if !write {
+                    failures.extend(context_failures);
                     // `--write` records what a case's rendering *is*; it
                     // does not also prove it. Checking `expect` here would
                     // make every recording pay the same cost as a full run,

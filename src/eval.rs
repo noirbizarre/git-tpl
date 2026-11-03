@@ -1019,7 +1019,7 @@ pub fn render_seed(
 }
 
 /// The inner expression of a template that is nothing but `{{ ... }}`.
-fn whole_expression(template: &str) -> Option<&str> {
+pub(crate) fn whole_expression(template: &str) -> Option<&str> {
     let trimmed = template.trim();
     let inner = trimmed.strip_prefix("{{")?.strip_suffix("}}")?;
     // Reject `{{ a }}{{ b }}`, which is two expressions and must be rendered

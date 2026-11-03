@@ -48,6 +48,19 @@ Whatever the data sources parsed to, as structured values — tables stay tables
 numbers.
 See [Data sources](../data/index.md).
 
+## Null and absence
+
+JSON/YAML null and a whole expression returning `none` preserve an explicit null value, including inside containers.
+Null is defined and falsy; it is distinct from a missing name, false, zero and an empty string.
+Use `value is defined` for presence and `value is none` for null.
+The JSON context dump retains null-valued members and omits missing names.
+
+This changes older null-to-empty-string normalization.
+If a template needs empty text for null, choose it explicitly, for example `{{ value if value is not none else '' }}`.
+Undefined expression results retain their existing lenient empty-string conversion; undefined is not null.
+Question types remain non-nullable, and TOML has no native null literal.
+See [context test assertions](../usage/test.md#context-assertions) and [ADR-048](../adr/048-context-assertions.md).
+
 ## How it is built
 
 ```mermaid

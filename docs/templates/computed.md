@@ -16,6 +16,10 @@ line_length = 100
 
 A value is an expression or a plain literal — see [Values, not strings](#values-not-strings).
 
+A whole expression returning `none` produces a defined null value, including when nested inside a collection.
+It remains null in context JSON and can be tested with `is none`.
+See [null and absence](context.md#null-and-absence) for compatibility and undefined-value behavior.
+
 Computed values sit in the same namespace as answers, so a template reads them the same way:
 
 ```jinja

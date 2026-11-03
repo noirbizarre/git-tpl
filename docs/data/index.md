@@ -1,5 +1,9 @@
 # Data sources
 
+JSON/YAML null is preserved as a typed null, including inside arrays and objects.
+It is distinct from a missing member and from empty text; templates can check `is defined` and `is none` separately.
+See [null and absence](../templates/context.md#null-and-absence) for the change from older normalization behavior.
+
 Template-local paths preserve dot-prefixed filenames such as `.settings.toml`.
 They are relative to the repository root; absolute paths and parent-directory traversal are rejected.
 

@@ -163,6 +163,7 @@ These two are about the flags rather than the template, so they are raised as er
 | Code | Meaning |
 |---|---|
 | `tpl::config::missing` | No `.config/git.tpl.toml`. The repository has no template attached. |
+| `tpl::config::null_answer` | A persisted answer contains null, which TOML cannot represent. Supply a non-null value accepted by the question. |
 | `tpl::config::changed` | Configuration changed during rendering; review it and rerun update. Nothing was published. |
 | `tpl::config::parse` | `.config/git.tpl.toml` is not valid TOML. |
 | `tpl::config::io` | It could not be read or written. |

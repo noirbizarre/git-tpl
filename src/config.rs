@@ -78,6 +78,17 @@ pub enum ConfigError {
     #[error("could not serialise the configuration")]
     #[diagnostic(code(tpl::config::serialise))]
     Serialise(#[from] toml::ser::Error),
+
+    /// TOML cannot preserve explicit nulls, even inside containers.
+    #[error("cannot persist null answer at `{path}` in TOML")]
+    #[diagnostic(
+        code(tpl::config::null_answer),
+        help("supply a non-null value accepted by the question's type")
+    )]
+    NullAnswer {
+        /// The location of the unrepresentable value.
+        path: String,
+    },
 }
 
 /// The project configuration.
@@ -284,6 +295,27 @@ impl Config {
 
     /// Render the configuration as TOML.
     pub fn to_toml(&self) -> Result<String, ConfigError> {
+        fn reject_null(value: &Value, path: String) -> Result<(), ConfigError> {
+            match value {
+                Value::Null => return Err(ConfigError::NullAnswer { path }),
+                Value::Array(items) => {
+                    for (index, item) in items.iter().enumerate() {
+                        reject_null(item, format!("{path}[{index}]"))?;
+                    }
+                }
+                Value::Table(items) => {
+                    for (key, item) in items {
+                        reject_null(item, format!("{path}.{key}"))?;
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+        // Do not let an unsupported TOML value disappear or acquire a different type on persistence.
+        for (key, value) in &self.answers {
+            reject_null(value, format!("answers.{key}"))?;
+        }
         let body = toml::to_string_pretty(self)?;
         // A header, because this file is meant to be read and hand-edited —
         // changing an answer and running `git tpl update` is the supported way
@@ -358,6 +390,24 @@ mod tests {
                 Value::String("async".into())
             ])
         );
+    }
+
+    #[test]
+    fn null_answers_are_rejected_recursively_instead_of_disappearing_from_toml() {
+        let mut config = Config::parse("[template]\nsource = '../tpl'", "test.toml").unwrap();
+        for (value, expected_path) in [
+            (Value::Null, "answers.example"),
+            (Value::Array(vec![Value::Null]), "answers.example[0]"),
+            (
+                Value::Table(BTreeMap::from([("key".into(), Value::Null)])),
+                "answers.example.key",
+            ),
+        ] {
+            config.answers.insert("example".into(), value);
+            assert!(
+                matches!(config.to_toml(), Err(ConfigError::NullAnswer { path }) if path == expected_path)
+            );
+        }
     }
 
     /// Writing must be lossless, or an `update` would silently drop an answer
