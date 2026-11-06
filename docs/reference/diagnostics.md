@@ -78,11 +78,12 @@ See [cache management and offline behavior](../usage/cache.md).
 | Code | Meaning |
 |---|---|
 | `tpl::log::dirty` | Applied input was uncommitted. Commit the template, update and merge a clean rendering. |
+| `tpl::log::invalid_range` | Unsupported range syntax. Use REF or A..B; omitted endpoints mean applied. |
 | `tpl::log::missing_commit` | The historical source commit is unavailable. Restore it or unshallow the source clone. |
 | `tpl::log::not_applied` | No rendering is reachable from `HEAD`. Merge the rendered ref first. |
 | `tpl::log::provenance` | Unusable applied provenance. Restore original history or merge a new valid rendering. |
 
-A missing rendered ref uses `tpl::ops::no_rendered_ref`; invalid target references use `tpl::git::no_such_revision`.
+A missing rendered ref uses `tpl::ops::no_rendered_ref`; invalid endpoint references use `tpl::git::no_such_revision`.
 
 ## Rendering
 

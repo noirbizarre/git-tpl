@@ -41,7 +41,7 @@ fn an_unmerged_rendering_does_not_advance_the_applied_log() {
 }
 
 #[test]
-fn explicit_template_branches_tags_and_shas_select_the_same_range() {
+fn explicit_template_branches_tags_and_shas_select_the_same_complete_history() {
     let world = World::new();
     world.init(&[]).success();
     world.move_template();
@@ -50,10 +50,17 @@ fn explicit_template_branches_tags_and_shas_select_the_same_range() {
         .repo
         .git(&["tag", "-a", "next", "-m", "next release"]);
     let target = world.template.repo.rev_parse("HEAD");
-    // Project main has a different history: resolving there would produce a wrong range.
-    for reference in ["main", "next", target.as_str()] {
+    // Project main has a different history: resolving there would select unrelated commits.
+    for reference in [
+        "main",
+        "next",
+        target.as_str(),
+        &target[..8],
+        "main~0",
+        "next^0",
+    ] {
         let result = entries(&world, &[reference]);
-        assert_eq!(result.len(), 1);
+        assert_eq!(result.len(), 2);
         assert_eq!(result[0]["commit"], target);
     }
     let output = tpl(&world.project, &["--json", "log", "missing-ref"])
@@ -68,8 +75,9 @@ fn equal_older_and_divergent_targets_follow_two_dot_semantics() {
     let older = world.template.repo.rev_parse("HEAD");
     world.move_template();
     world.init(&[]).success();
-    assert!(entries(&world, &["main"]).is_empty());
-    assert!(entries(&world, &[&older]).is_empty());
+    assert!(entries(&world, &["main.."]).is_empty());
+    assert_eq!(entries(&world, &[&format!("{older}..")]).len(), 1);
+    assert!(entries(&world, &[&format!("..{older}")]).is_empty());
     world
         .template
         .repo
@@ -78,17 +86,16 @@ fn equal_older_and_divergent_targets_follow_two_dot_semantics() {
         .template
         .repo
         .commit_all_at("fix: another line of development", DATE);
-    let output = tpl(&world.project, &["--json", "log", "other"])
+    let output = tpl(&world.project, &["--json", "log", "..other"])
         .success()
         .json();
     assert_eq!(output["targetDescendsFromApplied"], false);
     assert_eq!(output["entries"].as_array().unwrap().len(), 1);
-    assert!(
-        tpl(&world.project, &["log", "other"])
-            .success()
-            .stderr
-            .contains("target-only")
-    );
+    assert_eq!(entries(&world, &["other.."]).len(), 1);
+    let human = tpl(&world.project, &["log", "..other"]).success();
+    assert!(human.stderr.contains("Exclude:"));
+    assert!(human.stderr.contains("Target:"));
+    assert!(!human.stderr.contains("target-only"));
 }
 
 #[test]
@@ -110,11 +117,12 @@ fn source_merge_history_includes_both_parents_and_excludes_applied_ancestry() {
         .template
         .repo
         .git(&["merge", "--no-ff", "feature", "-m", "Merge feature"]);
-    let result = entries(&world, &["main", "--all"]);
+    let result = entries(&world, &["..main", "--all"]);
     assert_eq!(result.len(), 3);
     assert_eq!(result[0]["subject"], "Merge feature");
     assert!(result.iter().any(|entry| entry["commit"] == side));
-    assert_eq!(entries(&world, &["main", "-n", "1"])[0], result[0]);
+    assert_eq!(entries(&world, &["..main", "-n", "1"])[0], result[0]);
+    assert_eq!(entries(&world, &["main", "--all"]).len(), 4);
 }
 
 #[test]
@@ -166,6 +174,8 @@ fn inspection_preserves_dirty_project_and_source_state_and_all_refs() {
     let source_refs = world.template.repo.git(&["show-ref"]);
     let config = world.project.read(".git/config");
     tpl(&world.project, &["log", "main"]).success();
+    tpl(&world.project, &["log", "main.."]).success();
+    tpl(&world.project, &["log", "..main"]).success();
     assert_eq!(world.project.working_state(), project);
     assert_eq!(world.template.repo.working_state(), source);
     assert_eq!(world.project.git(&["show-ref"]), refs);
@@ -174,16 +184,132 @@ fn inspection_preserves_dirty_project_and_source_state_and_all_refs() {
 }
 
 #[test]
-fn remote_style_source_access_uses_an_ephemeral_clone() {
+fn remote_style_source_access_uses_cached_history_and_resolves_both_endpoints() {
     let world = World::new();
     tpl(
         &world.project,
         &["init", &file_url(&world.template.repo.path), "--defaults"],
     )
     .success();
+    world.template.repo.git(&["branch", "before"]);
     world.move_template();
-    assert_eq!(entries(&world, &["main"]).len(), 1);
+    world.template.repo.git(&["branch", "after"]);
+    assert_eq!(entries(&world, &["main"]).len(), 2);
+    assert_eq!(entries(&world, &["before..after"]).len(), 1);
+    assert_eq!(entries(&world, &["..main"]).len(), 1);
+    assert!(entries(&world, &["main.."]).is_empty());
     assert_eq!(entries(&world, &[]).len(), 1);
+    let before = world.template.repo.rev_parse("before");
+    let after = world.template.repo.rev_parse("after");
+    tpl(
+        &world.project,
+        &["--offline", "log", &format!("{before}..{after}")],
+    )
+    .success();
+    let json = tpl(
+        &world.project,
+        &["--json", "--offline", "log", "before..after"],
+    )
+    .code(1)
+    .json();
+    assert_eq!(json["error"]["code"], "tpl::cache::offline_reference");
+
+    world
+        .template
+        .repo
+        .git(&["checkout", "-q", "-b", "other", "before"]);
+    world
+        .template
+        .repo
+        .commit_all_at("fix: divergent remote branch", DATE);
+    let other = world.template.repo.rev_parse("HEAD");
+    assert_eq!(entries(&world, &["main..other"])[0]["commit"], other);
+    assert_eq!(entries(&world, &["other..main"])[0]["commit"], after);
+}
+
+#[test]
+fn omitted_endpoints_use_merged_source_history_and_ranges_match_native_git() {
+    let world = World::new();
+    let older = world.template.repo.rev_parse("HEAD");
+    world.move_template();
+    world.init(&[]).success();
+    let applied = world.template.repo.rev_parse("HEAD");
+    world
+        .template
+        .repo
+        .commit_all_at("fix: unmerged rendering", DATE);
+    tpl(&world.project, &["update", "--defaults"]).success();
+    world
+        .template
+        .repo
+        .commit_all_at("docs: newer than rendering", DATE);
+
+    for (expression, native) in [
+        (format!("{older}.."), format!("{older}..{applied}")),
+        ("main..".into(), format!("main..{applied}")),
+        ("..main".into(), format!("{applied}..main")),
+        ("..".into(), format!("{applied}..{applied}")),
+        (format!("{older}..main"), format!("{older}..main")),
+        ("main..main".into(), "main..main".into()),
+    ] {
+        let json = tpl(&world.project, &["--json", "log", &expression, "--all"])
+            .success()
+            .json();
+        assert_eq!(json["mode"], "range");
+        let actual: Vec<_> = json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| entry["commit"].as_str().unwrap())
+            .collect();
+        let expected = world
+            .template
+            .repo
+            .git(&["rev-list", "--topo-order", &native]);
+        assert_eq!(actual, expected.lines().collect::<Vec<_>>(), "{expression}");
+        if expression.starts_with("..") {
+            assert_eq!(json["exclude"]["commit"], applied);
+        }
+        if expression.ends_with("..") {
+            assert_eq!(json["target"]["commit"], applied);
+        }
+    }
+    let json = tpl(&world.project, &["--json", "log", "main"])
+        .success()
+        .json();
+    assert_eq!(json["mode"], "history");
+    assert!(json["exclude"].is_null());
+    assert_eq!(json["entries"].as_array().unwrap().len(), 4);
+}
+
+#[test]
+fn unsupported_range_syntax_has_an_actionable_diagnostic() {
+    let world = World::new();
+    world.init(&[]).success();
+    for expression in [
+        "main...",
+        "...main",
+        "main...main",
+        "main..main..main",
+        "....",
+    ] {
+        let json = tpl(&world.project, &["--json", "log", expression])
+            .code(1)
+            .json();
+        assert_eq!(
+            json["error"]["code"], "tpl::log::invalid_range",
+            "{expression}"
+        );
+    }
+    for expression in ["missing..", "..missing", "main..missing", "missing..main"] {
+        let json = tpl(&world.project, &["--json", "log", expression])
+            .code(1)
+            .json();
+        assert_eq!(
+            json["error"]["code"], "tpl::git::no_such_revision",
+            "{expression}"
+        );
+    }
 }
 
 #[test]

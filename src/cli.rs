@@ -104,7 +104,7 @@ pub enum Command {
     /// Show the template, the rendered ref, and what is pending
     Status(StatusArgs),
 
-    /// Show the applied template's source history, or changes toward a template ref
+    /// Show template source history through a revision or within a two-dot range
     Log(LogArgs),
 
     /// Show what merging the template would change
@@ -162,8 +162,8 @@ pub enum CacheCommand {
 /// `git tpl log`
 #[derive(Debug, clap::Args)]
 pub struct LogArgs {
-    /// Target branch, tag or commit in the template repository (shows applied..REF)
-    #[arg(value_name = "REF")]
+    /// Template revision or A..B range; omitted endpoints mean the applied template revision
+    #[arg(value_name = "REVISION")]
     pub reference: Option<String>,
 
     /// Maximum commits to show (20 by default)

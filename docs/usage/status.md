@@ -5,7 +5,7 @@ The rendering count excludes internal migration rename commits and other commits
 What is attached, where it is, and whether anything is pending.
 
 Use [`git tpl log`](log.md) to read source commits up to the applied version,
-or `git tpl log main` to inspect available template changes.
+or `git tpl log ..main` to inspect available template changes.
 
 ```sh
 git tpl status [--dirty]
