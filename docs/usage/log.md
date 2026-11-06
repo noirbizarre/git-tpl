@@ -3,33 +3,55 @@
 Read the template's source commits, formatted as a compact changelog.
 
 ```sh
-git tpl log [REF] [-n COUNT | --all] [--no-relative-date]
+git tpl log [REVISION] [-n COUNT | --all] [--no-relative-date]
 ```
 
 Without a reference, show the latest **20 source commits up to the template version applied to your current branch**.
 An update you rendered but have not merged does not advance that boundary.
 
-With a reference, show commits reachable from that reference but absent from the applied version:
+With a reference, show its complete reachable history.
+Use a two-dot range to exclude the left endpoint and all its ancestors from the right endpoint's history:
 
 ```sh
-git tpl log main                  # applied..main in the template repository
-git tpl log v2.0.0                # a template tag
-git tpl log a17b0b2               # a template commit
+git tpl log main                  # history through the upstream template branch
+git tpl log v2.0.0                # history through a template tag
+git tpl log a17b0b2               # history through a template commit
+git tpl log ..main                # upstream changes absent from the applied version
+git tpl log main..                # applied commits absent from upstream main
+git tpl log v1.0.0..v2.0.0         # changes between two template versions
 git tpl log --max-count 50        # more applied history; -n 50 is equivalent
-git tpl log main --all            # the complete selected range
+git tpl log main --all            # the complete upstream history
 ```
 
-`REF` is a single branch, tag or commit in the **template repository**, not your project.
-No rendering or merge is needed to inspect an available version.
+References resolve in the **template repository**, not your project.
+Branches, tags, commit IDs and single-revision expressions such as `main~2` are supported.
+Omitted range endpoints mean the applied template source revision:
+
+| Argument | History selection |
+| --- | --- |
+| none | All history through the applied revision |
+| `REF` | All history through REF |
+| `A..B` | Reachable from B, excluding A and its ancestors |
+| `A..` | A..applied |
+| `..B` | applied..B |
+| `..` | applied..applied (empty) |
+
+Three-dot ranges and multiple positional revisions are unsupported.
+An existing merged rendering with usable provenance is required for every selection.
+No additional rendering or merge is needed to inspect an available version.
+
+**Syntax change:** earlier versions treated `log REF` as `applied..REF`.
+Use `log ..REF` for that pending-updates view.
 
 ## Output
 
 ```console
-$ git tpl log main
+$ git tpl log ..main
 
 Template:  https://github.com/org/rust-template
 Applied:   v1.0.0 (8b3e7d1)
 Target:    main (4f2c1a9)
+Exclude:   v1.0.0 (8b3e7d1)
 
   4f2c1a9  feat(ci): add a release workflow  (2 days ago)
   a17b0b2  fix!: correct the package layout  (1 week ago)
@@ -79,9 +101,10 @@ Fetching a shared ref alone does not restore the local ref.
 Unusable provenance and dirty-worktree renderings are diagnosed rather than replaced with an older guessed baseline.
 Commit the template changes, update, and merge a clean rendering to inspect its exact source history.
 
-An explicit target uses Git's two-dot reachability semantics, `applied..target`.
-An equal or older target normally has no commits to show.
-A divergent target shows its target-only commits, with a message explaining that it does not descend from the applied version.
+Ranges use Git's literal two-dot reachability semantics, `left..right`.
+For `main..`, an upstream main that already contains the applied revision leaves no commits to show.
+For `..main`, an equal or older main normally leaves no commits to show.
+Divergent endpoints show commits reachable only from the right side after excluding the left side's ancestry.
 This is not a symmetric difference or a list of removals when downgrading.
 
 ## Source access and scope

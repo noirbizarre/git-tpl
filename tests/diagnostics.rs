@@ -168,6 +168,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::lint::unguarded_gate",
     "tpl::lint::unknown_code",
     "tpl::log::dirty",
+    "tpl::log::invalid_range",
     "tpl::log::missing_commit",
     "tpl::log::not_applied",
     "tpl::log::provenance",

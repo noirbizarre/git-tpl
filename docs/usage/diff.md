@@ -6,7 +6,7 @@ Native presentation is bound to the preview repository, including when ambient G
 
 What merging the template would change.
 
-For the template's source commit messages, use [`git tpl log [REF]`](log.md).
+For the template's source commit messages, use [`git tpl log [REVISION]`](log.md).
 
 ```sh
 git tpl diff [--stat] [--name-only] [--reverse] [--exit-code] [--dirty] [-- <path>...]

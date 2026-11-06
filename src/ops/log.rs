@@ -15,6 +15,18 @@ use crate::refs::TemplateId;
 /// Failures specific to locating an exact applied source-history boundary.
 #[derive(Debug, Error, Diagnostic)]
 pub enum LogError {
+    /// Only a single revision or one two-dot range is meaningful here.
+    #[error("invalid template history range `{reference}`")]
+    #[diagnostic(
+        code(tpl::log::invalid_range),
+        help(
+            "use REF or A..B; omitted range endpoints mean the applied template revision; three-dot ranges are unsupported"
+        )
+    )]
+    InvalidRange {
+        /// The expression the user supplied.
+        reference: String,
+    },
     /// No rendering is reachable from this branch.
     #[error("no rendering of `{ref_name}` has been applied to HEAD")]
     #[diagnostic(
@@ -111,16 +123,53 @@ pub struct Log {
     pub applied_reference: Option<String>,
     /// The applied source commit.
     pub applied_revision: Oid,
-    /// Explicit target name, absent in applied-history mode.
+    /// Selection syntax, independent of whether either endpoint was omitted.
+    pub mode: LogMode,
+    /// Included endpoint name; absent when it defaults to applied.
     pub target_reference: Option<String>,
     /// Target source commit (the applied commit in default mode).
     pub target_revision: Oid,
+    /// Excluded endpoint name; absent when it defaults to applied or there is no range.
+    pub exclude_reference: Option<String>,
+    /// Excluded source commit; absent outside range mode.
+    pub exclude_revision: Option<Oid>,
     /// Whether an explicit target descends from the applied source commit.
     pub target_descends_from_applied: bool,
     /// Effective limit; absent means unlimited.
     pub max_count: Option<usize>,
     /// Ordered source commits.
     pub entries: Vec<HistoryEntry>,
+}
+
+/// The syntax determines whether history has an excluded endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogMode {
+    /// No argument: history through the merged source revision.
+    Applied,
+    /// One explicit revision: its complete reachable history.
+    History,
+    /// Two-dot reachability subtraction.
+    Range,
+}
+
+fn selection(reference: Option<&str>) -> Result<(LogMode, Option<&str>, Option<&str>), LogError> {
+    let Some(reference) = reference else {
+        return Ok((LogMode::Applied, None, None));
+    };
+    if let Some((left, right)) = reference.split_once("..") {
+        // A third dot or another separator must not silently become part of an endpoint.
+        if left.ends_with('.') || right.starts_with('.') || right.contains("..") {
+            return Err(LogError::InvalidRange {
+                reference: reference.into(),
+            });
+        }
+        return Ok((
+            LogMode::Range,
+            (!right.is_empty()).then_some(right),
+            (!left.is_empty()).then_some(left),
+        ));
+    }
+    Ok((LogMode::History, Some(reference), None))
 }
 
 /// Inspect source history without rendering or changing any project state.
@@ -131,6 +180,7 @@ pub fn log(
     max_count: Option<usize>,
     access: &crate::git::cache::Access,
 ) -> Result<Log, OpError> {
+    let (mode, target_reference, exclude_reference) = selection(reference)?;
     let (id, ref_name) = identify(project_root)?;
     let tip = require_tip(project, &ref_name)?;
     let not_applied = || LogError::NotApplied {
@@ -167,8 +217,13 @@ pub fn log(
     // History remains useful before template.toml existed, or while its latest version is invalid.
     let location = crate::config::source_location(&source, project_root);
     let applied_id = applied_revision.to_hex();
-    let opened =
-        resolve::open_repository(&location, reference.or(Some(&applied_id)), false, access)?;
+    let first_reference = target_reference.or(exclude_reference);
+    let opened = resolve::open_repository(
+        &location,
+        first_reference.or(Some(&applied_id)),
+        false,
+        access,
+    )?;
     let repo = &opened.repo;
     repo.commit(applied_revision)
         .map_err(|error| LogError::MissingCommit {
@@ -176,19 +231,39 @@ pub fn log(
             origin: source.clone(),
             reason: error.to_string(),
         })?;
-    let target_revision = match reference {
-        Some(reference) => match &opened.resolved {
-            Some((_, revision)) => *revision,
-            None => repo.resolve_revision(reference, &source)?,
-        },
-        None => applied_revision,
+    let resolve_endpoint =
+        |opened: &resolve::OpenedRepository, reference: &str| match &opened.resolved {
+            Some((_, revision)) => Ok(*revision),
+            None => opened.repo.resolve_revision(reference, &source),
+        };
+    let first_revision = first_reference
+        .map(|reference| resolve_endpoint(&opened, reference))
+        .transpose()?;
+    // A second mutable endpoint must be frozen under the cache lock too, not resolved after a fetch races us.
+    // Keep both leases alive until the walk finishes, including when the endpoints name disjoint branches.
+    let second = match (target_reference, exclude_reference) {
+        (Some(target), Some(exclude)) if target != exclude => Some(resolve::open_repository(
+            &location,
+            Some(exclude),
+            false,
+            access,
+        )?),
+        _ => None,
+    };
+    let target_revision = target_reference
+        .and(first_revision)
+        .unwrap_or(applied_revision);
+    let exclude_revision = if mode == LogMode::Range {
+        Some(match (exclude_reference, &second) {
+            (Some(reference), Some(opened)) => resolve_endpoint(opened, reference)?,
+            (Some(_), None) => first_revision.expect("explicit endpoint was resolved"),
+            (None, _) => applied_revision,
+        })
+    } else {
+        None
     };
     let target_descends_from_applied = repo.is_ancestor(applied_revision, target_revision)?;
-    let entries = repo.history(
-        target_revision,
-        reference.map(|_| applied_revision),
-        max_count,
-    )?;
+    let entries = repo.history(target_revision, exclude_revision, max_count)?;
     Ok(Log {
         id,
         ref_name,
@@ -196,8 +271,11 @@ pub fn log(
         applied_rendering: applied.oid,
         applied_reference: recorded.reference,
         applied_revision,
-        target_reference: reference.map(str::to_string),
+        mode,
+        target_reference: target_reference.map(str::to_string),
         target_revision,
+        exclude_reference: exclude_reference.map(str::to_string),
+        exclude_revision,
         target_descends_from_applied,
         max_count,
         entries,

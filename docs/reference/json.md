@@ -112,14 +112,19 @@ See [the authoring loop](../usage/render.md#the-authoring-loop).
   "ref": "refs/tpl/github-com-org-template", "appliedRendering": "8b3e7d1…",
   "applied": { "reference": "v1.0.0", "commit": "a17b0b2…", "dirty": false },
   "target": { "reference": "main", "commit": "4f2c1a9…", "dirty": false },
+  "exclude": { "reference": "v1.0.0", "commit": "a17b0b2…", "dirty": false },
   "mode": "range", "targetDescendsFromApplied": true, "maxCount": 20,
   "entries": [{ "commit": "4f2c1a9…", "subject": "feat(ci): add a release workflow",
                 "committedAt": 1793284542,
                 "conventional": { "type": "feat", "scope": "ci", "breaking": false } }] }
 ```
 
-[`log`](../usage/log.md) uses `mode: "applied"` without a target reference and `mode: "range"` with one.
-In applied mode, `target` equals `applied`.
+[`log`](../usage/log.md) uses `mode: "applied"` without an argument,
+`mode: "history"` for a single explicit revision, and `mode: "range"` for two-dot syntax.
+The example above represents `git tpl log ..main`.
+`target` is the included endpoint; `exclude` is the excluded endpoint in range mode, otherwise `null`.
+In applied mode, `target` equals `applied`; in history mode, all ancestry of `target` is selected.
+Omitted range endpoints resolve to `applied`, including its reference (which may be `null`).
 `appliedRendering` is a project-side commit; the revision objects and entries identify source-side commits.
 All commit IDs are full hexadecimal strings; the examples abbreviate them for readability.
 The applied reference can be `null` when old provenance records only a source commit.
@@ -128,7 +133,8 @@ The applied reference can be `null` when old provenance records only a source co
 `entries` is always an ordered array, empty when there are no selected commits.
 `maxCount` is the effective count limit, or `null` with `--all`.
 `targetDescendsFromApplied` indicates whether the target includes the applied commit in its ancestry.
-Ranges use target reachability minus applied reachability, even when this field is false.
+Ranges use target reachability minus exclude reachability, even when this field is false.
+The ancestry field is metadata, not a filter on the selected history.
 
 `committedAt` is the signed Unix committer timestamp in seconds.
 Relative/absolute date preferences do not affect JSON.

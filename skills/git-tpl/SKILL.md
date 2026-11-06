@@ -319,7 +319,7 @@ See <https://noirbizarre.github.io/git-tpl/usage/fetch/#restoring-an-absent-loca
 
 ```sh
 git tpl status --json          # exit 2 / "templateMoved": true → work to do
-git tpl log main --json        # source commits in applied..main (main is a TEMPLATE ref)
+git tpl log ..main --json      # source commits in applied..main (main is a TEMPLATE ref)
 git tpl update --dry-run --json
 git tpl update --defaults --json
 git tpl diff --json --stat     # preview the merge; "conflicts" array if any
@@ -490,7 +490,7 @@ case-level `trust` only controls data loading during cases, and `test` has no in
 | `questions` | `git tpl --json questions <template>` | `questions[]{name,default,defaultIsExpression,when,choices,defaultWhenSkipped}` |
 | `init` | `git tpl init <template> [<dir>] [--init] [--answer k=v]... [--answers-from f]... [--defaults] [--dry-run]` | `id`,`ref`,`revision`,`commit`,`changes[]`,`merge{result,...}` |
 | `status` | `git tpl status` | `templateMoved`,`merged`,`availableReferenceDescription`,`availableCommit`,`renderedReference`,`worktreeClean`,`remote{ahead,behind}` |
-| `log` | `git tpl log [REF] [-n COUNT \| --all] [--no-relative-date]` | `applied`,`target`,`mode`,`entries[]{commit,subject,committedAt,conventional}` |
+| `log` | `git tpl log [REVISION] [-n COUNT \| --all] [--no-relative-date]` | `applied`,`target`,`exclude`,`mode`,`entries[]{commit,subject,committedAt,conventional}` |
 | `update` | `git tpl update [--answer k=v]... [--defaults] [--dry-run] [--push]` | `result`(`upToDate`\|`updated`\|`wouldUpdate`),`previousRevision`,`revision`,`changes[]`,`migrations[]`,`movedCommit` |
 | `pull` | `git tpl pull [update options except --dry-run] [--no-commit] [-m <msg>]` | `update{result,...}`,`merge{result,...}` |
 | `diff` | `git tpl diff [--stat] [--name-only] [--exit-code] [-- <path>...]` | `conflicts[]`,`changes[]{path,kind,insertions,deletions}` |
@@ -518,7 +518,11 @@ stderr carries human prose, warnings, and errors. `--json` and `--quiet` suppres
 but warnings and errors remain visible.
 
 `log` defaults to the latest 20 source commits up to the template rendering actually merged into `HEAD`.
-An explicit `REF` resolves in that rendering's source repository and shows `applied..REF`.
+An explicit `REF` resolves in that rendering's source repository and shows its full reachable history.
+Two-dot `A..B` selects B's history excluding A's ancestry; omitted endpoints mean the applied source revision.
+Use `..main` for pending updates and `main..` for applied commits absent from upstream main.
+Bare `..` is empty; three-dot ranges are unsupported.
+JSON modes are `applied`, `history`, and `range`; `target` is included and `exclude` is null outside ranges.
 Unmerged renderings do not advance the applied boundary.
 It reads only the main source's Git history; it does not render or combine inherited/composed sources.
 Use `diff` to determine the effect on the project.
@@ -526,7 +530,7 @@ Use `diff` to determine the effect on the project.
 `--no-relative-date` or `tpl.log.relativeDate=false` displays UTC dates and times to the minute;
 JSON always carries signed Unix committer seconds.
 Log-specific failures are `tpl::log::not_applied`, `tpl::log::provenance`, `tpl::log::dirty`,
-and `tpl::log::missing_commit`; inspect their help before retrying.
+`tpl::log::missing_commit`, and `tpl::log::invalid_range`; inspect their help before retrying.
 
 Without `--json`, `diff` patches and `--stat` output are displayed on stdout by native Git,
 honoring its pager (including delta), colors, diff drivers and textconv filters.

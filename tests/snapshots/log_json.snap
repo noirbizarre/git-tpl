@@ -19,6 +19,7 @@ exit: 0
     "commit": "[sha]",
     "dirty": false
   },
+  "exclude": null,
   "mode": "applied",
   "targetDescendsFromApplied": true,
   "maxCount": 1,
