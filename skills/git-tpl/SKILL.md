@@ -121,7 +121,14 @@ template  →  rendered Git ref  →  normal Git merge  →  updated project
 It advances the ref and saves `.config/git.tpl.toml` only for semantic answer or composed-child-lock changes,
 as an unstaged edit, on both updated and up-to-date outcomes.
 Otherwise it preserves the file's exact bytes, comments and formatting, even when rendered output changes.
-Applying the result is always a separate, explicit `git tpl merge` (or a plain `git merge refs/tpl/<id>`).
+Apply the result with an explicit `git tpl merge` (or plain `git merge refs/tpl/<id>`).
+`git tpl pull` explicitly combines update and merge, including integration after an unchanged rendering.
+It supports update options except `--dry-run`, plus merge's `--no-commit` and `--message`, but not `--abort`.
+Its JSON has `update` and `merge` objects with their usual payloads and one top-level `ok`.
+It refuses a missing local rendered ref before updating; recover original ancestry before retrying.
+Saved configuration edits remain unstaged; conflicts use normal Git recovery and report `merge.result: "conflicted"`.
+Push consent and ordering match update: push a new rendering before merging; failed push prevents integration.
+Later failures do not undo completed phases and use the usual diagnostic envelope without phase payloads.
 Ordinary `git push`/`git pull` ignore template refs; git-tpl does not push them by default.
 `tpl.autoPush` or `git tpl update --push` opts into pushing when update creates a rendered commit.
 Use `git tpl push` to publish an existing rendering or retry a failed push; fetching remains explicit.
@@ -157,7 +164,7 @@ do not assume it is preinstalled.
 1. **Always pass `--json`** before deciding what to do next, and branch on `error.code`, never on `error.message` —
    messages are free to change.
    The full catalogue is at <https://noirbizarre.github.io/git-tpl/reference/diagnostics/>.
-2. **Never run `init`/`update`/`show --dirty` interactively.**
+2. **Never run `init`/`update`/`pull`/`show --dirty` interactively.**
    Build the answer set first with `git tpl --json questions <template>`,
    then supply it with repeated `--answer k=v`, one or more `--answers-from file.toml`, and/or `--defaults`.
    Add `--strict-answers` to catch a typoed key instead of a silent warning.
@@ -229,7 +236,9 @@ do not assume it is preinstalled.
     If a template's note or README documents a `scripts/bootstrap.sh`, running it is a separate, deliberate step
     for you or the user, never something `init`/`update` does on your behalf.
 13. **Show the user what changes before it lands, and let them choose what leaves.**
-    Before `merge`, present the list of incoming template changes and wait for a go-ahead.
+     Before `merge`, present the list of incoming template changes and wait for a go-ahead.
+     An explicit user request to `pull` authorizes update and integration together.
+     Otherwise retain the preview-and-approval workflow; do not substitute pull for an inspection-only update.
     Before any backport, present the candidate changes and let the user pick which to send.
     Never merge, backport, push, or open a pull request on your own judgement of what is "obviously fine".
 14. **Never push a branch or open a pull request without explicit confirmation**, each time.
@@ -246,6 +255,7 @@ do not assume it is preinstalled.
 | Advance the rendered ref | `git tpl update --defaults --json` |
 | Preview what merging would change | `git tpl diff --json --stat` |
 | Apply the update | `git tpl merge --json` |
+| Update and apply with explicit authorization | `git tpl pull --defaults --json` |
 | See the template's side of a conflict | `git tpl show <path>` |
 | Synchronize (pull, then push back) | [Synchronize](#synchronize-a-project-with-its-template) |
 | List the local changes that could go upstream | `git tpl backport --list-hunks --json` |
@@ -482,6 +492,7 @@ case-level `trust` only controls data loading during cases, and `test` has no in
 | `status` | `git tpl status` | `templateMoved`,`merged`,`availableReferenceDescription`,`availableCommit`,`renderedReference`,`worktreeClean`,`remote{ahead,behind}` |
 | `log` | `git tpl log [REF] [-n COUNT \| --all] [--no-relative-date]` | `applied`,`target`,`mode`,`entries[]{commit,subject,committedAt,conventional}` |
 | `update` | `git tpl update [--answer k=v]... [--defaults] [--dry-run] [--push]` | `result`(`upToDate`\|`updated`\|`wouldUpdate`),`previousRevision`,`revision`,`changes[]`,`migrations[]`,`movedCommit` |
+| `pull` | `git tpl pull [update options except --dry-run] [--no-commit] [-m <msg>]` | `update{result,...}`,`merge{result,...}` |
 | `diff` | `git tpl diff [--stat] [--name-only] [--exit-code] [-- <path>...]` | `conflicts[]`,`changes[]{path,kind,insertions,deletions}` |
 | `merge` | `git tpl merge [--no-commit] [-m <msg>]` / `git tpl merge --abort` | `result`(`upToDate`\|`fastForward`\|`merged`\|`staged`\|`conflicted`\|`aborted`),`commit`,`conflicts[]` |
 | `show` | `git tpl show <path>` | no envelope — stdout **is** the file's bytes |

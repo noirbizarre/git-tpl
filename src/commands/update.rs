@@ -8,12 +8,26 @@ use super::{
     Session, answering, enforce_strict_answers, report_ignored, report_ignored_paths, supplied,
     trust,
 };
-use crate::cli::{GlobalArgs, UpdateArgs};
+use crate::cli::{GlobalArgs, UpdateArgs, UpdateOptions};
 use crate::prompt::{Confirmer, Interactive};
 use crate::theme::{change, command, field, headline, muted, note_block, transition};
 
 pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
+    let payload = execute(&ctx, &args.options, args.dry_run, false)?;
+    if global.json {
+        println!("{}", crate::report::success(payload));
+    }
+    Ok(crate::exit::SUCCESS)
+}
+
+/// Reuse update's policy and reporting without emitting an envelope between pull's phases.
+pub(super) fn execute(
+    ctx: &Session,
+    args: &UpdateOptions,
+    preview: bool,
+    pulling: bool,
+) -> Result<serde_json::Value, OpError> {
     let preferences = Preferences::load(&ctx.repo)?.with_overrides(Overrides {
         remote: args.remote.as_deref(),
         push: args.push,
@@ -35,12 +49,8 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
     let overrides = supplied(&args.answers)?;
 
-    if args.dry_run {
-        let payload = dry_run(&ctx, &config, &args, overrides, preferences.interactive)?;
-        if global.json {
-            println!("{}", crate::report::success(payload));
-        }
-        return Ok(crate::exit::SUCCESS);
+    if preview {
+        return dry_run(ctx, &config, args, overrides, preferences.interactive);
     }
 
     let mut prompter = Interactive;
@@ -181,8 +191,10 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
             // Stated every time. It is the single most surprising property of
             // the tool, and a user who does not believe it will not use it.
-            ctx.out
-                .say("Your rendered worktree files were not modified.");
+            if !pulling {
+                ctx.out
+                    .say("Your rendered worktree files were not modified.");
+            }
 
             if answers_changed {
                 // Configuration edits must be said rather than discovered
@@ -219,10 +231,12 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                 ));
             }
 
-            ctx.out.blank();
-            ctx.out.say("Run:");
-            ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
-            ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
+            if !pulling {
+                ctx.out.blank();
+                ctx.out.say("Run:");
+                ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
+                ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
+            }
 
             // The push happens under `--json` too. Only its prose is silenced;
             // suppressing the push itself would make the flag change behaviour
@@ -264,11 +278,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         }
     };
 
-    if global.json {
-        println!("{}", crate::report::success(payload));
-    }
-
-    Ok(crate::exit::SUCCESS)
+    Ok(payload)
 }
 
 /// Report what would change, without writing anything.
@@ -279,7 +289,7 @@ pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 fn dry_run(
     ctx: &Session,
     config: &tpl::config::Config,
-    args: &UpdateArgs,
+    args: &UpdateOptions,
     overrides: tpl::answers::SuppliedAnswers,
     interactive: bool,
 ) -> Result<serde_json::Value, OpError> {

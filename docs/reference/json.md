@@ -384,6 +384,26 @@ A dry-run `upToDate` report includes `changes: []`, `answersChanged` and `compos
 Both outcomes predict semantic configuration edits, including child-lock repairs without a new rendered commit.
 Neither dry-run outcome writes configuration or publishes a ref.
 
+### `pull`
+
+`pull` emits one success envelope with `update` and `merge` objects.
+Each contains the corresponding command's normal success payload, without a nested `ok` field:
+
+```json
+{ "ok": true,
+  "update": { "result": "upToDate", "id": "rust", "ref": "refs/tpl/rust",
+    "template": "../rust.tpl",
+    "revision": { "reference": "main", "commit": "937573e…", "dirty": false },
+    "answersChanged": false, "ignoredAnswers": [] },
+  "merge": { "result": "merged", "commit": "a17b0b2…", "id": "rust", "ref": "refs/tpl/rust" } }
+```
+
+Update's `upToDate` does not imply merge's `upToDate`: a previous rendering may still need integration.
+Conflicts report `ok: true` and `merge.result: "conflicted"`, with paths in `merge.conflicts`.
+Failures use the normal diagnostic envelope and underlying stable code.
+They do not include successful phase payloads; an update or push may already have completed before a later failure.
+Inspect the rendered ref and project state before retrying.
+
 ### `merge`
 
 ```json

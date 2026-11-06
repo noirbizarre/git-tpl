@@ -32,6 +32,7 @@ fn every_supported_shell_gets_a_completion_script() {
             out.stdout
         );
         assert!(out.stdout.contains("help"), "{shell}: {}", out.stdout);
+        assert!(out.stdout.contains("pull"), "{shell}: {}", out.stdout);
         assert!(!out.stdout.contains('\u{1b}'), "{shell}: {}", out.stdout);
     }
 }
@@ -92,6 +93,7 @@ fn each_visible_command_gets_its_own_page() {
     for command in [
         "init",
         "update",
+        "pull",
         "render",
         "lint",
         "questions",

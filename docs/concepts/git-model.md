@@ -76,6 +76,9 @@ git-tpl's own `merge` command is a convenience over the last one, and `diff` ove
 [`git tpl diff`](../usage/diff.md).
 You are never locked into them.
 
+[`git tpl pull`](../usage/pull.md) explicitly combines update and merge in one invocation.
+Its update phase preserves the same rendering invariants; its merge phase integrates the rendered history.
+
 It lives under `refs/tpl/` rather than `refs/heads/` on purpose: it is not a branch you check out, it should not
 appear in `git branch`, and it should not be pushed by a bare `git push`.
 
@@ -129,9 +132,9 @@ is recorded even when its rendered output is unchanged.
 Committing an exact previously dirty snapshot also requires a provenance-only commit to record its clean boundary.
 
 Occasionally `update` adds two commits rather than one: a template [migration](../usage/update.md#migrations) that
-moves a file gets a content-identical rename commit first, so that a later `git merge` — plain, never one git-tpl
-runs — reliably sees a rename rather than an unrelated delete and add, and the ordinary rendered commit follows as
-its child.
+moves a file gets a content-identical rename commit first,
+so that a later ordinary merge reliably sees a rename rather than an unrelated delete and add.
+The ordinary rendered commit follows as its child.
 Both are ordinary commits on the same append-only history; see [ADR-024](../adr/024-template-migrations.md).
 
 ## What `init` does to your history
