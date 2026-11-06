@@ -61,6 +61,14 @@ pkg-fmt = "zip"
 name = "git-tpl"
 path = "src/main.rs"
 
+# Keep line-number backtraces without full debugger information, reducing
+# compilation IO, link time and the size of dev/test outputs.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
 # The engine is a library first. The binary is one frontend; `gh-tpl` will be
 # another. Integration tests use both — the library for engine-level assertions,
 # the binary for output snapshots.

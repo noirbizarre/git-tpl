@@ -1,0 +1,40 @@
+[global]
+disable = [
+  # Usage examples intentionally show shell prompts without output.
+  "MD014",
+  # Repeated Configuration headings describe independent release services.
+  "MD024",
+  # AGENTS.md uses an ellipsis in "When you touch...".
+  "MD026",
+  # Allow raw HTML in the README's centered hero and badges.
+  # https://rumdl.dev/md033/
+  "MD033",
+  # Output and tree diagrams need no code language label.
+  "MD040",
+  # Allow the README's hero block before its first heading.
+  # https://rumdl.dev/md041/
+  "MD041",
+  # Documentation intentionally mixes indented snippets and fenced blocks.
+  "MD046",
+  # Preserve authored table spacing instead of enforcing a formatter style.
+  # https://rumdl.dev/md060/
+  "MD060",
+]
+
+# Only the documentation site uses MkDocs anchors and list parsing.
+[per-file-flavor]
+"docs/**/*.md" = "mkdocs"
+
+# Keep prose and headings within 120 columns, exempting tables and code blocks.
+# https://rumdl.dev/md013/
+[MD013]
+line-length = 120
+heading-line-length = 120
+tables = false
+code-blocks = false
+
+# --- project-specific ---------------------------------------------------
+#
+# Add per-project rule exceptions below this line, with a one-line description
+# followed by the rule's documentation link. Keep the default checks enabled.
+# Marker comments organize customizations; ordinary Git merges reconcile the whole file.

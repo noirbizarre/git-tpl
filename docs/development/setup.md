@@ -9,11 +9,11 @@
 git clone https://github.com/noirbizarre/git-tpl
 cd git-tpl
 mise install
-prek install
 ```
 
-`mise install` reads `mise.toml` and `mise.lock`, so you get the same tool versions CI does. `prek install` wires
-up the Git hooks.
+`mise install` reads `mise.toml` and `mise.lock`, so you get the same tool versions CI does.
+Its postinstall hook runs `prek install` to wire up both pre-commit and commit-message checks.
+Commitizen with Emotional validates commit messages; rumdl checks Markdown without rewriting it.
 
 Rustup supplies toolchains; mise declares stable Rust to enable native [Mr Boxington](https://mr-boxington.jdx.dev/)
 Cargo caching and compilation scheduling.

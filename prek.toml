@@ -14,35 +14,41 @@ hooks = [
 ]
 
 [[repos]]
-repo = "https://github.com/alessandrojcm/commitlint-pre-commit-hook"
-rev = "v9.21.0"
+repo = "https://github.com/commitizen-tools/commitizen"
+rev = "v4.19.3"
 
 [[repos.hooks]]
-id = "commitlint"
+id = "commitizen"
 stages = ["commit-msg"]
-additional_dependencies = ["@commitlint/config-conventional"]
+additional_dependencies = ["emotional==0.6.1"]
 
-# Enforces the 120-character ceiling from AGENTS.md's Style section. It
-# cannot judge whether a break under that ceiling is semantic or columnar —
-# that half of the convention is a review concern, not a lint one.
+# actionlint publishes its own hook manifest, so this uses that instead of
+# hand-rolling a `repo = "local"` block: version bumps are then visible to
+# `prek update` the same way the Commitizen hook above already is, and
+# `name`/`entry`/`files` come from the manifest — nothing to override. mise
+# is a requirement to work on this project at all, so its shims already put
+# the pinned `actionlint` on PATH; the `actionlint-system` hook's bare
+# `entry = "actionlint"` finds it without help.
 #
-# Include the README and contributor guide as well as docs and skills.
-# CHANGELOG.md remains excluded because git-cliff owns its formatting.
-[[repos]]
-repo = "https://github.com/DavidAnson/markdownlint-cli2"
-rev = "v0.23.2"
-hooks = [
-  { id = "markdownlint-cli2", files = "^(docs/.*\\.md|skills/.*\\.md|AGENTS\\.md|CONTRIBUTING\\.md|README\\.md)$", additional_dependencies = ["markdownlint-cli2-formatter-pretty"] },
-]
-
+# Keep `rev` in step with `tools.actionlint` in mise.lock: nothing enforces
+# the two agree.
+#
+# Suppressions are configured in .github/actionlint.yml, not here: the same
+# file serves `mise run lint:actions`, so the two cannot disagree.
 [[repos]]
 repo = "https://github.com/rhysd/actionlint"
 rev = "v1.7.12"
+hooks = [{ id = "actionlint-system" }]
 
-# Suppressions are configured in .github/actionlint.yml, not here: the same
-# file serves `mise run lint:actions`, so the two cannot disagree.
+# Checks Markdown style, including the 120-column prose limit. Scoped to the
+# project-authored docs, not CHANGELOG.md — that one is git-cliff's output,
+# not prose to wrap.
+[[repos]]
+repo = "https://github.com/rvben/rumdl-pre-commit"
+rev = "v0.3.2"
 [[repos.hooks]]
-id = "actionlint-system"
+id = "rumdl-check"
+files = "^(AGENTS\\.md|CONTRIBUTING\\.md|README\\.md|docs/.*\\.md|skills/.*\\.md)$"
 
 [[repos]]
 repo = "https://github.com/crate-ci/typos"

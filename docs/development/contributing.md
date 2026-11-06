@@ -11,9 +11,9 @@ does.
 
 ## Commits
 
-[Conventional Commits](https://www.conventionalcommits.org). Enforced by commitlint through a `commit-msg` hook,
-and used by git-cliff to generate the changelog, so the type you choose becomes a section heading in the release
-notes.
+[Conventional Commits](https://www.conventionalcommits.org), enforced by Commitizen with Emotional
+through a `commit-msg` hook and used by git-cliff to generate the changelog.
+The type you choose becomes a section heading in the release notes.
 
 ```
 feat(render): support conditional directories

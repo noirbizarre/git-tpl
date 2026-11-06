@@ -64,6 +64,9 @@ jobs:
           # may have moved since.
           ref: ${{ inputs.tag }}
           persist-credentials: false
+      # Setup precedes caches so their post-save hooks run before the drive is dismounted.
+      - uses: ./.github/actions/setup-windows
+        if: runner.os == 'Windows'
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -86,6 +89,11 @@ jobs:
         if: endsWith(matrix.target, 'windows-msvc')
         shell: bash
         run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "$GITHUB_ENV"
+
+      - name: Verify Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/actions/setup-windows/verify.ps1
 
       - name: Build
         shell: bash
