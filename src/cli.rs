@@ -83,6 +83,9 @@ pub enum Command {
     /// Re-render the template and advance refs/tpl/<id>
     Update(UpdateArgs),
 
+    /// Re-render the template and merge it into the current branch
+    Pull(PullArgs),
+
     /// Render a template into a directory, with no project and no ref
     Render(RenderArgs),
 
@@ -234,6 +237,17 @@ pub struct InitArgs {
 /// `git tpl update`
 #[derive(Debug, clap::Args)]
 pub struct UpdateArgs {
+    #[command(flatten)]
+    pub options: UpdateOptions,
+
+    /// Report what would change; write nothing
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+/// Rendering options shared by update and pull, without update-only previews.
+#[derive(Debug, clap::Args)]
+pub struct UpdateOptions {
     /// Render this revision instead of the configured one
     #[arg(long, value_name = "REF", conflicts_with = "dirty")]
     pub r#ref: Option<String>,
@@ -258,15 +272,26 @@ pub struct UpdateArgs {
     /// Per invocation: nothing is recorded, and the next run asks again.
     #[arg(long)]
     pub trust: bool,
+}
 
-    /// Report what would change; write nothing
+/// `git tpl pull`
+#[derive(Debug, clap::Args)]
+pub struct PullArgs {
+    #[command(flatten)]
+    pub update: UpdateOptions,
+
+    /// Stage the merge without committing (fast-forwards still advance HEAD)
     #[arg(long)]
-    pub dry_run: bool,
+    pub no_commit: bool,
+
+    /// Use this message for the merge commit
+    #[arg(short = 'm', long, value_name = "MSG")]
+    pub message: Option<String>,
 }
 
 /// Answer supply, shared by the commands that render.
 ///
-/// Flattened into `init` and `update` rather than made global: it is
+/// Flattened into rendering commands rather than made global: it is
 /// meaningless to `diff` and `push`, and a flag that is silently ignored is
 /// worse than one that is refused.
 #[derive(Debug, Clone, clap::Args)]

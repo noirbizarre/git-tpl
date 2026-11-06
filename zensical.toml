@@ -39,6 +39,7 @@ nav = [
   { "Usage" = [
     { "init" = "usage/init.md" },
     { "update" = "usage/update.md" },
+    { "pull" = "usage/pull.md" },
     { "render" = "usage/render.md" },
     { "lint" = "usage/lint.md" },
       { "test" = "usage/test.md" },

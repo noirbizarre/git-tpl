@@ -32,7 +32,20 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         !args.no_commit,
     )?;
 
-    match &outcome {
+    let payload = present(&ctx, &id, &outcome);
+    if global.json {
+        println!("{}", crate::report::success(payload));
+    }
+    Ok(crate::exit::SUCCESS)
+}
+
+/// Keep pull's conflict instructions and result tags identical to standalone merge.
+pub(super) fn present(
+    ctx: &Session,
+    id: &tpl::refs::TemplateId,
+    outcome: &MergeOutcome,
+) -> serde_json::Value {
+    match outcome {
         MergeOutcome::UpToDate => {
             ctx.out.say("Already up to date.");
         }
@@ -93,14 +106,10 @@ pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         }
     }
 
-    if global.json {
-        let mut payload = crate::report::merge(&outcome);
-        if let Some(map) = payload.as_object_mut() {
-            map.insert("id".into(), id.as_str().into());
-            map.insert("ref".into(), id.ref_name().into());
-        }
-        println!("{}", crate::report::success(payload));
+    let mut payload = crate::report::merge(outcome);
+    if let Some(map) = payload.as_object_mut() {
+        map.insert("id".into(), id.as_str().into());
+        map.insert("ref".into(), id.ref_name().into());
     }
-
-    Ok(crate::exit::SUCCESS)
+    payload
 }

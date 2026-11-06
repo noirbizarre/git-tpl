@@ -55,6 +55,24 @@ fn cache_help_exposes_management_and_global_network_policy() {
 }
 
 #[test]
+fn pull_help_exposes_update_and_integration_options_without_preview_or_abort() {
+    let output = help(&["help", "pull"], &[]);
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    for option in [
+        "--ref",
+        "--answers-from",
+        "--push",
+        "--no-commit",
+        "--message",
+    ] {
+        assert!(text.contains(option), "{text}");
+    }
+    assert!(!text.contains("--dry-run"), "{text}");
+    assert!(!text.contains("--abort"), "{text}");
+}
+
+#[test]
 fn help_uses_the_shared_color_environment_precedence() {
     for (env, colored) in [
         (vec![], false),

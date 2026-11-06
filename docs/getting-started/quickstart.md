@@ -168,6 +168,9 @@ git tpl diff     # exactly what merging would bring in
 git tpl merge    # bring it in
 ```
 
+When you want to update and merge immediately, [`git tpl pull`](../usage/pull.md) combines those steps.
+Use the separate commands above when you want to inspect the diff first.
+
 If you had also edited `README.md` yourself, that merge behaves like any other Git merge: it combines the
 changes, or it stops with conflict markers and you resolve them.
 `git merge --abort` works, because it *is* a merge.

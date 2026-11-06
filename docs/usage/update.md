@@ -17,6 +17,8 @@ Inspect the current ref before retrying; the failed publication does not save ne
 
 Re-render the template and advance `refs/tpl/<id>`.
 
+To update and immediately integrate in one invocation, use [`git tpl pull`](pull.md).
+
 Read source commit messages before updating with [`git tpl log <ref>`](log.md),
 where the reference names a branch, tag or commit in the template repository.
 

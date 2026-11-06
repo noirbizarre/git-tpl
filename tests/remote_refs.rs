@@ -67,11 +67,25 @@ fn a_server_rejected_ref_is_a_failure_for_explicit_and_automatic_pushes() {
         &format!("git://127.0.0.1:{port}/remote.git"),
     ]);
     world.move_template();
+    let head = world.project.rev_parse("HEAD");
     for args in [
         vec!["push"],
         vec!["--json", "push"],
+        vec!["--json", "pull", "--defaults", "--push"],
         vec!["--json", "update", "--defaults", "--push"],
     ] {
+        // Each rendering command needs fresh output: a failed push still
+        // publishes locally, and an unchanged update intentionally never pushes.
+        if args.contains(&"update") || args.contains(&"pull") {
+            world
+                .template
+                .repo
+                .write(&format!("template/{}.txt", args[1]), "new output\n");
+            world
+                .template
+                .repo
+                .commit_all("feat: change output before rejected push");
+        }
         let output = tpl(&world.project, &args).failure();
         if args.contains(&"--json") {
             assert_eq!(output.json()["error"]["code"], "tpl::git::push_rejected");
@@ -79,6 +93,7 @@ fn a_server_rejected_ref_is_a_failure_for_explicit_and_automatic_pushes() {
             output.says("pre-receive hook declined");
         }
         assert!(remote_refs(&remote).is_empty());
+        assert_eq!(world.project.rev_parse("HEAD"), head);
     }
 }
 
@@ -167,6 +182,51 @@ fn remote_refs(remote: &Repo) -> Vec<String> {
         .lines()
         .map(str::to_string)
         .collect()
+}
+
+#[test]
+fn pull_pushes_before_integration_only_when_a_rendering_is_created() {
+    for automatic in [false, true] {
+        let world = World::new();
+        world.init(&[]).success();
+        let remote = with_remote(&world);
+        if automatic {
+            world.project.git(&["config", "tpl.autoPush", "true"]);
+        }
+        world.move_template();
+        let mut args = vec!["--json", "pull", "--defaults"];
+        if !automatic {
+            args.push("--push");
+        }
+        let json = tpl(&world.project, &args).success().json();
+        assert_eq!(json["update"]["pushed"], "origin");
+        assert_eq!(json["merge"]["result"], "merged");
+        assert_eq!(
+            remote.rev_parse(&world.ref_name()),
+            world.project.rev_parse(&world.ref_name())
+        );
+        // A missing remote proves a no-op update does not attempt another push.
+        world.project.git(&["remote", "remove", "origin"]);
+        let json = tpl(&world.project, &args).success().json();
+        assert_eq!(json["update"]["result"], "upToDate");
+        assert_eq!(json["merge"]["result"], "upToDate");
+    }
+}
+
+#[test]
+fn offline_pull_with_push_is_refused_before_publication_or_integration() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    let before = world.project.working_state();
+    let tip = world.project.rev_parse(&world.ref_name());
+    tpl(
+        &world.project,
+        &["--offline", "pull", "--defaults", "--push"],
+    )
+    .failure();
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
 }
 
 /// A contributor who clones the project to fix a typo must not download
