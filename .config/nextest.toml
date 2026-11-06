@@ -3,6 +3,8 @@
 [profile.default]
 # Integration tests create real Git repositories on disk. A slow leg is normal
 # on a cold cache; a hung one is not.
+# Cap each test at four 30-second elapsed periods, even if it keeps printing progress.
+# This bounds hangs before they consume the full runner timeout.
 slow-timeout = { period = "30s", terminate-after = 4 }
 
 [profile.ci]

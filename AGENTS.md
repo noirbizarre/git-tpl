@@ -173,8 +173,8 @@ directories.
 **Documentation wraps on meaning, not on a column.** Break a line after a sentence, before a coordinating
 conjunction joining two independent clauses, or before the colon that introduces a list — never by filling to a
 fixed width. The one hard limit is 120 characters: past that, break at the nearest earlier clause boundary, not
-mid-word. `docs/` and this file both follow it; `markdownlint-cli2` (`mise run lint:md`, and the prek hook of the
-same name) enforces the 120-character ceiling, not the "semantic" half — that's a review concern.
+mid-word. `docs/` and this file both follow it; rumdl (`mise run lint:md`, and the `rumdl-check` prek hook)
+enforces the 120-character ceiling, not the "semantic" half — that's a review concern.
 
 ## Driving git-tpl without a person
 
@@ -200,8 +200,8 @@ The explicit `git tpl test` harness can run a case's `[commands]`, as described 
 
 ## Commits
 
-Conventional Commits, enforced by commitlint on `commit-msg`. The type becomes a changelog heading, so choose it as
-if someone will read it in release notes — because they will.
+Conventional Commits, enforced by Commitizen with Emotional on `commit-msg`.
+The type becomes a changelog heading, so choose it as if someone will read it in release notes — because they will.
 
 ## Before you push
 

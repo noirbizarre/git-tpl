@@ -63,6 +63,10 @@ stable
 MBX_GC_AUTO = "0"
 MBX_TARGET_VIEWS = "0"
 
+[hooks]
+# prek.toml declares both pre-commit and commit-msg as default hook types.
+postinstall = "prek install"
+
 # --- Everyday ---------------------------------------------------------------
 
 [tasks.default]
@@ -115,8 +119,13 @@ run = "actionlint .github/workflows/*.yaml"
 
 [tasks."lint:md"]
 description = "Lint the documentation Markdown"
-# Both packages must share an npm environment so the formatter can resolve.
-run = 'npx -y -p markdownlint-cli2 -p markdownlint-cli2-formatter-pretty -- markdownlint-cli2 "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/**/*.md" "skills/**/*.md"'
+# Install the native binary only for this task; keep its version aligned with
+# the rumdl pre-commit hook in prek.toml.
+tools = { rumdl = "0.3.2" }
+#
+# Scoped to the same files as the prek hook, minus CHANGELOG.md, which is
+# git-cliff's output, not prose to wrap.
+run = 'rumdl check "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/" "skills/"'
 
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"

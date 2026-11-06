@@ -7,9 +7,12 @@ to an exact build in `mise.lock`, so a local run and a CI run use the same
 versions.
 
 ```bash
-mise install          # the tools
-prek install          # the Git hooks
+mise install          # the tools and Git hooks
 ```
+
+Mise's postinstall hook installs both `pre-commit` and `commit-msg` hooks.
+Prek installs Commitizen and its Emotional plugin in an isolated Python environment
+for commit-message validation.
 
 ### Mr Boxington build caching
 
@@ -64,6 +67,7 @@ The Intel CI/release legs retain that fallback and their native runner.
 
 This feature disables automatic collection and managed target placement through
 `MBX_GC_AUTO=0` and `MBX_TARGET_VIEWS=0`, preserving existing outputs and caches.
+
 To demonstrate reuse, run equivalent builds in two fresh temporary target
 directories using `--target-dir` and `MBX_SUMMARY=full`. Require positive mbx hits
 on the second build; Cargo freshness is not a hit. Diagnose with
@@ -75,6 +79,18 @@ ownership by removing the added mise Rust entry, preserving unrelated pins and
 options. Remove any wrapper/scheduler and local activation overrides you added;
 keep the shared cache. Set the template answer `mbx = false` and review the
 rendered update to restore the original CI cache actions too.
+
+Dev and test profiles use `debug = "line-tables-only"` to retain line-number
+backtraces with smaller outputs and less linker IO. Full debugger variable
+information requires rebuilding with `CARGO_PROFILE_DEV_DEBUG=2` and/or
+`CARGO_PROFILE_TEST_DEBUG=2`. Changing profiles causes a one-time rebuild;
+old artifacts do not shrink in place.
+
+Check/Clippy produces metadata, whereas nextest needs linked test executables.
+Some compilation between them is expected. Features, compiler versions, coverage
+instrumentation and release profiles also change build inputs. Keep these stable
+within an edit loop and select Cargo packages/targets for focused checks; a
+nextest runtime filter alone does not necessarily reduce compiled targets.
 
 Clippy runs through `mise run lint` and in CI rather than in the commit hooks.
 Run `mise run ci` before pushing, as required by [AGENTS.md](AGENTS.md).
@@ -90,7 +106,7 @@ Run `mise run ci` before pushing, as required by [AGENTS.md](AGENTS.md).
 | `mise format` | Format |
 | `mise lint` | Clippy, warnings denied |
 | `mise lint:actions` | actionlint over the workflows |
-| `mise lint:md` | markdownlint over AGENTS.md, CONTRIBUTING.md, README.md, docs/ and skills/ |
+| `mise lint:md` | rumdl over AGENTS.md, CONTRIBUTING.md, README.md, docs/ and skills/ |
 | `mise spell` | typos |
 | `mise snapshots` | Review pending insta snapshots |
 | `mise check` | Everything that does not modify the working tree |
@@ -123,7 +139,9 @@ The full contribution guidelines live in [docs/development/contributing.md](docs
 ## Commits
 
 [Conventional Commits](https://www.conventionalcommits.org/), enforced by
-commitlint on `commit-msg`. The type selects the changelog section, and a `!`
+Commitizen with [Emotional](https://github.com/noirbizarre/emotional) on `commit-msg`.
+The hook checks Emotional's Conventional Commit grammar; subject case and length
+remain authoring conventions. The type selects the changelog section, and a `!`
 or a `BREAKING CHANGE:` footer drives the version bump — so the message is part
 of the release, not paperwork around it.
 
@@ -160,14 +178,25 @@ no CI results. That means the repository needs:
 
 - a `release` environment holding the variable `APP_CLIENT_ID` and the secret
   `APP_PRIVATE_KEY`.
+- the corresponding GitHub App installed on `noirbizarre/git-tpl` with
+  Contents and Pull requests read/write permissions.
 - squash-merge settings of `squash_merge_commit_title: PR_TITLE` and
   `squash_merge_commit_message: BLANK`, so the squash commit subject is the
   Conventional Commit title from `.github/ship.yml`.
-- Trusted Publishing configured on crates.io for the `release` environment.
+- ownership of the crate name `git-tpl` on crates.io, and Trusted Publishing
+  configured for owner `noirbizarre`, repository `git-tpl`, workflow
+  `publish-release.yaml`, and environment `release`.
 - a `homebrew` environment holding the secret `TAP_TOKEN`, scoped to push to
   `noirbizarre/homebrew-tap` only.
 - an `aur` environment holding the secret `AUR_SSH_PRIVATE_KEY`, for the AUR
-   account that owns the `git-tpl-bin` and `git-tpl` packages.
+  account that owns the `git-tpl-bin` and `git-tpl` packages.
+
+### Documentation and coverage services
+
+In GitHub Settings → Pages, set Source to **GitHub Actions** before the first
+documentation deployment. The workflow uses the `github-pages` environment.
+
+Onboard `noirbizarre/git-tpl` to Codecov for coverage and test results.
 
 ## This repository is attached to a template
 
