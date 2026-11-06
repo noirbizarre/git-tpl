@@ -45,7 +45,7 @@ users grep for — renaming one is a breaking change.
 
 ## Commits
 
-Conventional Commits, enforced by commitlint on `commit-msg`. The type becomes a
+Conventional Commits, enforced by Commitizen with Emotional on `commit-msg`. The type becomes a
 changelog heading, so choose it as if someone will read it in release notes —
 because they will.
 

@@ -1,6 +1,7 @@
 name: 📚 Documentation
 
 on:
+  pull_request:
   push:
     branches: [main]
     paths:
@@ -8,16 +9,6 @@ on:
       - zensical.toml
       - .github/workflows/docs.yaml
   workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-# Only one deployment at a time; never cancel one midway.
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   build:
@@ -36,13 +27,22 @@ jobs:
         run: mise run docs:build
 
       - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
         with:
           path: site
 
   deploy:
     name: 🚀 Deploy
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # Only one deployment at a time; never cancel one midway.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

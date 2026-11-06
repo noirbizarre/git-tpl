@@ -25,7 +25,7 @@ idiomatic_version_file_enable_tools = []
 [tools]
 # Keep the install request stable and lockable; runtime selection lives in env.
 rust = { version = "stable", components = ["rustfmt", "clippy"], mr_boxington = true }
-mr-boxington = "1.28.0"
+mr-boxington = "latest"
 actionlint = "latest"
 # actionlint silently skips its shellcheck integration when the binary is
 # absent, so without this a local run is NOT the CI run. Runners ship it.
@@ -53,7 +53,7 @@ cargo-binstall = "latest"
 #
 # An explicit version, never `latest`: mise applies a `minimum_release_age`, so
 # `latest` resolves to whatever is old enough rather than to the newest release.
-"cargo:git-tpl" = "0.11.0"
+"cargo:git-tpl" = "latest"
 # Zensical runs through `uvx`, so uv is the only thing the docs build needs.
 uv = "latest"
 # cargo-insta is declared on the task that uses it instead of here — see the
@@ -71,9 +71,13 @@ RUSTUP_TOOLCHAIN = """
 stable
 {%- endif -%}
 """
-# Opting into caching must not collect caches or adopt existing target outputs.
-MBX_GC_AUTO = "0"
+# Keep existing target outputs in place; automatic cache collection follows
+# the developer's global mbx policy (or mbx's bounded defaults).
 MBX_TARGET_VIEWS = "0"
+
+[hooks]
+# prek.toml declares both pre-commit and commit-msg as default hook types.
+postinstall = "prek install"
 
 # --- Everyday ---------------------------------------------------------------
 #
@@ -126,17 +130,13 @@ run = "actionlint .github/workflows/*.yaml"
 
 [tasks."lint:md"]
 description = "Lint the documentation Markdown"
-# Through `npx -p`, not mise's `npm:` backend: .markdownlint-cli2.yaml loads
-# the pretty output formatter alongside markdownlint-cli2 itself, and mise's
-# `npm:` backend installs each tool into its own isolated tree, where one
-# cannot resolve the other — `npx -p pkg1 -p pkg2` installs both into one
-# shared cache instead. Also not in [tools] for the usual reason: `mise
-# install`, what CI's other jobs run, would then pull an npm toolchain onto
-# every job in the matrix for a check only this task needs.
+# Install the native binary only for this task; keep its version aligned with
+# the rumdl pre-commit hook in prek.toml.
+tools = { rumdl = "0.3.2" }
 #
 # Scoped to the same files as the prek hook, minus CHANGELOG.md, which is
 # git-cliff's output, not prose to wrap.
-run = 'npx -y -p markdownlint-cli2 -p markdownlint-cli2-formatter-pretty -- markdownlint-cli2 "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/**/*.md"'
+run = 'rumdl check "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/"'
 
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"

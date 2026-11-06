@@ -53,6 +53,10 @@ jobs:
           # Every matrix leg uses the immutable run commit, even if a tag or main moves later.
           ref: ${{ github.sha }}
           persist-credentials: false
+      # Setup precedes caches so their post-save hooks run before the drive is dismounted.
+      - uses: ./.github/actions/setup-windows
+        if: runner.os == 'Windows'
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.build.target }}
@@ -67,6 +71,10 @@ jobs:
       - name: Statically link the MSVC C runtime
         if: endsWith(matrix.build.target, 'windows-msvc')
         run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "$GITHUB_ENV"
+      - name: Verify Windows build storage
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./.github/actions/setup-windows/verify.ps1
       - name: Build and stage the asset
         env:
           TARGET: ${{ matrix.build.target }}
