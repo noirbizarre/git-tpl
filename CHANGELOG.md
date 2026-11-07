@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0](https://github.com/noirbizarre/git-tpl/compare/0.16.0..0.17.0) - 2026-11-07
+
+### 💫 Features
+
+- **log**  🚨 **breaking** Align revision and range syntax with git log ([#215](https://github.com/noirbizarre/git-tpl/issues/215)) - ([9484ee3](https://github.com/noirbizarre/git-tpl/commit/9484ee39e87ed83bcf7c953bbdbd4374c168ca47))
+- **pull** Update and merge templates in one command ([#214](https://github.com/noirbizarre/git-tpl/issues/214)) - ([0b31a1e](https://github.com/noirbizarre/git-tpl/commit/0b31a1e77646c64c53b77cabf43d3452bbc10f93))
+- **test**  🚨 **breaking** Store snapshot paths and modes in TOML ([#217](https://github.com/noirbizarre/git-tpl/issues/217)) - ([ac7f31e](https://github.com/noirbizarre/git-tpl/commit/ac7f31e9405cd5ddf722a5ddab406b4bd9d72aaa))
+- **test**  🚨 **breaking** Assert evaluated context in template cases ([#211](https://github.com/noirbizarre/git-tpl/issues/211)) - ([1b44c00](https://github.com/noirbizarre/git-tpl/commit/1b44c00cae2928c33609f78bc00dacaea7941ebf))
+
+### 🏗️ Build
+
+- **deps** Update mise.lock - ([37f3d63](https://github.com/noirbizarre/git-tpl/commit/37f3d63980121c7dc3b74de8b54597a57762969f))
+- **deps** Update mise.lock - ([607a4f7](https://github.com/noirbizarre/git-tpl/commit/607a4f7e6b35059526f17d33f9f12337b2fed3b8))
+
+### 🧹 Chores
+
+- **tpl** Merge latest rust.tpl update - ([2a3acca](https://github.com/noirbizarre/git-tpl/commit/2a3accaefc7e2792fac11fa31fdc14b5d0d8c0a1))
+
+### Tpl
+
+- Render rust at main - ([0636758](https://github.com/noirbizarre/git-tpl/commit/06367582cbc7a15d07f0126da9384a1f65a2f2c2))
+
 ## [0.16.0](https://github.com/noirbizarre/git-tpl/compare/0.15.0..0.16.0) - 2026-11-03
 
 ### 💫 Features
