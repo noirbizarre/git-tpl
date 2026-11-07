@@ -542,6 +542,9 @@ this project has.
 
 Documented with the command, at [`git tpl test`](../usage/test.md).
 The payload carries `summary` and a `cases` array, each with its `failures`.
+Under `--write`, a case's `snapshot: "updated"` can mean only that its legacy `MANIFEST` was migrated or removed.
+Such a format-only update has an empty `snapshotChanges` array and counts toward `summary.snapshotsWritten`.
+An equal snapshot already using only `manifest.toml` reports `unchanged` and is not rewritten.
 
 ### `show`, `completion` and `man`
 

@@ -558,7 +558,7 @@ tests/
 ├── minimal.toml
 └── __snapshots__/
     └── minimal/
-        ├── MANIFEST
+        ├── manifest.toml
         └── files/
             ├── pyproject.toml
             └── src/thing/__init__.py
@@ -569,10 +569,51 @@ That is the whole point: a change to the template shows up as a `git diff` of th
 generated project's own language.
 Reviewing it needs no tooling and no Rust.
 
-`MANIFEST` records what the files themselves cannot — the executable bit, a digest and a size, one sorted line
-each.
+`manifest.toml` records the expected paths and Git modes, sorted by path:
+
+```toml
+version = 2
+
+[files]
+"pyproject.toml" = "100644"
+"src/thing/__init__.py" = "100644"
+```
+
+Modes are `100644` for ordinary files, `100755` for executables and `120000` for symbolic links.
 A Windows checkout loses the mode on disk, and a snapshot that silently stopped asserting on `chmod +x` would be
 worse than none.
+Symlink payloads are ordinary files containing the exact target bytes, never live links.
+An empty `[files]` table records an empty expected output.
+
+The manifest contains no checksums or sizes: changing expected contents does not change shared metadata.
+Independent PRs changing different file contents can therefore merge without conflicting on the manifest.
+The manifest and `files/` must still list the same paths.
+
+### Expectation-first testing
+
+Edit a file under `files/` to describe the output you want, then run `git tpl test`.
+The test reports an ordinary snapshot difference until you change the template to match the expectation.
+No manifest edit is needed for content changes, including binary content.
+When adding or deleting an expected file, also add or delete its `[files]` entry;
+when changing its kind or executable bit, edit its mode.
+
+Use plain `git tpl test` throughout this red/green loop.
+`--write` replaces expectations with the template's current output, so it would overwrite the desired failing example.
+
+### Legacy snapshots
+
+Existing `MANIFEST` snapshots remain readable, with their old checksums and sizes ignored.
+Their path inventories and modes are still checked.
+Plain comparison leaves them untouched; `--write` records `manifest.toml` and removes the legacy `MANIFEST`,
+even when the rendered output has not changed.
+This format-only update reports `updated` with no content or mode differences.
+If both files exist, `manifest.toml` is authoritative and the next write removes `MANIFEST`.
+
+To convert a deliberately failing expectation without replacing its contents, create `manifest.toml` as above,
+copy each legacy path and mode into `[files]`, and remove `MANIFEST` manually.
+Leave the payload files unchanged.
+
+### Recording behavior
 
 Things worth knowing:
 
@@ -649,8 +690,7 @@ rendering got. See [ADR-030](../adr/030-test-never-resolves-a-remote-template.md
 
 A snapshot is not subject to the project's `.gitignore` either, deliberately: it is data `--write` recorded, not a
 project file a render produced.
-An ordinary rule matching a snapshot's own filename — a bare `MANIFEST`, say, the Python `setup.py sdist`
-convention — does not stop it from being read back.
+An ordinary rule matching `manifest.toml` or the legacy `MANIFEST` does not stop it from being read back.
 
 ## In CI
 
