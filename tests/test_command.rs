@@ -51,9 +51,9 @@ fn symlink_snapshots_store_ordinary_target_bytes_and_compare_the_recorded_link_m
     );
     assert_eq!(std::fs::read(&payload).unwrap(), b"opaque.jinja");
     assert!(
-        std::fs::read_to_string(snapshot.join("MANIFEST"))
+        std::fs::read_to_string(snapshot.join("manifest.toml"))
             .unwrap()
-            .contains("120000 ")
+            .contains("\"120000\"")
     );
     run(&template, &[]).success();
     template.repo.commit_all("record link snapshot");
@@ -732,9 +732,12 @@ fn write_records_the_rendered_tree_under_the_snapshots_directory() {
         "name = \"thing\"\n",
         "the rendered bytes, verbatim, at the rendered path"
     );
-    let manifest = template.repo.read("tests/__snapshots__/minimal/MANIFEST");
-    assert!(manifest.starts_with("# git-tpl snapshot 1\n"), "{manifest}");
-    assert!(manifest.contains(" pyproject.toml\n"), "{manifest}");
+    let manifest = template
+        .repo
+        .read("tests/__snapshots__/minimal/manifest.toml");
+    let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+    assert_eq!(parsed["version"].as_integer(), Some(2));
+    assert_eq!(parsed["files"]["pyproject.toml"].as_str(), Some("100644"));
 }
 
 #[test]
@@ -756,10 +759,164 @@ fn a_recorded_snapshot_is_compared_on_the_next_run() {
     assert_eq!(output.json()["summary"]["snapshotsCompared"], 1);
 }
 
+#[test]
+fn independent_content_updates_leave_the_manifest_unchanged_and_merge_cleanly() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(
+        dir.path(),
+        "name = 'parallel'\n",
+        &[("a.txt", "old a\n"), ("b.txt", "old b\n")],
+    );
+    built.repo.write("tests/c.toml", "snapshot = true\n");
+    built.repo.commit_all("test: a case");
+    run(&built, &["--write"]).success();
+    built.repo.commit_all("test: base snapshot");
+    let manifest = built.repo.read("tests/__snapshots__/c/manifest.toml");
+
+    built.repo.git(&["checkout", "-b", "change-a"]);
+    built
+        .repo
+        .write("template/a.txt", "new a, different length\n");
+    run(&built, &["--write"]).success();
+    assert_eq!(
+        built.repo.read("tests/__snapshots__/c/manifest.toml"),
+        manifest
+    );
+    built.repo.commit_all("test: change a");
+
+    built.repo.git(&["checkout", "-b", "change-b", "main"]);
+    built.repo.write("template/b.txt", "new b\n");
+    run(&built, &["--write"]).success();
+    assert_eq!(
+        built.repo.read("tests/__snapshots__/c/manifest.toml"),
+        manifest
+    );
+    built.repo.commit_all("test: change b");
+    built.repo.git(&["merge", "--no-edit", "change-a"]);
+    assert_eq!(
+        built.repo.read("tests/__snapshots__/c/manifest.toml"),
+        manifest
+    );
+    run(&built, &[]).success();
+}
+
+#[test]
+fn legacy_snapshots_allow_content_edits_and_migrate_only_on_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = Template::minimal(dir.path(), "name = 'legacy'\n", &[("a.txt", "old\n")]);
+    built.repo.write("tests/c.toml", "snapshot = true\n");
+    let legacy = "# git-tpl snapshot 1\n100644 outdated-checksum 999 a.txt\n";
+    built.repo.write("tests/__snapshots__/c/MANIFEST", legacy);
+    built
+        .repo
+        .write("tests/__snapshots__/c/files/a.txt", "expected content\n");
+    built.repo.commit_all("test: legacy expectations");
+
+    let output = run(&built, &["--json"]).code(1);
+    assert_eq!(
+        output.json()["cases"][0]["failures"][0]["kind"],
+        "snapshotDiff"
+    );
+    built.repo.write("template/a.txt", "expected content\n");
+    run(&built, &[]).success();
+    assert_eq!(built.repo.read("tests/__snapshots__/c/MANIFEST"), legacy);
+    assert!(
+        !built
+            .repo
+            .path
+            .join("tests/__snapshots__/c/manifest.toml")
+            .exists()
+    );
+
+    let output = run(&built, &["--json", "--write"]).success();
+    assert_eq!(output.json()["cases"][0]["snapshot"], "updated");
+    assert_eq!(output.json()["summary"]["snapshotsWritten"], 1);
+    assert!(
+        output.json()["cases"][0]["snapshotChanges"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        !built
+            .repo
+            .path
+            .join("tests/__snapshots__/c/MANIFEST")
+            .exists()
+    );
+    run(&built, &[]).success();
+    let output = run(&built, &["--json", "--write"]).success();
+    assert_eq!(output.json()["cases"][0]["snapshot"], "unchanged");
+}
+
+#[test]
+fn write_removes_a_leftover_legacy_manifest_even_when_toml_output_is_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(dir.path(), &[("tests/c.toml", "snapshot = true\n")]);
+    run(&built, &["--write"]).success();
+    let manifest = built.repo.read("tests/__snapshots__/c/manifest.toml");
+    built.repo.commit_all("test: TOML snapshot");
+    // A stale or malformed legacy file must neither override TOML nor block its cleanup.
+    built
+        .repo
+        .write("tests/__snapshots__/c/MANIFEST", "stale legacy metadata\n");
+    run(&built, &[]).success();
+    // The selected ref lacks the leftover file; writing must still clean up the checkout.
+    let output = run(&built, &["--json", "--write", "--ref", "HEAD"]).success();
+    assert_eq!(output.json()["cases"][0]["snapshot"], "updated");
+    assert!(
+        !built
+            .repo
+            .path
+            .join("tests/__snapshots__/c/MANIFEST")
+            .exists()
+    );
+    assert_eq!(
+        built.repo.read("tests/__snapshots__/c/manifest.toml"),
+        manifest
+    );
+}
+
+#[test]
+fn invalid_toml_never_falls_back_to_a_legacy_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let built = template(dir.path(), &[("tests/c.toml", "snapshot = true\n")]);
+    run(&built, &["--write"]).success();
+    built.repo.write(
+        "tests/__snapshots__/c/MANIFEST",
+        "# git-tpl snapshot 1\n100644 stale 0 pyproject.toml\n",
+    );
+    built
+        .repo
+        .write("tests/__snapshots__/c/manifest.toml", "invalid TOML\n");
+    let output = run(&built, &["--json"]).failure();
+    assert_eq!(output.error_code(), "tpl::testing::snapshot_read");
+    assert!(output.stdout.contains("invalid TOML"));
+}
+
+#[test]
+fn an_empty_snapshot_survives_committing_and_reading_an_explicit_ref() {
+    let dir = tempfile::tempdir().unwrap();
+    // Keep a tracked template root while rendering no files at all.
+    let built = Template::minimal(
+        dir.path(),
+        "name = 'empty'\n",
+        &[("{% if false %}hidden{% endif %}.jinja", "unused")],
+    );
+    built.repo.write("tests/c.toml", "snapshot = true\n");
+    built.repo.commit_all("test: empty case");
+    run(&built, &["--write"]).success();
+    built.repo.commit_all("test: record empty snapshot");
+    let manifest: toml::Value =
+        toml::from_str(&built.repo.read("tests/__snapshots__/c/manifest.toml")).unwrap();
+    assert!(manifest["files"].as_table().unwrap().is_empty());
+    run(&built, &["--ref", "HEAD"]).success();
+}
+
 /// #51. `--write` records a snapshot through the filesystem; the dirty
 /// read-back reads it through the working-tree walk. The two halves have to
 /// agree, and they did not: a global `core.excludesFile` hiding `mise.toml`
-/// made the walk drop `files/mise.toml` while leaving the `MANIFEST` that
+/// made the walk drop `files/mise.toml` while leaving the manifest that
 /// lists it, so recording a snapshot made every subsequent run fail with
 /// `snapshot_read`.
 ///
@@ -805,7 +962,7 @@ fn a_snapshot_of_a_globally_ignored_filename_reads_back() {
 }
 
 /// #116. Distinct from #51 above: no negation involved, just an ordinary
-/// rule — a bare `MANIFEST`, as Python's `setup.py sdist` convention writes —
+/// rule matching the snapshot's manifest (originally a bare `MANIFEST`, as Python's sdist convention writes),
 /// matching the snapshot's own manifest file at any depth. `--write` put the
 /// file on disk regardless, since it never goes through Git at all; before
 /// the fix, the dirty read-back dropped it from the synthetic tree anyway and
@@ -817,14 +974,16 @@ fn a_snapshot_whose_manifest_matches_an_ordinary_gitignore_rule_reads_back() {
         dir.path(),
         &[("tests/case.toml", "snapshot = true\n[answers]\n")],
     );
-    template.repo.write(".gitignore", "MANIFEST\n");
-    template.repo.commit_all("test: an ordinary MANIFEST rule");
+    template.repo.write(".gitignore", "manifest.toml\n");
+    template
+        .repo
+        .commit_all("test: an ordinary manifest ignore rule");
 
     run(&template, &["--write"]).success();
     assert!(
         template
             .repo
-            .git(&["ls-files", "tests/__snapshots__/case/MANIFEST"])
+            .git(&["ls-files", "tests/__snapshots__/case/manifest.toml"])
             .is_empty(),
         "sanity: the rule really does keep git from tracking it"
     );
@@ -1166,9 +1325,9 @@ fn the_snapshot_manifest_records_the_executable_bit() {
     built.repo.commit_all("test: an executable");
 
     run(&built, &["--write"]).success();
-    let manifest = built.repo.read("tests/__snapshots__/c/MANIFEST");
+    let manifest = built.repo.read("tests/__snapshots__/c/manifest.toml");
     assert!(
-        manifest.contains("100755 "),
+        manifest.contains("\"100755\""),
         "the executable mode is recorded: {manifest}"
     );
 
@@ -1204,11 +1363,9 @@ fn a_binary_file_round_trips_through_a_snapshot_without_a_patch() {
     built.repo.commit_all("test: a binary file");
 
     run(&built, &["--write"]).success();
-    let manifest = built.repo.read("tests/__snapshots__/c/MANIFEST");
-    assert!(
-        manifest.contains(" binary "),
-        "a binary file records no digest: {manifest}"
-    );
+    let manifest = built.repo.read("tests/__snapshots__/c/manifest.toml");
+    let parsed: toml::Value = toml::from_str(&manifest).unwrap();
+    assert_eq!(parsed["files"]["logo.png"].as_str(), Some("100644"));
     built.repo.commit_all("test: record");
 
     std::fs::write(built.repo.path.join("template/logo.png"), [0u8, 9, 9, 9]).unwrap();
@@ -1281,7 +1438,7 @@ fn write_does_not_check_a_case_s_expectations() {
 
 /// A snapshot that has been hand-edited into disagreeing with itself.
 ///
-/// The MANIFEST is authoritative for the file list and modes, `files/` for
+/// The manifest is authoritative for the file list and modes, `files/` for
 /// content. Trusting either half alone would let a snapshot drift into
 /// asserting nothing while still reporting green, which is the worst failure
 /// mode a snapshot suite has.
@@ -1329,41 +1486,44 @@ fn a_snapshot_file_that_the_manifest_does_not_list_is_refused() {
 }
 
 #[test]
-fn a_snapshot_file_edited_without_its_digest_is_refused() {
+fn expected_content_can_be_edited_before_fixing_the_template() {
     let dir = tempfile::tempdir().unwrap();
-    // Same length, different bytes: only the digest catches this one, which is
-    // why the manifest records one rather than a size alone.
-    let output = corrupted_snapshot(dir.path(), |built| {
-        built.repo.write(
-            "tests/__snapshots__/minimal/files/pyproject.toml",
-            "name = \"OTHER\"\n",
+    let built = template(
+        dir.path(),
+        &[(
+            "tests/minimal.toml",
+            "snapshot = true\n[answers]\nproject_name = 'thing'\n",
+        )],
+    );
+    run(&built, &["--write"]).success();
+    let manifest = built.repo.read("tests/__snapshots__/minimal/manifest.toml");
+    // Exercise equal and different lengths: neither needs derived metadata edits.
+    for expected in ["name = \"OTHER\"\n", "name = \"a longer expectation\"\n"] {
+        built
+            .repo
+            .write("tests/__snapshots__/minimal/files/pyproject.toml", expected);
+        let output = run(&built, &["--json"]).code(1);
+        assert_eq!(
+            output.json()["cases"][0]["failures"][0]["kind"],
+            "snapshotDiff"
         );
-    })
-    .failure();
-    assert_eq!(output.error_code(), "tpl::testing::snapshot_read");
-    assert!(output.stdout.contains("digest"), "{}", output.stdout);
-}
-
-#[test]
-fn a_snapshot_file_of_the_wrong_length_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
-    let output = corrupted_snapshot(dir.path(), |built| {
-        built.repo.write(
-            "tests/__snapshots__/minimal/files/pyproject.toml",
-            "name = \"thing\"\nand more\n",
+        built.repo.write("template/pyproject.toml.jinja", expected);
+        run(&built, &[]).success();
+        assert_eq!(
+            built.repo.read("tests/__snapshots__/minimal/manifest.toml"),
+            manifest
         );
-    })
-    .failure();
-    assert_eq!(output.error_code(), "tpl::testing::snapshot_read");
+    }
 }
 
 #[test]
 fn a_snapshot_with_an_unreadable_manifest_says_how_to_recover() {
     let dir = tempfile::tempdir().unwrap();
     let output = corrupted_snapshot(dir.path(), |built| {
-        built
-            .repo
-            .write("tests/__snapshots__/minimal/MANIFEST", "not a manifest\n");
+        built.repo.write(
+            "tests/__snapshots__/minimal/manifest.toml",
+            "not a manifest\n",
+        );
     })
     .failure();
     assert_eq!(output.error_code(), "tpl::testing::snapshot_read");

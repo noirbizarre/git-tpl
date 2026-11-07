@@ -3,6 +3,7 @@
 **Status:** accepted
 
 [ADR-046](046-declarative-migration-tests.md) extends cases with declarative project upgrades and migration assertions.
+[ADR-049](049-toml-snapshot-manifests.md) supersedes the snapshot manifest serialization and content-integrity checks.
 
 ## Context
 

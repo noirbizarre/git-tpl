@@ -98,7 +98,12 @@ Rendering preserves symlink modes and opaque target bytes; render JSON adds octa
 Materialisation resolves the selected output parent, then refuses output-root links and prefix collisions.
 Existing symlink ancestors inside the output root are refused.
 Real links are created only on Unix; snapshot paths reject links below the selected repository root.
-Snapshots store link targets as ordinary payload files with manifest mode `120000`.
+Snapshots store link targets as ordinary payload files with mode `"120000"` in `manifest.toml`'s `[files]` table.
+Snapshot manifests contain only `version = 2` and sorted path-to-mode entries, without checksums or sizes.
+For template TDD, edit expected `files/` contents, run plain `git tpl test`, then fix the template to match.
+Only file additions, deletions and mode changes need manifest edits.
+`test --write` replaces expectations with rendered output and removes legacy `MANIFEST`, even for unchanged output.
+Legacy snapshots remain readable; when both manifests exist, `manifest.toml` is authoritative.
 Backport rejects links and file/link conversions with `tpl::backport::symlink`, including hunk listings.
 
 Backport refuses inherited/composed outputs with `tpl::backport::non_leaf`, including hunk listings.

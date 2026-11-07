@@ -30,7 +30,7 @@ use super::{
 };
 use crate::data::format::{Format, parse_value};
 use crate::data::{Decision, declared_remotes};
-use crate::git::{ChangeKind, FileMode, GitBackend, GitError, LibGit2, Oid};
+use crate::git::{ChangeKind, FileMode, GitBackend, GitError, LibGit2};
 use crate::render::Rendered;
 use crate::suggest::closest;
 use crate::template::{Value, is_expression};
@@ -55,17 +55,20 @@ pub const TEMPLATE_ROOT_ENV: &str = "TEMPLATE_ROOT";
 /// The subdirectory of the tests directory holding recorded snapshots.
 pub const SNAPSHOTS_DIR: &str = "__snapshots__";
 
-/// The file recording each snapshot's paths, modes and digests.
-pub const SNAPSHOT_MANIFEST: &str = "MANIFEST";
+/// The file recording each snapshot's paths and portable Git modes.
+pub const SNAPSHOT_MANIFEST: &str = "manifest.toml";
+
+/// Read older snapshots without requiring authors to re-record expectations first.
+const LEGACY_SNAPSHOT_MANIFEST: &str = "MANIFEST";
 
 /// The subdirectory of a snapshot holding the rendered bytes verbatim.
 pub const SNAPSHOT_FILES: &str = "files";
 
-/// The snapshot format's version, written as the manifest's first line.
+/// The snapshot format's version, written in the TOML manifest.
 ///
 /// Present so a later version can recognise and migrate an older snapshot
 /// rather than reporting every file as changed. See ADR-016.
-const SNAPSHOT_VERSION: &str = "# git-tpl snapshot 1";
+const SNAPSHOT_VERSION: u32 = 2;
 
 /// The subdirectory of the tests directory holding recorded case durations.
 ///
@@ -79,8 +82,8 @@ pub const DURATIONS_FILE: &str = "durations";
 
 /// The durations format's version, written as the file's first line.
 ///
-/// Mirrors [`SNAPSHOT_VERSION`] — same reasoning, same mechanism, a
-/// different file. See ADR-036.
+/// Like [`SNAPSHOT_VERSION`], this permits future format migration, but durations
+/// retain their line-based header rather than a TOML version field. See ADR-036.
 const DURATIONS_VERSION: &str = "# git-tpl durations 1";
 
 /// How many bytes are sniffed for a NUL before a file is called binary.
@@ -2650,7 +2653,7 @@ fn snapshot_step(
             failures.push(Failure::SnapshotMissing);
             return Ok((SnapshotOutcome::None, Vec::new()));
         };
-        let changes = compare(&recorded, &current);
+        let changes = compare(&recorded.files, &current);
         if !changes.is_empty() {
             failures.push(Failure::SnapshotDiff { changes });
         }
@@ -2663,10 +2666,33 @@ fn snapshot_step(
     // place of the live command output it no longer produces (ADR-032).
     let changes = recorded
         .as_ref()
-        .map(|recorded| compare(recorded, &current));
+        .map(|recorded| compare(&recorded.files, &current));
+    // --ref selects comparison data, but --write always targets the checkout.
+    // A legacy file added since that ref must also be removed on an equal write.
+    let legacy_path = template
+        .repo
+        .workdir()?
+        .join(snapshot_path(tests_dir, &case.name))
+        .join(LEGACY_SNAPSHOT_MANIFEST);
+    let legacy_in_worktree = match legacy_path.symlink_metadata() {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(TestingError::SnapshotWrite {
+                case: case.name.clone(),
+                path: legacy_path.display().to_string(),
+                reason: format!("could not inspect it: {error}"),
+            }
+            .into());
+        }
+    };
     let outcome = match (&recorded, changes.as_ref()) {
         (None, _) => SnapshotOutcome::Written,
-        (Some(_), Some(changes)) if changes.is_empty() => SnapshotOutcome::Unchanged,
+        (Some(recorded), Some(changes))
+            if changes.is_empty() && !recorded.needs_migration && !legacy_in_worktree =>
+        {
+            SnapshotOutcome::Unchanged
+        }
         (Some(_), Some(_)) => SnapshotOutcome::Updated,
         (Some(_), None) => unreachable!("changes is computed above whenever recorded is Some"),
     };
@@ -2676,6 +2702,12 @@ fn snapshot_step(
     }
 
     Ok((outcome, changes.unwrap_or_default()))
+}
+
+struct RecordedSnapshot {
+    files: BTreeMap<String, SnapshotEntry>,
+    // Even equal output needs a write when a legacy MANIFEST must be removed.
+    needs_migration: bool,
 }
 
 /// Read a recorded snapshot out of the resolved tree.
@@ -2688,8 +2720,8 @@ fn snapshot_step(
 /// snapshot's own directory straight off disk rather than through
 /// `template.tree` — the whole-repository dirty tree, already filtered by
 /// `.gitignore`. A snapshot is data `--write` puts on disk directly, bypassing
-/// Git on purpose; letting an ordinary rule matching its own filename, a bare
-/// `MANIFEST` say, make that file disappear on read-back would disagree with
+/// Git on purpose; letting an ordinary rule matching `manifest.toml` or legacy
+/// `MANIFEST` make that file disappear on read-back would disagree with
 /// what `--write` just produced (#116). There is no `--ref` to be a lie about
 /// here: no `--ref` already means "read the workdir", for the snapshot
 /// exactly as for everything else it reads.
@@ -2697,7 +2729,7 @@ fn read_snapshot(
     template: &Resolved,
     tests_dir: &str,
     case: &Case,
-) -> Result<Option<BTreeMap<String, SnapshotEntry>>, OpError> {
+) -> Result<Option<RecordedSnapshot>, OpError> {
     let dir = snapshot_path(tests_dir, &case.name);
 
     let unreadable = |reason: String| TestingError::SnapshotRead {
@@ -2722,19 +2754,34 @@ fn read_snapshot(
 
     let entries = template.repo.list_tree(tree)?;
 
-    let manifest_oid = entries
+    let legacy_manifest = entries
+        .iter()
+        .find(|entry| entry.path == LEGACY_SNAPSHOT_MANIFEST);
+    // Prefer TOML when both exist: stale legacy data must never override edited expectations.
+    let manifest_entry = entries
         .iter()
         .find(|entry| entry.path == SNAPSHOT_MANIFEST)
-        .map(|entry| entry.oid);
-    let Some(manifest_oid) = manifest_oid else {
+        .or(legacy_manifest);
+    let Some(manifest_entry) = manifest_entry else {
         return Err(unreadable(format!("there is no `{SNAPSHOT_MANIFEST}`")).into());
     };
+    if manifest_entry.mode == FileMode::Link {
+        return Err(unreadable(format!(
+            "`{}` must be an ordinary file, not a symlink",
+            manifest_entry.path
+        ))
+        .into());
+    }
 
-    let manifest = template.repo.read_blob(manifest_oid)?;
-    let manifest = parse_manifest(&manifest, &unreadable)?;
+    let manifest = template.repo.read_blob(manifest_entry.oid)?;
+    let manifest = if manifest_entry.path == SNAPSHOT_MANIFEST {
+        parse_manifest(&manifest, &unreadable)?
+    } else {
+        parse_legacy_manifest(&manifest, &unreadable)?
+    };
 
     let prefix = format!("{SNAPSHOT_FILES}/");
-    let mut files: BTreeMap<String, (Oid, bool)> = BTreeMap::new();
+    let mut files = BTreeMap::new();
     for entry in &entries {
         let Some(path) = entry.path.strip_prefix(&prefix) else {
             continue;
@@ -2745,10 +2792,7 @@ fn read_snapshot(
             ))
             .into());
         }
-        files.insert(
-            path.to_string(),
-            (entry.oid, entry.mode == FileMode::BlobExecutable),
-        );
+        files.insert(path.to_string(), entry.oid);
     }
 
     // The manifest is authoritative for the file list and the modes; `files/`
@@ -2756,34 +2800,19 @@ fn read_snapshot(
     // hand-edited snapshot drift into asserting nothing.
     let mut out = BTreeMap::new();
     for (path, recorded) in &manifest {
-        let Some((oid, _)) = files.get(path) else {
+        let Some(oid) = files.get(path) else {
             return Err(unreadable(format!(
-                "`{SNAPSHOT_MANIFEST}` lists `{path}`, which is not under `{SNAPSHOT_FILES}/`"
+                "`{}` lists `{path}`, which is not under `{SNAPSHOT_FILES}/`",
+                manifest_entry.path
             ))
             .into());
         };
         let content = template.repo.read_blob(*oid)?;
-        if content.len() as u64 != recorded.size {
-            return Err(unreadable(format!(
-                "`{path}` is {} bytes, but `{SNAPSHOT_MANIFEST}` records {}",
-                content.len(),
-                recorded.size
-            ))
-            .into());
-        }
-        if let Some(digest) = &recorded.digest
-            && sha256(&content) != *digest
-        {
-            return Err(unreadable(format!(
-                "`{path}` does not match the digest in `{SNAPSHOT_MANIFEST}`"
-            ))
-            .into());
-        }
         out.insert(
             path.clone(),
             SnapshotEntry {
                 content,
-                mode: recorded.mode,
+                mode: *recorded,
             },
         );
     }
@@ -2791,27 +2820,62 @@ fn read_snapshot(
     for path in files.keys() {
         if !manifest.contains_key(path) {
             return Err(unreadable(format!(
-                "`{SNAPSHOT_FILES}/{path}` is not listed in `{SNAPSHOT_MANIFEST}`"
+                "`{SNAPSHOT_FILES}/{path}` is not listed in `{}`",
+                manifest_entry.path
             ))
             .into());
         }
     }
 
-    Ok(Some(out))
+    Ok(Some(RecordedSnapshot {
+        files: out,
+        needs_migration: legacy_manifest.is_some(),
+    }))
 }
 
-/// A manifest line.
-struct RecordedFile {
-    mode: FileMode,
-    /// `None` for a binary file, which records no digest.
-    digest: Option<String>,
-    size: u64,
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+struct SnapshotManifest {
+    version: u32,
+    files: BTreeMap<String, String>,
 }
 
 fn parse_manifest(
     bytes: &[u8],
     unreadable: &impl Fn(String) -> TestingError,
-) -> Result<BTreeMap<String, RecordedFile>, TestingError> {
+) -> Result<BTreeMap<String, FileMode>, TestingError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| unreadable("it is not UTF-8".to_string()))?;
+    let manifest: SnapshotManifest = toml::from_str(text)
+        .map_err(|error| unreadable(format!("invalid TOML manifest: {error}")))?;
+    if manifest.version != SNAPSHOT_VERSION {
+        return Err(unreadable(format!(
+            "snapshot version {} is not supported (expected {SNAPSHOT_VERSION})",
+            manifest.version
+        )));
+    }
+    manifest
+        .files
+        .into_iter()
+        .map(|(path, mode)| Ok((path, parse_snapshot_mode(&mode, unreadable)?)))
+        .collect()
+}
+
+fn parse_snapshot_mode(
+    mode: &str,
+    unreadable: &impl Fn(String) -> TestingError,
+) -> Result<FileMode, TestingError> {
+    match mode {
+        "100644" => Ok(FileMode::Blob),
+        "100755" => Ok(FileMode::BlobExecutable),
+        "120000" => Ok(FileMode::Link),
+        other => Err(unreadable(format!("`{other}` is not a file mode"))),
+    }
+}
+
+fn parse_legacy_manifest(
+    bytes: &[u8],
+    unreadable: &impl Fn(String) -> TestingError,
+) -> Result<BTreeMap<String, FileMode>, TestingError> {
     let text = std::str::from_utf8(bytes).map_err(|_| unreadable("it is not UTF-8".to_string()))?;
 
     let mut out = BTreeMap::new();
@@ -2821,60 +2885,35 @@ fn parse_manifest(
         }
         // The path is last so that a path containing spaces needs no quoting.
         let mut parts = line.splitn(4, ' ');
-        let (Some(mode), Some(digest), Some(size), Some(path)) =
+        let (Some(mode), Some(_digest), Some(size), Some(path)) =
             (parts.next(), parts.next(), parts.next(), parts.next())
         else {
             return Err(unreadable(format!("`{line}` is not a manifest entry")));
         };
-        let mode = match mode {
-            "100644" => FileMode::Blob,
-            "100755" => FileMode::BlobExecutable,
-            "120000" => FileMode::Link,
-            other => return Err(unreadable(format!("`{other}` is not a file mode"))),
-        };
-        let size = size
-            .parse::<u64>()
+        let mode = parse_snapshot_mode(mode, unreadable)?;
+        // Retain structural validation, but old checksums and sizes no longer constrain
+        // expected bytes: authors must be able to edit expectations before the template.
+        size.parse::<u64>()
             .map_err(|_| unreadable(format!("`{size}` is not a byte count")))?;
-        out.insert(
-            path.to_string(),
-            RecordedFile {
-                mode,
-                digest: (digest != "binary").then(|| digest.to_string()),
-                size,
-            },
-        );
+        if path.is_empty() || out.insert(path.to_string(), mode).is_some() {
+            return Err(unreadable(format!(
+                "`{path}` is an empty or duplicate manifest path"
+            )));
+        }
     }
     Ok(out)
 }
 
-fn render_manifest(case: &str, files: &BTreeMap<String, SnapshotEntry>) -> String {
-    let mut out = String::new();
-    out.push_str(SNAPSHOT_VERSION);
-    out.push('\n');
-    out.push_str(&format!("# case: {case}\n"));
-    out.push_str("# Written by `git tpl test --write`. Do not edit by hand.\n");
-    for (path, entry) in files {
-        let mode = entry.mode;
-        // `binary` in place of the digest, so the comparator knows not to try a
-        // patch — the same distinction `FileStat.binary` makes for `diff`.
-        let digest = if is_binary(&entry.content) {
-            "binary".to_string()
-        } else {
-            sha256(&entry.content)
-        };
-        out.push_str(&format!(
-            "{:06o} {digest} {} {path}\n",
-            mode.as_u32(),
-            entry.content.len()
-        ));
-    }
-    out
-}
-
-fn sha256(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(bytes);
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+fn render_manifest(files: &BTreeMap<String, SnapshotEntry>) -> String {
+    let manifest = SnapshotManifest {
+        version: SNAPSHOT_VERSION,
+        files: files
+            .iter()
+            .map(|(path, entry)| (path.clone(), format!("{:06o}", entry.mode.as_u32())))
+            .collect(),
+    };
+    // A BTreeMap keeps generated entries sorted, so unrelated renders cannot reorder them.
+    toml::to_string(&manifest).expect("snapshot paths and modes are TOML strings")
 }
 
 fn snapshot_path(tests_dir: &str, case: &str) -> String {
@@ -2998,7 +3037,7 @@ fn write_snapshot(
     )?;
 
     let manifest = dir.join(SNAPSHOT_MANIFEST);
-    std::fs::write(&manifest, render_manifest(&case.name, files))
+    std::fs::write(&manifest, render_manifest(files))
         .map_err(|error| failed(&manifest, "write", &error))?;
 
     Ok(())
@@ -3433,7 +3472,7 @@ mod tests {
         }
     }
 
-    fn read_manifest(body: &str) -> Result<BTreeMap<String, RecordedFile>, TestingError> {
+    fn read_manifest(body: &str) -> Result<BTreeMap<String, FileMode>, TestingError> {
         parse_manifest(body.as_bytes(), &|reason| TestingError::SnapshotRead {
             case: "c".into(),
             path: "p".into(),
@@ -3441,9 +3480,7 @@ mod tests {
         })
     }
 
-    fn snapshot_read_reason(
-        result: Result<BTreeMap<String, RecordedFile>, TestingError>,
-    ) -> String {
+    fn snapshot_read_reason(result: Result<BTreeMap<String, FileMode>, TestingError>) -> String {
         match result {
             Err(TestingError::SnapshotRead { reason, .. }) => reason,
             Ok(_) => panic!("expected the manifest to be refused"),
@@ -3452,27 +3489,32 @@ mod tests {
     }
 
     /// A manifest that has been hand-edited into nonsense is refused rather
-    /// than half-read. Silently dropping a malformed line would quietly shrink
+    /// than half-read. Silently dropping a malformed entry would quietly shrink
     /// the set of files the snapshot asserts on.
     #[rstest]
-    #[case("100644 abc\n", "is not a manifest entry")]
-    #[case("100600 abc 3 a.txt\n", "`100600` is not a file mode")]
-    #[case("100644 abc three a.txt\n", "`three` is not a byte count")]
-    fn a_malformed_manifest_line_is_refused(#[case] body: &str, #[case] expected: &str) {
+    #[case("not TOML\n", "invalid TOML")]
+    #[case(
+        "version = 2\n[files]\n'a.txt' = '100600'\n",
+        "`100600` is not a file mode"
+    )]
+    #[case("version = 3\n[files]\n", "version 3 is not supported")]
+    #[case("version = 2\n[files]\na = '100644'\na = '100755'\n", "invalid TOML")]
+    #[case("version = 2\n", "invalid TOML")]
+    fn a_malformed_manifest_is_refused(#[case] body: &str, #[case] expected: &str) {
         let reason = snapshot_read_reason(read_manifest(body));
         assert!(reason.contains(expected), "{reason}");
     }
 
     #[test]
     fn a_manifest_path_may_contain_spaces() {
-        // The path is last precisely so it needs no quoting.
-        let parsed = read_manifest("100644 abc 3 a file.txt\n").unwrap();
+        let parsed = read_manifest("version = 2\n[files]\n'a file.txt' = '100644'\n").unwrap();
         assert_eq!(parsed.keys().collect::<Vec<_>>(), ["a file.txt"]);
     }
 
     #[test]
     fn manifest_comments_and_blank_lines_are_skipped() {
-        let parsed = read_manifest("# a comment\n\n100644 abc 3 a.txt\n").unwrap();
+        let parsed =
+            read_manifest("# a comment\n\nversion = 2\n[files]\n'a.txt' = '100644'\n").unwrap();
         assert_eq!(parsed.len(), 1);
     }
 
@@ -3501,7 +3543,22 @@ mod tests {
             },
         );
 
-        let rendered = render_manifest("c", &files);
+        for path in [
+            "a file.txt",
+            "dotted/path.toml",
+            "quote\".txt",
+            "café.txt",
+            "back\\slash",
+        ] {
+            files.insert(
+                path.to_string(),
+                SnapshotEntry {
+                    content: Vec::new(),
+                    mode: FileMode::Link,
+                },
+            );
+        }
+        let rendered = render_manifest(&files);
         let parsed = parse_manifest(rendered.as_bytes(), &|reason| TestingError::SnapshotRead {
             case: "c".into(),
             path: "p".into(),
@@ -3509,11 +3566,43 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(parsed.len(), 3);
-        assert_eq!(parsed["a.txt"].mode, FileMode::Blob);
-        assert_eq!(parsed["run.sh"].mode, FileMode::BlobExecutable);
-        assert_eq!(parsed["logo.png"].digest, None, "binary records no digest");
-        assert_eq!(parsed["a.txt"].size, 6);
+        assert_eq!(parsed.len(), files.len());
+        for (path, entry) in &files {
+            assert_eq!(parsed[path], entry.mode);
+        }
+        assert!(!rendered.contains("digest"));
+        assert!(!rendered.contains("size"));
+    }
+
+    #[test]
+    fn legacy_manifest_modes_remain_readable_without_content_assertions() {
+        let parsed = parse_legacy_manifest(
+            b"# git-tpl snapshot 1\n100644 stale 99 a file.txt\n120000 binary 3 link\n",
+            &|reason| TestingError::SnapshotRead {
+                case: "c".into(),
+                path: "p".into(),
+                reason,
+            },
+        )
+        .unwrap();
+        assert_eq!(parsed["a file.txt"], FileMode::Blob);
+        assert_eq!(parsed["link"], FileMode::Link);
+    }
+
+    #[rstest]
+    #[case("100644 abc\n", "is not a manifest entry")]
+    #[case("100600 abc 3 a.txt\n", "is not a file mode")]
+    #[case("100644 abc three a.txt\n", "is not a byte count")]
+    #[case("100644 abc 3 a.txt\n100755 def 4 a.txt\n", "duplicate manifest path")]
+    fn malformed_legacy_metadata_is_still_refused(#[case] body: &str, #[case] expected: &str) {
+        let reason = snapshot_read_reason(parse_legacy_manifest(body.as_bytes(), &|reason| {
+            TestingError::SnapshotRead {
+                case: "c".into(),
+                path: "p".into(),
+                reason,
+            }
+        }));
+        assert!(reason.contains(expected), "{reason}");
     }
 
     fn entry(content: &[u8], executable: bool) -> SnapshotEntry {

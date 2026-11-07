@@ -4,6 +4,8 @@
 
 Accepted.
 
+[ADR-049](049-toml-snapshot-manifests.md) supersedes the manifest format, preserving modes and opaque target payloads.
+
 ## Context
 
 An executable-only artifact loses Git's `120000` kind and can turn a link target into a rendered regular file.
