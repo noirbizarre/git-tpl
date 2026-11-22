@@ -14,6 +14,10 @@ Mise's postinstall hook installs both `pre-commit` and `commit-msg` hooks.
 Prek installs Commitizen and its Emotional plugin in an isolated Python environment
 for commit-message validation.
 
+Windows CI places build outputs and temporary files on a ReFS Dev Drive.
+The shared setup action exports `TMP`, `TEMP` and `TMPDIR` for all subsequent
+steps and child processes, with temporary storage outside the cached target directory.
+
 ### Mr Boxington build caching
 
 [Mr Boxington](https://mr-boxington.jdx.dev/setup) is enabled through mise's
@@ -50,9 +54,10 @@ Environment-selected wrappers still take precedence and prevent mbx caching.
 CI uses `jdx/mr-boxington-action` instead of sccache and rust-cache. Its default
 GitHub `target` payload includes Cargo outputs and registry/git downloads, so
 an additional rust-cache action is unnecessary. Successful main pushes populate
-the cache; same-repository pull requests also save in their own PR scope.
-Fork pull requests only restore. Cross-build jobs retain their container-produced
-target outputs through that payload; native builds also use compiler caching.
+the cache; all pull requests only restore to avoid expensive archive creation
+and PR-scoped entries competing for the cache budget. PR-only cross-build jobs
+can restore compatible baselines but do not populate caches of their own.
+Native builds also use compiler caching.
 Publication jobs use `backend: local` without shared compiler-output restores
 or saves. No separate remote cache service or local-to-CI connection is configured.
 
@@ -97,6 +102,16 @@ Run `mise run ci` before pushing, as required by [AGENTS.md](AGENTS.md).
 
 ## Tasks
 
+`mise build` uses source/output freshness checks to avoid starting Cargo when
+nothing changed. Cargo handles incremental compilation whenever the task runs, with mbx caching.
+The default tracks `src/`, `build.rs`, the manifests, toolchain and Cargo config,
+and checks the debug binary and library outputs.
+Extend `tasks.build.sources` for external path dependencies or build assets.
+Adjust its outputs for custom target directories or compilation targets.
+After changing environment-only inputs such as `RUSTFLAGS` or `RUSTUP_TOOLCHAIN`,
+use `mise run --force build`. Use `mise exec -- cargo build` directly for one-off
+profile/target options.
+
 | Command | What it does |
 |---|---|
 | `mise build` | Build the project |
@@ -104,18 +119,21 @@ Run `mise run ci` before pushing, as required by [AGENTS.md](AGENTS.md).
 | `mise test` | Run the tests (accepts nextest selectors) |
 | `mise cover` | Run the tests with coverage |
 | `mise format` | Format |
+| `mise format:check` | Check formatting without rewriting |
 | `mise lint` | Clippy, warnings denied |
 | `mise lint:actions` | actionlint over the workflows |
-| `mise lint:md` | rumdl over AGENTS.md, CONTRIBUTING.md, README.md, docs/ and skills/ |
+| `mise lint:md` | Check all project Markdown except the generated root CHANGELOG.md |
 | `mise spell` | typos |
 | `mise snapshots` | Review pending insta snapshots |
 | `mise check` | Everything that does not modify the working tree |
 | `mise ci` | `check` plus the documentation build |
 | `mise docs` | Serve the documentation locally |
+| `mise docs:build` | Build the documentation |
 | `mise changelog` | Preview the changelog for unreleased commits |
 | `mise release` | Show the version the next release would take |
 | `mise tpl:update` | Bring the rendered template ref up to date |
 | `mise tpl:diff` | Show what merging the template would change |
+| `mise tpl:merge` | Merge the updated rendered template |
 | `mise tpl:check` | Update the rendered ref, then fail if its merge would change files |
 | `mise ship:validate` | Validate the release contract |
 
@@ -145,9 +163,19 @@ remain authoring conventions. The type selects the changelog section, and a `!`
 or a `BREAKING CHANGE:` footer drives the version bump — so the message is part
 of the release, not paperwork around it.
 
-The official typos hooks check source files on `pre-commit` and commit messages
-on `commit-msg`. Message spelling is checked without rewriting the message, so
-fix any reported errors before retrying the commit.
+The pre-commit hooks format and check project Markdown with rumdl and validate
+EditorConfig settings. The generated root `CHANGELOG.md` is excluded because
+git-cliff owns it. Run `mise lint:md` for a non-rewriting Markdown check.
+Rumdl owns Markdown list indentation and the 120-column prose limit, with tables
+and code blocks exempt from line wrapping.
+Markdown and Rust keep their EditorConfig editor defaults but are excluded from the generic EditorConfig hook;
+rumdl and `cargo fmt` own their syntax-aware formatting checks, including prose and embedded strings.
+Other file types are checked by the EditorConfig hook.
+
+The official typos hook checks source files on `pre-commit`. Commit-message
+spelling checks are temporarily disabled pending
+[the upstream commit/rebase fix](https://github.com/crate-ci/typos/pull/1605).
+Commitizen still validates commit messages on `commit-msg`.
 
 ## Releases
 
@@ -179,7 +207,12 @@ no CI results. That means the repository needs:
 - a `release` environment holding the variable `APP_CLIENT_ID` and the secret
   `APP_PRIVATE_KEY`.
 - the corresponding GitHub App installed on `noirbizarre/git-tpl` with
-  Contents and Pull requests read/write permissions.
+  Contents, Actions, Pull requests and Issues read/write permissions.
+
+Preparation runs `gh ship sign` to re-create the release commit with GitHub's signature.
+
+Also configure:
+
 - squash-merge settings of `squash_merge_commit_title: PR_TITLE` and
   `squash_merge_commit_message: BLANK`, so the squash commit subject is the
   Conventional Commit title from `.github/ship.yml`.
@@ -207,7 +240,7 @@ The toolchain, hooks, CI and release workflows come from
 git tpl status         # is there a template update pending?
 mise tpl:update        # advance refs/tpl/<id>, recording any newly answered defaults
 mise tpl:diff          # read what merging it would change
-git tpl merge          # take it
+mise tpl:merge         # take it
 ```
 
 `tpl:update` leaves HEAD, the index and rendered worktree files untouched.
@@ -223,3 +256,9 @@ The initial merge retains project-specific contracts: the public library name `t
 archive layouts and Windows ZIPs, runtime man/completion generation, both AUR packages, and architecture checks.
 These are ordinary Git customizations; marker comments do not create protected regions.
 A fix that belongs to every project belongs in the template.
+
+Files carrying template-owned content — `mise.toml`, `prek.toml`, `Cargo.toml` —
+have project-specific section markers. Add below them, or put global mise
+tools between the begin/end project-specific tools markers. Git's 3-way merge
+then preserves your additions across updates. A fix that belongs to every
+project belongs in the template, not here.

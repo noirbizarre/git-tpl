@@ -25,6 +25,9 @@ concurrency:
   group: template
   cancel-in-progress: false
 
+env:
+  MISE_NO_HOOKS: "1"
+
 jobs:
   drift:
     name: 🔄 Drift

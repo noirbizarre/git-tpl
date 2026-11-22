@@ -13,7 +13,8 @@ mise install
 
 `mise install` reads `mise.toml` and `mise.lock`, so you get the same tool versions CI does.
 Its postinstall hook runs `prek install` to wire up both pre-commit and commit-message checks.
-Commitizen with Emotional validates commit messages; rumdl checks Markdown without rewriting it.
+Commitizen with Emotional validates commit messages; rumdl formats and checks Markdown in the pre-commit hooks.
+EditorConfig validation covers other file types except Rust, whose formatting belongs to rustfmt.
 
 Rustup supplies toolchains; mise declares stable Rust to enable native [Mr Boxington](https://mr-boxington.jdx.dev/)
 Cargo caching and compilation scheduling.
@@ -56,7 +57,8 @@ mise run docs:build
 `mise tasks` lists them all.
 `mise run fmt`, `mise run fmt:check` and `mise run tpl` remain supported as aliases.
 Clippy runs explicitly in CI and `mise run ci`, rather than during every commit.
-Hooks check both source spelling and commit-message spelling without rewriting the message.
+Hooks check source spelling; commit-message spelling checks are temporarily disabled pending the upstream typos fix.
+Commitizen still validates commit messages, and `mise run lint:md` checks Markdown without rewriting it.
 
 ## Maintaining the project's template
 
@@ -66,7 +68,7 @@ This repository is attached to [rust.tpl](https://github.com/noirbizarre/rust.tp
 ```sh
 mise run tpl:update    # restore a missing baseline, then update the rendered ref
 mise run tpl:diff      # preview the merge
-git tpl merge         # apply it with an ordinary Git merge
+mise run tpl:merge     # apply it with an ordinary Git merge
 ```
 
 `mise run tpl:check` updates first, then exits nonzero if merging would change files.

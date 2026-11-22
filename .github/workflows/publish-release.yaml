@@ -36,6 +36,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_RETRY: "10"
+  MISE_NO_HOOKS: "1"
+  RUSTUP_MAX_RETRIES: "10"
   RUSTFLAGS: -D warnings
 
 # Never overlap uploads or irreversible crates publication.
@@ -64,18 +66,17 @@ jobs:
           # may have moved since.
           ref: ${{ inputs.tag }}
           persist-credentials: false
-      # Setup precedes caches so their post-save hooks run before the drive is dismounted.
-      - uses: ./.github/actions/setup-windows
-        if: runner.os == 'Windows'
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      # Release builds use only a local compiler cache, never shared outputs.
+      # Bootstrap the toolchain before relocating temporary storage, but keep cache cleanup before drive teardown.
+      - name: Tune Windows runner
+        uses: ./.github/actions/setup-windows
+        if: runner.os == 'Windows'
+      # Published binaries must not depend on shared compiler-output caches.
       - uses: jdx/mr-boxington-action@v1
         if: matrix.target != 'x86_64-apple-darwin'
         with:
-          version: 1.28.0
           backend: local
       # `cross` is only needed on the Linux cross-compilation legs, so it is
       # installed conditionally here rather than added to mise.toml, which
@@ -273,7 +274,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: jdx/mr-boxington-action@v1
         with:
-          version: 1.28.0
           backend: local
 
       # `cargo publish` fails outright on a version that already exists, which

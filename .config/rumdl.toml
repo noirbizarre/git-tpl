@@ -1,4 +1,6 @@
 [global]
+# git-cliff owns this file; nested project changelogs are still checked.
+exclude = ["./CHANGELOG.md"]
 disable = [
   # Usage examples intentionally show shell prompts without output.
   "MD014",
@@ -37,4 +39,4 @@ code-blocks = false
 #
 # Add per-project rule exceptions below this line, with a one-line description
 # followed by the rule's documentation link. Keep the default checks enabled.
-# Marker comments organize customizations; ordinary Git merges reconcile the whole file.
+# The template owns everything above; Git's 3-way merge preserves project additions.
