@@ -20,10 +20,15 @@ crate = "git-tpl"
 description = "Git-native project templates"
 docs = true
 docs_accent = "deep orange"
+gh_ship_token_mode = "app"
 homebrew = true
 homebrew_tap = "noirbizarre/homebrew-tap"
 keywords = "git,template,scaffolding,minijinja,project"
 kind = "library-and-binary"
+logos = [
+    "wordmark",
+    "icon",
+]
 man_pages = false
 mbx = true
 msrv = true

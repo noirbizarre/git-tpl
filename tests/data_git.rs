@@ -274,12 +274,19 @@ fn a_missing_path_in_the_data_repository_names_the_revision_it_looked_at() {
     );
     let project = project(dir.path());
 
-    let output = init(&project, &template, &["--trust"]).failure();
+    let output = init(&project, &template, &["--trust", "--json"]).failure();
     // "no such file" without saying *where* it looked sends the author to check
     // a branch they were never reading. Both the reference and the commit it
     // resolved to, `describe_revision`'s shape — a bare commit alone would not
     // say whether `v1` moved since.
-    output.says("tpl::data::load").says("at v1 (");
+    // JSON keeps terminal-width wrapping from splitting the reference from its commit.
+    assert_eq!(output.error_code(), "tpl::data::load");
+    assert!(
+        output.json()["error"]["help"]
+            .as_str()
+            .unwrap()
+            .contains("at v1 (")
+    );
 }
 
 #[test]

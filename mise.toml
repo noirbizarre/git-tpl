@@ -1,9 +1,7 @@
 # Toolchain and task definitions.
 #
-# Tool versions are resolved to exact builds in `mise.lock`, which is
-# committed. CI installs from these two files, so local runs and CI runs
-# use identical tool versions — CI drives the tools directly rather than
-# through the tasks defined below.
+# Tool versions are resolved to exact builds in `mise.lock`, which is committed.
+# CI installs from these two files, so local runs and CI runs use identical tool versions.
 #
 # Tools no CI job needs are declared on their own task rather than in `[tools]`,
 # because `mise install` — what CI runs — installs `[tools]` only. It matters
@@ -14,8 +12,7 @@
 # while the environment below preserves explicit and CI-selected toolchains.
 
 [settings]
-# Resolve tools through mise.lock and keep it updated. Without this, the
-# lockfile is ignored and `latest` really means latest.
+# Resolve tools through mise.lock and keep it updated.
 lockfile = true
 
 # Avoid a second install request from the version file: runtime selection
@@ -46,6 +43,9 @@ cargo-binstall = "latest"
 "cargo:git-tpl" = "latest"
 # cargo-insta, usvg and resvg are declared on the tasks that use them instead
 # of here — see the note in the header.
+# --- begin project-specific tools ---
+# Add project-wide tools here; tools needed by only one task belong on that task.
+# --- end project-specific tools ---
 
 [env]
 # dtolnay selects a rustup default, not RUSTUP_TOOLCHAIN. Preserve that
@@ -64,8 +64,9 @@ MBX_GC_AUTO = "0"
 MBX_TARGET_VIEWS = "0"
 
 [hooks]
-# prek.toml declares both pre-commit and commit-msg as default hook types.
-postinstall = "prek install"
+postinstall = [
+  "prek install"
+]
 
 # --- Everyday ---------------------------------------------------------------
 
@@ -76,6 +77,20 @@ depends = ["format", "lint", "lint:actions", "lint:md", "build", "test"]
 [tasks.build]
 description = "Build the binary"
 run = "cargo build"
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  "mise.lock",
+  ".cargo/config",
+  ".cargo/config.toml",
+  "build.rs",
+  "src/**",
+]
+outputs = [
+  'target/debug/git-tpl{% if os() == "windows" %}.exe{% endif %}',
+  "target/debug/libtpl.rlib",
+]
 
 [tasks.test]
 description = "Run tests (accepts nextest selectors)"
@@ -113,22 +128,21 @@ run = "typos"
 
 [tasks."lint:actions"]
 description = "Lint the GitHub Actions workflows"
-# Suppressions live in .github/actionlint.yml rather than as flags here, so
-# this task and the prek hook cannot drift apart.
+# Suppressions live in .github/actionlint.yml rather than as flags here,
+# so this task and the prek hook cannot drift apart.
 run = "actionlint .github/workflows/*.yaml"
 
 [tasks."lint:md"]
-description = "Lint the documentation Markdown"
+description = "Lint all project Markdown"
 # Install the native binary only for this task; keep its version aligned with
 # the rumdl pre-commit hook in prek.toml.
 tools = { rumdl = "0.3.2" }
-#
-# Scoped to the same files as the prek hook, minus CHANGELOG.md, which is
-# git-cliff's output, not prose to wrap.
-run = 'rumdl check "AGENTS.md" "CONTRIBUTING.md" "README.md" "docs/" "skills/"'
+# The shared rumdl config excludes the generated root CHANGELOG.md.
+run = "rumdl check ."
 
 [tasks.snapshots]
 description = "Review and update insta snapshots interactively"
+# cargo-insta is declared here as only used once by this task
 tools = { "cargo:cargo-insta" = "latest" }
 run = "cargo insta review"
 
@@ -196,6 +210,11 @@ run = "git tpl update --defaults"
 description = "Preview merging the rendered template"
 raw_args = true
 run = "git tpl diff"
+
+[tasks."tpl:merge"]
+description = "Merge the last updated rendered files"
+raw_args = true
+run = "git tpl merge"
 
 [tasks."tpl:check"]
 description = "Update the template ref and fail if its merge would change files"

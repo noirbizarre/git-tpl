@@ -74,7 +74,9 @@ fn invalid_selection_counts_retry_in_place_and_can_be_corrected_or_cancelled() {
         writer.flush().unwrap();
         wait_for("Please select an option");
         if cancel {
-            writer.write_all(b"\x03").unwrap();
+            // Escape exercises cancellation without racing read_key's raw-mode setup:
+            // Ctrl-C between reads becomes SIGINT and bypasses the JSON diagnostic.
+            writer.write_all(b"\x1b").unwrap();
             writer.flush().unwrap();
             wait_for("tpl::eval::cancelled");
         } else {
