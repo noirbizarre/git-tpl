@@ -70,6 +70,7 @@ git tpl update --defaults --merge
 
 `--merge` requires an existing rendered ref, no active Git operation, and a clean index and worktree before rendering.
 It runs ordinary integration after rendering, including when there is already pending unchanged output.
+Integration uses [native Git](merge.md#it-is-a-normal-merge), including configured merge drivers, hooks and signing.
 The configuration edit created by rendering remains unstaged and is not included in the merge commit.
 For custom merge messages or staged-only integration, render first and use `git tpl merge` separately.
 

@@ -37,7 +37,8 @@ project.
    If you need a Git capability, add it to the `GitBackend` trait — do not import `git2` "just this once".
 
 5. **Templates cannot execute code.** No subprocess, no shell, no eval, no hooks — true without qualification of
-   `render`, `init` and `update`. HTTP data-source access exists only in `src/data/` — the `http-isolation` prek
+   rendering and `init`. Explicit integration is a separate phase, including after `update --merge`.
+   HTTP data-source access exists only in `src/data/` — the `http-isolation` prek
    hook fails the commit otherwise; git-backed network access (cloning or fetching a template) is confined to
    `src/git/libgit2.rs` by invariant 4. Template repositories and remote data are untrusted input. The one narrow,
    deliberate exception is `git tpl test`'s `[commands]` (ADR-027): the test *harness* — never a render — may spawn
@@ -47,7 +48,9 @@ project.
    over the completed preview's two trees, inheriting the user's pager, diff drivers and textconv configuration.
    This is display after rendering, never a template hook or a capability available to a render.
    Explicit merge abort also delegates to native Git in the backend (ADR-040), solely for safe recovery.
-   It is unavailable to rendering, init and update.
+   Explicit integration (`merge`, `pull`, `update --merge`, `switch --merge`) delegates to native Git
+   in the backend (ADR-052), honoring repository-configured drivers, hooks and signing.
+   These integration and recovery capabilities are unavailable to rendering and init.
 
 ## Layout
 

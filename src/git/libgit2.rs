@@ -1027,6 +1027,123 @@ impl GitBackend for LibGit2 {
         })
     }
 
+    fn merge_explicit(
+        &self,
+        commit: Oid,
+        message: &str,
+        commit_result: bool,
+    ) -> Result<MergeOutcome, GitError> {
+        // Native Git can include staged edits in a merge commit. They belong
+        // to the user, and must never ride along with template integration.
+        if !self.is_normal_state() {
+            return Err(GitError::RepositoryBusy);
+        }
+        if !self.is_index_clean()? {
+            return Err(GitError::DirtyIndex);
+        }
+        let before = self.head_commit()?;
+        let root = self.repo.workdir().unwrap_or(self.repo.path());
+        let mut command = std::process::Command::new("git");
+        // A caller's hook environment must not redirect integration to another
+        // repository or index, especially in linked worktrees.
+        for key in [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_INDEX_FILE",
+            "GIT_NAMESPACE",
+        ] {
+            command.env_remove(key);
+        }
+        let output = command
+            .current_dir(root)
+            .arg("--git-dir")
+            .arg(self.repo.path())
+            .arg("--work-tree")
+            .arg(root)
+            // Explicit options override branch mergeOptions: never squash away
+            // the merge base or hide local/configuration edits in an autostash.
+            .args([
+                "merge",
+                "--ff",
+                "--no-squash",
+                "--no-autostash",
+                "--no-edit",
+                "--no-overwrite-ignore",
+                "--allow-unrelated-histories",
+            ])
+            .arg(if commit_result {
+                "--commit"
+            } else {
+                "--no-commit"
+            })
+            .arg("--message")
+            .arg(message)
+            .arg(commit.to_hex())
+            // Driver and hook stdout must not escape into the JSON envelope.
+            .output()
+            .map_err(|error| GitError::MergeFailed {
+                reason: error.to_string(),
+            })?;
+
+        let mut index = self
+            .repo
+            .index()
+            .map_err(|e| backend("read the index", &e))?;
+        // libgit2 caches the index across calls; native Git wrote it externally.
+        index
+            .read(true)
+            .map_err(|e| backend("refresh the index", &e))?;
+        if output.status.code() == Some(1) && index.has_conflicts() {
+            let mut paths = BTreeSet::new();
+            for conflict in index
+                .conflicts()
+                .map_err(|e| backend("read the conflicts", &e))?
+            {
+                let conflict = conflict.map_err(|e| backend("read a conflict", &e))?;
+                if let Some(entry) = conflict.our.or(conflict.their).or(conflict.ancestor) {
+                    paths.insert(String::from_utf8_lossy(&entry.path).into_owned());
+                }
+            }
+            // Ordinary conflicts are successful outcomes; fatal driver/hook
+            // failures remain errors even if Git left partial merge state.
+            return Ok(MergeOutcome::Conflicted {
+                paths: paths.into_iter().collect(),
+            });
+        }
+        if !output.status.success() {
+            let reason = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stderr).trim(),
+                String::from_utf8_lossy(&output.stdout).trim(),
+            );
+            return Err(GitError::MergeFailed {
+                reason: if reason.trim().is_empty() {
+                    output.status.to_string()
+                } else {
+                    reason.trim().to_owned()
+                },
+            });
+        }
+        let after = self.head_commit()?;
+        if after != before {
+            let after = after.ok_or_else(|| GitError::MergeFailed {
+                reason: "HEAD disappeared during integration".into(),
+            })?;
+            return Ok(if after == commit {
+                MergeOutcome::FastForward { to: after }
+            } else {
+                MergeOutcome::Merged { commit: after }
+            });
+        }
+        if self.repo.state() == git2::RepositoryState::Merge {
+            return Ok(MergeOutcome::Staged);
+        }
+        Ok(MergeOutcome::UpToDate)
+    }
+
     fn merge_preview(&self, ours: Oid, theirs: Oid) -> Result<MergePreview, GitError> {
         let our_commit = self
             .repo

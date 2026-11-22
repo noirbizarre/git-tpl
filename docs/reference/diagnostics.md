@@ -265,6 +265,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::git::not_a_repository` | The command needs a repository and there is none. |
 | `tpl::git::no_merge` | No merge is active; inspect `git status`. Local changes are preserved. |
 | `tpl::git::abort_failed` | Native Git could not abort; inspect its captured reason and preserve edits before retrying. |
+| `tpl::git::merge_failed` | Native integration failed; inspect Git's reason and status, then finish or abort any active merge. |
 | `tpl::git::no_such_revision` | The requested revision is absent, or an inheritance object pin is ambiguous or noncommit. |
 | `tpl::git::auth` | Authentication failed. |
 | `tpl::git::network` | The remote could not be reached. The help text carries libgit2's own reason. |
@@ -273,7 +274,7 @@ The area is `testing` rather than `test`, which is reserved for the diagnostic f
 | `tpl::git::remote_exists` | A remote of that name already exists. git-tpl never repoints one. |
 | `tpl::git::stale_ref` | The rendered ref changed concurrently; inspect expected/actual tips and retry. No config is saved. |
 | `tpl::git::dirty_worktree` | The operation merges, and the worktree has uncommitted changes. |
-| `tpl::git::dirty_index` | Attachment would include staged user changes; commit or unstage them, even with `--no-merge`. |
+| `tpl::git::dirty_index` | Attachment or integration would include staged user changes; commit or unstage them. |
 | `tpl::git::repository_busy` | Another Git/template operation is active; wait, finish or abort it before retrying. |
 | `tpl::git::diverged` | The remote template ref has diverged. Nothing is force-pushed. |
 | `tpl::git::jj_not_colocated` | The path is a Jujutsu workspace without a colocated `.git`. |

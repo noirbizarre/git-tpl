@@ -455,7 +455,9 @@ for one invocation, pass `--skip-commands`; to disable them for yourself by defa
 `false` (`git config --global tpl.testCommands false` also applies outside repositories).
 `--skip-commands` can only disable further, never re-enable what
 configuration turned off. See [ADR-027](../adr/027-test-case-commands.md) for the full reasoning, including why
-this does not reopen the rule that a *rendered* project — `render`, `init`, `update` — cannot execute anything.
+this does not reopen the rule that rendering and `init` cannot execute anything.
+Explicit [integration](merge.md), including the separate phase after `update --merge`,
+runs native Git under [ADR-052](../adr/052-native-explicit-merge.md).
 
 Both also skip an ordinary render case's [`git`](#git-sandbox), since no commands remain to use its sandbox.
 Migration cases still initialize isolated Git and run their migration assertions;

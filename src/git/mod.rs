@@ -284,7 +284,7 @@ pub enum GitError {
     #[diagnostic(
         code(tpl::git::dirty_index),
         help(
-            "commit or unstage your changes before attaching a template, including with --no-merge"
+            "commit or unstage your changes before attaching a template or merging template changes"
         )
     )]
     DirtyIndex,
@@ -334,6 +334,19 @@ pub enum GitError {
     )]
     AbortFailed {
         /// Spawn failure or captured Git stderr.
+        reason: String,
+    },
+
+    /// Native integration failed; its recovery state must remain available.
+    #[error("native `git merge` failed: {reason}")]
+    #[diagnostic(
+        code(tpl::git::merge_failed),
+        help(
+            "inspect `git status` and the reason above; finish or abort any active merge before retrying"
+        )
+    )]
+    MergeFailed {
+        /// Spawn failure or captured Git output.
         reason: String,
     },
     /// The path is not inside a Git repository.
@@ -680,7 +693,7 @@ pub trait GitBackend {
     /// How two commits relate.
     fn ahead_behind(&self, local: Oid, upstream: Oid) -> Result<AheadBehind, GitError>;
 
-    /// Merge a commit into the current branch.
+    /// Non-executing merge into the current branch, used by initialization.
     ///
     /// Implemented with the backend's own merge. git-tpl contributes no
     /// conflict resolution of its own — see
@@ -696,6 +709,15 @@ pub trait GitBackend {
         message: &str,
         commit_result: bool,
         stage: &[&Path],
+    ) -> Result<MergeOutcome, GitError>;
+
+    /// Explicit integration through native Git, including configured drivers
+    /// and hooks. Never available to initialization or rendering (ADR-052).
+    fn merge_explicit(
+        &self,
+        commit: Oid,
+        message: &str,
+        commit_result: bool,
     ) -> Result<MergeOutcome, GitError>;
 
     /// The tree merging `theirs` into `ours` would produce.

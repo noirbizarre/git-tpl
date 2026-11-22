@@ -52,13 +52,15 @@ Not because they are bad ideas, but because they are contrary to what this proje
 
 **A second template engine.** MiniJinja is the only one. [ADR-003](../adr/003-minijinja-only.md).
 
-**Code execution from a `render`, `init` or `update`.** Hooks, scripts, subprocesses, embedded interpreters.
+**Code execution from rendering or `init`.** Hooks, scripts, subprocesses, embedded interpreters.
 Templates are untrusted input, and a rendered project is never a place code runs from — unconditionally, still.
 [ADR-016](../adr/016-template-tests-are-data.md).
 A `git tpl test` case's `[commands]` is not an exception to this: it is a different, narrower capability entirely
 — a test author's own harness running their own declared checks against their own template, never reachable from
 a render — added by [ADR-027](../adr/027-test-case-commands.md), which supersedes only the clause of ADR-016 that
 closed that one door.
+Explicit integration (`merge`, `pull`, `update --merge`, `switch --merge`) separately invokes native Git,
+including repository-configured drivers and hooks, under [ADR-052](../adr/052-native-explicit-merge.md).
 
 **Post-render tasks**, reviewed under issue #32 and declined. The proposal was narrow — a confirmed, `init`-only
 command list, run after the merge, leaving rendering untouched — and it still does not pay for itself. Of the five

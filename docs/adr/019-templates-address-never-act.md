@@ -118,6 +118,9 @@ git-tpl does not repoint someone's `origin`; a template that could would be a te
 
 ### The closure rule
 
+[ADR-052](052-native-explicit-merge.md) later permits native Git during explicit integration only.
+It grants no helper or execution capability to rendering or initialization.
+
 A builtin helper qualifies only if it:
 
 1. is a Git operation expressible through `GitBackend`,

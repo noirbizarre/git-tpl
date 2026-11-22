@@ -3130,7 +3130,7 @@ pub fn merge(
         format!("Merge {ref_name}\n\nTemplate changes rendered by `git tpl update`.\n")
     });
 
-    let outcome = project.merge(tip, &message, commit_result, &[])?;
+    let outcome = project.merge_explicit(tip, &message, commit_result)?;
     Ok((id, outcome))
 }
 
