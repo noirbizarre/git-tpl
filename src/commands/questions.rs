@@ -123,6 +123,8 @@ fn describe(
         "message": question.pattern_message(),
         // Clients preparing answers need the same constraints evaluation enforces.
         "itemPattern": question.item_pattern,
+        "minChoices": question.min_choices,
+        "maxChoices": question.max_choices,
         "itemMessage": question.item_pattern_message(),
         "defaultFrom": question.default_from,
     });

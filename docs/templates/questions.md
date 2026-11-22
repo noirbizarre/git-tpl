@@ -23,6 +23,8 @@ help = "Used for the package name and the README title"
 | `default_when_skipped` | boolean | Inject `default` into the context even when `when` is false. |
 | `choices` | array | The offered choices, for `choice` and `multi_choice`. |
 | `choices_from` | string | A reference to a list, instead of `choices`. |
+| `min_choices` | integer | Inclusive minimum selections for `multi_choice`, defaulting to zero. |
+| `max_choices` | integer | Inclusive maximum selections for `multi_choice`, unlimited when omitted. |
 | `default_from` | string | Where the *prompt default* comes from. `git:<key>`, or an expression over `git`, `dir` and `remote`. |
 | `pattern` | string | A regular expression every answer must match. `string` only. |
 | `message` | string | What to say when `pattern` rejects an answer. |
@@ -79,6 +81,28 @@ help = "Used for the package name and the README title"
     ```
 
     The answer is a list, so `{% if 'serde' in features %}` works in templates.
+
+    Optional `min_choices` and `max_choices` constrain the number of selections:
+
+    ```toml
+    [questions.categories]
+    type = "multi_choice"
+    choices = ["command-line-utilities", "development-tools", "web-programming"]
+    min_choices = 0
+    max_choices = 2
+    default = []
+    ```
+
+    Bounds are inclusive nonnegative integers and apply only to `multi_choice`.
+    Omit either bound to leave that end unrestricted; `max_choices = 0` permits only an empty answer.
+    The minimum must not exceed the maximum or the number of distinct available choices.
+    An upper bound larger than the catalogue is allowed.
+    An empty dynamically filtered catalogue still skips the question, including when a minimum is set.
+
+    Invalid interactive selections stay in the selector for correction.
+    Defaults, supplied answers and recorded answers must satisfy the same bounds;
+    an invalid count fails with `tpl::eval::choice_count` rather than truncating the answer.
+    Bounds also apply to defaults injected by `default_when_skipped`.
 
 === "list"
 

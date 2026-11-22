@@ -77,6 +77,12 @@ impl Prompter for Interactive {
                 };
 
                 let mut select = MultiSelect::new(title);
+                if let Some(min) = question.min_choices {
+                    select = select.min(min);
+                }
+                if let Some(max) = question.max_choices {
+                    select = select.max(max);
+                }
                 if let Some(help) = help {
                     select = select.description(help);
                 }

@@ -121,6 +121,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::data::untrusted",
     "tpl::eval::bad_choices",
     "tpl::eval::cancelled",
+    "tpl::eval::choice_count",
     "tpl::eval::expression",
     "tpl::eval::invalid_choice",
     "tpl::eval::invalid_list",

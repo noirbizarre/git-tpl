@@ -16,7 +16,7 @@ pub enum QuestionKind {
     Integer,
     /// One of a fixed set.
     Choice,
-    /// Any number of a fixed set. The answer is an array.
+    /// Multiple selections from a fixed set, optionally bounded. The answer is an array.
     MultiChoice,
     /// Any ordered number of freely named string values.
     List,
@@ -126,6 +126,14 @@ pub struct Question {
     /// serialise data into.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub choices_from: Option<String>,
+
+    /// Inclusive minimum number of selections for a `multi_choice` question.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_choices: Option<usize>,
+
+    /// Inclusive maximum number of selections for a `multi_choice` question.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_choices: Option<usize>,
 
     /// Where the *prompt default* comes from.
     ///
@@ -319,6 +327,8 @@ mod tests {
             pattern: None,
             message: None,
             item_pattern: None,
+            min_choices: None,
+            max_choices: None,
             item_message: None,
         };
         assert_eq!(question.default_expression(), None);
@@ -345,6 +355,8 @@ mod tests {
             pattern: None,
             message: None,
             item_pattern: None,
+            min_choices: None,
+            max_choices: None,
             item_message: None,
         };
         assert_eq!(question.git_config_key(), expected);
@@ -372,6 +384,8 @@ mod tests {
             pattern: pattern.map(str::to_string),
             message: message.map(str::to_string),
             item_pattern: None,
+            min_choices: None,
+            max_choices: None,
             item_message: None,
         };
         assert_eq!(question.pattern_message().as_deref(), expected);

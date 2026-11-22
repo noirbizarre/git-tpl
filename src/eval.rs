@@ -24,6 +24,20 @@ pub(crate) use demand::Session;
 /// Errors from evaluating a template.
 #[derive(Debug, Error, Diagnostic)]
 pub enum EvalError {
+    /// A selection count is outside the question's inclusive bounds.
+    #[error("invalid number of choices for `{question}`: {reason}")]
+    #[diagnostic(
+        code(tpl::eval::choice_count),
+        help(
+            "adjust the selection or supplied answer; edit `{question}` in `.config/git.tpl.toml` if it was recorded by an earlier render"
+        )
+    )]
+    ChoiceCount {
+        /// The question whose selection cannot be accepted.
+        question: String,
+        /// The actual count and the violated bound.
+        reason: String,
+    },
     /// An expression failed to render.
     #[error("failed to evaluate `{location}`")]
     #[diagnostic(
@@ -278,6 +292,7 @@ pub(crate) fn resolve_session<'a, 'repo>(
                             })?
                         {
                             validate_type(&node.key, question, &default)?;
+                            validate_choice_count(&node.key, question, &default)?;
                             session.context.set_gated_default(&node.key, default);
                         }
                         continue;
@@ -309,6 +324,24 @@ pub(crate) fn resolve_session<'a, 'repo>(
                     continue;
                 }
 
+                // demand clamps its minimum to the catalogue size. Reject an
+                // impossible minimum before opening a selector it cannot satisfy.
+                if let (Some(min), Some(choices)) = (question.min_choices, &choices) {
+                    let available = choices
+                        .iter()
+                        .map(|choice| &choice.value)
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len();
+                    if available < min {
+                        return Err(EvalError::ChoiceCount {
+                            question: node.key.clone(),
+                            reason: format!(
+                                "at least {min} required, but only {available} distinct choices are available; lower `min_choices` or expand the catalogue"
+                            ),
+                        });
+                    }
+                }
+
                 let default = if supplied.contains_key(&node.key) {
                     None
                 } else {
@@ -331,6 +364,7 @@ pub(crate) fn resolve_session<'a, 'repo>(
                 // replayed answers, or a successful init can fail on update.
                 validate_type(&node.key, question, &answer)?;
                 validate_choice(&node.key, question, &answer, choices.as_deref())?;
+                validate_choice_count(&node.key, question, &answer)?;
                 // Deliberately here rather than in the prompter: this covers
                 // the supplied branch too, which is where an answer replayed
                 // from `.config/git.tpl.toml` by `update` arrives.
@@ -342,6 +376,33 @@ pub(crate) fn resolve_session<'a, 'repo>(
     }
 
     Ok(session)
+}
+
+/// Check selection bounds independently of the answer's source or catalogue.
+pub fn validate_choice_count(
+    name: &str,
+    question: &Question,
+    answer: &Value,
+) -> Result<(), EvalError> {
+    let Value::Array(items) = answer else {
+        return Ok(());
+    };
+    let count = items.len();
+    let reason = if let Some(min) = question.min_choices.filter(|min| count < *min) {
+        Some(format!("at least {min} required, got {count}"))
+    } else {
+        question
+            .max_choices
+            .filter(|max| count > *max)
+            .map(|max| format!("at most {max} allowed, got {count}"))
+    };
+    match reason {
+        Some(reason) => Err(EvalError::ChoiceCount {
+            question: name.into(),
+            reason,
+        }),
+        None => Ok(()),
+    }
 }
 
 /// Resolve a question's choices, from `choices` or `choices_from`.
@@ -1058,6 +1119,66 @@ mod tests {
             context.set_answer(*key, value.clone());
         }
         context
+    }
+
+    #[rstest]
+    #[case("", "[]", true)]
+    #[case("min_choices = 1", "[]", false)]
+    #[case("min_choices = 1\nmax_choices = 2", "['a']", true)]
+    #[case("min_choices = 1\nmax_choices = 2", "['a', 'b']", true)]
+    #[case("max_choices = 1", "['a', 'b']", false)]
+    #[case("max_choices = 0", "[]", true)]
+    #[case("max_choices = 0", "['a']", false)]
+    fn selection_bounds_apply_to_literal_expression_and_supplied_answers(
+        #[case] bounds: &str,
+        #[case] answer: &str,
+        #[case] accepted: bool,
+    ) {
+        for default in [answer.to_string(), format!("\"{{{{ {answer} }}}}\"")] {
+            let manifest = format!(
+                "name = 'bounds'\n[questions.pick]\ntype = 'multi_choice'\nchoices = ['a', 'b']\n{bounds}\ndefault = {default}\n"
+            );
+            let result = resolve_with(&manifest, &[]);
+            assert_eq!(result.is_ok(), accepted, "{manifest}: {result:?}");
+            if !accepted {
+                assert!(matches!(result, Err(EvalError::ChoiceCount { .. })));
+            }
+            // Evaluate as a whole expression so the supplied value remains typed.
+            let value = evaluate(
+                &format!("{{{{ {answer} }}}}"),
+                &Context::new(),
+                "answer",
+                no_partials(),
+            )
+            .unwrap();
+            assert_eq!(
+                resolve_with(&manifest, &[("pick", value)]).is_ok(),
+                accepted
+            );
+        }
+    }
+
+    #[test]
+    fn skipped_defaults_obey_bounds_without_loading_unused_remote_choices() {
+        let manifest = "name = 'bounds'\n[data.options]\nsource = 'https://example.invalid/choices.json'\n[questions.pick]\ntype = 'multi_choice'\nchoices_from = 'data.options'\nwhen = '{{ false }}'\ndefault_when_skipped = true\ndefault = ['a', 'b']\nmax_choices = 1\n";
+        assert!(matches!(
+            resolve_with(manifest, &[]),
+            Err(EvalError::ChoiceCount { .. })
+        ));
+    }
+
+    #[test]
+    fn impossible_dynamic_minima_fail_but_empty_dynamic_choices_still_skip() {
+        for (choices, accepted) in [("['a']", false), ("[]", true)] {
+            let manifest = format!(
+                "name = 'bounds'\n[computed]\noptions = \"{{{{ {choices} }}}}\"\n[questions.pick]\ntype = 'multi_choice'\nchoices_from = 'options'\nmin_choices = 2\ndefault = []\n"
+            );
+            let result = resolve_with(&manifest, &[]);
+            assert_eq!(result.is_ok(), accepted, "{result:?}");
+            if !accepted {
+                assert!(matches!(result, Err(EvalError::ChoiceCount { .. })));
+            }
+        }
     }
 
     #[test]

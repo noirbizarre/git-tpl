@@ -136,6 +136,7 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::eval::bad_choices` | `choices_from` did not resolve to an array. |
 | `tpl::eval::wrong_type` | An answer is not of the declared type. |
 | `tpl::eval::invalid_choice` | An answer is not one of the choices. |
+| `tpl::eval::choice_count` | A selection count violates its bounds, or too few choices can satisfy the minimum. |
 | `tpl::eval::invalid_list` | A free-form list contains a non-string, empty, or pattern-mismatching item, or its command-line answer is not a JSON array of strings. |
 | `tpl::eval::pattern_mismatch` | An answer does not match the question's `pattern`. |
 | `tpl::eval::unanswered` | A question has no default and no answer was supplied. Usual cause of a failing `--defaults` run. |
