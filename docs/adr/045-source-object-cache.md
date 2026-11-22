@@ -65,6 +65,8 @@ Pruning removes whole entries rather than rewriting their object databases.
 It permits cached full-commit requests and ordinary local repository access.
 It does not sandbox explicitly authorized external test commands or native diff presentation.
 
+[ADR-051](051-checksum-http-cache.md) extends offline reuse to verified checksum-pinned HTTP bodies.
+
 ## Consequences
 
 Persistent objects are disposable optimization state, including any private source contents previously fetched.

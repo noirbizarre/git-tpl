@@ -31,7 +31,7 @@ pub struct Cli {
 /// Flags accepted before or after the subcommand.
 #[derive(Debug, Clone, clap::Args)]
 pub struct GlobalArgs {
-    /// Prohibit network access; remote sources require cached full commit IDs
+    /// Prohibit network access; use cached full commits or checksum-pinned HTTP data
     #[arg(long, global = true)]
     pub offline: bool,
 
@@ -75,7 +75,7 @@ pub enum ColorChoice {
 /// The commands.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Inspect, refresh, or remove cached source repositories
+    /// Inspect, refresh, or remove cached source objects
     Cache(CacheArgs),
     /// Attach a template to this repository and render it
     Init(InitArgs),
@@ -140,7 +140,7 @@ pub enum Command {
     Man(ManArgs),
 }
 
-/// Repository cache maintenance, independent of a project.
+/// Source cache maintenance, independent of a project.
 #[derive(Debug, clap::Args)]
 pub struct CacheArgs {
     #[command(subcommand)]
@@ -149,13 +149,13 @@ pub struct CacheArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum CacheCommand {
-    /// List cached repositories and their disk usage
+    /// List cached Git and HTTP entries and their disk usage
     List,
     /// Fetch current source branches and tags into the cache
     Fetch { source: String },
-    /// Clear one source, or all inactive repositories
+    /// Clear a Git source, sha256:<digest> HTTP object, or all inactive entries
     Clear { source: Option<String> },
-    /// Remove repositories unused for an age in days
+    /// Remove entries unused for an age in days
     Prune {
         #[arg(long, default_value_t = 30, value_name = "DAYS")]
         older_than: u64,

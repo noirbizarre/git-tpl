@@ -137,15 +137,31 @@ pub enum DataError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     Cache(#[from] CacheError),
-    /// HTTP is deliberately unavailable offline, even with a checksum.
+    /// Unpinned HTTP cannot establish an immutable offline identity.
     #[error("cannot load HTTP data source `{name}` while offline")]
     #[diagnostic(
         code(tpl::data::offline),
-        help("Retry without --offline, or use a local or cached commit-pinned Git source.")
+        help("Retry without --offline, or declare sha256 and populate its cache online first.")
     )]
     Offline {
         /// Data declaration that requested HTTP access.
         name: String,
+    },
+    /// Pinned HTTP content has not yet been acquired on this machine.
+    #[error("HTTP data source `{name}` is not cached while offline")]
+    #[diagnostic(
+        code(tpl::data::offline_miss),
+        help(
+            "source: {location}\nsha256: {digest}\nRetry this source online with the same checksum to populate the cache."
+        )
+    )]
+    OfflineMiss {
+        /// Declared source name.
+        name: String,
+        /// Resolved URL.
+        location: String,
+        /// Required content identity.
+        digest: String,
     },
     /// The source could not be read.
     //
@@ -560,8 +576,9 @@ enum ResourceKey {
 
 /// Loads and caches data sources.
 ///
-/// Caching is keyed by the *resolved* source string, so several questions
-/// drawing on one source cause one read. A declared source that nothing
+/// Invocation-local caching is keyed by the *resolved* resource, so several questions
+/// drawing on one source cause one read. Pinned HTTP also reuses verified persistent content by digest.
+/// A declared source that nothing
 /// references is never loaded at all, which is what lets a template offer
 /// data-backed choices on a conditional branch without imposing the cost on
 /// everyone.
@@ -606,6 +623,7 @@ impl<'a> Loader<'a> {
     /// No remote source is permitted until [`with_decisions`](Self::with_decisions)
     /// says so. Defaulting to "allowed" would mean every future caller had to
     /// remember to close the gate.
+    /// Configure [`Self::with_access`] before loading Git or checksum-pinned HTTP sources.
     pub fn new(template: TemplateTree<'a>, project_root: Option<PathBuf>) -> Self {
         Self {
             access: Access::new(None, false),
@@ -735,6 +753,7 @@ impl<'a> Loader<'a> {
         if kind.is_network() {
             self.authorised(name, &location)?;
         }
+        let expected = expected_digest(name, decl)?;
         let cache_key = match kind {
             SourceKind::TemplateFile => ResourceKey::Template(
                 self.data_origin
@@ -752,13 +771,20 @@ impl<'a> Loader<'a> {
 
         // Set by the git arm alone: the commit the file was actually read at,
         // which is what makes a git source's trailer answer "which bytes?".
-        let (bytes, git_revision) = if let Some(resource) = self.cache.get(&cache_key) {
+        let (bytes, git_revision) = if kind == SourceKind::Remote {
+            (
+                self.read_http(name, rendered.source, expected.as_deref())?,
+                None,
+            )
+        } else if let Some(resource) = self.cache.get(&cache_key) {
             resource.clone()
         } else {
             let resource = match kind {
                 SourceKind::TemplateFile => (self.read_template_file(name, rendered.source)?, None),
                 SourceKind::LocalFile => (self.read_local_file(name, rendered.source)?, None),
-                SourceKind::Remote => (self.fetch(name, rendered.source)?, None),
+                SourceKind::Remote => {
+                    unreachable!("HTTP acquisition validates persistent objects separately")
+                }
                 SourceKind::Git => {
                     let location = git.as_ref().expect("a git source has a location");
                     let (bytes, revision) = self.read_git_file(name, location)?;
@@ -774,7 +800,6 @@ impl<'a> Loader<'a> {
         // for the other kinds unless a pin asked for it: a template file is
         // already pinned by the template revision, and so is a git source once
         // its ref has been resolved to a commit.
-        let expected = expected_digest(name, decl)?;
         let digest = (expected.is_some() || kind == SourceKind::Remote).then(|| digest_of(&bytes));
 
         if let (Some(expected), Some(actual)) = (&expected, &digest)
@@ -949,6 +974,86 @@ impl<'a> Loader<'a> {
         }
     }
 
+    /// Acquire raw HTTP bytes without letting immutable availability confer trust or freshness.
+    fn read_http(
+        &mut self,
+        name: &str,
+        url: &str,
+        expected: Option<&str>,
+    ) -> Result<Vec<u8>, DataError> {
+        // Explicit remote declarations bypass source inference, including on cache hits.
+        if !(url.starts_with("http://") || url.starts_with("https://")) {
+            return Err(DataError::Load {
+                name: name.into(),
+                location: url.into(),
+                kind: SourceKind::Remote,
+                reason: "unsupported scheme: a remote data source must be http or https".into(),
+            });
+        }
+        let key = ResourceKey::Remote(url.into());
+        let Some(expected) = expected else {
+            // A pinned alias must not accidentally give unpinned data offline semantics.
+            if self.access.offline {
+                return Err(DataError::Offline { name: name.into() });
+            }
+            if let Some((bytes, _)) = self.cache.get(&key) {
+                return Ok(bytes.clone());
+            }
+            let bytes = self.fetch(name, url)?;
+            self.cache.insert(key, (bytes.clone(), None));
+            return Ok(bytes);
+        };
+        let entry = self.access.http(expected)?;
+        let bytes = if let Some(file) = entry.open()? {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            file.take(REMOTE_LIMIT_BYTES + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|e| entry.corrupt(e.to_string()))?;
+            if bytes.len() as u64 > REMOTE_LIMIT_BYTES {
+                return Err(entry
+                    .corrupt("cached body exceeds the HTTP response size limit")
+                    .into());
+            }
+            let actual = digest_of(&bytes);
+            if actual != expected {
+                return Err(entry
+                    .corrupt(format!("expected {expected}, actual {actual}"))
+                    .into());
+            }
+            entry.touch()?;
+            bytes
+        } else {
+            if self.access.offline {
+                return Err(DataError::OfflineMiss {
+                    name: name.into(),
+                    location: url.into(),
+                    digest: expected.into(),
+                });
+            }
+            let bytes = match self.cache.get(&key) {
+                Some((bytes, _)) => bytes.clone(),
+                None => self.fetch(name, url)?,
+            };
+            let actual = digest_of(&bytes);
+            if actual != expected {
+                return Err(DataError::ChecksumMismatch {
+                    name: name.into(),
+                    location: url.into(),
+                    expected: expected.into(),
+                    actual,
+                });
+            }
+            entry.publish(&bytes)?;
+            bytes
+        };
+        // Preserve any URL snapshot already observed by an unpinned alias.
+        self.cache
+            .entry(key)
+            .or_insert_with(|| (bytes.clone(), None));
+        Ok(bytes)
+    }
+
     /// Fetch a remote source over HTTP.
     ///
     /// The response is untrusted input from a third party: it is bounded, timed
@@ -959,18 +1064,6 @@ impl<'a> Loader<'a> {
         self.authorised(name, url)?;
         if self.access.offline {
             return Err(DataError::Offline { name: name.into() });
-        }
-
-        // `kind = "remote"` can be declared on any string, so the scheme is
-        // checked here rather than relying on the inference that a declared
-        // kind bypasses.
-        if !(url.starts_with("http://") || url.starts_with("https://")) {
-            return Err(DataError::Load {
-                name: name.to_string(),
-                location: url.to_string(),
-                kind: SourceKind::Remote,
-                reason: "unsupported scheme: a remote data source must be http or https".into(),
-            });
         }
 
         // No retry setting here on purpose: ureq only retries when a

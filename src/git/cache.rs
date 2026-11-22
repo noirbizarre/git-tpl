@@ -1,4 +1,4 @@
-//! Disposable source objects, never template state. See ADR-045.
+//! Disposable source objects, never template state. See ADR-045 and ADR-051.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -19,7 +19,7 @@ use super::{GitBackend, GitError, LibGit2, Oid};
 #[derive(Debug, Error, Diagnostic)]
 pub enum CacheError {
     /// The cache could not be read or written.
-    #[error("could not access Git cache at `{}`: {source}", path.display())]
+    #[error("could not access source cache at `{}`: {source}", path.display())]
     #[diagnostic(
         code(tpl::cache::io),
         help("Check cache permissions and free space, or choose --cache-dir.")
@@ -67,11 +67,13 @@ pub enum CacheError {
     #[error("no cache directory is available")]
     #[diagnostic(
         code(tpl::cache::location),
-        help("Set GIT_TPL_CACHE_DIR or pass --cache-dir with an absolute path.")
+        help(
+            "Pass --cache-dir with an absolute path or set GIT_TPL_CACHE_DIR; library callers must configure Access::new with a root."
+        )
     )]
     Location,
     /// Disposable metadata is invalid.
-    #[error("invalid Git cache metadata in `{}`", path.display())]
+    #[error("invalid source cache metadata in `{}`", path.display())]
     #[diagnostic(
         code(tpl::cache::corrupt),
         help("Clear this cache entry and retry online.")
@@ -79,6 +81,28 @@ pub enum CacheError {
     Corrupt {
         /// Invalid entry metadata.
         path: PathBuf,
+    },
+    /// A content-addressed entry is incomplete or does not match its identity.
+    #[error("invalid HTTP cache entry sha256:{digest}: {reason}")]
+    #[diagnostic(
+        code(tpl::cache::http_corrupt),
+        help("Run `git tpl cache clear sha256:{digest}`, then retry online.")
+    )]
+    HttpCorrupt {
+        /// Expected content identity.
+        digest: String,
+        /// Specific integrity failure.
+        reason: String,
+    },
+    /// A reserved content selector must not become a path or Git source.
+    #[error("invalid HTTP cache checksum `{digest}`")]
+    #[diagnostic(
+        code(tpl::cache::http_digest),
+        help("Use sha256: followed by 64 hexadecimal characters.")
+    )]
+    HttpDigest {
+        /// Invalid selector digest.
+        digest: String,
     },
     /// The caller required a tag or object pin, not a branch.
     #[error("`{reference}` is not a tag or unambiguous commit ID")]
@@ -113,6 +137,30 @@ pub struct Access {
 type Resolutions = BTreeMap<(String, Option<String>, bool), (String, Oid)>;
 
 impl Access {
+    /// Lock one raw content object. Transport and verification belong to the data loader.
+    pub fn http(&self, digest: &str) -> Result<HttpEntry, CacheError> {
+        let digest = normalize_digest(digest)?;
+        let root = self.root()?.join("v1");
+        let entries = root.join("http");
+        let locks = root.join("locks");
+        fs::create_dir_all(&entries).map_err(|e| io(&entries, e))?;
+        fs::create_dir_all(&locks).map_err(|e| io(&locks, e))?;
+        #[cfg(unix)]
+        private_directory(&root)?;
+        let lease_path = locks.join(format!("http-{digest}.lease"));
+        let lease = Lock(lock_file(&lease_path)?);
+        lease.0.lock_shared().map_err(|e| io(&lease_path, e))?;
+        let mutation_path = locks.join(format!("http-{digest}.fetch"));
+        let mutation = Lock(lock_file(&mutation_path)?);
+        mutation.0.lock().map_err(|e| io(&mutation_path, e))?;
+        Ok(HttpEntry {
+            path: entries.join(&digest),
+            digest,
+            _mutation: mutation,
+            _lease: lease,
+        })
+    }
+
     /// Construct explicitly; environment discovery belongs to the frontend.
     pub fn new(root: Option<PathBuf>, offline: bool) -> Self {
         Self {
@@ -274,8 +322,8 @@ impl Access {
     pub fn list(&self) -> Result<Vec<Entry>, CacheError> {
         let mut entries = Vec::new();
         for id in self.ids()? {
-            let path = self.root()?.join("v1/repos").join(&id);
-            let lease_path = self.root()?.join("v1/locks").join(format!("{id}.lease"));
+            let path = id.path(self.root()?);
+            let lease_path = id.lease_path(self.root()?);
             let lease = Lock(lock_file(&lease_path)?);
             lease.0.lock_shared().map_err(|e| io(&lease_path, e))?;
             let metadata_path = path.join("git-tpl-cache.json");
@@ -289,7 +337,8 @@ impl Access {
                     path: metadata_path,
                 })?;
             entries.push(Entry {
-                id,
+                id: id.public(),
+                kind: id.kind(),
                 source: metadata.source,
                 last_used: metadata.last_used,
                 bytes: directory_size(&path)?,
@@ -298,23 +347,29 @@ impl Access {
         Ok(entries)
     }
 
-    fn ids(&self) -> Result<Vec<String>, CacheError> {
-        let path = self.root()?.join("v1/repos");
-        let dirs = match fs::read_dir(&path) {
-            Ok(dirs) => dirs,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(io(&path, e)),
-        };
+    fn ids(&self) -> Result<Vec<Identity>, CacheError> {
         let mut ids = Vec::new();
-        for dir in dirs {
-            let dir = dir.map_err(|e| io(&path, e))?;
-            let id = dir.file_name().to_string_lossy().into_owned();
-            if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-                continue;
+        for namespace in ["repos", "http"] {
+            let path = self.root()?.join("v1").join(namespace);
+            let dirs = match fs::read_dir(&path) {
+                Ok(dirs) => dirs,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(io(&path, e)),
+            };
+            for dir in dirs {
+                let dir = dir.map_err(|e| io(&path, e))?;
+                let id = dir.file_name().to_string_lossy().into_owned();
+                if id.len() != 64 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    continue;
+                }
+                ids.push(if namespace == "http" {
+                    Identity::Http(id)
+                } else {
+                    Identity::Git(id)
+                });
             }
-            ids.push(id);
         }
-        ids.sort();
+        ids.sort_by_key(Identity::public);
         Ok(ids)
     }
 
@@ -325,18 +380,25 @@ impl Access {
         older_than: Option<Duration>,
     ) -> Result<Removal, CacheError> {
         let mut result = Removal::default();
-        let selected = source.map(identity);
+        let selected = source
+            .map(|source| {
+                source.strip_prefix("sha256:").map_or_else(
+                    || Ok(Identity::Git(identity(source))),
+                    |digest| normalize_digest(digest).map(Identity::Http),
+                )
+            })
+            .transpose()?;
         for id in self.ids()? {
             if selected.as_ref().is_some_and(|selected| *selected != id) {
                 continue;
             }
-            let path = self.root()?.join("v1/repos").join(&id);
-            let lease_path = self.root()?.join("v1/locks").join(format!("{id}.lease"));
+            let path = id.path(self.root()?);
+            let lease_path = id.lease_path(self.root()?);
             let lease = Lock(lock_file(&lease_path)?);
             match lease.0.try_lock() {
                 Ok(()) => (),
                 Err(std::fs::TryLockError::WouldBlock) => {
-                    result.skipped.push(id);
+                    result.skipped.push(id.public());
                     continue;
                 }
                 Err(std::fs::TryLockError::Error(e)) => return Err(io(&lease_path, e)),
@@ -358,9 +420,129 @@ impl Access {
                 }
             }
             fs::remove_dir_all(&path).map_err(|e| io(&path, e))?;
-            result.removed.push(id);
+            result.removed.push(id.public());
         }
         Ok(result)
+    }
+}
+
+#[derive(PartialEq, Eq)]
+enum Identity {
+    Git(String),
+    Http(String),
+}
+
+impl Identity {
+    fn public(&self) -> String {
+        match self {
+            Self::Git(id) => id.clone(),
+            Self::Http(id) => format!("sha256:{id}"),
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Git(_) => "git",
+            Self::Http(_) => "http",
+        }
+    }
+
+    fn path(&self, root: &Path) -> PathBuf {
+        match self {
+            Self::Git(id) => root.join("v1/repos").join(id),
+            Self::Http(id) => root.join("v1/http").join(id),
+        }
+    }
+
+    fn lease_path(&self, root: &Path) -> PathBuf {
+        let name = match self {
+            Self::Git(id) => id.clone(),
+            Self::Http(id) => format!("http-{id}"),
+        };
+        root.join("v1/locks").join(format!("{name}.lease"))
+    }
+}
+
+fn normalize_digest(digest: &str) -> Result<String, CacheError> {
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(CacheError::HttpDigest {
+            digest: digest.into(),
+        });
+    }
+    Ok(digest.to_ascii_lowercase())
+}
+
+/// A raw object protected from publication and maintenance races until bytes are owned.
+pub struct HttpEntry {
+    path: PathBuf,
+    digest: String,
+    // Release mutation before the lifetime lease, so maintenance cannot race a writer.
+    _mutation: Lock,
+    _lease: Lock,
+}
+
+impl HttpEntry {
+    /// Open an existing body; only an absent final directory constitutes a miss.
+    pub fn open(&self) -> Result<Option<File>, CacheError> {
+        if !self.path.try_exists().map_err(|e| io(&self.path, e))? {
+            return Ok(None);
+        }
+        let metadata_path = self.path.join("git-tpl-cache.json");
+        let bytes = fs::read(&metadata_path).map_err(|e| self.corrupt(e.to_string()))?;
+        let metadata: Metadata =
+            serde_json::from_slice(&bytes).map_err(|e| self.corrupt(e.to_string()))?;
+        if metadata.source != format!("sha256:{}", self.digest) {
+            return Err(self.corrupt("metadata identity does not match the entry"));
+        }
+        File::open(self.path.join("body"))
+            .map(Some)
+            .map_err(|e| self.corrupt(e.to_string()))
+    }
+
+    /// Construct an actionable integrity error without exposing internal paths to the loader.
+    pub fn corrupt(&self, reason: impl Into<String>) -> CacheError {
+        CacheError::HttpCorrupt {
+            digest: self.digest.clone(),
+            reason: reason.into(),
+        }
+    }
+
+    /// Mark a successfully verified object as used.
+    pub fn touch(&self) -> Result<(), CacheError> {
+        write_metadata(
+            &self.path,
+            &Metadata {
+                source: format!("sha256:{}", self.digest),
+                last_used: now(),
+            },
+        )
+    }
+
+    /// Atomically publish verified raw bytes and metadata while holding per-object exclusion.
+    pub fn publish(&self, bytes: &[u8]) -> Result<(), CacheError> {
+        let entries = self.path.parent().expect("HTTP entries have a parent");
+        let prefix = format!(".staging-{}-", self.digest);
+        // Only the mutation-lock holder can own this digest's staging directories.
+        for entry in fs::read_dir(entries).map_err(|e| io(entries, e))? {
+            let entry = entry.map_err(|e| io(entries, e))?;
+            if entry.file_name().to_string_lossy().starts_with(&prefix) {
+                fs::remove_dir_all(entry.path()).map_err(|e| io(&entry.path(), e))?;
+            }
+        }
+        let staging = tempfile::Builder::new()
+            .prefix(&prefix)
+            .tempdir_in(entries)
+            .map_err(|e| io(entries, e))?;
+        fs::write(staging.path().join("body"), bytes).map_err(|e| io(staging.path(), e))?;
+        write_metadata(
+            staging.path(),
+            &Metadata {
+                source: format!("sha256:{}", self.digest),
+                last_used: now(),
+            },
+        )?;
+        fs::rename(staging.path(), &self.path).map_err(|e| io(&self.path, e))?;
+        Ok(())
     }
 }
 
@@ -397,12 +579,14 @@ struct Metadata {
     last_used: u64,
 }
 
-/// A disposable repository's inspection data.
+/// A disposable source entry's inspection data.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
-    /// Opaque repository identity.
+    /// Opaque Git identity or `sha256:<digest>` HTTP content identity.
     pub id: String,
+    /// Storage kind: Git repository or HTTP content object.
+    pub kind: &'static str,
     /// Source label without URL credentials.
     pub source: String,
     /// Last successful access, in Unix seconds.
@@ -414,7 +598,7 @@ pub struct Entry {
 /// Maintenance result, including active readers left untouched.
 #[derive(Debug, Default, Serialize)]
 pub struct Removal {
-    /// IDs of removed repositories.
+    /// IDs of removed source entries.
     pub removed: Vec<String>,
     /// IDs retained because another operation is using them.
     pub skipped: Vec<String>,

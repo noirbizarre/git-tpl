@@ -5,7 +5,7 @@ This lets source-history inspection recover after the resulting commit is merged
 Dry runs validate ordered migration moves against the previous rendering and report the same move errors as an update.
 
 Source objects use the [Git cache](cache.md); mutable refs refresh online and never fall back to stale names.
-Global `--offline` requires local sources or cached full commit IDs for every source actually used.
+Global `--offline` requires local sources, cached full commit IDs, or cached checksum-pinned HTTP data for sources used.
 Publication through `--push` or `tpl.autoPush` is refused before the rendered ref advances when offline.
 
 Concurrent init/update operations in one worktree are refused until the first finishes saving configuration.

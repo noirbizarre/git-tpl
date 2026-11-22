@@ -59,3 +59,4 @@ explains the code that existed.
 | [048](048-context-assertions.md) | Template tests assert resolved context with first-class null values |
 | [049](049-toml-snapshot-manifests.md) | Snapshot manifests record paths and modes in TOML without content checksums or sizes |
 | [050](050-template-switch-and-explicit-merge.md) | Template switches retain history; merging is an explicit second phase |
+| [051](051-checksum-http-cache.md) | Checksum-pinned HTTP bodies persist by content identity and remain verified offline |
