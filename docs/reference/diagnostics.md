@@ -57,13 +57,15 @@ Something is wrong with the template itself.
 | `tpl::compose::child_failed` | A child repository could not be resolved or rendered; inspect its cause. |
 | `tpl::compose::nested` | A composed child also composes other children. Keep siblings in the parent. |
 
-## Git source cache
+## Source cache
 
 See [cache management and offline behavior](../usage/cache.md).
 
 | Code | Meaning |
 |---|---|
 | `tpl::cache::corrupt` | Invalid cache metadata, repository, or incomplete objects. Clear the entry and retry online. |
+| `tpl::cache::http_corrupt` | Invalid HTTP body or metadata. Run `git tpl cache clear sha256:<digest>` and retry online. |
+| `tpl::cache::http_digest` | Invalid HTTP cache selector. Use `sha256:` followed by 64 hexadecimal characters. |
 | `tpl::cache::io` | Cache storage or locking failed. Check permissions/free space, or choose `--cache-dir`. |
 | `tpl::cache::location` | No cache location is available. Supply `--cache-dir` or `GIT_TPL_CACHE_DIR`. |
 | `tpl::cache::offline` | A network-capable operation conflicts with offline mode. Retry without `--offline`. |
@@ -149,7 +151,8 @@ These two are about the flags rather than the template, so they are raised as er
 | Code | Meaning |
 |---|---|
 | `tpl::data::load` | A data source could not be read. |
-| `tpl::data::offline` | HTTP data was requested offline. Retry online or use local/cached commit-pinned Git data. |
+| `tpl::data::offline` | Unpinned HTTP data was requested offline. Retry online or populate a declared SHA-256 pin online. |
+| `tpl::data::offline_miss` | Pinned HTTP content is not cached. Populate the same source and checksum online first. |
 | `tpl::data::parse` | A data source is not valid in its declared format. |
 | `tpl::data::escapes_root` | A `local` path leaves the project root. |
 | `tpl::data::needs_project` | A `local` source was reached without a project during evaluation, such as `render` or `context`. Use a `template` source or a project-aware rendering. Lint checks declarations without loading values. |

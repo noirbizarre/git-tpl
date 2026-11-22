@@ -19,6 +19,98 @@ fn access(root: &std::path::Path, offline: bool) -> Access {
 }
 
 #[test]
+fn http_publication_recovers_staging_and_maintenance_respects_live_readers() {
+    use sha2::{Digest, Sha256};
+    let root = tempfile::tempdir().unwrap();
+    let cache = access(root.path(), false);
+    let bytes = b"{\"value\":1}";
+    let digest = hex::encode(Sha256::digest(bytes));
+    let id = format!("sha256:{digest}");
+    let abandoned = root
+        .path()
+        .join("v1/http")
+        .join(format!(".staging-{digest}-abandoned"));
+    std::fs::create_dir_all(&abandoned).unwrap();
+    std::fs::write(abandoned.join("body"), b"partial").unwrap();
+    assert!(
+        cache.list().unwrap().is_empty(),
+        "staging is never an entry"
+    );
+    let reader = cache.http(&digest).unwrap();
+    assert!(reader.open().unwrap().is_none());
+    reader.publish(bytes).unwrap();
+    assert!(!abandoned.exists());
+    let listed = cache.list().unwrap();
+    assert_eq!(listed[0].id, id);
+    assert_eq!(listed[0].kind, "http");
+    assert_eq!(listed[0].source, id);
+    for age in [None, Some(Duration::ZERO)] {
+        let result = cache.clear(None, age).unwrap();
+        assert!(result.removed.is_empty());
+        assert_eq!(result.skipped, std::slice::from_ref(&id));
+    }
+    drop(reader);
+    assert!(
+        cache
+            .clear(None, Some(Duration::from_secs(86400)))
+            .unwrap()
+            .removed
+            .is_empty()
+    );
+    let result = cache.clear(None, Some(Duration::ZERO)).unwrap();
+    assert_eq!(result.removed, [id]);
+    assert!(
+        root.path()
+            .join("v1/locks")
+            .join(format!("http-{digest}.lease"))
+            .exists(),
+        "lock inodes survive removal"
+    );
+}
+
+#[test]
+fn cache_commands_distinguish_git_sources_from_http_content_selectors() {
+    use sha2::{Digest, Sha256};
+    let source = source();
+    let root = tempfile::tempdir().unwrap();
+    let cache = access(root.path(), false);
+    let url = file_url(&source.path);
+    drop(cache.acquire(&url, None, false).unwrap());
+    let bytes = b"{}";
+    let digest = hex::encode(Sha256::digest(bytes));
+    cache.http(&digest).unwrap().publish(bytes).unwrap();
+    let run = |args: &[&str]| {
+        let mut all = vec!["--json", "--cache-dir", root.path().to_str().unwrap()];
+        all.extend_from_slice(args);
+        tpl(&source, &all)
+    };
+    let listed = run(&["cache", "list"]).success().json();
+    assert_eq!(listed["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(listed["entries"][0]["kind"], "git");
+    assert_eq!(listed["entries"][1]["kind"], "http");
+    assert_eq!(
+        run(&["cache", "clear", "sha256:../../oops"])
+            .failure()
+            .error_code(),
+        "tpl::cache::http_digest"
+    );
+    let removed = run(&[
+        "cache",
+        "clear",
+        &format!("sha256:{}", digest.to_uppercase()),
+    ])
+    .success()
+    .json();
+    assert_eq!(removed["removed"][0], format!("sha256:{digest}"));
+    assert_eq!(cache.list().unwrap().len(), 1);
+    cache.http(&digest).unwrap().publish(bytes).unwrap();
+    run(&["cache", "clear", &url]).success();
+    assert_eq!(cache.list().unwrap()[0].kind, "http");
+    run(&["cache", "clear"]).success();
+    assert!(cache.list().unwrap().is_empty());
+}
+
+#[test]
 fn a_cached_full_commit_is_reusable_after_the_origin_disappears() {
     let source = source();
     let url = file_url(&source.path);

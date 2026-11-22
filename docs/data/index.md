@@ -43,7 +43,7 @@ Instead, a template *declares* the data it wants. The data layer owns:
 - resolution — turning a `source` into something concrete
 - loading — reading a file, or making a request
 - parsing — TOML, JSON and YAML, into structured values
-- caching — one fetch per source per run, no matter how many things use it
+- caching — invocation-local byte reuse, plus persistent verified content for checksum-pinned HTTP sources
 - validation — a parse failure names the source
 - provenance — recording what contributed to a rendering
 - error handling
@@ -99,6 +99,7 @@ See [Local data](local.md), [Remote data](remote.md) and [Git data](git.md).
 
 Any source may declare the sha256 of its content.
 A mismatch stops the render.
+For HTTP sources, a declared checksum also enables verified persistent caching and offline reuse once populated.
 
 ```toml
 [data.licenses]

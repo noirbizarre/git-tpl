@@ -65,6 +65,12 @@ Guaranteeing they will not change is the next section.
     producing a plausible tree from content the template did not vouch for.
     Both digests are reported, so "the source changed" is distinguishable from "the pin is wrong".
 
+    HTTP bodies matching a declared checksum are [cached across runs](../usage/cache.md#http-content-identity-and-integrity).
+    The raw bytes are verified on every acquisition, independently of URL and parsing format.
+    A populated pin works with `--offline`; a missing object must be populated online first.
+    Corruption is an error requiring explicit clearing and an online retry, never permission to trust cached bytes.
+    Unpinned URLs retain their network-dependent behavior, including versioned URLs without a declared checksum.
+
     Exact, verifiable, and the strongest option — at the cost of a manual update whenever the source legitimately
     changes.
     It is accepted on any kind of data source, though a template file is already pinned by the template revision.
