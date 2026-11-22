@@ -1,4 +1,6 @@
-<h1 align="center">git-tpl</h1>
+<p align="center">
+  <img src="docs/images/logo.svg" alt="git-tpl">
+</p>
 
 <p align="center"><strong>Git-native project templates</strong></p>
 

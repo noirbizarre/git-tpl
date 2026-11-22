@@ -1,4 +1,4 @@
-# git-tpl
+<h1 align="center"><img src="images/logo.svg" alt="git-tpl"></h1>
 
 Git-native project templates
 
