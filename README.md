@@ -66,8 +66,6 @@ In GitHub Actions, install it for subsequent steps:
 steps:
   - uses: actions/checkout@v7
   - uses: noirbizarre/git-tpl@main
-    with:
-      # Omit to install the latest release; pin a version for reproducible CI.
   - run: git tpl --version
 ```
 
