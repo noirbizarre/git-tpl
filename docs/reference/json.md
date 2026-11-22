@@ -77,6 +77,17 @@ Reading the code to decide *what* went wrong and the exit status to decide *whet
 
 Every payload carries `"ok": true`, so a caller can check one field without first knowing which command it ran.
 
+### `cache`
+
+`cache list` returns `root` and `entries`, sorted by entry ID.
+Each entry has `id`, `kind` (`"git"` or `"http"`), `source`, `lastUsed` (Unix seconds), and `bytes`.
+Git IDs remain opaque repository identities and their source labels are redacted.
+HTTP IDs and labels are `sha256:<digest>`, identifying raw content independently of URL or format.
+
+`cache clear` and `cache prune` return `removed` and `skipped` ID arrays across both kinds.
+Use `cache clear sha256:<digest>` to select one HTTP object; busy entries are skipped.
+`cache fetch SOURCE` remains Git-only and returns redacted `source` and `refreshed: true`.
+
 ### `render`
 
 See also [`log`](#log) for source commits without rendering.

@@ -26,10 +26,17 @@ pub fn run(args: CacheArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             serde_json::json!({ "source": tpl::git::cache::redact(&source), "refreshed": true })
         }
         CacheCommand::Clear { source } => {
-            let source = source.as_deref().map(|source| ctx.user.expand(source));
+            // Content selectors are identities, not repository aliases.
+            let source = source.as_deref().map(|source| {
+                if source.starts_with("sha256:") {
+                    source.to_owned()
+                } else {
+                    ctx.user.expand(source).into_owned()
+                }
+            });
             let removed = ctx.access.clear(source.as_deref(), None)?;
             ctx.out.say(format!(
-                "Removed {} repositories; skipped {} busy entries",
+                "Removed {} entries; skipped {} busy entries",
                 removed.removed.len(),
                 removed.skipped.len()
             ));
@@ -44,7 +51,7 @@ pub fn run(args: CacheArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     })?;
             let removed = ctx.access.clear(None, Some(Duration::from_secs(seconds)))?;
             ctx.out.say(format!(
-                "Removed {} repositories; skipped {} busy entries",
+                "Removed {} entries; skipped {} busy entries",
                 removed.removed.len(),
                 removed.skipped.len()
             ));

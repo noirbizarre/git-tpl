@@ -29,6 +29,353 @@ fn project(dir: &std::path::Path) -> Repo {
 
 const REGISTRY: &str = r#"{"count": 2, "items": ["a", "b"], "strict": true}"#;
 
+fn registry_digest() -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(REGISTRY.as_bytes()))
+}
+
+fn render_cached(template: &Repo, cache: &std::path::Path, extra: &[&str]) -> common::Output {
+    let output = template.path.join("out");
+    let mut args = vec![
+        "--json",
+        "--cache-dir",
+        cache.to_str().unwrap(),
+        "render",
+        template.path.to_str().unwrap(),
+        "--defaults",
+        "--force",
+        "-o",
+        output.to_str().unwrap(),
+    ];
+    args.extend_from_slice(extra);
+    tpl(template, &args)
+}
+
+#[test]
+fn pinned_http_is_reused_across_invocations_and_urls_even_offline() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let digest = registry_digest();
+    let template = template_with(
+        dir.path(),
+        &format!(
+            "source = '{}'\nsha256 = ' {} '",
+            server.url("/reg.json"),
+            digest.to_uppercase()
+        ),
+        "{{ data.reg.count }}",
+    );
+    render_cached(&template, cache.path(), &["--trust"]).success();
+    render_cached(&template, cache.path(), &["--trust"]).success();
+    assert_eq!(server.hits(), 1);
+    assert_eq!(template.read("out/out.txt"), "2");
+
+    // A different URL cannot affect immutable content identity or require its old server.
+    template.write("template.toml", &format!("name = 'remote'\n[data.reg]\nsource = 'http://127.0.0.1:1/other.json'\nsha256 = '{digest}'\n"));
+    template.commit_all("change content location");
+    drop(server);
+    for extra in [vec!["--trust"], vec!["--trust", "--offline"]] {
+        render_cached(&template, cache.path(), &extra).success();
+        assert_eq!(template.read("out/out.txt"), "2");
+    }
+}
+
+#[test]
+fn pinned_http_offline_misses_explain_how_to_populate_the_cache() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let template = template_with(
+        dir.path(),
+        &format!(
+            "source = '{}'\nsha256 = '{}'",
+            server.url("/reg.json"),
+            registry_digest()
+        ),
+        "{{ data.reg.count }}",
+    );
+    let result = render_cached(&template, cache.path(), &["--trust", "--offline"]).failure();
+    assert_eq!(result.error_code(), "tpl::data::offline_miss");
+    assert!(result.json().to_string().contains("populate the cache"));
+    assert_eq!(server.hits(), 0);
+    assert!(!template.path.join("out").exists());
+}
+
+#[test]
+fn corrupt_http_objects_fail_without_network_fallback_and_can_be_cleared() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let digest = registry_digest();
+    let template = template_with(
+        dir.path(),
+        &format!(
+            "source = '{}'\nsha256 = '{digest}'",
+            server.url("/reg.json")
+        ),
+        "{{ data.reg.count }}",
+    );
+    let entry = cache.path().join("v1/http").join(&digest);
+    for corruption in ["checksum", "oversized", "missing body", "metadata"] {
+        render_cached(&template, cache.path(), &["--trust"]).success();
+        match corruption {
+            "checksum" => std::fs::write(entry.join("body"), b"{}").unwrap(),
+            "oversized" => {
+                std::fs::write(entry.join("body"), vec![b' '; 5 * 1024 * 1024 + 1]).unwrap()
+            }
+            "missing body" => std::fs::remove_file(entry.join("body")).unwrap(),
+            _ => std::fs::write(entry.join("git-tpl-cache.json"), b"invalid").unwrap(),
+        }
+        let hits = server.hits();
+        for flags in [vec!["--trust"], vec!["--trust", "--offline"]] {
+            let result = render_cached(&template, cache.path(), &flags).failure();
+            assert_eq!(result.error_code(), "tpl::cache::http_corrupt");
+            assert!(
+                result
+                    .json()
+                    .to_string()
+                    .contains(&format!("cache clear sha256:{digest}"))
+            );
+        }
+        assert_eq!(server.hits(), hits);
+        tpl(
+            &template,
+            &[
+                "--cache-dir",
+                cache.path().to_str().unwrap(),
+                "cache",
+                "clear",
+                &format!("sha256:{digest}"),
+            ],
+        )
+        .success();
+        assert!(!entry.exists());
+    }
+    render_cached(&template, cache.path(), &["--trust"]).success();
+}
+
+#[test]
+fn cached_http_content_does_not_bypass_trust_scheme_or_parser_checks() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let digest = registry_digest();
+    let template = template_with(
+        dir.path(),
+        &format!(
+            "source = '{}'\nsha256 = '{digest}'",
+            server.url("/reg.json")
+        ),
+        "{{ data.reg.count }}",
+    );
+    render_cached(&template, cache.path(), &["--trust"]).success();
+    assert_eq!(
+        render_cached(&template, cache.path(), &["--offline"])
+            .failure()
+            .error_code(),
+        "tpl::data::untrusted"
+    );
+    for (source, format, code) in [
+        ("file:///reg.json".to_owned(), "json", "tpl::data::load"),
+        (server.url("/reg.json"), "toml", "tpl::data::parse"),
+    ] {
+        template.write("template.toml", &format!("name = 'remote'\n[data.reg]\nkind = 'remote'\nsource = '{source}'\nformat = '{format}'\nsha256 = '{digest}'\n"));
+        template.commit_all("change declaration validation");
+        assert_eq!(
+            render_cached(&template, cache.path(), &["--trust", "--offline"])
+                .failure()
+                .error_code(),
+            code
+        );
+    }
+    assert_eq!(server.hits(), 1);
+}
+
+#[test]
+fn an_unpinned_alias_can_populate_a_pin_but_cannot_gain_persistent_offline_semantics() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let digest = registry_digest();
+    let url = server.url("/reg.json");
+    let template = template_with(
+        dir.path(),
+        &format!("source = '{url}'\n[data.pin]\nsource = '{url}'\nsha256 = '{digest}'"),
+        "{{ data.reg.count }}{{ data.pin.count }}",
+    );
+    for hits in [1, 2] {
+        render_cached(&template, cache.path(), &["--trust"]).success();
+        assert_eq!(server.hits(), hits);
+    }
+    assert_eq!(
+        std::fs::read(cache.path().join("v1/http").join(&digest).join("body")).unwrap(),
+        REGISTRY.as_bytes()
+    );
+    // Force the pinned declaration first: its memory bytes must not authorize an unpinned offline read.
+    template.write(
+        "template/out.txt.jinja",
+        "{{ data.pin.count }}{{ data.reg.count }}",
+    );
+    template.commit_all("read pinned alias first");
+    assert_eq!(
+        render_cached(&template, cache.path(), &["--trust", "--offline"])
+            .failure()
+            .error_code(),
+        "tpl::data::offline"
+    );
+    assert_eq!(server.hits(), 2);
+}
+
+#[test]
+fn a_downloaded_checksum_mismatch_never_publishes_an_http_object() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let digest = "0".repeat(64);
+    let template = template_with(
+        dir.path(),
+        &format!(
+            "source = '{}'\nsha256 = '{digest}'",
+            server.url("/reg.json")
+        ),
+        "{{ data.reg.count }}",
+    );
+    assert_eq!(
+        render_cached(&template, cache.path(), &["--trust"])
+            .failure()
+            .error_code(),
+        "tpl::data::checksum"
+    );
+    assert!(!cache.path().join("v1/http").join(digest).exists());
+}
+
+#[test]
+fn independent_render_processes_publish_one_complete_http_object() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let digest = registry_digest();
+    let template = template_with(
+        dir.path(),
+        &format!(
+            "source = '{}'\nsha256 = '{digest}'",
+            server.url("/reg.json")
+        ),
+        "{{ data.reg.count }}",
+    );
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+    let handles: Vec<_> = (0..6)
+        .map(|index| {
+            let path = template.path.clone();
+            let config = template.config_home().to_owned();
+            let root = cache.path().to_owned();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let output = root.join(format!("out-{index}"));
+                barrier.wait();
+                common::tpl_outside(
+                    &path,
+                    &config,
+                    &[
+                        "--cache-dir",
+                        root.to_str().unwrap(),
+                        "render",
+                        path.to_str().unwrap(),
+                        "--trust",
+                        "--defaults",
+                        "-o",
+                        output.to_str().unwrap(),
+                    ],
+                )
+                .success();
+                assert_eq!(
+                    std::fs::read_to_string(output.join("out.txt")).unwrap(),
+                    "2"
+                );
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+    assert_eq!(server.hits(), 1);
+    assert_eq!(
+        std::fs::read(cache.path().join("v1/http").join(digest).join("body")).unwrap(),
+        REGISTRY.as_bytes()
+    );
+}
+
+#[test]
+fn offline_http_reuse_preserves_provenance_and_update_working_state() {
+    let server = TestServer::start(vec![("/reg.json", 200, REGISTRY.into())]);
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let digest = registry_digest();
+    let url = server.url("/reg.json");
+    let template = template_with(
+        dir.path(),
+        &format!("source = '{url}'\nsha256 = '{digest}'"),
+        "{{ data.reg.count }}",
+    );
+    let project = project(dir.path());
+    tpl(
+        &project,
+        &[
+            "--cache-dir",
+            cache.path().to_str().unwrap(),
+            "init",
+            template.path.to_str().unwrap(),
+            "--trust",
+            "--defaults",
+        ],
+    )
+    .success();
+    let reference = project.git(&["for-each-ref", "--format=%(refname)", "refs/tpl/"]);
+    let reference = reference.trim();
+    let tip = project.rev_parse(reference);
+    let message = project.git(&["log", "-1", "--format=%B", reference]);
+    assert!(message.contains(&format!("Data-Source: reg = remote:{url}@sha256:{digest}")));
+    let state = project.working_state();
+    drop(server);
+    tpl(
+        &project,
+        &[
+            "--offline",
+            "--cache-dir",
+            cache.path().to_str().unwrap(),
+            "update",
+            "--trust",
+            "--defaults",
+        ],
+    )
+    .success();
+    assert_eq!(
+        project.rev_parse(reference),
+        tip,
+        "cache state cannot create a render commit"
+    );
+    assert_eq!(project.working_state(), state);
+}
+
+#[test]
+fn unused_pinned_http_data_does_not_require_usable_cache_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let blocked = cache.path().join("not-a-directory");
+    std::fs::write(&blocked, b"no storage").unwrap();
+    let template = template_with(
+        dir.path(),
+        &format!(
+            "source = 'http://127.0.0.1:1/never.json'\nsha256 = '{}'",
+            registry_digest()
+        ),
+        "{% if false %}{{ data.reg.count }}{% endif %}unused",
+    );
+    render_cached(&template, &blocked, &["--offline"]).success();
+    assert_eq!(template.read("out/out.txt"), "unused");
+}
+
 #[test]
 fn aliases_share_bytes_but_validate_and_record_each_declaration() {
     for (policy, expected) in [

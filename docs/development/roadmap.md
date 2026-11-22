@@ -44,8 +44,9 @@ Explicit `tpl.autoPush` or `update --push` consent is supported; fetching remain
 Branches, tags and default branches refresh online; cached full commits support offline use.
 See [the cache commands](../usage/cache.md) and [ADR-045](../adr/045-source-object-cache.md).
 
-**An HTTP data source is fetched on every run.** Once per run, never cached between runs.
-`sha256` is the answer for anyone who needs the bytes to be the same ones.
+**Checksum-pinned HTTP content is cached by SHA-256.** Every cached body is verified before use, including offline.
+Unpinned HTTP data remains network-dependent and is never cached between runs.
+See [ADR-051](../adr/051-checksum-http-cache.md).
 
 ## Changing your mind, or ours
 

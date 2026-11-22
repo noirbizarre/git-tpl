@@ -49,6 +49,9 @@ will not be one.
 A template declares the source; it cannot construct a request.
 
 **Fetched at most once per run**, no matter how many questions and files use it.
+With a declared `sha256`, verified content is also reused across runs and URLs from the
+[source cache](../usage/cache.md#http-content-identity-and-integrity).
+Without a checksum, every invocation still needs network access.
 
 **Only if used.** A declared source that nothing references is never fetched, so a template may offer
 remote-backed choices on a conditional branch without imposing a network round-trip on everyone.
@@ -99,7 +102,7 @@ Each response is limited to 5120 KiB and is parsed as data — never executed.
 Nothing is remembered.
 The next run asks again.
 
-`--trust` accepts every source for one invocation, without prompting and without writing anything anywhere:
+`--trust` accepts every source for one invocation, without prompting or recording a trust decision:
 
 ```sh
 git tpl init https://github.com/org/template --trust
@@ -153,12 +156,25 @@ It is parsed defensively, and:
 The size limit is enforced while reading the body, never taken from `Content-Length` — that header is a claim
 made by the party being bounded.
 A malformed response is an error that names the source rather than a panic or a partial context.
+Cached bodies are bounded by the same size limit and checksum-verified before every use.
+
+## Checksum-pinned reuse and offline use
+
+Declare `sha256` to retain verified raw bytes across invocations; see [pinning](reproducibility.md#pinning).
+An existing verified object satisfies the pin without a request, including with `--offline`.
+Each declaration still requires trust and is parsed in its own format.
+Provenance records its requested URL and actual checksum, irrespective of cache state.
+
+Offline cache misses fail with instructions to populate the same checksum online.
+Corrupt objects fail even online and require explicit `git tpl cache clear sha256:<digest>` before retrying.
+Unpinned sources never consult persistent HTTP storage and cannot be used offline.
 
 ## Failure stops the render
 
 A remote source that cannot be loaded aborts the operation.
-It does not fall back to a cached copy, an empty table, or the last known value — each of those produces a
+An acquisition failure does not fall back to an old response, an empty table, or the last known value — each produces a
 plausible-looking tree that is quietly wrong, and that tree would be committed.
+Verified checksum-addressed content is an exact match for an immutable pin, not a failure fallback.
 
 ```
 x could not load template data source `licenses`

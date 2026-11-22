@@ -31,13 +31,18 @@ Data acquisition follows actual expression access, including short-circuiting an
 `context --eval` can demand otherwise unused data; a context dump evaluates all computed values, then shows loaded data.
 
 Git source objects persist across invocations; mutable refs refresh online with no stale fallback.
-Use global `--offline` only with cached full commit IDs for every URL source actually used, including ancestors/children/data.
-Local filesystem refs still work; HTTP data and publication (`fetch`, `push`, update `--push`/`tpl.autoPush`) are refused.
+Use global `--offline` with cached full commit IDs for Git URL sources used, including ancestors/children/data.
+Checksum-pinned HTTP bodies persist by SHA-256 and are verified before reuse, including offline.
+Local filesystem refs still work; unpinned HTTP and publication (`fetch`, `push`, update `--push`/`tpl.autoPush`) are refused.
 Offline is git-tpl network policy, not a sandbox for test commands or native diff drivers.
 `tpl::cache::offline_reference` means expand the requested ref to a full commit ID;
 `tpl::cache::offline_miss` means populate that commit online first.
+`tpl::data::offline_miss` means populate the declared HTTP checksum online first.
+`tpl::cache::http_corrupt` requires `git tpl cache clear sha256:<digest>`, then an online retry; no automatic repair.
 Cache hits never bypass trust. Short IDs may become ambiguous as cached history grows.
 Use `git tpl cache list`, `cache fetch SOURCE`, `cache clear [SOURCE]`, or `cache prune --older-than DAYS` (default 30).
+List/clear/prune include Git and HTTP entries; `cache fetch` remains Git-only.
+Use `cache clear sha256:<digest>` for HTTP content and `clear SOURCE` for Git; malformed digests give `tpl::cache::http_digest`.
 All support `--json`; maintenance reports `removed`/`skipped` entry IDs and skips active readers.
 The root is `--cache-dir` > `GIT_TPL_CACHE_DIR` > absolute `$XDG_CACHE_HOME/git-tpl` > `$HOME/.cache/git-tpl`.
 Explicit roots must be absolute; SSH/HTTPS/account/path spellings remain separate entries.
@@ -527,7 +532,7 @@ case-level `trust` only controls data loading during cases, and `test` has no in
 | `backport` | `git tpl backport [<pathspec>...] [--exclude g]... [-o file] [--unsubstitute] [--list-hunks \| --hunk <path>:<id>...]` | `result`(`patched`\|`nothingToBackport`\|`plan`),`template`,`patch`,`files[]`,`skipped[]`,`unsubstituted[]`,`plan[]{rendered,source,added,hunks[]{id,spec,header,insertions,deletions,lines}}` |
 | `fetch` | `git tpl fetch [--remote name] [--dry-run]` | `state`(`absent`\|`synced`\|`diverged`\|`behind`\|`ahead`),`relation{ahead,behind}` |
 | `push` | `git tpl push [--remote name] [--dry-run]` | `remote`,`ref` |
-| `cache list` | `git tpl cache list` | `root`,`entries[]{id,source,lastUsed,bytes}` |
+| `cache list` | `git tpl cache list` | `root`,`entries[]{id,kind,source,lastUsed,bytes}` |
 | `cache fetch` | `git tpl cache fetch SOURCE` | `source`,`refreshed` |
 | `cache clear/prune` | `git tpl cache clear [SOURCE]` / `cache prune --older-than DAYS` | `removed[]`,`skipped[]` |
 | `test` | `git tpl test [CASE...] [--ref R] [--shard I/T] [--record-durations] [--write] [--skip-commands]` | `summary{total,passed,failed,durationsRecorded,...}`,`shard{index,total,casesTotal,balanced}`,`cases[]{name,path,passed,durationMs,failures[]}` |
