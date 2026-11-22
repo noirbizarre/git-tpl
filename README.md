@@ -67,7 +67,7 @@ steps:
   - uses: actions/checkout@v7
   - uses: noirbizarre/git-tpl@main
     with:
-      version: 0.14.3 # omit to install the latest release
+      # Omit to install the latest release; pin a version for reproducible CI.
   - run: git tpl --version
 ```
 
