@@ -17,13 +17,14 @@ Read `docs/concepts/git-model.md` before changing anything structural.
 Each of these is enforced by a hook or a test. If you find yourself working around one, you are about to break the
 project.
 
-1. **`update` does not modify `HEAD` or the index, and never writes rendered output into the worktree.** Not
+1. **The update operation does not modify `HEAD` or the index, or write rendered output into the worktree.** Not
    "should not" — does not. The renderer writes into a `TreeBuilder`, so there is no code path that opens a
    *rendered* file for writing. The one file `update` does write is `.config/git.tpl.toml` itself — project
    configuration, not render output — and only when resolved answers or composed child locks change semantically.
    That edit is unstaged, the same way a hand edit would be.
    Without a semantic change, its exact bytes, comments and formatting are preserved even when rendering changes.
    `tests/update.rs` fingerprints `HEAD`, the index and the worktree, including expected configuration edits.
+   Explicit `update --merge` and `switch --merge` run ordinary merge as a separate command-layer phase (ADR-050).
 
 2. **Rendering is deterministic.** Same template revision, same answers, same data → byte-identical tree. This is
    what makes an unchanged template produce no commit. Never introduce a timestamp, an environment read, a hash-map

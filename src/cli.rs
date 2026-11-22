@@ -83,6 +83,9 @@ pub enum Command {
     /// Re-render the template and advance refs/tpl/<id>
     Update(UpdateArgs),
 
+    /// Change templates while preserving the rendered history and compatible answers
+    Switch(SwitchArgs),
+
     /// Re-render the template and merge it into the current branch
     Pull(PullArgs),
 
@@ -241,8 +244,38 @@ pub struct UpdateArgs {
     pub options: UpdateOptions,
 
     /// Report what would change; write nothing
-    #[arg(long)]
+    #[arg(long, conflicts_with = "merge")]
     pub dry_run: bool,
+
+    /// Merge the rendered ref into the current branch after updating
+    #[arg(long)]
+    pub merge: bool,
+}
+
+/// `git tpl switch`
+#[derive(Debug, clap::Args)]
+pub struct SwitchArgs {
+    /// The replacement template — any Git URL, path, or shortcut
+    pub template: String,
+
+    /// Persistently select this branch, tag or commit
+    #[arg(long, value_name = "REF", conflicts_with = "dirty")]
+    pub r#ref: Option<String>,
+
+    #[command(flatten)]
+    pub answers: AnswerArgs,
+
+    /// Render the template's working tree rather than its HEAD
+    #[arg(long)]
+    pub dirty: bool,
+
+    /// Fetch remote data sources without confirming
+    #[arg(long)]
+    pub trust: bool,
+
+    /// Merge the rendered ref into the current branch after switching
+    #[arg(long)]
+    pub merge: bool,
 }
 
 /// Rendering options shared by update and pull, without update-only previews.

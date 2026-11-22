@@ -246,6 +246,16 @@ pub(crate) fn resolve_session<'a, 'repo>(
     loader: &'a mut Loader<'repo>,
     prompter: &mut dyn Prompter,
 ) -> Result<Session<'a, 'repo>, EvalError> {
+    resolve_session_with_candidates(evaluation, &BTreeMap::new(), loader, prompter)
+}
+
+/// Recorded answers from another template are suggestions, never authoritative input.
+pub(crate) fn resolve_session_with_candidates<'a, 'repo>(
+    evaluation: Evaluation<'a>,
+    candidates: &BTreeMap<String, Value>,
+    loader: &'a mut Loader<'repo>,
+    prompter: &mut dyn Prompter,
+) -> Result<Session<'a, 'repo>, EvalError> {
     let Evaluation {
         manifest,
         graph,
@@ -342,16 +352,22 @@ pub(crate) fn resolve_session<'a, 'repo>(
                     }
                 }
 
-                let default = if supplied.contains_key(&node.key) {
+                // Runtime choices can depend on earlier answers. Checking here avoids
+                // accepting a value against a stale or only partially resolved schema.
+                let candidate = candidates.get(&node.key).filter(|value| {
+                    validate_answer(&node.key, question, value, choices.as_deref()).is_ok()
+                });
+                let default = if supplied.contains_key(&node.key) || candidate.is_some() {
                     None
                 } else {
                     session
                         .run(|context| resolve_default(&node.key, question, context, partials))?
                 };
 
-                let answer = match supplied.get(&node.key) {
-                    Some(value) => coerce(&node.key, question, value)?,
-                    None => prompter.ask(
+                let answer = match (supplied.get(&node.key), candidate) {
+                    (Some(value), _) => coerce(&node.key, question, value)?,
+                    (None, Some(value)) => value.clone(),
+                    (None, None) => prompter.ask(
                         &node.key,
                         question,
                         default.as_ref(),
@@ -362,20 +378,27 @@ pub(crate) fn resolve_session<'a, 'repo>(
 
                 // Defaults and custom prompters must obey the same schema as
                 // replayed answers, or a successful init can fail on update.
-                validate_type(&node.key, question, &answer)?;
-                validate_choice(&node.key, question, &answer, choices.as_deref())?;
-                validate_choice_count(&node.key, question, &answer)?;
-                // Deliberately here rather than in the prompter: this covers
-                // the supplied branch too, which is where an answer replayed
-                // from `.config/git.tpl.toml` by `update` arrives.
-                validate_pattern(&node.key, question, &answer)?;
-                validate_list(&node.key, question, &answer)?;
+                validate_answer(&node.key, question, &answer, choices.as_deref())?;
                 session.context.set_answer(&node.key, answer);
             }
         }
     }
 
     Ok(session)
+}
+
+// Candidate reuse must obey exactly the same contract as explicit input and prompts.
+fn validate_answer(
+    name: &str,
+    question: &Question,
+    answer: &Value,
+    choices: Option<&[Choice]>,
+) -> Result<(), EvalError> {
+    validate_type(name, question, answer)?;
+    validate_choice(name, question, answer, choices)?;
+    validate_choice_count(name, question, answer)?;
+    validate_pattern(name, question, answer)?;
+    validate_list(name, question, answer)
 }
 
 /// Check selection bounds independently of the answer's source or catalogue.

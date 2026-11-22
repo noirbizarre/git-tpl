@@ -17,7 +17,8 @@ Inspect the current ref before retrying; the failed publication does not save ne
 
 Re-render the template and advance `refs/tpl/<id>`.
 
-To update and immediately integrate in one invocation, use [`git tpl pull`](pull.md).
+To update and immediately integrate in one invocation, add `--merge` or use [`git tpl pull`](pull.md).
+To change the configured template and reuse compatible answers, use [`git tpl switch`](switch.md).
 
 Read pending source commit messages before updating with [`git tpl log ..<ref>`](log.md),
 where the reference names a branch, tag or commit in the template repository.
@@ -28,7 +29,7 @@ git tpl update [options]
 
 ## What it does not do
 
-**It does not touch your branch.** Not `HEAD`, not the index, and it never writes a *rendered* file into your
+**Rendering does not touch your branch.** Not `HEAD`, not the index, and it never writes a *rendered* file into your
 working directory.
 
 This is structural rather than a promise: the rendered tree is built directly as a Git tree object and the ref is
@@ -42,6 +43,7 @@ This applies whether a new rendered commit is made or the output is already up t
 When answers and locks are unchanged, the configuration keeps its exact bytes, comments and formatting,
 even if the rendered output changed.
 Nothing else in the worktree moves.
+Explicit `--merge` runs a separate integration phase after rendering; see [opt-in merging](#opt-in-merging).
 
 ```console
 $ git tpl update
@@ -69,6 +71,22 @@ flowchart TD
     commit --> ref("refs/tpl/#60;template-id#62;")
     child --> ref
 ```
+
+## Opt-in merging
+
+```sh
+git tpl update --defaults --merge
+```
+
+This explicitly combines rendering and ordinary merge, even when an unchanged rendering still awaits integration.
+Before rendering it requires an existing rendered ref, no active Git operation, and a clean index and worktree.
+Configuration edits made by rendering stay unstaged after integration.
+`--merge` conflicts with `--dry-run`.
+Use [`pull`](pull.md) for additional merge controls such as `--no-commit` and `--message`.
+
+A failed merge does not roll back the completed update or any explicit push.
+Conflicts use normal Git recovery and report `merge.result: "conflicted"` under `--json`.
+Combined JSON contains `update` and `merge` payloads, matching pull; plain update output is unchanged.
 
 ## Output
 
@@ -230,6 +248,7 @@ then an error.
 | `--push` | Push after creating a rendered commit. Same as `tpl.autoPush`; unchanged renderings are not pushed. |
 | `--remote <name>` | The remote `--push` uses. Default `origin`, or `tpl.remote`. |
 | `--dry-run` | Report what would change, including migration-only commits; write nothing. |
+| `--merge` | Merge after rendering; requires clean state and conflicts with `--dry-run`. |
 
 `--ref` and `--dirty` are mutually exclusive — asking for both is refused at the parser.
 

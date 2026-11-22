@@ -14,7 +14,16 @@ use crate::theme::{change, command, field, headline, muted, note_block, transiti
 
 pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
-    let payload = execute(&ctx, &args.options, args.dry_run, false)?;
+    if args.merge {
+        super::pull::preflight(&ctx)?;
+    }
+    let updated = execute(&ctx, &args.options, args.dry_run, args.merge)?;
+    let payload = if args.merge {
+        let merged = super::pull::integrate(&ctx, None, true)?;
+        serde_json::json!({ "update": updated, "merge": merged })
+    } else {
+        updated
+    };
     if global.json {
         println!("{}", crate::report::success(payload));
     }

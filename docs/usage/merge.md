@@ -5,6 +5,8 @@ Detached `HEAD` supports both fast-forward and merge-commit updates, with the sa
 Merge `refs/tpl/<id>` into the current branch.
 
 Use [`git tpl pull`](pull.md) to render an update before merging in one invocation.
+Both [`update --merge`](update.md#opt-in-merging) and [`switch --merge`](switch.md#opt-in-merging)
+explicitly integrate after rendering too.
 
 ```sh
 git tpl merge [--no-commit] [-m <msg>]

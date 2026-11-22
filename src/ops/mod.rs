@@ -10,6 +10,7 @@ pub mod extends;
 pub mod hunks;
 pub mod log;
 pub mod resolve;
+mod switch;
 pub mod testing;
 pub mod unsubstitute;
 
@@ -40,6 +41,7 @@ use crate::template::{MANIFEST_NAME, Manifest, Value};
 use crate::userconfig::UserConfig;
 
 pub use resolve::{Request, ResolveError, Resolved};
+pub use switch::{SwitchOutcome, switch};
 
 pub use crate::migration::{self, Migration, MigrationError, Move};
 pub use backport::{
@@ -854,7 +856,7 @@ fn render_files_from_location(
     answering: Answering<'_>,
     mut trust: Trust<'_>,
     composed: Option<&[ComposedRevision]>,
-    preparation: Preparation,
+    preparation: Preparation<'_>,
 ) -> Result<RenderedFiles, OpError> {
     // A reborrow, not a move: `resolve` confirms an `[extends]` ancestor's
     // source (if any), and `render_resolved` below still needs the same
@@ -998,10 +1000,12 @@ pub fn render_context(
 }
 
 #[derive(Clone, Copy)]
-enum Preparation {
+enum Preparation<'a> {
     Files,
     Init,
     Update,
+    // A source transition has no shared migration history with the old source.
+    Switch(&'a BTreeMap<String, Value>),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1014,7 +1018,7 @@ fn render_resolved_preparing(
     mut answering: Answering<'_>,
     mut trust: Trust<'_>,
     recorded_composed: Option<&[ComposedRevision]>,
-    preparation: Preparation,
+    preparation: Preparation<'_>,
     prepare: impl FnOnce(&mut crate::eval::Session<'_, '_>) -> Result<(), OpError>,
 ) -> Result<RenderedOnce, OpError> {
     // Built and validated before anything is prompted: a cycle or a typo
@@ -1106,7 +1110,12 @@ fn render_resolved_preparing(
     // names, so a macro usable in a `.jinja` file is usable in a `computed`.
     let partials = template.partials()?;
 
-    let mut session = crate::eval::resolve_session(
+    let empty_candidates = BTreeMap::new();
+    let candidates = match preparation {
+        Preparation::Switch(candidates) => candidates,
+        _ => &empty_candidates,
+    };
+    let mut session = crate::eval::resolve_session_with_candidates(
         Evaluation {
             manifest: &template.manifest,
             graph: &graph,
@@ -1114,6 +1123,7 @@ fn render_resolved_preparing(
             seeds: &seeds,
             partials: &partials,
         },
+        candidates,
         &mut loader,
         answering.prompter(),
     )?;
@@ -1272,7 +1282,7 @@ fn render_preparing(
     access: &Access,
     answering: Answering<'_>,
     trust: Trust<'_>,
-    preparation: Preparation,
+    preparation: Preparation<'_>,
 ) -> Result<Render, OpError> {
     let location = crate::config::source_location(&config.template.source, project_root);
     let rendered = render_files_from_location(
