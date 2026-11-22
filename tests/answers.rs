@@ -9,6 +9,25 @@ mod common;
 use common::{World, tpl};
 
 #[test]
+fn selection_bounds_reject_oversized_cli_and_file_answers_before_recording() {
+    let world = World::with_template(
+        "name = 'bounds'\n[questions.pick]\ntype = 'multi_choice'\nchoices = ['a', 'b']\nmax_choices = 1\ndefault = []\n",
+        &[("out.jinja", "{{ pick }}")],
+    );
+    let path = answers_file(&world, "answers.toml", "pick = ['a', 'b']\n");
+    for args in [
+        vec!["--json", "--answer", "pick=a,b"],
+        vec!["--json", "--answers-from", &path],
+    ] {
+        assert_eq!(
+            world.init(&args).failure().error_code(),
+            "tpl::eval::choice_count"
+        );
+        assert!(!world.project.path.join(".config/git.tpl.toml").exists());
+    }
+}
+
+#[test]
 fn invalid_defaults_are_rejected_before_they_can_be_recorded() {
     for default in ["'8080'", "'{{ \"8080\" }}'"] {
         let world = World::new();

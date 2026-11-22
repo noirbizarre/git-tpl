@@ -477,6 +477,10 @@ A merge that left conflicts unresolved stops the sync: backporting from a half-m
 ## Commands used above
 
 Question schemas expose list-item constraints as `itemPattern` and effective `itemMessage` (or `null` when unset).
+Multiselect schemas expose inclusive `minChoices`/`maxChoices` bounds (or `null` when unset).
+Templates declare these as optional `min_choices`/`max_choices` on `multi_choice` questions.
+`tpl::eval::choice_count` rejects invalid counts from defaults, supplied or recorded answers;
+correct the answer or the template's bounds. Empty dynamic choice lists still skip the question.
 
 Quiet lint retains diagnostic findings on stderr; JSON lint reports them only in `diagnostics[]`.
 Dirty snapshots preserve tracked files despite ignore rules; ignore exclusions apply to untracked discovery.

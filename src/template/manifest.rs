@@ -515,6 +515,37 @@ impl Manifest {
         }
 
         for (name, question) in &self.questions {
+            if (question.min_choices.is_some() || question.max_choices.is_some())
+                && question.kind != super::QuestionKind::MultiChoice
+            {
+                return Err(ManifestError::InvalidQuestion {
+                    name: name.clone(),
+                    reason:
+                        "`min_choices` and `max_choices` only apply to `multi_choice` questions"
+                            .into(),
+                });
+            }
+            if let (Some(min), Some(max)) = (question.min_choices, question.max_choices)
+                && min > max
+            {
+                return Err(ManifestError::InvalidQuestion {
+                    name: name.clone(),
+                    reason: "`min_choices` must not exceed `max_choices`".into(),
+                });
+            }
+            if let (Some(min), Some(choices)) = (question.min_choices, &question.choices)
+                && min
+                    > choices
+                        .iter()
+                        .map(|choice| &choice.value)
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+            {
+                return Err(ManifestError::InvalidQuestion {
+                    name: name.clone(),
+                    reason: "`min_choices` exceeds the number of distinct offered choices".into(),
+                });
+            }
             let has_choices = question.choices.is_some();
             let has_choices_from = question.choices_from.is_some();
 

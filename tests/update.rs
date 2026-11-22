@@ -7,6 +7,28 @@ mod common;
 use common::{World, file_url, tpl, tpl_colored};
 
 #[test]
+fn narrowing_selection_bounds_preserves_repository_state_when_recorded_answers_fail() {
+    let manifest = "name = 'bounds'\n[questions.pick]\ntype = 'multi_choice'\nchoices = ['a', 'b']\ndefault = ['a', 'b']\n";
+    let world = World::with_template(manifest, &[("out.jinja", "{{ pick }}")]);
+    world.init(&[]).success();
+    world
+        .template
+        .repo
+        .write("template.toml", &format!("{manifest}max_choices = 1\n"))
+        .commit_all("narrow selection bounds");
+    let before = world.project.working_state();
+    let reference = world.project.rev_parse(&world.ref_name());
+    assert_eq!(
+        tpl(&world.project, &["--json", "update", "--defaults"])
+            .failure()
+            .error_code(),
+        "tpl::eval::choice_count"
+    );
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.rev_parse(&world.ref_name()), reference);
+}
+
+#[test]
 fn concurrent_publication_refuses_stale_created_and_deleted_tips_without_saving_answers() {
     use std::collections::BTreeMap;
     use tpl::eval::{EvalError, Prompter};

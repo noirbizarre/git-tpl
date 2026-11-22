@@ -5,6 +5,40 @@ mod common;
 use common::{Template, World, tpl, tpl_outside};
 
 #[test]
+fn selection_bounds_are_exposed_and_invalid_schemas_are_rejected() {
+    let world = World::with_template(
+        "name = 'bounds'\n[questions.pick]\ntype = 'multi_choice'\nchoices = ['a', 'b']\nmin_choices = 1\nmax_choices = 2\n[questions.other]\ntype = 'boolean'\ndefault = false\n",
+        &[("out.jinja", "{{ pick }}")],
+    );
+    let schema = Scratch::new().ask(&world.template.source());
+    assert_eq!(question(&schema, "pick")["minChoices"], 1);
+    assert_eq!(question(&schema, "pick")["maxChoices"], 2);
+    assert!(question(&schema, "other")["minChoices"].is_null());
+    assert!(question(&schema, "other")["maxChoices"].is_null());
+
+    for body in [
+        "type = 'string'\nmax_choices = 1",
+        "type = 'list'\nmin_choices = 1",
+        "type = 'choice'\nchoices = ['a']\nmax_choices = 1",
+        "type = 'multi_choice'\nchoices = ['a']\nmin_choices = 2\nmax_choices = 1",
+        "type = 'multi_choice'\nchoices = ['a']\nmin_choices = 2",
+        "type = 'multi_choice'\nchoices = ['a', 'a']\nmin_choices = 2",
+        "type = 'multi_choice'\nchoices = ['a']\nmax_choices = -1",
+        "type = 'multi_choice'\nchoices = ['a']\nmax_choices = 1.5",
+        "type = 'multi_choice'\nchoices = ['a']\nmin_choices = '1'",
+    ] {
+        assert!(
+            tpl::template::Manifest::parse(
+                &format!("name = 'bounds'\n[questions.pick]\n{body}\n"),
+                "template.toml"
+            )
+            .is_err(),
+            "{body}"
+        );
+    }
+}
+
+#[test]
 fn question_schema_exposes_the_list_item_constraints_enforced_by_evaluation() {
     let world = World::with_template(
         "name = 'lists'\n[questions.modules]\ntype = 'list'\ndefault = []\nitem_pattern = '^[a-z]+$'\nitem_message = 'lowercase module names only'\n",

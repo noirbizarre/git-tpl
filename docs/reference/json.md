@@ -168,6 +168,7 @@ An `--allow`ed finding appears nowhere and is counted nowhere.
 ### `questions`
 
 Each question includes `itemPattern` and `itemMessage` for enforced list-item validation, or `null` when unset.
+Multiselect bounds appear as `minChoices` and `maxChoices`, each an inclusive integer or `null` when unset.
 `itemMessage` contains the effective validation message, including the default when no custom message is declared.
 
 ```json
