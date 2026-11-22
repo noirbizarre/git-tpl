@@ -10,16 +10,19 @@ on:
       - .github/workflows/docs.yaml
   workflow_dispatch:
 
+env:
+  MISE_NO_HOOKS: "1"
+
 jobs:
   build:
-    name: 🏗️ Build
+    name: 📝 Build documentation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       # uv is pinned by mise.lock, so the docs build uses the same version
       # as `mise run docs:build` locally.
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
         with:
           cache: true
 
@@ -32,7 +35,7 @@ jobs:
           path: site
 
   deploy:
-    name: 🚀 Deploy
+    name: 🌐 Publish documentation
     if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest

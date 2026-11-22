@@ -27,6 +27,7 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_NET_RETRY: "10"
+  MISE_NO_HOOKS: "1"
   RUSTUP_MAX_RETRIES: "10"
   RUSTFLAGS: -D warnings
   # gh-ship runs on the version tag; main CI publishes to the rolling channel.
@@ -53,17 +54,16 @@ jobs:
           # Every matrix leg uses the immutable run commit, even if a tag or main moves later.
           ref: ${{ github.sha }}
           persist-credentials: false
-      # Setup precedes caches so their post-save hooks run before the drive is dismounted.
-      - uses: ./.github/actions/setup-windows
-        if: runner.os == 'Windows'
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.build.target }}
+      # Bootstrap the toolchain before relocating temporary storage, but keep cache cleanup before drive teardown.
+      - name: Tune Windows runner
+        uses: ./.github/actions/setup-windows
+        if: runner.os == 'Windows'
       # Published binaries must not depend on shared compiler-output caches.
       - uses: jdx/mr-boxington-action@v1
         with:
-          version: 1.28.0
           backend: local
       - uses: taiki-e/install-action@cross
         if: matrix.build.cross
@@ -181,7 +181,6 @@ jobs:
       - uses: jdx/mr-boxington-action@v1
         if: startsWith(inputs.ref || github.ref, 'refs/tags/')
         with:
-          version: 1.28.0
           backend: local
       # Last: an irreversible crates.io publication must follow successful binary uploads.
       - name: Check whether this version is already published

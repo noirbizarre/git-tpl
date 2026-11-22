@@ -30,12 +30,6 @@ nav = [
 
 language = "en"
 
-# The header slot is one line tall and already sits next to the site name, so
-# it gets the mark alone — a wordmark would render as an illegible sliver and
-# repeat the name.
-logo = "images/icon.svg"
-favicon = "images/icon.svg"
-
 features = [
   "content.action.edit",
   "content.code.annotate",

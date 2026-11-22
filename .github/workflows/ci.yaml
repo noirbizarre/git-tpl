@@ -18,6 +18,7 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  MISE_NO_HOOKS: "1"
   RUST_BACKTRACE: full
 
   # Shared action caching cannot reuse Cargo's private incremental state.
@@ -51,16 +52,16 @@ jobs:
       # what `mise run default` runs locally. No pinned mise version: an
       # incompatibility should surface here, not only on a contributor's
       # machine running whatever they already have.
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
         with:
           cache: true
 
       # Includes Cargo downloads and target outputs; do not duplicate rust-cache.
       # Workload generations scope fallback restores too, unlike key suffixes.
+      # PRs restore only: archiving large target trees delays feedback and churns the cache budget.
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: lint-v1
-          save-on-pull-request: true
 
       # Run the same hooks as `git commit`, then the heavier Rust lint task
       # separately so committing does not require a Clippy compilation.
@@ -99,10 +100,6 @@ jobs:
             flag: macos
     steps:
       - uses: actions/checkout@v7
-      # Setup precedes caches so their post-save hooks run before the drive is dismounted.
-      - uses: ./.github/actions/setup-windows
-        if: runner.os == 'Windows'
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -114,14 +111,19 @@ jobs:
 
       # nextest and llvm-cov are pinned by mise.lock rather than resolved
       # per-run, so a tool release cannot change CI behaviour on its own.
-      - uses: jdx/mise-action@v4
+      - uses: jdx/mise-action@v5
         with:
           cache: true
+
+      # Bootstrap tools first: mise installs on C: with a same-volume temporary rename.
+      # Storage still precedes Cargo caches so their post hooks run before drive teardown.
+      - name: Tune Windows runner
+        uses: ./.github/actions/setup-windows
+        if: runner.os == 'Windows'
 
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: tests-${{ matrix.os.flag }}-v1
-          save-on-pull-request: true
 
       - name: Verify Windows build storage
         if: runner.os == 'Windows'
@@ -129,12 +131,28 @@ jobs:
         run: ./.github/actions/setup-windows/verify.ps1
 
       - name: Run tests (with coverage)
-        run: |
-          # --no-report also disables automatic cleaning: discard cached workspace artifacts
-          # and profiles explicitly so earlier runs cannot contaminate this run's coverage.
-          cargo llvm-cov clean --workspace
-          cargo llvm-cov nextest --profile ci --no-report
-          cargo llvm-cov report --lcov --output-path lcov.info
+        env:
+          # %m signatures can collide; %b separates builds, but LLVM cannot read build IDs on macOS.
+          LLVM_PROFILE_FILE_NAME: ${{ runner.os == 'macOS' && '%m.profraw' || '%m-%b.profraw' }}
+          # %b requires a build ID in each instrumented binary; Darwin keeps its native linker settings.
+          RUSTFLAGS: ${{ runner.os == 'Windows' && '-C link-arg=/build-id' || runner.os == 'Linux' && '-C link-arg=-Wl,--build-id=sha1' || '' }}
+        run: cargo llvm-cov nextest --profile ci --lcov --output-path lcov.info
+
+      # Debug runs need raw inputs even when a corrupt profile prevents generating lcov.info.
+      - name: Upload coverage artifacts
+        if: ${{ always() && runner.debug == '1' }}
+        # Diagnostic upload failures must not fail tests or block Codecov uploads.
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-${{ matrix.os.flag }}-${{ github.run_attempt }}
+          path: |
+            lcov.info
+            target/llvm-cov-target/*.profraw
+            target/llvm-cov-target/*.profdata
+            target/llvm-cov-target/*-profraw-list
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -163,7 +181,11 @@ jobs:
       - name: Read the MSRV from Cargo.toml
         id: msrv
         run: |
-          version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          # A root package's explicit version wins; an inherited version comes from the workspace.
+          version="$(yq -p toml -o yaml -er '
+            ((.package."rust-version" | select(tag == "!!str")) // .workspace.package."rust-version") |
+            select(tag == "!!str" and . != "")
+          ' Cargo.toml)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: dtolnay/rust-toolchain@master
@@ -174,9 +196,7 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: jdx/mr-boxington-action@v1
         with:
-          version: 1.28.0
           cache-generation: msrv-v1
-          save-on-pull-request: true
 
       # `check`, not `test`: dev-dependencies routinely require a newer
       # toolchain than the crate itself, and the MSRV is a promise about
@@ -205,19 +225,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Setup precedes caches so their post-save hooks run before the drive is dismounted.
-      - uses: ./.github/actions/setup-windows
-        if: runner.os == 'Windows'
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.build.target }}
-      # The target payload retains container-produced cross outputs too.
+      # Bootstrap the toolchain before relocating temporary storage, but keep cache cleanup before drive teardown.
+      - name: Tune Windows runner
+        uses: ./.github/actions/setup-windows
+        if: runner.os == 'Windows'
+      # This PR-only workload restores compatible baselines without saving PR-scoped archives.
       - uses: jdx/mr-boxington-action@v1
         with:
-          version: 1.28.0
           cache-generation: pr-build-${{ matrix.build.target }}-v1
-          save-on-pull-request: true
       - uses: taiki-e/install-action@cross
         if: matrix.build.cross
       # Exercise the same CRT choice as downloaded Windows release binaries.

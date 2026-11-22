@@ -1,15 +1,15 @@
 # git-tpl — Git-native project templates
 #
-# Single crate, library + binary. The library (`src/lib.rs`) holds the engine;
-# the binary (`src/main.rs`) is a thin CLI over it, so integration tests can
-# exercise either. Cargo discovers both targets on its own.
+# Single crate, library (`src/lib.rs`) + binary (`src/main.rs`). Cargo discovers
+# both targets automatically. Runtime module ownership belongs to the project;
+# this manifest does not require the binary to delegate to the library.
 
 [package]
 name = "git-tpl"
 version = "0.1.0"
 edition = "2024"
-# The MSRV. Checked by the MSRV job in ci.yaml, which greps this very line — keep it
-# a plain literal. `rust-toolchain.toml` separately pins the channel to develop
+# The MSRV. Read as TOML by the MSRV job in ci.yaml.
+# `rust-toolchain.toml` separately pins the channel to develop
 # against; the two answer different questions.
 rust-version = "1.96"
 license = "MIT"
@@ -19,7 +19,6 @@ license = "MIT"
 # on, the PKGBUILD's `# Maintainer:` line.
 description = "Git-native project templates"
 repository = "https://github.com/noirbizarre/git-tpl"
-homepage = "https://noirbizarre.github.io/git-tpl/"
 documentation = "https://noirbizarre.github.io/git-tpl/"
 readme = "README.md"
 keywords = ["git", "template", "scaffolding", "minijinja", "project"]
