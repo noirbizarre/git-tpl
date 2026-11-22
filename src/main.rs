@@ -35,6 +35,7 @@ fn main() -> ExitCode {
         // disagree the day a second command grows a code of its own.
         Command::Init(args) => commands::init(args, &cli.global),
         Command::Update(args) => commands::update(args, &cli.global),
+        Command::Switch(args) => commands::switch(args, &cli.global),
         Command::Pull(args) => commands::pull(args, &cli.global),
         Command::Render(args) => commands::render(args, &cli.global),
         Command::Lint(args) => commands::lint(args, &cli.global),

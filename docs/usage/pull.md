@@ -10,6 +10,7 @@ git tpl pull --no-commit
 ```
 
 For an inspect-first workflow, use [`update`](update.md), [`diff`](diff.md), then [`merge`](merge.md).
+`update --merge` also combines rendering and integration, with a clean-index/worktree preflight.
 `pull` has no `--dry-run`; use `update --dry-run` to preview rendering without publication.
 
 ## Phase ordering

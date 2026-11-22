@@ -317,6 +317,9 @@ An empty array would claim the template renders nothing.
 
 ### `update`
 
+With `--merge`, success wraps these payloads as `{"ok": true, "update": {...}, "merge": {...}}`, matching pull.
+Plain update keeps the payloads below.
+
 ```json
 { "ok": true, "result": "upToDate",
   "id": "rust", "ref": "refs/tpl/rust",
@@ -390,6 +393,33 @@ It does not report `commit`, `previousRevision`, `startedNewHistory`, `movedComm
 A dry-run `upToDate` report includes `changes: []`, `answersChanged` and `composedChanged`, but no `migrations` field.
 Both outcomes predict semantic configuration edits, including child-lock repairs without a new rendered commit.
 Neither dry-run outcome writes configuration or publishes a ref.
+
+### `switch`
+
+```json
+{ "ok": true, "result": "switched",
+  "previousTemplate": "https://github.com/acme/base.tpl",
+  "template": "https://github.com/acme/service.tpl",
+  "inherited": true,
+  "id": "base", "ref": "refs/tpl/base",
+  "commit": "f4c9e21…", "changed": true,
+  "revision": { "reference": "main", "commit": "a17b0b2…", "dirty": false },
+  "changes": [{ "path": "service.toml", "kind": "added" }],
+  "reusedAnswers": ["project_name"], "skippedAnswers": ["obsolete"],
+  "ignoredAnswers": [] }
+```
+
+`inherited` means the target's resolved ancestor chain contains the previously configured source.
+The attachment's ID/ref remains stable across source changes.
+`changed` indicates a new rendered-ref commit, including provenance-only source transitions.
+`reusedAnswers` names automatically accepted recorded answers; `skippedAnswers` names recorded keys not reused,
+including explicit replacements and inactive questions.
+Neither array exposes answer values.
+`ignoredAnswers` concerns only explicit inputs naming no target question.
+
+With `--merge`, success has one envelope containing `switch` and `merge` objects.
+Conflicts report `merge.result: "conflicted"` with exit status 0, matching pull.
+A later merge failure uses the normal diagnostic envelope and does not roll back the completed switch.
 
 ### `pull`
 

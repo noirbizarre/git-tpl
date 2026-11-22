@@ -122,12 +122,14 @@ there is no reconciliation engine, no patch replay, and no `.rej` file.
 template  →  rendered Git ref  →  normal Git merge  →  updated project
 ```
 
-`git tpl update` never touches `HEAD`, the index, or rendered files in the worktree.
+The update rendering operation never touches `HEAD`, the index, or rendered files in the worktree.
 It advances the ref and saves `.config/git.tpl.toml` only for semantic answer or composed-child-lock changes,
 as an unstaged edit, on both updated and up-to-date outcomes.
 Otherwise it preserves the file's exact bytes, comments and formatting, even when rendered output changes.
 Apply the result with an explicit `git tpl merge` (or plain `git merge refs/tpl/<id>`).
 `git tpl pull` explicitly combines update and merge, including integration after an unchanged rendering.
+`update --merge` opts into the same integration phase and JSON `{update, merge}` shape;
+it requires existing history and a clean index/worktree before rendering, and conflicts with `--dry-run`.
 It supports update options except `--dry-run`, plus merge's `--no-commit` and `--message`, but not `--abort`.
 Its JSON has `update` and `merge` objects with their usual payloads and one top-level `ok`.
 It refuses a missing local rendered ref before updating; recover original ancestry before retrying.
@@ -139,6 +141,22 @@ Ordinary `git push`/`git pull` ignore template refs; git-tpl does not push them 
 Use `git tpl push` to publish an existing rendering or retry a failed push; fetching remains explicit.
 
 Full model: <https://noirbizarre.github.io/git-tpl/concepts/git-model/>.
+
+`git tpl switch TEMPLATE` changes the attached source while retaining its existing rendered ref ID and ancestry.
+Direct/transitive inheritance preserves existing config/root/answers; unrelated sources build fresh target config.
+Both automatically reuse exact-name recorded answers only after target validation, including dynamic choices.
+Incompatible candidates use prompts/defaults; explicit invalid answers fail.
+Use `--defaults` and shared answer flags for unattended switching; `--ref` persists the target reference.
+Local CLI paths are invocation-relative and stored project-relative; source shortcuts expand before persistence.
+Remote URL aliases are conservatively treated as unrelated for inheritance detection.
+Switch records fresh composed-child locks and skips cross-source migrations; future updates use the target baseline.
+It requires an existing rendered ref (`tpl::ops::no_rendered_ref` otherwise) and saves config unstaged.
+Plain switch leaves HEAD/index/rendered worktree files untouched; inspect with diff and integrate with merge.
+`switch --merge` opts into integration after clean-state preflight, returning `{switch, merge}` under one JSON envelope.
+Merge failure/abort leaves the completed switch in place; conflicts use normal Git recovery.
+Switch does not auto-push; publish explicitly with `git tpl push`.
+Switch JSON includes `previousTemplate`, `template`, `inherited`, `id`, `ref`, `commit`, `changed`, structured `revision`,
+`changes[]`, and key-only `reusedAnswers`/`skippedAnswers`/`ignoredAnswers`.
 
 ## When to use this skill
 
@@ -169,7 +187,7 @@ do not assume it is preinstalled.
 1. **Always pass `--json`** before deciding what to do next, and branch on `error.code`, never on `error.message` —
    messages are free to change.
    The full catalogue is at <https://noirbizarre.github.io/git-tpl/reference/diagnostics/>.
-2. **Never run `init`/`update`/`pull`/`show --dirty` interactively.**
+2. **Never run `init`/`update`/`switch`/`pull`/`show --dirty` interactively.**
    Build the answer set first with `git tpl --json questions <template>`,
    then supply it with repeated `--answer k=v`, one or more `--answers-from file.toml`, and/or `--defaults`.
    Add `--strict-answers` to catch a typoed key instead of a silent warning.
@@ -180,7 +198,7 @@ do not assume it is preinstalled.
    `init`, `update`, `fetch`, and `push` all accept `--dry-run` (the JSON payload gains `"dryRun": true`) —
    use it on an unfamiliar template or repository before acting for real.
    Update dry runs report `answersChanged` and `composedChanged`, including lock repairs without a new commit.
-4. **`update` does not apply rendered files.** It advances `refs/tpl/<id>` while preserving `HEAD` and the index.
+4. **Plain `update` does not apply rendered files.** It advances `refs/tpl/<id>` while preserving HEAD and the index.
    Semantic answer or child-lock changes can also leave an unstaged `.config/git.tpl.toml` edit; report it.
    Follow it with `git tpl diff` to preview and `git tpl merge` to apply rendered changes.
 5. **A migration can ride along with an `update`.** `migrations[]` is empty on almost every update; when it isn't,
@@ -500,7 +518,8 @@ case-level `trust` only controls data loading during cases, and `test` has no in
 | `init` | `git tpl init <template> [<dir>] [--init] [--answer k=v]... [--answers-from f]... [--defaults] [--dry-run]` | `id`,`ref`,`revision`,`commit`,`changes[]`,`merge{result,...}` |
 | `status` | `git tpl status` | `templateMoved`,`merged`,`availableReferenceDescription`,`availableCommit`,`renderedReference`,`worktreeClean`,`remote{ahead,behind}` |
 | `log` | `git tpl log [REVISION] [-n COUNT \| --all] [--no-relative-date]` | `applied`,`target`,`exclude`,`mode`,`entries[]{commit,subject,committedAt,conventional}` |
-| `update` | `git tpl update [--answer k=v]... [--defaults] [--dry-run] [--push]` | `result`(`upToDate`\|`updated`\|`wouldUpdate`),`previousRevision`,`revision`,`changes[]`,`migrations[]`,`movedCommit` |
+| `update` | `git tpl update [--answer k=v]... [--defaults] [--dry-run] [--push] [--merge]` | `result`(`upToDate`\|`updated`\|`wouldUpdate`),`previousRevision`,`revision`,`changes[]`,`migrations[]`,`movedCommit`; with merge: `update`, `merge` |
+| `switch` | `git tpl switch TEMPLATE [--ref REF] [--defaults] [--merge]` | `inherited`, `id`, `ref`, `commit`, `revision`, `reusedAnswers[]`, `skippedAnswers[]`; with merge: `switch`, `merge` |
 | `pull` | `git tpl pull [update options except --dry-run] [--no-commit] [-m <msg>]` | `update{result,...}`,`merge{result,...}` |
 | `diff` | `git tpl diff [--stat] [--name-only] [--exit-code] [-- <path>...]` | `conflicts[]`,`changes[]{path,kind,insertions,deletions}` |
 | `merge` | `git tpl merge [--no-commit] [-m <msg>]` / `git tpl merge --abort` | `result`(`upToDate`\|`fastForward`\|`merged`\|`staged`\|`conflicted`\|`aborted`),`commit`,`conflicts[]` |

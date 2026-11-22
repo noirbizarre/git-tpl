@@ -93,6 +93,7 @@ fn each_visible_command_gets_its_own_page() {
     for command in [
         "init",
         "update",
+        "switch",
         "pull",
         "render",
         "lint",

@@ -73,6 +73,22 @@ fn pull_help_exposes_update_and_integration_options_without_preview_or_abort() {
 }
 
 #[test]
+fn switch_and_update_expose_opt_in_merge_without_changing_pull_options() {
+    for command in ["switch", "update"] {
+        let output = help(&[command, "--help"], &[]);
+        assert!(output.status.success());
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains("--merge"), "{text}");
+        assert!(text.contains("--answers-from"), "{text}");
+        if command == "switch" {
+            assert!(text.contains("<TEMPLATE>"), "{text}");
+        }
+    }
+    let output = help(&["pull", "--merge"], &[]);
+    assert_eq!(output.status.code(), Some(2));
+}
+
+#[test]
 fn help_uses_the_shared_color_environment_precedence() {
     for (env, colored) in [
         (vec![], false),

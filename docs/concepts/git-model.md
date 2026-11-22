@@ -78,6 +78,10 @@ You are never locked into them.
 
 [`git tpl pull`](../usage/pull.md) explicitly combines update and merge in one invocation.
 Its update phase preserves the same rendering invariants; its merge phase integrates the rendered history.
+`update --merge` and [`switch --merge`](../usage/switch.md) likewise opt into a separate integration phase.
+Without `--merge`, switching changes the attached source while leaving rendered worktree files untouched.
+It retains the same ref ID and appends the new source's rendering to the previous tip,
+so Git retains the old rendering as the merge base even across unrelated template sources.
 
 It lives under `refs/tpl/` rather than `refs/heads/` on purpose: it is not a branch you check out, it should not
 appear in `git branch`, and it should not be pushed by a bare `git push`.

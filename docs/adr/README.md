@@ -58,3 +58,4 @@ explains the code that existed.
 | [047](047-demand-driven-data.md) | Actual expression access controls data acquisition and computed resolution |
 | [048](048-context-assertions.md) | Template tests assert resolved context with first-class null values |
 | [049](049-toml-snapshot-manifests.md) | Snapshot manifests record paths and modes in TOML without content checksums or sizes |
+| [050](050-template-switch-and-explicit-merge.md) | Template switches retain history; merging is an explicit second phase |

@@ -172,6 +172,19 @@ pub struct Resolved {
 }
 
 impl Resolved {
+    /// Apply an attachment's retained root without resolving a moving ref again.
+    pub(super) fn select_root(&mut self, root: &str) -> Result<(), ResolveError> {
+        self.root_tree = match self.repo.subtree(self.tree, root)? {
+            Some(tree) => tree,
+            None if self.has_ancestors() => self.repo.build_tree(&[])?,
+            None => return Err(ResolveError::MissingRoot { root: root.into() }),
+        };
+        self.root = root.into();
+        self.ignored
+            .retain(|path| affects_render(path, root, &self.manifest.data));
+        Ok(())
+    }
+
     /// Whether this template extends anything.
     pub fn has_ancestors(&self) -> bool {
         !self.ancestors.is_empty()

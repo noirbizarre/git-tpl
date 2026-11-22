@@ -7,6 +7,70 @@ mod common;
 use common::{World, file_url, tpl, tpl_colored};
 
 #[test]
+fn explicit_merge_integrates_pending_output_and_leaves_answer_edits_unstaged() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    tpl(&world.project, &["update", "--defaults"]).success();
+    let json = tpl(
+        &world.project,
+        &["--json", "update", "--merge", "--defaults"],
+    )
+    .success()
+    .json();
+    assert_eq!(json["update"]["result"], "upToDate");
+    assert_eq!(json["merge"]["result"], "merged");
+    assert!(world.project.exists(".github/workflows/release.yml"));
+    let json = tpl(
+        &world.project,
+        &[
+            "--json",
+            "update",
+            "--merge",
+            "--defaults",
+            "--answer",
+            "project_name=renamed",
+        ],
+    )
+    .success()
+    .json();
+    assert_eq!(json["update"]["answersChanged"], true);
+    assert!(world.project.read("Cargo.toml").contains("renamed"));
+    assert_eq!(world.project.git(&["diff", "--cached", "--name-only"]), "");
+    assert_eq!(
+        world.project.git(&["diff", "--name-only"]),
+        ".config/git.tpl.toml"
+    );
+}
+
+#[test]
+fn explicit_merge_refuses_dirty_state_and_preview_before_rendering() {
+    let world = World::new();
+    world.init(&[]).success();
+    world.move_template();
+    let tip = world.project.rev_parse(&world.ref_name());
+    assert_eq!(
+        tpl(&world.project, &["update", "--merge", "--dry-run"])
+            .failure()
+            .code,
+        2
+    );
+    world.project.write("README.md", "unstaged edit");
+    let before = world.project.working_state();
+    assert_eq!(
+        tpl(
+            &world.project,
+            &["--json", "update", "--merge", "--defaults"]
+        )
+        .failure()
+        .error_code(),
+        "tpl::git::dirty_worktree"
+    );
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+}
+
+#[test]
 fn narrowing_selection_bounds_preserves_repository_state_when_recorded_answers_fail() {
     let manifest = "name = 'bounds'\n[questions.pick]\ntype = 'multi_choice'\nchoices = ['a', 'b']\ndefault = ['a', 'b']\n";
     let world = World::with_template(manifest, &[("out.jinja", "{{ pick }}")]);

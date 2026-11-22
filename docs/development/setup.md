@@ -141,11 +141,12 @@ These are enforced, not merely intended. Breaking one fails a hook or a test.
 else makes it decorative. The `git-backend-isolation` prek hook is what actually stops that. If you need a Git
 capability the trait lacks, add it to the trait — not a `git2` import.
 
-**`update` does not modify `HEAD`, the index, or render output in the worktree.** Integration tests fingerprint them.
+**The update operation does not modify HEAD, the index, or render output in the worktree.** Tests fingerprint them.
 The one allowed worktree edit is `.config/git.tpl.toml`, saved unstaged when resolved answers or composed child locks
 change semantically, including explicit answer overrides.
 Without a semantic change its exact bytes, comments and formatting are preserved.
 The renderer writes to a Git tree builder and never writes rendered files into the worktree.
+Explicit `update --merge` and `switch --merge` integrate in a separate command-layer phase (ADR-050).
 
 **Rendering is deterministic.** A test renders twice and compares trees. See
 [Determinism](../concepts/determinism.md).
