@@ -18,7 +18,8 @@ runs:
         drive-type: Dynamic
         drive-format: ReFS
         drive-path: ${{ github.workspace }}/../rust-build.vhdx
-        mount-path: ${{ runner.temp }}/rust-build
+        # Use the default drive letter: a directory mount is a reparse-point ancestor,
+        # which rendered-output and snapshot materialisation deliberately reject.
 
     - name: Link build storage and configure archiving
       shell: pwsh

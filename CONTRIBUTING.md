@@ -15,6 +15,7 @@ Prek installs Commitizen and its Emotional plugin in an isolated Python environm
 for commit-message validation.
 
 Windows CI places build outputs and temporary files on a ReFS Dev Drive.
+It uses a drive letter so temporary render roots have no directory-mount reparse-point ancestors.
 The shared setup action exports `TMP`, `TEMP` and `TMPDIR` for all subsequent
 steps and child processes, with temporary storage outside the cached target directory.
 

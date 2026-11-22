@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
+# Directory mounts are reparse points, so temporary render roots need a direct drive-letter path.
+if ($env:DEV_DRIVE -notmatch '^[A-Za-z]:$') {
+    throw 'The Dev Drive must use a drive letter; remove mount-path from the Windows setup action.'
+}
+
 # Run again after cache restoration: extraction must not replace the junction with an NTFS directory.
 $target = Get-Item "$env:GITHUB_WORKSPACE/target"
 $expected = [System.IO.Path]::GetFullPath("$env:DEV_DRIVE/target")
