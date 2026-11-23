@@ -38,7 +38,7 @@ fn link_target_changes_and_file_to_link_conversions_are_refused_before_listing_h
 }
 
 #[test]
-fn inherited_sources_are_refused_but_leaf_overrides_can_be_backported() {
+fn inherited_sources_target_the_ancestor_but_leaf_overrides_target_the_leaf() {
     use common::{Repo, tpl};
     let parent = Repo::init("base");
     parent.write("template.toml", "name = 'base'\n");
@@ -64,12 +64,16 @@ fn inherited_sources_are_refused_but_leaf_overrides_can_be_backported() {
     for extra in [vec![], vec!["--list-hunks"]] {
         let mut args = vec!["backport", "--json", "shared.txt"];
         args.extend(extra);
-        let output = tpl(&project, &args).failure();
-        assert!(
-            output.stdout.contains("tpl::backport::non_leaf"),
-            "{}",
-            output.stdout
-        );
+        let output = tpl(&project, &args).success().json();
+        if output["result"] == "plan" {
+            assert_eq!(output["plan"][0]["source"], "template/shared.txt");
+        } else {
+            assert_eq!(
+                output["template"],
+                parent.path.canonicalize().unwrap().to_str().unwrap()
+            );
+            assert!(output["patch"].as_str().unwrap().contains("+changed"));
+        }
     }
     project.git(&["restore", "shared.txt"]);
     leaf.write("template/shared.txt", "leaf original\n");

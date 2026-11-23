@@ -189,6 +189,12 @@ fn missing_child_locks_are_saved_on_changed_and_identical_renderings() {
 #[test]
 fn a_child_with_the_same_source_path_as_its_parent_cannot_backport_into_the_parent() {
     let source = child("source");
+    source
+        .write(
+            "template/{{ module_path }}/module.txt.jinja",
+            "{{ module_name }}\noriginal\n",
+        )
+        .commit_all("add a literal line to backport");
     let integration = child("integration");
     let parent = parent(&source, &integration, "main", "main");
     let manifest = parent.read("template.toml");
@@ -214,12 +220,19 @@ fn a_child_with_the_same_source_path_as_its_parent_cannot_backport_into_the_pare
     for extra in [vec![], vec!["--list-hunks"]] {
         let mut args = vec!["backport", "--json", "modules/jira/module.txt"];
         args.extend(extra);
-        let output = tpl(&project, &args).failure();
-        assert!(
-            output.stdout.contains("tpl::backport::non_leaf"),
-            "{}",
-            output.stdout
-        );
+        let output = tpl(&project, &args).success().json();
+        if output["result"] != "plan" {
+            assert_eq!(
+                output["template"],
+                source.path.canonicalize().unwrap().to_str().unwrap()
+            );
+            assert!(
+                output["patch"]
+                    .as_str()
+                    .unwrap()
+                    .contains("+new literal line")
+            );
+        }
     }
 }
 
@@ -710,6 +723,12 @@ fn backport_reproduces_the_original_children_after_their_branch_moves() {
 #[test]
 fn backport_never_mistakes_a_child_generated_file_for_a_parent_template_file() {
     let source = child("source");
+    source
+        .write(
+            "template/{{ module_path }}/module.txt.jinja",
+            "{{ module_name }}\noriginal\n",
+        )
+        .commit_all("add a literal line to backport");
     let integration = child("integration");
     let parent = parent(&source, &integration, "main", "main");
     let project = Repo::init("project");
@@ -726,14 +745,14 @@ fn backport_never_mistakes_a_child_generated_file_for_a_parent_template_file() {
     )
     .success();
     project.write("modules/jira/module.txt", "jira\nA local edit.\n");
-    let output = tpl(&project, &["--json", "backport", "modules/jira/module.txt"]);
-    assert_ne!(
-        output.code,
-        0,
-        "child files must not be backported to the parent: {}",
-        output.all()
+    let output = tpl(&project, &["--json", "backport", "modules/jira/module.txt"])
+        .success()
+        .json();
+    assert_eq!(
+        output["template"],
+        source.path.canonicalize().unwrap().to_str().unwrap()
     );
-    assert_eq!(output.error_code(), "tpl::backport::non_leaf");
+    assert!(output["patch"].as_str().unwrap().contains("+A local edit."));
 }
 
 #[test]

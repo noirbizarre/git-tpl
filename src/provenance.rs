@@ -21,9 +21,20 @@ pub struct ComposedRevision {
     pub reference: String,
     /// The commit actually rendered.
     pub revision: Oid,
+    /// Historical child ancestry; `None` distinguishes legacy records from a known empty chain.
+    pub extends: Option<Vec<ExtendsProvenance>>,
 }
 
 impl ComposedRevision {
+    /// Adding ancestry evidence alone must not manufacture an update commit for legacy history.
+    pub fn matches_recorded(&self, recorded: &Self) -> bool {
+        self.lock() == recorded.lock()
+            && recorded
+                .extends
+                .as_ref()
+                .is_none_or(|chain| self.extends.as_ref() == Some(chain))
+    }
+
     /// The editable project lock for this child.
     pub fn lock(&self) -> crate::config::ComposedRef {
         crate::config::ComposedRef {
@@ -93,11 +104,11 @@ pub struct ExtendsProvenance {
 }
 
 impl ExtendsProvenance {
-    /// `<source>@<short-sha>` — positional rather than named like
+    /// `<source>@<commit>` — positional rather than named like
     /// `Data-Source`: an ancestor has no name a template author chose, and its
     /// position in the chain is its identity.
     fn trailer(&self) -> String {
-        format!("{}@{}", self.source, self.revision.short())
+        format!("{}@{}", self.source, self.revision)
     }
 }
 
@@ -135,6 +146,16 @@ impl Provenance {
             message.push_str(&format!("{}: {}\n", keys::EXTENDS, extends.trailer()));
         }
         for child in &self.composed {
+            let extends = child.extends.as_ref().map(|chain| {
+                chain
+                    .iter()
+                    .map(|ancestor| {
+                        serde_json::json!({
+                            "source": ancestor.source, "commit": ancestor.revision.to_hex(),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
             // JSON escapes URL/ref separators and control characters, so this trailer round-trips even for scp URLs.
             message.push_str(&format!(
                 "{}: {}\n",
@@ -142,6 +163,8 @@ impl Provenance {
                 serde_json::json!({
                     "from": child.from, "source": child.source, "ref": child.reference,
                     "commit": child.revision.to_hex(),
+                    "extends": extends,
+                    "ancestryVersion": 1,
                 })
             ));
         }
@@ -233,6 +256,18 @@ impl Provenance {
                         source: source.to_string(),
                         reference: reference.to_string(),
                         revision,
+                        extends: value.get("extends").and_then(|chain| {
+                            chain
+                                .as_array()?
+                                .iter()
+                                .map(|ancestor| {
+                                    Some(ExtendsProvenance {
+                                        source: ancestor.get("source")?.as_str()?.to_string(),
+                                        revision: Oid::parse(ancestor.get("commit")?.as_str()?)?,
+                                    })
+                                })
+                                .collect()
+                        }),
                     });
                     found_any = true;
                 }
@@ -399,6 +434,7 @@ mod tests {
             source: "git@example.com:org/source.tpl".into(),
             reference: "main".into(),
             revision: oid("1122334455667788990011223344556677889900"),
+            extends: None,
         };
         let rendering = Provenance {
             composed: vec![child.clone()],
@@ -483,11 +519,11 @@ mod tests {
             [
                 (
                     "https://github.com/org/parent".to_string(),
-                    "a1b2c3d".to_string()
+                    "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2".to_string()
                 ),
                 (
                     "https://github.com/org/grandparent".to_string(),
-                    "1122334".to_string()
+                    "1122334455667788990011223344556677889900".to_string()
                 ),
             ]
         );
@@ -529,7 +565,7 @@ mod tests {
             recorded.extends,
             [(
                 "git@github.com:org/parent.git".to_string(),
-                "a1b2c3d".to_string()
+                "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2".to_string()
             )]
         );
     }

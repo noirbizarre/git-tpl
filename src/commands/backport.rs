@@ -86,7 +86,7 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         ops::Picking::All
     };
 
-    let result = ops::backport(
+    let mut results = ops::backports(
         &ctx.repo,
         &ctx.root,
         &args.paths,
@@ -98,6 +98,42 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         unsubstitute,
         picking,
     )?;
+
+    if results.len() > 1 && args.output_dir.is_none() && (!global.json || args.output.is_some()) {
+        return Err(ops::BackportError::MultipleOwners.into());
+    }
+    if let Some(directory) = &args.output_dir {
+        for (index, result) in results.iter_mut().enumerate() {
+            let mailbox = directory.join(format!("{:04}.patch", index + 1));
+            result.apply_command = artifact_apply_command(result, &ctx.root, &mailbox)?;
+        }
+        if results.iter().any(|result| !result.patch.is_empty()) {
+            publish(directory, &args, &results)?;
+        }
+    }
+    if results.len() > 1 {
+        if args.output_dir.is_none() {
+            for (index, result) in results.iter_mut().enumerate() {
+                result.apply_command = artifact_apply_command(
+                    result,
+                    &ctx.root,
+                    std::path::Path::new(&format!("{:04}.patch", index + 1)),
+                )?;
+            }
+        }
+        for result in &results {
+            ctx.out.say(field(&ctx.out.theme, "owner", &result.source));
+            print_text(&ctx, &args, result);
+        }
+        if global.json {
+            println!("{}", crate::report::success(grouped_json(&args, &results)));
+        }
+        return Ok(crate::exit::SUCCESS);
+    }
+    let mut result = results.remove(0);
+    if let Some(path) = &args.output {
+        result.apply_command = artifact_apply_command(&result, &ctx.root, path)?;
+    }
 
     // Written before anything is said, so a failure to write is not reported
     // after a line claiming success.
@@ -116,7 +152,7 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
 
     if global.json {
         println!("{}", crate::report::success(json(&args, &result)));
-    } else if args.output.is_none() && !result.patch.is_empty() {
+    } else if args.output.is_none() && args.output_dir.is_none() && !result.patch.is_empty() {
         // The patch is data, so it goes to stdout and nowhere else. Everything
         // above went to stderr precisely so that this stays pipeable straight
         // into `git am`.
@@ -124,6 +160,111 @@ pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     }
 
     Ok(crate::exit::SUCCESS)
+}
+
+/// Quote a shell argument, leaving the familiar simple-path hints unchanged.
+fn shell_quote(value: &str) -> String {
+    if !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"/_-.".contains(&b))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
+fn artifact_apply_command(
+    result: &Backport,
+    root: &std::path::Path,
+    mailbox: &std::path::Path,
+) -> Result<String, OpError> {
+    let location = tpl::config::source_location(&result.source, root);
+    let target = tpl::ops::resolve::local_path(&location)
+        .map(|path| shell_quote(&path.display().to_string()))
+        .unwrap_or_else(|| "\"<your-template-clone>\"".to_string());
+    // An absolute artifact path remains correct after `git -C` changes Git's working directory.
+    let mailbox = if mailbox.is_absolute() {
+        mailbox.to_path_buf()
+    } else {
+        super::current_dir()?.join(mailbox)
+    };
+    Ok(format!(
+        "git -C {target} am {}",
+        shell_quote(&mailbox.display().to_string())
+    ))
+}
+
+fn grouped_json(args: &BackportArgs, results: &[Backport]) -> serde_json::Value {
+    serde_json::json!({
+        "result": "grouped",
+        "outputDirectory": args.output_dir.as_ref().map(|p| p.display().to_string()),
+        "owners": results.iter().enumerate().map(|(index, result)| {
+            let mut owner = json(args, result);
+            owner["mailbox"] = format!("{:04}.patch", index + 1).into();
+            owner["sourceOutputs"] = serde_json::json!(result.source_outputs);
+            owner["sourceLocation"] = result.source_location.clone().into();
+            owner
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn publish(
+    directory: &std::path::Path,
+    args: &BackportArgs,
+    results: &[Backport],
+) -> Result<(), OpError> {
+    let write_error = |error: std::io::Error| {
+        OpError::Backport(ops::BackportError::OutputWrite {
+            path: directory.display().to_string(),
+            reason: error.to_string(),
+        })
+    };
+    let parent = directory
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let staging = tempfile::Builder::new()
+        .prefix(".git-tpl-backport-")
+        .tempdir_in(parent)
+        .map_err(write_error)?;
+    for (index, result) in results.iter().enumerate() {
+        std::fs::write(
+            staging.path().join(format!("{:04}.patch", index + 1)),
+            &result.patch,
+        )
+        .map_err(write_error)?;
+    }
+    let mut manifest = grouped_json(args, results);
+    manifest["version"] = 1.into();
+    // Mailboxes live in separate files; the manifest cannot itself be mistaken for `git am` input.
+    for owner in manifest["owners"].as_array_mut().expect("owner array") {
+        owner.as_object_mut().expect("owner object").remove("patch");
+    }
+    std::fs::write(
+        staging.path().join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest).expect("JSON values serialize"),
+    )
+    .map_err(write_error)?;
+    // Reserve rather than overwrite, including empty directories and symlinks. Publish the
+    // manifest last as the completion marker; clean up our reserved directory on ordinary failure.
+    std::fs::create_dir(directory).map_err(write_error)?;
+    let publication = (|| {
+        for index in 0..results.len() {
+            let name = format!("{:04}.patch", index + 1);
+            std::fs::rename(staging.path().join(&name), directory.join(name))?;
+        }
+        std::fs::rename(
+            staging.path().join("manifest.json"),
+            directory.join("manifest.json"),
+        )
+    })();
+    if let Err(error) = publication {
+        let _ = std::fs::remove_dir_all(directory);
+        return Err(write_error(error));
+    }
+    Ok(())
 }
 
 /// Whether substitutions may be reversed, and whether to ask first.
@@ -212,9 +353,14 @@ fn print_text(ctx: &Session, args: &BackportArgs, result: &Backport) {
     ));
     ctx.out.blank();
     for file in &result.files {
+        let outputs = result
+            .source_outputs
+            .get(&file.source)
+            .map(|paths| paths.join(", "))
+            .unwrap_or_else(|| file.rendered.clone());
         ctx.out.say(muted(
             &ctx.out.theme,
-            &format!("  {} <- {}", file.source, file.rendered),
+            &format!("  {} <- {outputs}", file.source),
         ));
     }
     ctx.out.blank();
@@ -243,6 +389,19 @@ fn print_text(ctx: &Session, args: &BackportArgs, result: &Backport) {
     // git-tpl will not apply the patch — ADR-002 and ADR-020 — but it knows
     // exactly what would, and a user reconstructing this from prose gets the
     // `-C` wrong the first time.
+    if let Some(directory) = &args.output_dir {
+        ctx.out.say(field(
+            &ctx.out.theme,
+            "written",
+            &directory.display().to_string(),
+        ));
+        ctx.out.say(field(
+            &ctx.out.theme,
+            "apply",
+            &command(&ctx.out.theme, &result.apply_command),
+        ));
+        return;
+    }
     match &args.output {
         Some(path) => {
             ctx.out.say(field(
@@ -253,13 +412,7 @@ fn print_text(ctx: &Session, args: &BackportArgs, result: &Backport) {
             ctx.out.say(field(
                 &ctx.out.theme,
                 "apply",
-                &command(
-                    &ctx.out.theme,
-                    &result
-                        .apply_command
-                        .replace("git tpl backport | ", "")
-                        .replace(" am", &format!(" am {}", path.display())),
-                ),
+                &command(&ctx.out.theme, &result.apply_command),
             ));
         }
         None => ctx.out.say(field(
@@ -291,6 +444,13 @@ fn print_plan(ctx: &Session, result: &Backport) {
             &ctx.out.theme,
             &format!("  {} <- {}", file.source, file.rendered),
         ));
+        if let Some((owner, revision)) = &file.owner {
+            ctx.out.say(field(
+                &ctx.out.theme,
+                "owner",
+                &format!("{owner} at {revision}"),
+            ));
+        }
         for hunk in &file.hunks {
             // The spec exactly as `--hunk` takes it, so it can be copied.
             ctx.out.say(muted(
@@ -310,7 +470,7 @@ fn plan_json(result: &Backport) -> serde_json::Value {
         .plan
         .iter()
         .map(|file| {
-            serde_json::json!({
+            let mut value = serde_json::json!({
                 "rendered": file.rendered,
                 "source": file.source,
                 "added": file.added,
@@ -323,7 +483,12 @@ fn plan_json(result: &Backport) -> serde_json::Value {
                     "deletions": hunk.deletions,
                     "lines": hunk.lines,
                 })).collect::<Vec<_>>(),
-            })
+            });
+            if let Some((owner, revision)) = &file.owner {
+                value["owner"] =
+                    serde_json::json!({ "source": owner, "commit": revision.to_hex() });
+            }
+            value
         })
         .collect()
 }
@@ -337,6 +502,13 @@ fn json(args: &BackportArgs, result: &Backport) -> serde_json::Value {
     if args.list_hunks {
         payload["result"] = "plan".into();
         payload["plan"] = plan_json(result);
+    }
+    if let Some(directory) = &args.output_dir {
+        payload["outputDirectory"] = directory.display().to_string().into();
+        payload["sourceLocation"] = result.source_location.clone().into();
+    }
+    if args.output_dir.is_some() || result.source_outputs.values().any(|paths| paths.len() > 1) {
+        payload["sourceOutputs"] = serde_json::json!(result.source_outputs);
     }
     payload
 }

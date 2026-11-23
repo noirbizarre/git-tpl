@@ -219,10 +219,14 @@ The reasoning is [ADR-020](../adr/020-backport-is-a-patch.md).
 | `tpl::backport::binary` | A changed file is binary, and a text patch cannot carry it. |
 | `tpl::backport::stale_rendering` | The recorded answers no longer reproduce `refs/tpl/<id>`, so every line of the patch would be measured against the wrong file. Run `update` first. |
 | `tpl::backport::unknown_path` | A named path is neither produced by the template nor present in the project. |
-| `tpl::backport::non_leaf` | A modified output belongs to an inherited or composed repository. Edit its owning repository directly or exclude the path. |
 | `tpl::backport::one_shot` | Modified output is an initialized one-shot file. Exclude it, or edit the template directly to change placeholders for new projects. |
+| `tpl::backport::non_leaf` | Reserved legacy identifier for unsupported non-leaf ownership. |
+| `tpl::backport::history` | Historical ownership is unproven or inconsistent. Restore recorded sources or edit upstream. |
+| `tpl::backport::multiple_owners` | Several owners need separate mailboxes. Use `--output-dir DIR` or `--json`. |
+| `tpl::backport::source_conflict` | Instances propose different edits to one source. Select consistent changes. |
+| `tpl::backport::shared_source` | A source edit would alter an unselected instance. Select its corresponding change too. |
 | `tpl::backport::symlink` | A changed path is a symlink on one side. Edit the link in the owning template directly or exclude it. |
-| `tpl::backport::output_write` | The patch could not be written to `--output`. |
+| `tpl::backport::output_write` | Output could not be published. Check permissions and use a new `--output-dir`. |
 | `tpl::backport::hunk_refused` | One of the hunks selected with `-p` or `--hunk` cannot be backported. The refusal underneath keeps its own code and its own advice; this names the hunk. Run again and leave that hunk out. See [Choosing hunks](../usage/backport.md#choosing-hunks). |
 | `tpl::backport::cancelled` | The hunk picker was cancelled. No patch was produced and nothing was written. |
 | `tpl::backport::not_interactive` | `-p` was asked for under `--json`, in a pipe, or with `tpl.interactive false` — where the hunks cannot be shown. Use `--list-hunks` and `--hunk` to choose hunks without a prompt, or limit the backport with pathspecs or `--exclude`. |

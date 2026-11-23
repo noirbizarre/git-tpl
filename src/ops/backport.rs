@@ -31,6 +31,13 @@ use super::{
 };
 use std::sync::Arc;
 
+// A source may render into several module outputs. Keep its one proposed edit
+// separate from the per-instance expected bytes so deduplication cannot weaken proof.
+struct Candidate {
+    patched: String,
+    outputs: BTreeMap<String, String>,
+}
+
 /// Why a backport could not be produced.
 ///
 /// Every variant is a refusal rather than a wrong answer, and every `help`
@@ -38,6 +45,57 @@ use std::sync::Arc;
 /// floor no refusal can fall below. See ADR-020.
 #[derive(Debug, Error, Diagnostic)]
 pub enum BackportError {
+    /// Owner identity cannot be inferred from byte-identical output alone.
+    #[error("cannot establish the historical template owner: {reason}")]
+    #[diagnostic(
+        code(tpl::backport::history),
+        help(
+            "restore the recorded sources and pins, or edit the owning template directly; a new render records complete ancestry"
+        )
+    )]
+    History {
+        /// Evidence missing or inconsistent with the recorded rendering.
+        reason: String,
+    },
+    /// A single mailbox cannot safely target several repositories.
+    #[error("the backport spans multiple template owners")]
+    #[diagnostic(
+        code(tpl::backport::multiple_owners),
+        help("use --output-dir DIR or --json to keep each owner's mailbox separate")
+    )]
+    MultipleOwners,
+    /// Different instances cannot independently prescribe one upstream file's contents.
+    #[error("conflicting backports for `{source_path}` in `{owner}`: {paths}")]
+    #[diagnostic(
+        code(tpl::backport::source_conflict),
+        help("select consistent changes for every instance, or edit the owning source directly")
+    )]
+    SourceConflict {
+        /// Owner repository identity.
+        owner: String,
+        /// Repository-relative source file.
+        source_path: String,
+        /// Rendered instances that disagree.
+        paths: String,
+    },
+    /// A selected source edit must not change an unselected instance.
+    #[error(
+        "backporting `{source_path}` in `{owner}` would also change unselected output `{path}`"
+    )]
+    #[diagnostic(
+        code(tpl::backport::shared_source),
+        help(
+            "make and select the corresponding change in every affected instance, or edit the owning template directly"
+        )
+    )]
+    SharedSource {
+        /// Owner repository identity.
+        owner: String,
+        /// Source file shared by instances.
+        source_path: String,
+        /// Output whose baseline would change.
+        path: String,
+    },
     /// Text patches cannot carry link modes or link target changes.
     #[error("`{path}` is a symbolic link on one side of the change")]
     #[diagnostic(
@@ -48,7 +106,7 @@ pub enum BackportError {
         /// Output whose mode cannot be backported.
         path: String,
     },
-    /// A patch against the leaf repository cannot edit a different repository's source.
+    /// Legacy refusal retained for callers that match this public diagnostic identifier.
     #[error("`{path}` is owned by an inherited or composed template")]
     #[diagnostic(
         code(tpl::backport::non_leaf),
@@ -264,6 +322,8 @@ pub struct PlannedHunk {
 /// One file's hunks, as listed.
 #[derive(Debug, Clone)]
 pub struct PlannedFile {
+    /// Actual non-leaf owner and base commit; absent for legacy leaf-only listings.
+    pub owner: Option<(String, Oid)>,
     /// The path in the project; the left half of a `--hunk` spec.
     pub rendered: String,
     /// The template source the file would patch, when the template owns it.
@@ -288,6 +348,7 @@ impl PlannedFile {
             })
             .collect();
         Self {
+            owner: None,
             rendered: path.to_string(),
             source: source.to_string(),
             added,
@@ -323,6 +384,10 @@ pub struct Skipped {
 /// The outcome of a backport.
 #[derive(Debug)]
 pub struct Backport {
+    /// Unambiguous owner location: canonical local path or the exact remote source identity.
+    pub source_location: String,
+    /// All output instances contributing to each repository-relative source edit.
+    pub source_outputs: BTreeMap<String, Vec<String>>,
     /// The mailbox, ready for `git am`. Empty when `files` is empty.
     pub patch: String,
     /// What the patch carries.
@@ -366,9 +431,8 @@ pub struct Backport {
 
 /// Produce the patch that carries the project's local divergence upstream.
 ///
-/// Writes nothing, anywhere: not the project, not the template, not even a
-/// loose object. The two trees compared both already exist in the project
-/// repository, and the patch is formatted in process.
+/// Does not change checkouts, the index or refs. Reconstruction and the worktree
+/// snapshot may write objects in the project repository, never template sources.
 ///
 /// There is no `supplied` parameter, unlike every other rendering entry point.
 /// The rendering here is not a rendering the user is choosing — it exists to
@@ -388,13 +452,57 @@ pub fn backport(
     access: &crate::git::cache::Access,
     answering: Answering<'_>,
     trust: Trust<'_>,
+    unsubstitute: Unsubstitute<'_>,
+    picking: Picking<'_>,
+) -> Result<Backport, OpError> {
+    let mut owners = backports(
+        project,
+        project_root,
+        paths,
+        exclude,
+        user,
+        access,
+        answering,
+        trust,
+        unsubstitute,
+        picking,
+    )?;
+    if owners.len() != 1 {
+        return Err(BackportError::MultipleOwners.into());
+    }
+    Ok(owners.remove(0))
+}
+
+/// Produce separately applicable mailboxes for every actual source owner.
+#[allow(clippy::too_many_arguments)]
+pub fn backports(
+    project: &dyn GitBackend,
+    project_root: &Path,
+    paths: &[String],
+    exclude: &[String],
+    user: &UserConfig,
+    access: &crate::git::cache::Access,
+    answering: Answering<'_>,
+    trust: Trust<'_>,
     mut unsubstitute: Unsubstitute<'_>,
     mut picking: Picking<'_>,
-) -> Result<Backport, OpError> {
+) -> Result<Vec<Backport>, OpError> {
     let config = Config::load(project_root)?;
     let (_, ref_name) = identify(project_root)?;
     let tip = super::require_tip(project, &ref_name)?;
     let recorded = Provenance::parse(&project.commit(tip)?.message);
+    validate_history(&project.commit(tip)?.message)?;
+    if let Some(source) = recorded.as_ref().and_then(|r| r.source.as_ref())
+        && *source != config.template.source
+    {
+        return Err(BackportError::History {
+            reason: format!(
+                "recorded source `{source}` differs from configured source `{}`",
+                config.template.source
+            ),
+        }
+        .into());
+    }
 
     // The recorded revision, not the configured one. A backport diffs the
     // user's divergence, and rendering anything else folds the template's own
@@ -426,9 +534,20 @@ pub fn backport(
         answering,
         trust,
         recorded.as_ref().map(|r| r.composed.as_slice()),
-        super::Preparation::Files,
+        super::Preparation::Backport,
         &super::once::load(project, Some(tip))?,
     )?;
+
+    if rendered.template.has_ancestors()
+        && !recorded
+            .as_ref()
+            .is_some_and(|r| rendered.template.backport_ancestry_matches(&r.extends))
+    {
+        return Err(BackportError::History {
+            reason: "the inherited chain differs from its recorded sources or commits".into(),
+        }
+        .into());
+    }
 
     // The proof depends on the rendering we hold matching the one the ref
     // records. If it does not, the alignment below is against the wrong file
@@ -461,30 +580,15 @@ pub fn backport(
         .map(|file| (file.path.as_str(), file))
         .collect();
 
-    let partials = rendered.template.partials()?;
-    let undefined = if rendered.template.manifest.strict.unwrap_or(false) {
-        Undefined::Strict
-    } else {
-        Undefined::Lenient
-    };
     let root = rendered.template.root.clone();
-
-    // Gathered once. `None` is ADR-020's behaviour exactly: a change to a line
-    // the render produced is refused, and no reversal is attempted.
-    let lines = match unsubstitute {
-        Unsubstitute::Never => None,
-        Unsubstitute::Ask(_) | Unsubstitute::Always => Some(LineContext {
-            context: &rendered.context,
-            partials: &partials,
-            undefined,
-        }),
-    };
 
     let mut files = Vec::new();
     let mut skipped = Vec::new();
     let mut diffs = Vec::new();
     let mut unsubstituted: Vec<Unsubstitution> = Vec::new();
     let mut plan = Vec::new();
+    let mut candidates: BTreeMap<(String, String, String), Candidate> = BTreeMap::new();
+    let mut file_owners = BTreeMap::new();
     // Read once: `picking` is borrowed mutably by `choose` further down.
     let listing = matches!(picking, Picking::List);
 
@@ -562,6 +666,27 @@ pub fn backport(
                 // has never seen, and naming it `.jinja` would render it —
                 // turning any `{{` the user wrote into a template expression.
                 let source = join_root(&root, &change.path);
+                // A non-produced path may still exist as a conditional or inherited source.
+                if rendered.template.entries()?.iter().any(|entry| {
+                    entry.entry.path == change.path
+                        || entry.entry.path == format!("{}.jinja", change.path)
+                }) {
+                    return Err(BackportError::History {
+                        reason: format!(
+                            "new output `{}` would override an existing source",
+                            change.path
+                        ),
+                    }
+                    .into());
+                }
+                file_owners.insert(
+                    change.path.clone(),
+                    (
+                        owner_identity(&config.template.source, project_root),
+                        rendered.template.revision.to_hex(),
+                        reference.clone(),
+                    ),
+                );
                 diffs.push(file_diff(&source, "", &text, true));
                 files.push(BackportedFile {
                     rendered: change.path.clone(),
@@ -596,33 +721,26 @@ pub fn backport(
                     continue;
                 }
 
-                // Mode-only changes above need no owner, but content changes must be checked
-                // before reading leaf bytes or publishing a hunk: identical source paths in
-                // different repositories otherwise produce a plausible patch against the wrong owner.
+                // Retained bytes no longer have a live source mapping, even when their old repository is known.
                 if file.origin == crate::render::Origin::Retained {
                     return Err(BackportError::OneShot {
                         path: change.path.clone(),
                     }
                     .into());
                 }
-                if file.origin != crate::render::Origin::Leaf {
-                    return Err(BackportError::NonLeaf {
-                        path: change.path.clone(),
-                    }
-                    .into());
-                }
-                let template_bytes = rendered
-                    .template
-                    .repo
-                    .read_path(rendered.template.root_tree, &file.source)?;
-                let Some(template_bytes) = template_bytes else {
-                    return Err(BackportError::UnknownPath {
-                        path: file.source.clone(),
-                    }
-                    .into());
+                let origin = &rendered.backport_trace[&change.path];
+                let template_bytes = &origin.bytes;
+                let environment = &origin.environment;
+                let lines = match unsubstitute {
+                    Unsubstitute::Never => None,
+                    _ => Some(LineContext {
+                        context: &environment.context,
+                        partials: &environment.partials,
+                        undefined: environment.undefined,
+                    }),
                 };
 
-                if is_binary(&template_bytes)
+                if is_binary(template_bytes)
                     || is_binary(&file.content)
                     || is_binary(&project_bytes)
                 {
@@ -641,7 +759,7 @@ pub fn backport(
                     .into());
                 }
 
-                let source_text = to_text(&template_bytes, &change.path, &file.source)?;
+                let source_text = to_text(template_bytes, &change.path, &file.source)?;
                 let rendered_text = to_text(&file.content, &change.path, &file.source)?;
                 let project_text = to_text(&project_bytes, &change.path, &file.source)?;
 
@@ -650,13 +768,17 @@ pub fn backport(
                 // refusable is only knowable per selection, and is reported
                 // when one is made (`hunk_refused`).
                 if listing {
-                    plan.push(PlannedFile::new(
+                    let mut listed = PlannedFile::new(
                         &change.path,
-                        &join_root(&root, &file.source),
+                        &origin.path,
                         &rendered_text,
                         &project_text,
                         false,
-                    ));
+                    );
+                    if file.origin != crate::render::Origin::Leaf {
+                        listed.owner = Some((origin.owner.clone(), origin.revision));
+                    }
+                    plan.push(listed);
                     continue;
                 }
 
@@ -702,9 +824,9 @@ pub fn backport(
                     &patched.patched,
                     &project_text,
                     file,
-                    &rendered.context,
-                    &partials,
-                    undefined,
+                    &environment.context,
+                    &environment.partials,
+                    environment.undefined,
                     &change.path,
                 ) {
                     // A failed round trip on a file that reversed a
@@ -738,7 +860,42 @@ pub fn backport(
                 )?;
 
                 let (insertions, deletions) = counts(&source_text, &patched.patched);
-                let source = join_root(&root, &file.source);
+                let source = origin.path.clone();
+                let key = (
+                    owner_identity(&origin.owner, project_root),
+                    origin.revision.to_hex(),
+                    source.clone(),
+                );
+                let candidate = candidates.entry(key).or_insert_with(|| Candidate {
+                    patched: patched.patched.clone(),
+                    outputs: BTreeMap::new(),
+                });
+                if candidate.patched != patched.patched {
+                    return Err(BackportError::SourceConflict {
+                        owner: origin.owner.clone(),
+                        source_path: source,
+                        paths: format!(
+                            "{}, {}",
+                            candidate
+                                .outputs
+                                .keys()
+                                .cloned()
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                            change.path
+                        ),
+                    }
+                    .into());
+                }
+                candidate.outputs.insert(change.path.clone(), project_text);
+                file_owners.insert(
+                    change.path.clone(),
+                    (
+                        owner_identity(&origin.owner, project_root),
+                        origin.revision.to_hex(),
+                        Some(origin.reference.clone()),
+                    ),
+                );
                 diffs.push(file_diff(&source, &source_text, &patched.patched, false));
                 unsubstituted.extend(patched.unsubstituted.into_iter().map(|mut reversal| {
                     reversal.path = change.path.clone();
@@ -764,6 +921,41 @@ pub fn backport(
         && let Some(spec) = selection.unmatched().into_iter().next()
     {
         return Err(BackportError::UnknownHunk { spec }.into());
+    }
+
+    // One upstream edit can affect several module instances, including ones outside the pathspec.
+    for (path, origin) in &rendered.backport_trace {
+        let key = (
+            owner_identity(&origin.owner, project_root),
+            origin.revision.to_hex(),
+            origin.path.clone(),
+        );
+        if let Some(candidate) = candidates.get(&key) {
+            let file = by_output[path.as_str()];
+            let expected = candidate
+                .outputs
+                .get(path)
+                .map(String::as_str)
+                .unwrap_or(std::str::from_utf8(&file.content).unwrap_or(""));
+            if verify(
+                &candidate.patched,
+                expected,
+                file,
+                &origin.environment.context,
+                &origin.environment.partials,
+                origin.environment.undefined,
+                path,
+            )
+            .is_err()
+            {
+                return Err(BackportError::SharedSource {
+                    owner: origin.owner.clone(),
+                    source_path: origin.path.clone(),
+                    path: path.clone(),
+                }
+                .into());
+            }
+        }
     }
 
     // Every arm goes through `describe_revision`, arm for arm as
@@ -805,16 +997,12 @@ pub fn backport(
         .as_ref()
         .map_or(rendered.template.dirty, |r| r.dirty);
 
-    let apply_command = apply_command(&config.template.source, project_root);
+    let leaf_apply_command = apply_command(&config.template.source, project_root);
 
-    let patch = if files.is_empty() {
-        String::new()
-    } else {
-        mailbox(project, project_root, &revision_description, &files, &diffs)?
-    };
-
-    Ok(Backport {
-        patch,
+    let result = Backport {
+        source_location: owner_identity(&config.template.source, project_root),
+        source_outputs: BTreeMap::new(),
+        patch: String::new(),
         files,
         skipped,
         unsubstituted,
@@ -823,9 +1011,195 @@ pub fn backport(
         revision: object_revision,
         dirty: object_dirty,
         source: config.template.source.clone(),
-        apply_command,
+        apply_command: leaf_apply_command,
         plan,
-    })
+    };
+    if result.files.is_empty() {
+        return Ok(vec![result]);
+    }
+
+    let mut groups: BTreeMap<(String, String), Vec<(BackportedFile, String)>> = BTreeMap::new();
+    let mut references = BTreeMap::new();
+    for (file, diff) in result.files.into_iter().zip(diffs) {
+        let (owner, commit, reference) = &file_owners[&file.rendered];
+        if groups
+            .keys()
+            .any(|(source, base)| source == owner && base != commit)
+        {
+            return Err(BackportError::History { reason: format!("owner `{owner}` is used at multiple base commits; select one revision at a time") }.into());
+        }
+        let key = (owner.clone(), commit.clone());
+        references.insert(key.clone(), reference.clone());
+        groups.entry(key).or_default().push((file, diff));
+    }
+    let multiple = groups.len() > 1;
+    groups
+        .into_iter()
+        .map(|((source, commit), mut entries)| {
+            // Output paths can be templated and reorder sources; mailbox order follows source paths.
+            entries.sort_by(|(left, _), (right, _)| (&left.source, &left.rendered).cmp(&(&right.source, &right.rendered)));
+            let mut files = Vec::new();
+            let mut diffs = Vec::new();
+            let mut source_outputs: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            let mut paths = Vec::new();
+            for (file, diff) in entries {
+                paths.push(file.rendered.clone());
+                let outputs = source_outputs.entry(file.source.clone()).or_default();
+                if outputs.is_empty() {
+                    diffs.push(diff);
+                    files.push(file.clone());
+                }
+                outputs.push(file.rendered);
+            }
+            let leaf = source == owner_identity(&config.template.source, project_root)
+                && commit == rendered.template.revision.to_hex();
+            let revision = Oid::parse(&commit).expect("resolved commit");
+            let reference = if leaf {
+                result.reference.clone()
+            } else {
+                references[&(source.clone(), commit)].clone()
+            };
+            let source_location = source.clone();
+            // Preserve the configured spelling in legacy leaf metadata while grouping aliases by repository.
+            let source = if leaf {
+                config.template.source.clone()
+            } else {
+                source
+            };
+            let revision_description = if leaf {
+                result.revision_description.clone()
+            } else {
+                reference
+                    .as_ref()
+                    .map_or_else(|| revision.short(), |r| describe_revision(r, revision))
+            };
+            let mut patch = mailbox(project, project_root, &revision_description, &files, &diffs)?;
+            // Labels supplement the explicit output boundary; mailboxes are never concatenated across owners.
+            if !leaf || multiple {
+                patch = patch.replacen(
+                    "\nBackported by",
+                    &format!(
+                        "\nTemplate owner: {source_location}\nBase commit: {revision}\n\nBackported by"
+                    ),
+                    1,
+                );
+            }
+            Ok(Backport {
+                source_location,
+                patch,
+                files,
+                source_outputs,
+                skipped: result.skipped.clone(),
+                unsubstituted: result
+                    .unsubstituted
+                    .iter()
+                    .filter(|r| paths.contains(&r.path))
+                    .cloned()
+                    .collect(),
+                revision_description,
+                reference,
+                revision,
+                dirty: leaf && result.dirty,
+                apply_command: if leaf && !multiple {
+                    apply_command(&source, project_root)
+                } else {
+                    format!(
+                        "{} '<owner-mailbox.patch>'",
+                        apply_command(&source, project_root)
+                            .trim_start_matches("git tpl backport | ")
+                    )
+                },
+                source,
+                plan: Vec::new(),
+            })
+        })
+        .collect()
+}
+
+/// Local spellings can identify one repository; remote URL aliases deliberately remain distinct.
+fn owner_identity(source: &str, project_root: &Path) -> String {
+    let location = crate::config::source_location(source, project_root);
+    super::resolve::local_path(&location)
+        .and_then(|path| std::fs::canonicalize(path).ok())
+        .map_or_else(|| source.to_string(), |path| path.display().to_string())
+}
+
+/// Unlike display parsing, a proof must not silently discard malformed or duplicate locks.
+fn validate_history(message: &str) -> Result<(), BackportError> {
+    let mut declarations = std::collections::BTreeSet::new();
+    let mut unique = std::collections::BTreeSet::new();
+    for line in message.lines() {
+        if let Some((key, rest)) = line.split_once(':')
+            && [
+                "Template-Source",
+                "Template-Ref",
+                "Template-Commit",
+                "Template-Dirty",
+                "Template-Extends",
+                "Template-Compose",
+            ]
+            .contains(&key)
+            && !rest.starts_with(' ')
+        {
+            return Err(BackportError::History {
+                reason: format!("malformed {key} trailer"),
+            });
+        }
+        if let Some((key, value)) = line.split_once(": ") {
+            if [
+                "Template-Source",
+                "Template-Ref",
+                "Template-Commit",
+                "Template-Dirty",
+            ]
+            .contains(&key)
+                && (!unique.insert(key)
+                    || (key == "Template-Commit" && Oid::parse(value).is_none()))
+            {
+                return Err(BackportError::History {
+                    reason: format!("malformed or duplicated {key} trailer"),
+                });
+            }
+            if key == "Template-Extends"
+                && !value.rsplit_once('@').is_some_and(|(source, commit)| {
+                    !source.is_empty()
+                        && (7..=40).contains(&commit.len())
+                        && commit.bytes().all(|b| b.is_ascii_hexdigit())
+                })
+            {
+                return Err(BackportError::History {
+                    reason: "malformed Template-Extends trailer".into(),
+                });
+            }
+        }
+        if let Some(value) = line.strip_prefix("Template-Compose: ") {
+            let valid = serde_json::from_str::<serde_json::Value>(value)
+                .ok()
+                .is_some_and(|v| {
+                    let Some(from) = v["from"].as_str() else {
+                        return false;
+                    };
+                    v["source"].is_string()
+                        && v["ref"].is_string()
+                        && v["commit"].as_str().and_then(Oid::parse).is_some()
+                        && declarations.insert(from.to_string())
+                        && (v.get("extends").is_none_or(|v| v.is_null())
+                            || (v["ancestryVersion"] == 1
+                                && v["extends"].as_array().is_some_and(|chain| {
+                                    chain.iter().all(|a| {
+                                        a["source"].is_string()
+                                            && a["commit"].as_str().and_then(Oid::parse).is_some()
+                                    })
+                                })))
+                });
+            if !valid {
+                return Err(BackportError::History {
+                    reason: "malformed or duplicated Template-Compose trailer".into(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Cut a change into hunks, ask which to keep, and reassemble the answer.
@@ -1451,6 +1825,15 @@ fn apply_command(source: &str, project_root: &Path) -> String {
         // A URL has no local clone to name, so the placeholder says so rather
         // than pretending to know.
         None => "<your-template-clone>".to_string(),
+    };
+    // A source path is user data, not shell syntax. Quote placeholders too, so `<` is never redirection.
+    let target = if target
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"/_-.".contains(&b))
+    {
+        target
+    } else {
+        format!("'{}'", target.replace('\'', "'\\''"))
     };
     format!("git tpl backport | git -C {target} am")
 }

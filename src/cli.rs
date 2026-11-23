@@ -554,6 +554,10 @@ pub struct BackportArgs {
     #[arg(short, long, value_name = "FILE")]
     pub output: Option<PathBuf>,
 
+    /// Write one mailbox per owner and a manifest into a new directory
+    #[arg(long, value_name = "DIR", conflicts_with_all = ["output", "list_hunks"])]
+    pub output_dir: Option<PathBuf>,
+
     /// Fetch remote data sources without confirming
     ///
     /// Per invocation: nothing is recorded, and the next run asks again.

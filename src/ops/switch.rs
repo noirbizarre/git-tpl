@@ -149,8 +149,14 @@ pub fn switch(
         || Provenance::parse(&previous.message).is_none_or(|old| {
             old.source.as_deref() != Some(rendered.provenance.source.as_str())
                 || old.revision != Some(template.revision)
-                || old.composed != rendered.provenance.composed
                 || old.once != rendered.provenance.once
+                || old.composed.len() != rendered.provenance.composed.len()
+                || !rendered
+                    .provenance
+                    .composed
+                    .iter()
+                    .zip(&old.composed)
+                    .all(|(new, old)| new.matches_recorded(old))
                 || old.dirty != template.dirty
         });
     if Config::load(project_root)? != initial {
