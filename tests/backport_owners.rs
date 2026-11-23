@@ -676,6 +676,16 @@ fn one_repository_at_different_base_revisions_requires_selecting_one_revision() 
 
 #[test]
 fn artifact_apply_hints_resolve_relative_outputs_from_the_invocation_directory() {
+    let assert_artifact = |command: &serde_json::Value, artifact: &std::path::Path| {
+        let command = command.as_str().unwrap();
+        let arguments = shlex::split(command).unwrap();
+        // Windows may spell the same working directory with or without a verbatim prefix.
+        // Check where the quoted argument actually points rather than its display spelling.
+        let actual = std::path::Path::new(arguments.last().unwrap())
+            .canonicalize()
+            .unwrap_or_else(|error| panic!("invalid artifact in `{command}`: {error}"));
+        assert_eq!(actual, artifact.canonicalize().unwrap(), "{command}");
+    };
     let world = Owners::new("[\"one\"]");
     world.edit_all();
     let cwd = world.project.path.join("modules/one");
@@ -689,12 +699,7 @@ fn artifact_apply_hints_resolve_relative_outputs_from_the_invocation_directory()
     for owner in output["owners"].as_array().unwrap() {
         let artifact = cwd.join("review").join(owner["mailbox"].as_str().unwrap());
         assert!(artifact.is_file());
-        assert!(
-            owner["applyCommand"]
-                .as_str()
-                .unwrap()
-                .contains(artifact.to_str().unwrap())
-        );
+        assert_artifact(&owner["applyCommand"], &artifact);
     }
     let output = common::tpl_outside(
         &cwd,
@@ -704,10 +709,5 @@ fn artifact_apply_hints_resolve_relative_outputs_from_the_invocation_directory()
     .success()
     .json();
     assert!(cwd.join("single.patch").is_file());
-    assert!(
-        output["applyCommand"]
-            .as_str()
-            .unwrap()
-            .contains(cwd.join("single.patch").to_str().unwrap())
-    );
+    assert_artifact(&output["applyCommand"], &cwd.join("single.patch"));
 }
