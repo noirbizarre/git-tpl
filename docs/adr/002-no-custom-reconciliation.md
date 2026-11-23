@@ -18,6 +18,8 @@ None of it. git-tpl implements no:
 - merge heuristics
 
 Merging is libgit2's merge, which is Git's merge.
+[ADR-052](052-native-explicit-merge.md) later distinguishes explicit native integration from libgit2 initialization
+and previews, because libgit2 does not execute configured external merge drivers.
 `git tpl merge` is a convenience wrapper that resolves the ref name and nothing else.
 
 ## Consequences

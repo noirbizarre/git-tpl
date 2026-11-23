@@ -367,8 +367,12 @@ Then ask whether to proceed. Only on a yes:
 git tpl merge --json
 ```
 
-The merge wrapper uses libgit2 and does not execute configured external `merge.<name>.driver` commands.
-If the project depends on those drivers, use native `git merge refs/tpl/<id>` after the same user confirmation.
+Explicit integration uses native Git, honoring `.gitattributes`, external `merge.<name>.driver` commands,
+hooks and signing. This also applies to `pull`, `update --merge` and `switch --merge`.
+Native Git must be on PATH; plain `git merge refs/tpl/<id>` remains available after the same user confirmation.
+Previews and initialization do not run external merge drivers, so previews can differ from integration.
+`tpl::git::merge_failed` carries native failure details; inspect `git status` and finish or abort any active merge.
+Staged changes and active operations are refused; autostash and squash are disabled to protect edits and ancestry.
 `merge --no-commit` leaves non-fast-forward merges staged; it still advances `HEAD` on a fast-forward.
 
 If the user declines, leave the advanced ref where it is and explain that rendered changes remain unapplied.

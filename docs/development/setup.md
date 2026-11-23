@@ -161,8 +161,10 @@ template ref would destroy the merge base a user's branch depends on.
 `git2`-isolation invariant above.
 The deliberate process-execution exceptions are the test harness's `[commands]` (ADR-027),
 native Git display of a completed diff preview in `src/commands/diff.rs` (ADR-039),
-and explicit native merge-abort recovery in the backend ([ADR-040](../adr/040-native-merge-abort.md)).
-None is available to rendering, init or update.
+explicit native merge-abort recovery in the backend ([ADR-040](../adr/040-native-merge-abort.md)),
+and explicit native integration, including configured merge drivers, hooks and signing
+([ADR-052](../adr/052-native-explicit-merge.md)).
+None is available to rendering or init; `update --merge` runs integration as a separate phase.
 
 ## Tests
 

@@ -3,6 +3,8 @@
 git-tpl is a single binary with libgit2 compiled into it, including its HTTPS and SSH transports
 and, on Linux, its own OpenSSL.
 Git must be on PATH for `git tpl` invocation and for native patch/stat display in [`diff`](../usage/diff.md).
+Explicit [integration and abort](../usage/merge.md) also require native Git,
+including the integration phase of `pull`, `update --merge` and `switch --merge`.
 Rendering and repository operations otherwise use the bundled backend.
 
 ## With Homebrew

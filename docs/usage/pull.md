@@ -42,9 +42,9 @@ just as with update, even if the rendered output is unchanged.
 They are not automatically included in the merge commit.
 When answers and child locks have no semantic change, configuration bytes and formatting are preserved exactly.
 
-Integration uses the same backend as `git tpl merge`, with its existing local-edit protections and limitations.
-Configured external merge drivers are not executed;
-use update followed by native `git merge refs/tpl/<id>` when those drivers are required.
+Integration uses the same [native Git path as `git tpl merge`](merge.md#it-is-a-normal-merge),
+including merge attributes, external merge drivers, hooks and signing, with the same local-edit protections.
+Native Git must be installed on PATH.
 
 Unlike update alone, pull refuses a missing local rendered ref with `tpl::ops::no_rendered_ref`.
 Restore the original rendered history before retrying; see [recovering a missing ref](fetch.md).

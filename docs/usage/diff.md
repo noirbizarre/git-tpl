@@ -70,6 +70,8 @@ git diff HEAD "$(git merge-tree --write-tree HEAD refs/tpl/rust-library-template
 
 `git tpl diff` computes its preview with the backend merge engine, which can differ from native Git
 and does not run external merge drivers.
+Unlike the preview, explicit [`git tpl merge`](merge.md) uses native Git and runs configured drivers;
+their results can differ from this preview.
 Native Git owns only the completed preview's presentation.
 The recipe above assumes `merge-tree` succeeds without conflicts;
 conflict output can contain more than a tree ID and cannot be passed verbatim as a revision.

@@ -20,10 +20,11 @@ git merge refs/tpl/github-com-noirbizarre-rust-library-template
 ```
 
 Both merge the rendered ref into your branch.
-`git tpl merge` looks up the ref name, uses a conventional message, and delegates merging to libgit2.
-Its configuration support differs from native Git: it does not run configured external
-`merge.<name>.driver` commands from `.gitattributes`.
-Use plain `git merge refs/tpl/<id>` when your repository requires those drivers.
+`git tpl merge` looks up the ref name, uses a conventional message, and delegates integration to native Git.
+Native Git must be installed on PATH.
+Repository `.gitattributes` and configured `merge.<name>.driver` commands work as with `git merge`,
+including driver inputs, successful output and unresolved conflicts.
+Plain `git merge refs/tpl/<id>` remains available for direct integration.
 
 Which means:
 
@@ -32,7 +33,21 @@ Which means:
 - `git merge --abort` works
 - `git rerere` works
 - your `merge.tool` works
-- libgit2's built-in merge attribute behavior applies; configured external merge drivers require native Git
+- Git's merge attributes and configured external merge drivers apply
+
+Native Git also honors its merge/commit hooks, filters and signing configuration.
+Git-tpl supplies the merge message without opening an editor.
+It explicitly preserves fast-forward behavior and merge ancestry, disables squash and autostash,
+and protects ignored files that obstruct incoming paths, even if branch merge options request otherwise.
+
+Before integration, staged changes and active Git operations are refused.
+Unrelated unstaged edits may remain, including answer/configuration edits made by a completed update.
+Overlapping local changes are subject to Git's normal checkout protections.
+
+This native execution applies to `merge`, `pull`, `update --merge` and `switch --merge`.
+Initialization retains a non-executing libgit2 merge and does not run external drivers.
+Rendering and [merge previews](diff.md#the-plain-git-equivalent) do not execute them either;
+previews can therefore differ from driver-aware integration.
 
 git-tpl implements **no** conflict resolution of its own.
 Not a custom three-way merge, not patch replay, not rename detection, not heuristics.
@@ -84,6 +99,15 @@ warning: automatic merge failed; fix conflicts and then commit the result.
 
 The index is left exactly as Git leaves it.
 Every tool you already use applies, because nothing here is special.
+
+A driver reporting unresolved conflicts leaves ordinary unmerged index entries for resolution or abort.
+Fatal driver failures, unavailable Git, and hook/signing failures report `tpl::git::merge_failed`
+with Git's captured explanation instead of reporting a successful integration.
+Inspect `git status` before retrying; if merge state exists, finish it or use `git tpl merge --abort`.
+Git-tpl never resets files or clears recovery state after failure, and never falls back to a driver-less merge.
+Git may return nonzero even when `rerere.autoupdate` has staged reused resolutions for every conflict.
+That native failure is still reported; inspect the staged result and complete it with `git commit`, or abort.
+With a combined command, a failed or aborted merge does not undo completed rendering or configuration edits.
 
 [`git tpl show <path>`](show.md) prints the template's version of a conflicted file, which is often the quickest
 way to see what it was trying to say.

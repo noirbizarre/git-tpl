@@ -79,6 +79,7 @@ git tpl update --defaults --merge
 ```
 
 This explicitly combines rendering and ordinary merge, even when an unchanged rendering still awaits integration.
+Integration uses [native Git](merge.md#it-is-a-normal-merge), including configured merge drivers, hooks and signing.
 Before rendering it requires an existing rendered ref, no active Git operation, and a clean index and worktree.
 Configuration edits made by rendering stay unstaged after integration.
 `--merge` conflicts with `--dry-run`.

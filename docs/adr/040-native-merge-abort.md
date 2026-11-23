@@ -2,6 +2,9 @@
 
 **Status:** Accepted
 
+[ADR-052](052-native-explicit-merge.md) extends the native-Git boundary to explicit forward integration.
+The recovery guarantees below continue to apply.
+
 ## Context
 
 A hard reset discards unrelated staged and unstaged changes even when no merge is active.
