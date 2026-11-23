@@ -5,6 +5,40 @@ mod common;
 use common::{Repo, tpl};
 
 #[test]
+fn unsafe_child_paths_preserve_the_project_and_rendered_ref() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "init",
+            parent.path.to_str().unwrap(),
+            "--defaults",
+            "--answer",
+            "sources=[\"jira\"]",
+        ],
+    )
+    .success();
+    source
+        .write("template/{{ module_path }}/{{ '.git' }}/config", "unsafe")
+        .commit_all("unsafe child output");
+    let before = project.working_state();
+    let tip = project.rev_parse("refs/tpl/parent");
+    let json = tpl(&project, &["--json", "update", "--defaults"])
+        .failure()
+        .json();
+    assert_eq!(json["error"]["code"], "tpl::compose::child_failed");
+    assert_eq!(
+        json["error"]["causes"][0]["code"],
+        "tpl::render::escapes_tree"
+    );
+    assert_eq!(project.working_state(), before);
+    assert_eq!(project.rev_parse("refs/tpl/parent"), tip);
+}
+
+#[test]
 fn only_selected_children_impose_a_minimum_engine_version() {
     let source = child("source");
     let integration = child("integration");

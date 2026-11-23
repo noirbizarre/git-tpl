@@ -76,8 +76,8 @@ pub enum RenderError {
     #[diagnostic(
         code(tpl::render::escapes_tree),
         help(
-            "a rendered piece may not be `..`, and may not contain a backslash — unconditionally, \
-             at any position. A segment may render `/`-separated pieces, or `.`: each is dropped \
+            "a rendered path may not contain `..`, `.git` (any case), NUL, backslashes or drive prefixes. \
+             A segment may render `/`-separated pieces, or `.`: empty and dot pieces are dropped \
              in place, except at the file's own name, which has no \"above\" to promote its \
              content to and so still rejects both."
         )
@@ -242,6 +242,8 @@ pub fn render_tree(
 /// needs a repository to write into: `git tpl render --output` produces the
 /// same `Rendered` values and writes them to a directory instead.
 pub fn write_tree(project: &dyn GitBackend, rendered: &[Rendered]) -> Result<Oid, RenderError> {
+    // Public callers can supply files without going through the renderer.
+    validate_paths(rendered)?;
     let mut tree_entries = Vec::with_capacity(rendered.len());
     for file in rendered {
         let oid = project.write_blob(&file.content)?;
@@ -445,10 +447,23 @@ fn render_indexed(
 
 /// A tree cannot contain a file (especially a link) and a descendant of that file.
 pub fn validate_paths(files: &[Rendered]) -> Result<(), RenderError> {
-    let paths: std::collections::BTreeMap<_, _> = files
-        .iter()
-        .map(|file| (file.path.as_str(), file.source.as_str()))
-        .collect();
+    let mut paths = std::collections::BTreeMap::new();
+    for file in files {
+        if !is_output_path(&file.path) {
+            return Err(RenderError::EscapesTree {
+                path: file.source.clone(),
+                rendered: file.path.clone(),
+            });
+        }
+        // Collecting into a map would silently discard exact duplicate evidence.
+        if let Some(first) = paths.insert(file.path.as_str(), file.source.as_str()) {
+            return Err(RenderError::Collision {
+                first: first.to_string(),
+                second: file.source.clone(),
+                rendered: file.path.clone(),
+            });
+        }
+    }
     for file in files {
         for (index, _) in file.path.match_indices('/') {
             if let Some(first) = paths.get(&file.path[..index]) {
@@ -465,19 +480,26 @@ pub fn validate_paths(files: &[Rendered]) -> Result<(), RenderError> {
 
 /// Validate exact declaration keys without source-path normalization or suffix stripping.
 pub(crate) fn validate_file_path(path: &str) -> Result<(), RenderError> {
-    if path.is_empty()
-        || path.contains(['\\', '\0'])
-        || path.split('/').any(|part| {
-            part.is_empty() || matches!(part, "." | "..") || part.eq_ignore_ascii_case(".git")
-        })
-        || path.as_bytes().get(1) == Some(&b':')
-    {
+    if !is_output_path(path) {
         return Err(RenderError::FilePath {
             path: path.into(),
             reason: "expected a canonical, relative Git output path".into(),
         });
     }
     Ok(())
+}
+
+/// Shared lexical boundary for rendered trees and standalone filesystem output.
+pub(crate) fn is_output_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.contains(['\\', '\0'])
+        && path.split('/').all(|part| {
+            !part.is_empty()
+                && !matches!(part, "." | "..")
+                && !part.eq_ignore_ascii_case(".git")
+                // Reject drive-relative components even on Unix, before output reaches Windows.
+                && part.as_bytes().get(1) != Some(&b':')
+        })
 }
 
 /// Render a path, stripping `.jinja` and evaluating each segment.
@@ -570,7 +592,15 @@ fn render_path_with(
         return Ok(None);
     }
 
-    Ok(Some(segments.join("/")))
+    let rendered = segments.join("/");
+    // Validate after transparent directory pieces have been normalized.
+    if !is_output_path(&rendered) {
+        return Err(RenderError::EscapesTree {
+            path: path.to_string(),
+            rendered,
+        });
+    }
+    Ok(Some(rendered))
 }
 
 /// Whether content should be treated as binary.
@@ -642,6 +672,30 @@ mod tests {
         context.set_answer("ci", Value::Bool(true));
         context.set_computed("package_name", Value::String("demo".into()));
         context
+    }
+
+    #[test]
+    fn public_tree_writes_reject_unsafe_and_duplicate_paths() {
+        let f = Fixture::new();
+        let mut files = f.render(&[f.entry("safe", b"bytes")], &context());
+        for path in [
+            ".git/config",
+            "nested/.GIT/config",
+            "bad\0name",
+            "C:drive/file",
+        ] {
+            files[0].path = path.into();
+            assert!(matches!(
+                write_tree(&f.repo, &files),
+                Err(RenderError::EscapesTree { .. })
+            ));
+        }
+        files[0].path = "safe".into();
+        files.push(files[0].clone());
+        assert!(matches!(
+            write_tree(&f.repo, &files),
+            Err(RenderError::Collision { .. })
+        ));
     }
 
     #[test]

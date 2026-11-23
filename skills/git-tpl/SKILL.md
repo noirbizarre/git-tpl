@@ -17,6 +17,9 @@ metadata:
 
 # git-tpl
 
+Rendered output rejects `.git` components in any letter case, traversal, NUL, backslashes and drive prefixes
+with `tpl::render::escapes_tree`, before standalone output is created or cleared.
+
 A dirty-to-clean update can create a provenance-only commit even when rendered bytes are unchanged.
 `[files]` maps final output path expressions to `{ once = true }` for user-owned placeholders.
 Capture occurs when output first appears; keys use the owning template's context, relative to output rather than `root`.

@@ -9,6 +9,71 @@ mod common;
 use common::{Template, World, tpl_outside};
 
 #[test]
+fn unsafe_rendered_paths_are_rejected_before_creating_or_clearing_output() {
+    for path in [".git", ".GiT", "nested/.git", "C:drive", "nested/C:drive"] {
+        let world = World::with_template(
+            "name = 'unsafe'\n[questions.directory]\ntype = 'string'\n",
+            &[("{{ directory }}/config.jinja", "untrusted")],
+        );
+        let scratch = Scratch::new();
+        let source = world.template.source();
+        for existing in [false, true] {
+            let output = scratch
+                .dir
+                .path()
+                .join(if existing { "existing" } else { "absent" });
+            if existing {
+                std::fs::create_dir(&output).unwrap();
+                std::fs::write(output.join("sentinel"), "preserved").unwrap();
+            }
+            let result = scratch.run(&[
+                "--json",
+                "render",
+                &source,
+                "-o",
+                output.to_str().unwrap(),
+                "--force",
+                "--answer",
+                &format!("directory={path}"),
+            ]);
+            assert_eq!(result.failure().error_code(), "tpl::render::escapes_tree");
+            if existing {
+                assert_eq!(
+                    std::fs::read_to_string(output.join("sentinel")).unwrap(),
+                    "preserved"
+                );
+                assert_eq!(std::fs::read_dir(&output).unwrap().count(), 1);
+            } else {
+                assert!(!output.exists());
+            }
+        }
+    }
+}
+
+#[test]
+fn materialisation_rejects_reserved_paths_before_writing_any_file() {
+    use tpl::git::FileMode;
+    let root = tempfile::tempdir().unwrap();
+    for path in [
+        ".git/config",
+        "nested/.GiT/config",
+        "C:drive/file",
+        "bad\0name",
+    ] {
+        let error = tpl::ops::materialise(
+            root.path(),
+            [
+                ("safe", b"safe".as_slice(), FileMode::Blob),
+                (path, b"bad".as_slice(), FileMode::Blob),
+            ],
+            &|_, _, error| error.to_string(),
+        );
+        assert!(error.is_err(), "accepted {path:?}");
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+}
+
+#[test]
 fn minimum_versions_are_checked_before_evaluation_or_output_changes() {
     let world = World::with_template(
         &format!("name = 'versions'\nminimum_version = '{}'\n", tpl::VERSION),

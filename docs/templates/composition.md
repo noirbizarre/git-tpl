@@ -1,5 +1,8 @@
 # Composing module templates
 
+All final child output paths obey the same safety checks as parent output.
+In particular, `.git` components are rejected in any letter case, including in composition paths.
+
 `[[compose]]` renders sibling template repositories alongside a parent.
 It is different from `[extends]`: a child provides its own files and questions, rather than overriding the parent.
 

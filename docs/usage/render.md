@@ -81,6 +81,13 @@ Checking the *output* with the tools that understand it is the intended division
 git-tpl does not run anything over a rendering, and [will not](../adr/003-minijinja-only.md): your own CI does it
 better, and executing a template's wishes is the one thing the renderer must never do.
 
+## Safe output paths
+
+Rendered output cannot contain `.git` components in any letter case, traversal components, NUL,
+backslashes or drive prefixes.
+These checks also apply to inherited and composed output, before creating the destination
+or clearing it with `--force`.
+
 ## No local data sources
 
 A `local` data source is resolved relative to the project root, and there is no project.

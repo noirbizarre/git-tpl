@@ -479,7 +479,7 @@ pub fn materialise<'a, E>(
     let paths: std::collections::BTreeSet<_> = files.iter().map(|(path, _, _)| *path).collect();
     for (path, _, mode) in &files {
         let invalid = |reason| std::io::Error::new(std::io::ErrorKind::InvalidInput, reason);
-        if path.is_empty()
+        if !crate::render::is_output_path(path)
             || paths.len() != files.len()
             || path.contains('\\')
             || Path::new(path)

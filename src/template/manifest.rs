@@ -265,7 +265,8 @@ fn valid_compose_path(path: &str) -> bool {
         && path.len() <= 240
         && path.split('/').all(|segment| {
             !segment.is_empty()
-                && !matches!(segment, "." | ".." | ".git")
+                && !matches!(segment, "." | "..")
+                && !segment.eq_ignore_ascii_case(".git")
                 && segment
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
