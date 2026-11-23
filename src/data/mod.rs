@@ -1640,8 +1640,7 @@ mod tests {
         assert_eq!(provenance.trailer(), "template:data/licenses.toml@4f2c1a9");
     }
 
-    /// A project file's own commit is the containing commit, so recording it
-    /// would be circular.
+    /// Project files may be uncommitted; the rendered commit cannot identify their historical bytes.
     #[test]
     fn a_local_file_trailer_records_only_the_path() {
         let provenance = Provenance {
