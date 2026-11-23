@@ -31,6 +31,7 @@ pub const TOP_LEVEL_KEYS: &[&str] = &[
     "data",
     "description",
     "extends",
+    "minimum_version",
     "name",
     "note",
     "note_file",
@@ -298,6 +299,10 @@ pub struct Manifest {
     /// The template's name.
     pub name: String,
 
+    /// The oldest engine that can interpret this layer, checked before evaluation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub minimum_version: Option<semver::Version>,
+
     /// One line, shown when prompting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -390,6 +395,7 @@ pub struct Manifest {
 
     /// A parent template this one extends. See ADR-034.
     ///
+    /// `minimum_version` is checked independently for every layer.
     /// `name`, `description`, `root`, `strict`, `note` and `note_file` are
     /// never inherited — each layer's own manifest is authoritative for them.
     /// `questions`, `computed`, `data` and `remotes` merge with the parent's,
@@ -865,6 +871,7 @@ mod tests {
         // otherwise hide exactly the keys the list is meant to name.
         let manifest = Manifest {
             name: "x".into(),
+            minimum_version: Some(semver::Version::new(0, 17, 0)),
             description: Some("d".into()),
             root: "template".into(),
             strict: Some(true),
@@ -915,6 +922,51 @@ mod tests {
     fn the_rendered_root_defaults_to_template() {
         let manifest = Manifest::parse(r#"name = "x""#, MANIFEST_NAME).unwrap();
         assert_eq!(manifest.root, "template");
+    }
+
+    #[test]
+    fn an_absent_minimum_version_stays_absent_when_serialized() {
+        let manifest = Manifest::parse("name = 'x'", MANIFEST_NAME).unwrap();
+        assert!(manifest.minimum_version.is_none());
+        assert!(
+            !toml::to_string(&manifest)
+                .unwrap()
+                .contains("minimum_version")
+        );
+    }
+
+    #[test]
+    fn minimum_versions_accept_complete_versions_and_reject_requirements() {
+        for version in ["0.17.0", "1.0.0-rc.1+build.7"] {
+            let text = format!("name = 'x'\nminimum_version = '{version}'\n");
+            let manifest = Manifest::parse(&text, MANIFEST_NAME).unwrap();
+            assert_eq!(manifest.minimum_version.unwrap().to_string(), version);
+        }
+        for value in [
+            "''",
+            "'0.17'",
+            "'v0.17.0'",
+            "'01.17.0'",
+            "'>=0.17.0'",
+            "'^0.17.0'",
+            "'~0.17.0'",
+            "'*'",
+            "'0.17.0, <1.0.0'",
+            "' 0.17.0'",
+            "'invalid'",
+            "17",
+            "true",
+            "[]",
+        ] {
+            let text = format!("name = 'x'\nminimum_version = {value}\n");
+            assert!(
+                matches!(
+                    Manifest::parse(&text, MANIFEST_NAME),
+                    Err(ManifestError::Parse { .. })
+                ),
+                "{value}"
+            );
+        }
     }
 
     #[test]

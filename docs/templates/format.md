@@ -63,6 +63,7 @@ root = "src"
 ```toml
 name = "rust-library"
 description = "A small Rust library"
+minimum_version = "0.17.0"
 root = "template"
 
 [data.licenses]
@@ -83,6 +84,7 @@ line_length = 100
 |---|---|---|---|
 | `name` | string | *required* | The template's name. Used in output, and in the rendered commit subject. |
 | `description` | string | — | One line, shown when prompting. |
+| `minimum_version` | string | — | Minimum git-tpl version needed to interpret this template. |
 | `root` | string | `"template"` | The subdirectory that gets rendered. |
 | `strict` | bool | `false` | Fail on an undeclared name in a rendered file, rather than rendering it to an empty string. [`git tpl lint`](../usage/lint.md) reports the same names as warnings. |
 | `note` | string | — | A note shown after `init`. May be an expression. Mutually exclusive with `note_file`. |
@@ -103,6 +105,30 @@ anything else is kept as written.
 
 `[questions]`, `[computed]` and `[data]` are covered in [Questions](questions.md), [Computed values](computed.md)
 and [Data sources](../data/index.md).
+
+### Minimum engine version
+
+`minimum_version` is optional; omitting it adds no version check.
+Write it at the root, above any table headers:
+
+```toml
+name = "my-template"
+minimum_version = "0.17.0"
+```
+
+The value is a complete semantic version, not a dependency requirement.
+Ranges such as `">=0.17.0"`, `"^0.17.0"`, and abbreviated versions such as `"0.17"` are manifest errors.
+Prerelease and build suffixes are allowed: prereleases sort before their stable release,
+and build metadata does not affect compatibility.
+
+An equal or newer engine proceeds normally.
+An older engine stops with `tpl::resolve::minimum_version`, identifying the required and installed versions
+and suggesting how to upgrade.
+Each inheritance layer and selected composed child is checked independently before that template is interpreted.
+A leaf cannot lower an ancestor's requirement, and unselected children impose no requirement.
+Compatible parents or siblings may already have rendered in memory when a selected child is rejected;
+no rendered output or attachment changes are published on that failure.
+`status` retains its best-effort behavior and reports unavailable source information as unknown.
 
 ### `[data.<name>]`
 

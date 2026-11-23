@@ -168,6 +168,8 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
 
     let mut manifest = Manifest {
         name: leaf.name.clone(),
+        // Each layer has already passed its own check; a leaf cannot weaken its ancestors.
+        minimum_version: leaf.minimum_version.clone(),
         description: leaf.description.clone(),
         root: leaf.root.clone(),
         strict: leaf.strict,

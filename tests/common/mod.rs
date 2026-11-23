@@ -16,6 +16,12 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use assert_cmd::prelude::*;
 
+/// A definitely unsupported version that stays unsupported after release bumps.
+pub fn future_version() -> String {
+    let installed = semver::Version::parse(tpl::VERSION).unwrap();
+    format!("{}.0.0", installed.major + 1)
+}
+
 /// Detach a child process from the Git environment of the process that ran the
 /// suite.
 ///

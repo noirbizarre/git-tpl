@@ -7,6 +7,34 @@ mod common;
 use common::{World, file_url, tpl, tpl_colored};
 
 #[test]
+fn an_unsupported_engine_preserves_all_project_state_and_the_template_ref() {
+    let world = World::new();
+    world.init(&[]).success();
+    let manifest = world.template.repo.read("template.toml");
+    world
+        .template
+        .repo
+        .write(
+            "template.toml",
+            &format!(
+                "minimum_version = '{}'\n{manifest}",
+                common::future_version()
+            ),
+        )
+        .commit_all("require a newer engine");
+    let before = world.project.working_state();
+    let tip = world.project.rev_parse(&world.ref_name());
+    assert_eq!(
+        tpl(&world.project, &["--json", "update", "--defaults"])
+            .failure()
+            .error_code(),
+        "tpl::resolve::minimum_version"
+    );
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+}
+
+#[test]
 fn explicit_merge_integrates_pending_output_and_leaves_answer_edits_unstaged() {
     let world = World::new();
     world.init(&[]).success();

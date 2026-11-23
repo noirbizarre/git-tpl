@@ -6,6 +6,38 @@ mod common;
 
 use common::{Repo, Template, tpl, tpl_outside};
 
+#[test]
+fn a_leaf_cannot_weaken_its_ancestors_minimum_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let parent = base(dir.path());
+    parent
+        .repo
+        .write(
+            "template.toml",
+            &format!(
+                "minimum_version = '{}'\n{BASE_MANIFEST}",
+                common::future_version()
+            ),
+        )
+        .commit_all("require newer engine");
+    let child = child_pinned_to(&parent, &parent.repo.rev_parse("HEAD"));
+    let original = child.repo.read("template.toml");
+    for prefix in ["minimum_version = '0.0.0'\n", ""] {
+        child
+            .repo
+            .write("template.toml", &format!("{prefix}{original}"));
+        child.repo.commit_all("set leaf minimum");
+        let scratch = Scratch::new();
+        assert_eq!(
+            scratch
+                .run(&["--json", "questions", &child.source()])
+                .failure()
+                .error_code(),
+            "tpl::resolve::minimum_version"
+        );
+    }
+}
+
 /// A scratch directory that is deliberately not a repository, for the
 /// project-free `render`/`questions`/`context` commands.
 struct Scratch {

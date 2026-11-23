@@ -9,6 +9,50 @@ mod common;
 use common::{Template, World, tpl_outside};
 
 #[test]
+fn minimum_versions_are_checked_before_evaluation_or_output_changes() {
+    let world = World::with_template(
+        &format!("name = 'versions'\nminimum_version = '{}'\n", tpl::VERSION),
+        &[("out.jinja", "compatible")],
+    );
+    let scratch = Scratch::new();
+    let source = world.template.source();
+    let output = scratch.out();
+    let args = [
+        "render",
+        &source,
+        "-o",
+        output.to_str().unwrap(),
+        "--defaults",
+        "--force",
+    ];
+    scratch.run(&args).success();
+    assert_eq!(scratch.read("out"), "compatible");
+    world.template.repo.write("template.toml", &format!(
+        "name = 'versions'\nminimum_version = '{}'\n[questions.required]\ntype = 'string'\n", common::future_version()
+    )).commit_all("require newer engine before asking questions");
+    scratch
+        .run(&args)
+        .failure()
+        .says("requires git-tpl")
+        .says("installed version");
+    assert_eq!(scratch.read("out"), "compatible");
+    let absent = scratch.dir.path().join("absent");
+    let result = scratch.run(&[
+        "--json",
+        "render",
+        &source,
+        "-o",
+        absent.to_str().unwrap(),
+        "--defaults",
+    ]);
+    assert_eq!(
+        result.failure().error_code(),
+        "tpl::resolve::minimum_version"
+    );
+    assert!(!absent.exists());
+}
+
+#[test]
 fn template_data_paths_preserve_hidden_filenames_and_reject_traversal() {
     for path in [
         ".settings.toml",

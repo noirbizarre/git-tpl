@@ -192,6 +192,11 @@ do not assume it is preinstalled.
 1. **Always pass `--json`** before deciding what to do next, and branch on `error.code`, never on `error.message` —
    messages are free to change.
    The full catalogue is at <https://noirbizarre.github.io/git-tpl/reference/diagnostics/>.
+   Templates may declare an optional root-level `minimum_version = "0.17.0"` before any TOML table headers.
+   This is a complete semantic version, not a range; every ancestor and selected composed child is checked.
+   On `tpl::resolve::minimum_version`, upgrade git-tpl to the reported minimum or newer and retry.
+   For composed failures, inspect `error.causes` for this code beneath `tpl::compose::child_failed`.
+   Compatibility failures publish no output or attachment changes; `init --init` may have created an empty repository.
 2. **Never run `init`/`update`/`switch`/`pull`/`show --dirty` interactively.**
    Build the answer set first with `git tpl --json questions <template>`,
    then supply it with repeated `--answer k=v`, one or more `--answers-from file.toml`, and/or `--defaults`.

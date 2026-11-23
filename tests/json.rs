@@ -10,6 +10,27 @@ mod common;
 use common::{World, tpl};
 
 #[test]
+fn minimum_version_failures_report_both_versions_and_an_upgrade_hint() {
+    let required = common::future_version();
+    let world = World::with_template(
+        &format!("name = 'future'\nminimum_version = '{required}'\n"),
+        &[("out", "future")],
+    );
+    let json = world.init(&["--json"]).failure().json();
+    assert_eq!(json["ok"], false);
+    assert_eq!(json["error"]["code"], "tpl::resolve::minimum_version");
+    let message = json["error"]["message"].as_str().unwrap();
+    assert!(message.contains(&required));
+    assert!(message.contains(tpl::VERSION));
+    assert!(
+        json["error"]["help"]
+            .as_str()
+            .unwrap()
+            .contains("cargo install git-tpl --force")
+    );
+}
+
+#[test]
 fn composed_resolution_keeps_ancestor_trust_diagnostics_and_explicit_consent() {
     let base = common::Repo::init("base");
     base.write("template.toml", "name = 'base'")

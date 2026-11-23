@@ -43,6 +43,7 @@ Something is wrong with the template itself.
 | `tpl::graph::unknown_reference` | An expression names something the template never declares. Carries a suggestion. |
 | `tpl::graph::cycle` | Questions, computed values or data sources depend on each other in a loop. |
 | `tpl::resolve::missing_root` | The render root does not exist in the template. |
+| `tpl::resolve::minimum_version` | The template requires a newer git-tpl; upgrade to the reported minimum or newer. |
 | `tpl::resolve::dirty_needs_local` | `--dirty` was used on a remote template, which has no working tree. |
 | `tpl::resolve::cache` | Legacy template-cache preparation failure; current persistent storage uses `tpl::cache::*`. |
 | `tpl::extends::unpinned` | An `[extends].rev` resolves to a branch rather than a tag or a commit. See [ADR-034](../adr/034-template-inheritance.md). |
