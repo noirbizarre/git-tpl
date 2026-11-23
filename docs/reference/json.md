@@ -627,6 +627,9 @@ this project has.
 
 Documented with the command, at [`git tpl test`](../usage/test.md).
 The payload carries `summary` and a `cases` array, each with its `failures`.
+Under `test --write`, selected non-snapshot cases report `snapshot: "skipped"` without rendering or checking assertions.
+Their failure-free outcomes have `passed: true` and count toward `summary.total` and `summary.passed`.
+These are selected-outcome counts, not a count of assertion runs.
 Under `--write`, a case's `snapshot: "updated"` can mean only that its legacy `MANIFEST` was migrated or removed.
 Such a format-only update has an empty `snapshotChanges` array and counts toward `summary.snapshotsWritten`.
 An equal snapshot already using only `manifest.toml` reports `unchanged` and is not rewritten.
