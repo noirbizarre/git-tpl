@@ -34,7 +34,9 @@ The two modes this gives you are both first-class:
     Contributors can work on the project without the local ref.
     Before running updates in a fresh clone, a collaborator must
     [restore the original rendered ref from full merged history](fetch.md#restoring-an-absent-local-ref).
-    Re-rendering from `.config/git.tpl.toml` can reproduce its tree, but cannot recover the original ancestry.
+    Re-rendering from `.config/git.tpl.toml` cannot recover the original ancestry.
+    Reproducing the tree also requires the original inputs, including retained one-shot bytes, modes
+    and cumulative capture records from rendered history.
 
 === "Shared"
 

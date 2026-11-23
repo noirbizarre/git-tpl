@@ -26,7 +26,11 @@ without reading the file.
 **The engine.** `Tpl-Version` records which git-tpl produced the tree, so a rendering difference caused by a
 git-tpl change is attributable.
 
-Given those five, a rendering is reproducible — with one exception.
+**The retained one-shot baseline.** Captured output bytes and modes come from the previous rendered tree,
+and cumulative `Template-Once` records identify initialized paths even after their declarations disappear.
+Preserve that rendered history: current template inputs and project configuration alone cannot reconstruct it.
+
+Together, these inputs make rendering reproducible when all external inputs are also preserved or immutable.
 
 ## What is not: remote data, or a moving ref
 
