@@ -107,6 +107,12 @@ impl Prompter for Interactive {
                 let mut items = Vec::new();
                 let mut index = 0;
                 loop {
+                    // At capacity, remaining defaults must still be explicitly removable.
+                    if question.max_items.is_some_and(|max| items.len() >= max)
+                        && index >= defaults.len()
+                    {
+                        break;
+                    }
                     let previous = defaults.get(index).and_then(Value::as_str);
                     let item_title = format!("{title} #{}", index + 1);
                     let item_help = if previous.is_some() {
@@ -120,14 +126,24 @@ impl Prompter for Interactive {
                         continue;
                     }
                     if previous.is_none() && text.trim().is_empty() {
-                        break;
+                        match tpl::eval::validate_list(name, question, &Value::Array(items.clone()))
+                        {
+                            Ok(()) => break,
+                            Err(error) => {
+                                eprintln!("  {error}");
+                                continue;
+                            }
+                        }
+                    }
+                    if question.max_items.is_some_and(|max| items.len() >= max) {
+                        eprintln!(
+                            "  `{name}` allows at most {} items; '-' removes this default",
+                            question.max_items.unwrap()
+                        );
+                        continue;
                     }
                     let item = Value::String(text);
-                    match tpl::eval::validate_list(
-                        name,
-                        question,
-                        &Value::Array(vec![item.clone()]),
-                    ) {
+                    match tpl::eval::validate_list_item(name, question, &item, items.len() + 1) {
                         Ok(()) => {
                             items.push(item);
                             index += 1;
@@ -139,12 +155,15 @@ impl Prompter for Interactive {
                 Ok(Value::Array(items))
             }
 
-            QuestionKind::Integer => {
+            QuestionKind::Integer | QuestionKind::Float => {
                 let placeholder = default.map(ToString::to_string).unwrap_or_default();
                 loop {
                     let text = text_input(title, help, &placeholder)?;
-                    match Value::parse_as(&text, "an integer") {
-                        Ok(value) => return Ok(value),
+                    match Value::parse_as(&text, question.kind.type_name()) {
+                        Ok(value) => match tpl::eval::validate_value(name, question, &value) {
+                            Ok(()) => return Ok(value),
+                            Err(error) => eprintln!("  {error}"),
+                        },
                         // Re-ask rather than abort. A typo in one field must
                         // not discard every answer given so far.
                         Err(error) => eprintln!("  {error}"),
@@ -161,7 +180,7 @@ impl Prompter for Interactive {
                     // empty submission back to the placeholder, and a validator
                     // runs on the typed text — so pressing Enter on a
                     // pre-filled prompt would submit an unchecked default.
-                    match tpl::eval::validate_pattern(name, question, &value) {
+                    match tpl::eval::validate_value(name, question, &value) {
                         Ok(()) => return Ok(value),
                         // Re-ask rather than abort, as the integer branch does.
                         Err(error) => eprintln!("  {error}"),

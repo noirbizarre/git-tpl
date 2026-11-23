@@ -24,6 +24,48 @@ pub(crate) use demand::Session;
 /// Errors from evaluating a template.
 #[derive(Debug, Error, Diagnostic)]
 pub enum EvalError {
+    /// A numeric answer is non-finite or outside an inclusive bound.
+    #[error("invalid numeric answer for `{question}`: {reason}")]
+    #[diagnostic(
+        code(tpl::eval::numeric_bound),
+        help(
+            "supply a finite number within the declared bounds; edit `{question}` in `.config/git.tpl.toml` if recorded"
+        )
+    )]
+    NumericBound {
+        /// The question being answered.
+        question: String,
+        /// The value and violated constraint.
+        reason: String,
+    },
+    /// A string's Unicode scalar count is outside an inclusive bound.
+    #[error("invalid string length for `{question}`: {reason}")]
+    #[diagnostic(
+        code(tpl::eval::string_length),
+        help(
+            "adjust the answer's length; edit `{question}` in `.config/git.tpl.toml` if recorded"
+        )
+    )]
+    StringLength {
+        /// The question being answered.
+        question: String,
+        /// The length and violated constraint.
+        reason: String,
+    },
+    /// A free-form list contains too few or too many entries.
+    #[error("invalid number of items for `{question}`: {reason}")]
+    #[diagnostic(
+        code(tpl::eval::item_count),
+        help(
+            "add or remove list entries; edit `{question}` in `.config/git.tpl.toml` if recorded"
+        )
+    )]
+    ItemCount {
+        /// The question being answered.
+        question: String,
+        /// The count and violated constraint.
+        reason: String,
+    },
     /// A selection count is outside the question's inclusive bounds.
     #[error("invalid number of choices for `{question}`: {reason}")]
     #[diagnostic(
@@ -301,8 +343,7 @@ pub(crate) fn resolve_session_with_candidates<'a, 'repo>(
                                 resolve_default(&node.key, question, context, partials)
                             })?
                         {
-                            validate_type(&node.key, question, &default)?;
-                            validate_choice_count(&node.key, question, &default)?;
+                            validate_value(&node.key, question, &default)?;
                             session.context.set_gated_default(&node.key, default);
                         }
                         continue;
@@ -394,11 +435,85 @@ fn validate_answer(
     answer: &Value,
     choices: Option<&[Choice]>,
 ) -> Result<(), EvalError> {
-    validate_type(name, question, answer)?;
+    validate_value(name, question, answer)?;
     validate_choice(name, question, answer, choices)?;
+    Ok(())
+}
+
+/// Validate without loading a choice catalogue, including for skipped defaults and prompt retries.
+pub fn validate_value(name: &str, question: &Question, answer: &Value) -> Result<(), EvalError> {
+    use crate::template::NumericBound;
+    validate_type(name, question, answer)?;
+    if matches!(question.kind, QuestionKind::Integer | QuestionKind::Float) {
+        let number = match answer {
+            Value::Integer(value) => *value as f64,
+            Value::Float(value) => *value,
+            _ => unreachable!("validated numeric answer type"),
+        };
+        let mut reason = (!number.is_finite()).then(|| format!("must be finite, got {answer}"));
+        for (field, bound) in [("min", question.min), ("max", question.max)] {
+            if let Some(bound) = bound {
+                // Keep integer comparisons exact; widening is exclusive to float questions.
+                let ordering = match (question.kind, answer, bound) {
+                    (
+                        QuestionKind::Integer,
+                        Value::Integer(value),
+                        NumericBound::Integer(bound),
+                    ) => value.partial_cmp(&bound),
+                    _ => number.partial_cmp(&bound.as_f64()),
+                };
+                let outside = if field == "min" {
+                    ordering == Some(std::cmp::Ordering::Less)
+                } else {
+                    ordering == Some(std::cmp::Ordering::Greater)
+                };
+                if outside && reason.is_none() {
+                    let bound = match bound {
+                        NumericBound::Integer(value) => value.to_string(),
+                        NumericBound::Float(value) => value.to_string(),
+                    };
+                    reason = Some(format!("`{field}` is {bound} (inclusive), got {answer}"));
+                }
+            }
+        }
+        if let Some(reason) = reason {
+            return Err(EvalError::NumericBound {
+                question: name.into(),
+                reason,
+            });
+        }
+    }
+    if question.kind == QuestionKind::String
+        && let Value::String(text) = answer
+        && let Some(reason) = count_reason(
+            text.chars().count(),
+            question.min_length,
+            question.max_length,
+            "characters",
+        )
+    {
+        return Err(EvalError::StringLength {
+            question: name.into(),
+            reason,
+        });
+    }
     validate_choice_count(name, question, answer)?;
     validate_pattern(name, question, answer)?;
     validate_list(name, question, answer)
+}
+
+fn count_reason(
+    count: usize,
+    min: Option<usize>,
+    max: Option<usize>,
+    unit: &str,
+) -> Option<String> {
+    if let Some(min) = min.filter(|min| count < *min) {
+        Some(format!("at least {min} {unit} required, got {count}"))
+    } else {
+        max.filter(|max| count > *max)
+            .map(|max| format!("at most {max} {unit} allowed, got {count}"))
+    }
 }
 
 /// Check selection bounds independently of the answer's source or catalogue.
@@ -660,6 +775,13 @@ pub fn validate_list(name: &str, question: &Question, answer: &Value) -> Result<
             found: answer.type_name().into(),
         });
     };
+    if let Some(reason) = count_reason(items.len(), question.min_items, question.max_items, "items")
+    {
+        return Err(EvalError::ItemCount {
+            question: name.into(),
+            reason,
+        });
+    }
     // The manifest already compiled it at load time; compiling once per answer avoids multiplying the cost by the
     // number of modules while checking the exact same rule for every entry.
     let regex = question
@@ -667,25 +789,53 @@ pub fn validate_list(name: &str, question: &Question, answer: &Value) -> Result<
         .as_deref()
         .and_then(|pattern| regex_lite::Regex::new(pattern).ok());
     for (index, item) in items.iter().enumerate() {
-        let reason = match item {
-            Value::String(text) if text.trim().is_empty() => Some("the item is empty".to_string()),
-            Value::String(text)
-                if regex
-                    .as_ref()
-                    .is_some_and(|pattern| !pattern.is_match(text)) =>
-            {
-                question.item_pattern_message()
-            }
-            Value::String(_) => None,
-            _ => Some(format!("expected a string, got {}", item.type_name())),
-        };
-        if let Some(reason) = reason {
-            return Err(EvalError::InvalidList {
-                question: name.to_string(),
-                position: index + 1,
-                reason,
-            });
-        }
+        validate_list_entry(name, question, item, index + 1, regex.as_ref())?;
+    }
+    Ok(())
+}
+
+/// Check one prompt entry without applying whole-list cardinality to a singleton.
+pub fn validate_list_item(
+    name: &str,
+    question: &Question,
+    item: &Value,
+    position: usize,
+) -> Result<(), EvalError> {
+    let regex = question
+        .item_pattern
+        .as_deref()
+        .and_then(|pattern| regex_lite::Regex::new(pattern).ok());
+    validate_list_entry(name, question, item, position, regex.as_ref())
+}
+
+fn validate_list_entry(
+    name: &str,
+    question: &Question,
+    item: &Value,
+    position: usize,
+    regex: Option<&regex_lite::Regex>,
+) -> Result<(), EvalError> {
+    let reason = match item {
+        Value::String(text) if text.trim().is_empty() => Some("the item is empty".to_string()),
+        Value::String(text) => count_reason(
+            text.chars().count(),
+            question.item_min_length,
+            question.item_max_length,
+            "characters",
+        )
+        .or_else(|| {
+            regex
+                .filter(|pattern| !pattern.is_match(text))
+                .and_then(|_| question.item_pattern_message())
+        }),
+        _ => Some(format!("expected a string, got {}", item.type_name())),
+    };
+    if let Some(reason) = reason {
+        return Err(EvalError::InvalidList {
+            question: name.to_string(),
+            position,
+            reason,
+        });
     }
     Ok(())
 }
@@ -1142,6 +1292,100 @@ mod tests {
             context.set_answer(*key, value.clone());
         }
         context
+    }
+
+    #[rstest]
+    #[case("integer", "min = 1\nmax = 2", "1", true)]
+    #[case("integer", "min = 1\nmax = 2", "2", true)]
+    #[case("integer", "min = 1\nmax = 2", "0", false)]
+    #[case("integer", "min = 1\nmax = 2", "3", false)]
+    #[case("integer", "min = 9007199254740993", "9007199254740992", false)]
+    #[case("integer", "max = 9007199254740992", "9007199254740993", false)]
+    #[case(
+        "integer",
+        "min = -9223372036854775808\nmax = 9223372036854775807",
+        "9223372036854775807",
+        true
+    )]
+    #[case("float", "min = 0.5\nmax = 2.5", "0.5", true)]
+    #[case("float", "min = 0.5\nmax = 2.5", "2.5", true)]
+    #[case("float", "min = 0.5\nmax = 2.5", "0.4", false)]
+    #[case("float", "min = 0.5\nmax = 2.5", "2.6", false)]
+    #[case("float", "min = 1\nmax = 2", "2", true)]
+    #[case("string", "min_length = 1\nmax_length = 2", "'é'", true)]
+    #[case("string", "min_length = 1\nmax_length = 2", "'é'", true)]
+    #[case("string", "max_length = 1", "'é'", false)]
+    #[case("string", "min_length = 1", "''", false)]
+    #[case("string", "max_length = 1", "''", true)]
+    #[case("string", "min_length = 2\npattern = '^[a-z]+$'", "'aa'", true)]
+    #[case("string", "min_length = 2\npattern = '^[a-z]+$'", "'a'", false)]
+    #[case("string", "min_length = 2\npattern = '^[a-z]+$'", "'AA'", false)]
+    #[case("list", "min_items = 1\nmax_items = 2", "['ab']", true)]
+    #[case("list", "min_items = 1\nmax_items = 2", "['ab', 'ab']", true)]
+    #[case("list", "min_items = 1", "[]", false)]
+    #[case("list", "max_items = 1", "['ab', 'cd']", false)]
+    #[case("list", "max_items = 0", "[]", true)]
+    #[case(
+        "list",
+        "item_min_length = 2\nitem_max_length = 2",
+        "['éé', 'ab']",
+        true
+    )]
+    #[case("list", "item_min_length = 2", "['ab', 'é']", false)]
+    #[case("list", "item_max_length = 1", "['a', 'é']", false)]
+    #[case("list", "item_min_length = 0", "['']", false)]
+    #[case(
+        "list",
+        "item_min_length = 2\nitem_pattern = '^[a-z]+$'",
+        "['ab', 'CD']",
+        false
+    )]
+    fn primitive_constraints_apply_to_defaults_expressions_and_typed_answers(
+        #[case] kind: &str,
+        #[case] bounds: &str,
+        #[case] answer: &str,
+        #[case] accepted: bool,
+    ) {
+        for default in [answer.to_string(), format!("\"{{{{ {answer} }}}}\"")] {
+            let manifest = format!(
+                "name = 'bounds'\n[questions.input]\ntype = '{kind}'\n{bounds}\ndefault = {default}\n"
+            );
+            let result = resolve_with(&manifest, &[]);
+            assert_eq!(result.is_ok(), accepted, "{manifest}: {result:?}");
+            let mut prompter = Recording { seen: Vec::new() };
+            let result = resolve_seeded(&manifest, &[], &[], &mut prompter);
+            assert_eq!(result.is_ok(), accepted, "custom prompter: {result:?}");
+            // A supplied source must reach the same checks as a selected default.
+            let value: Value = toml::from_str::<toml::Table>(&format!("v = {answer}"))
+                .unwrap()
+                .remove("v")
+                .unwrap()
+                .into();
+            let result = resolve_with(&manifest, &[("input", value)]);
+            assert_eq!(result.is_ok(), accepted, "{manifest}: {result:?}");
+            let skipped =
+                format!("{manifest}when = '{{{{ false }}}}'\ndefault_when_skipped = true\n");
+            assert_eq!(resolve_with(&skipped, &[]).is_ok(), accepted, "{skipped}");
+        }
+    }
+
+    #[test]
+    fn float_questions_reject_every_nonfinite_value_without_bounds() {
+        for number in ["nan", "inf", "-inf"] {
+            let manifest =
+                format!("name = 'finite'\n[questions.input]\ntype = 'float'\ndefault = {number}\n");
+            assert!(matches!(
+                resolve_with(&manifest, &[]),
+                Err(EvalError::NumericBound { .. })
+            ));
+            let value = Value::Float(number.parse().unwrap());
+            assert!(matches!(
+                resolve_with(&manifest, &[("input", value)]),
+                Err(EvalError::NumericBound { .. })
+            ));
+            // Explicit input must continue to bypass even an invalid unused default.
+            assert!(resolve_with(&manifest, &[("input", Value::Integer(2))]).is_ok());
+        }
     }
 
     #[rstest]

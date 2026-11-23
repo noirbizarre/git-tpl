@@ -180,6 +180,11 @@ An `--allow`ed finding appears nowhere and is counted nowhere.
 
 Each question includes `itemPattern` and `itemMessage` for enforced list-item validation, or `null` when unset.
 Multiselect bounds appear as `minChoices` and `maxChoices`, each an inclusive integer or `null` when unset.
+Numeric bounds appear as `min` and `max`, preserving integer or floating-point declarations.
+String lengths use `minLength`/`maxLength`; free-form lists use `minItems`/`maxItems`
+and per-entry `itemMinLength`/`itemMaxLength`.
+Each is `null` when unset; length and count bounds are inclusive nonnegative integers.
+The question `type` also includes `float`, accepting finite integer and floating-point answers.
 `itemMessage` contains the effective validation message, including the default when no custom message is declared.
 
 ```json

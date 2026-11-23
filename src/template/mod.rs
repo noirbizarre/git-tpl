@@ -10,5 +10,5 @@ pub use manifest::{
     ComposeDecl, DEFAULT_ROOT, DataSourceDecl, ExtendsDecl, MANIFEST_NAME, Manifest, ManifestError,
     TOP_LEVEL_KEYS, computed_expression,
 };
-pub use question::{GIT_PREFIX, Question, QuestionKind, is_expression};
+pub use question::{GIT_PREFIX, NumericBound, Question, QuestionKind, is_expression};
 pub use value::{Value, ValueError};

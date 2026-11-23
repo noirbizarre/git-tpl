@@ -511,6 +511,14 @@ A merge that left conflicts unresolved stops the sync: backporting from a half-m
 Question schemas expose list-item constraints as `itemPattern` and effective `itemMessage` (or `null` when unset).
 Multiselect schemas expose inclusive `minChoices`/`maxChoices` bounds (or `null` when unset).
 Templates declare these as optional `min_choices`/`max_choices` on `multi_choice` questions.
+Numeric schemas expose inclusive `min`/`max`; `float` accepts finite integers or floating-point numbers.
+Integer questions and their bounds remain integer-typed.
+Strings expose `minLength`/`maxLength`, and lists expose `minItems`/`maxItems`
+plus `itemMinLength`/`itemMaxLength`; absent bounds are `null`.
+The manifest uses snake_case for these keys, and lengths count Unicode scalar values.
+Bounds apply to all answer sources and selected defaults, alongside existing pattern checks.
+Failures use `tpl::eval::numeric_bound`, `tpl::eval::string_length`, `tpl::eval::item_count`,
+or `tpl::eval::invalid_list` for invalid list entries.
 `tpl::eval::choice_count` rejects invalid counts from defaults, supplied or recorded answers;
 correct the answer or the template's bounds. Empty dynamic choice lists still skip the question.
 
