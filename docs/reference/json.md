@@ -1,5 +1,9 @@
 # JSON output
 
+For `init`, `template` is the recorded source, including destination-project-relative local paths.
+An init dry run predicts that spelling when a project root is known;
+otherwise it reports the expanded invocation source.
+
 Template test context assertions report `contextMissing`, `contextUnexpected`, `contextMismatch` and `contextExpression`.
 Path failures include `path` and `actualPresent`; missing values omit `actual` rather than encoding absence as null.
 Equality failures include typed `expected` and, when present, typed `actual`, preserving null recursively.

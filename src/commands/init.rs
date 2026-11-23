@@ -122,9 +122,9 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     report_ignored_paths(&ctx.out, &outcome.ignored);
 
     ctx.out.blank();
-    // The expanded URL, not what was typed: this is the line a user copies
-    // when reporting a problem, and it is what is now recorded in the project.
-    ctx.out.say(field(&ctx.out.theme, "Template", &template));
+    // Local inputs are rebased by init; reporting the invocation spelling would disagree with the attachment.
+    ctx.out
+        .say(field(&ctx.out.theme, "Template", &outcome.source));
     ctx.out.say(field(
         &ctx.out.theme,
         "Revision",
@@ -245,10 +245,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             crate::report::success(serde_json::json!({
                 "id": outcome.id.as_str(),
                 "ref": outcome.id.ref_name(),
-                // The expanded URL, for the same reason the prose prints it:
-                // it is what was recorded, and a `mine:` shortcut means
-                // nothing on anybody else's machine.
-                "template": template,
+                "template": outcome.source,
                 "revision": crate::report::revision(
                     Some(&outcome.reference),
                     Some(outcome.revision),
@@ -345,6 +342,11 @@ fn dry_run(
         &mut preview_trust,
     )?;
     let graph = tpl::graph::Graph::build(&template.manifest)?;
+    let mut attachment = tpl::config::Config::new(source, args.r#ref.clone());
+    if let Some((_, root)) = project {
+        // A known project root lets the preview predict the same persisted spelling as init.
+        attachment.template.rebase_local(root)?;
+    }
 
     // The same rule `ops::render` applies, and for the same reason — a dry run
     // exists to find exactly this sort of mistake before anything is written.
@@ -361,7 +363,7 @@ fn dry_run(
     report_ignored(out, &ignored);
 
     out.blank();
-    out.say(field(&out.theme, "Template", source));
+    out.say(field(&out.theme, "Template", &attachment.template.source));
     let revision_description = ops::describe_revision(&template.reference, template.revision);
     out.say(field(&out.theme, "Revision", &revision_description));
     out.blank();
@@ -451,7 +453,7 @@ fn dry_run(
 
     Ok(serde_json::json!({
         "dryRun": true,
-        "template": source,
+        "template": attachment.template.source,
         "revision": crate::report::revision(
             Some(&template.reference),
             Some(template.revision),

@@ -281,5 +281,10 @@ genuine merge base — the same experience as a project generated from the templ
 
 ## Machine-readable output
 
+The displayed Template and JSON `template` values use the source spelling recorded in the destination project.
+Local CLI paths are rebased relative to that project.
+A dry run predicts this spelling when it discovers a project root;
+without an existing repository it reports the expanded invocation source.
+
 `git tpl --json init` emits its outcome on stdout as a single JSON object, with the prose on stderr.
 The payload is described in [JSON output](../reference/json.md#init).

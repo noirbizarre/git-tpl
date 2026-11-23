@@ -1557,6 +1557,8 @@ pub struct DeclaredRemote {
 
 /// The result of an `init`.
 pub struct InitOutcome {
+    /// Source spelling persisted relative to the destination project.
+    pub source: String,
     /// The template id, and so the ref name.
     pub id: TemplateId,
     /// The commit created on the rendered ref.
@@ -1842,6 +1844,7 @@ fn init_using<T: std::borrow::Borrow<Resolved>>(
     let remotes = add_remotes(project, &rendered)?;
 
     Ok(InitOutcome {
+        source: config.template.source,
         id,
         commit,
         changes,

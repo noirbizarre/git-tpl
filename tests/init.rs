@@ -234,6 +234,69 @@ fn attachment_refuses_active_git_operations_even_with_a_clean_index() {
 use common::{World, global_identity, tpl, tpl_outside};
 
 #[test]
+fn init_reports_the_recorded_source_for_relative_and_absolute_destination_inputs() {
+    for absolute in [false, true] {
+        let world = World::new();
+        let source = if absolute {
+            world.template.source()
+        } else {
+            "template".to_string()
+        };
+        let before = world.project.working_state();
+        let preview = tpl_outside(
+            world.dir.path(),
+            world.project.config_home(),
+            &[
+                "--json",
+                "init",
+                &source,
+                "project",
+                "--defaults",
+                "--dry-run",
+            ],
+        )
+        .success();
+        assert_eq!(preview.json()["template"], "../template");
+        assert_eq!(world.project.working_state(), before);
+        let output = tpl_outside(
+            world.dir.path(),
+            world.project.config_home(),
+            &["--json", "init", &source, "project", "--defaults"],
+        )
+        .success();
+        let config = tpl::config::Config::load(&world.project.path).unwrap();
+        assert_eq!(output.json()["template"], config.template.source);
+        let human = tpl_outside(
+            world.dir.path(),
+            world.project.config_home(),
+            &["init", &source, "project", "--defaults", "--force"],
+        )
+        .success();
+        let displayed = human
+            .stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("Template:"))
+            .unwrap()
+            .trim();
+        assert_eq!(displayed, config.template.source);
+        let reference = world
+            .project
+            .git(&["for-each-ref", "--format=%(refname)", "refs/tpl/"]);
+        let recorded = tpl::provenance::Provenance::parse(&world.project.git(&[
+            "show",
+            "-s",
+            "--format=%B",
+            reference.trim(),
+        ]))
+        .unwrap();
+        assert_eq!(
+            recorded.source.as_deref(),
+            Some(config.template.source.as_str())
+        );
+    }
+}
+
+#[test]
 fn rebasing_a_hostname_like_local_path_records_the_original_id_explicitly() {
     let world = World::new();
     let nested = world.dir.path().join("sources.local");
