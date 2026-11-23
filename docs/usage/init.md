@@ -201,14 +201,16 @@ Uncommitted changes are refused with the same message Git would give you.
 
 ## An empty repository
 
-`init` in a repository with no commits works: the orphan template commit becomes the first commit on the branch
-directly, with no merge — there is nothing to merge it with.
+`init` in a repository with no commits works: integration fast-forwards the branch to the orphan template commit.
+It then creates a separate attachment commit containing `.config/git.tpl.toml`:
 
 ```
-main:  G0
+refs/tpl/<id>:  G0
+main:          G0 → attachment configuration
 ```
 
-Which is the cleanest possible history for a project generated from a template.
+The rendered ref stays at `G0`, whose tree contains only rendered output.
+The completed initialization leaves `HEAD` at the attachment commit.
 
 ## An existing project
 
