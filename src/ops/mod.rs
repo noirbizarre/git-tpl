@@ -9,6 +9,7 @@ pub mod compose;
 pub mod extends;
 pub mod hunks;
 pub mod log;
+mod once;
 pub mod resolve;
 mod switch;
 pub mod testing;
@@ -53,6 +54,32 @@ pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Ve
 /// Errors from any operation.
 #[derive(Debug, Error, Diagnostic)]
 pub enum OpError {
+    /// Ref metadata must never silently lose a permanently initialized entry.
+    #[error("initialized one-shot file `{path}` is missing from rendered commit {revision}")]
+    #[diagnostic(
+        code(tpl::ops::once_missing),
+        help(
+            "restore the rendered ref from its intact history or fetch a valid copy before updating"
+        )
+    )]
+    OnceMissing {
+        /// The missing output path.
+        path: String,
+        /// The rendered commit carrying its capture record.
+        revision: Oid,
+    },
+    /// A migration cannot rename user-owned baseline output.
+    #[error("migration move touches initialized one-shot file `{path}`")]
+    #[diagnostic(
+        code(tpl::ops::once_move),
+        help(
+            "remove the move involving this initialized path; one-shot files keep their original output paths"
+        )
+    )]
+    OnceMove {
+        /// The protected path.
+        path: String,
+    },
     /// A raw payload could not be delivered to the caller.
     #[error("could not write to stdout")]
     #[diagnostic(
@@ -841,6 +868,7 @@ pub fn render_files_with_composed(
         trust,
         composed,
         Preparation::Files,
+        &once::for_project(project)?,
     )
 }
 
@@ -857,12 +885,13 @@ fn render_files_from_location(
     mut trust: Trust<'_>,
     composed: Option<&[ComposedRevision]>,
     preparation: Preparation<'_>,
+    baseline: &once::Baseline,
 ) -> Result<RenderedFiles, OpError> {
     // A reborrow, not a move: `resolve` confirms an `[extends]` ancestor's
     // source (if any), and `render_resolved` below still needs the same
     // `trust` afterwards, for `[data]`. The two are independent confirmations
     // over the same invocation's `Trust`, not one shared decision.
-    let template = resolve::resolve(
+    let template = resolve::resolve_with_retained(
         Request {
             source: location,
             reference: target.reference,
@@ -872,6 +901,7 @@ fn render_files_from_location(
         user,
         access,
         &mut trust,
+        !baseline.is_empty(),
     )?;
 
     let rendered = render_resolved_preparing(
@@ -884,6 +914,7 @@ fn render_files_from_location(
         trust,
         composed,
         preparation,
+        baseline,
         |_| Ok(()),
     )?;
 
@@ -942,6 +973,7 @@ pub fn render_resolved_with_composed(
             Some(_) => Preparation::Init,
             None => Preparation::Files,
         },
+        &once::for_project(project)?,
         |_| Ok(()),
     )
 }
@@ -979,6 +1011,7 @@ pub fn render_context(
         trust,
         None,
         Preparation::Files,
+        &once::Baseline::new(),
         |session| {
             if let Some(expression) = expression {
                 session.run(|context| {
@@ -1019,6 +1052,7 @@ fn render_resolved_preparing(
     mut trust: Trust<'_>,
     recorded_composed: Option<&[ComposedRevision]>,
     preparation: Preparation<'_>,
+    baseline: &once::Baseline,
     prepare: impl FnOnce(&mut crate::eval::Session<'_, '_>) -> Result<(), OpError>,
 ) -> Result<RenderedOnce, OpError> {
     // Built and validated before anything is prompted: a cycle or a typo
@@ -1148,15 +1182,33 @@ fn render_resolved_preparing(
             crate::eval::render_string_with(text, context, location, &partials, undefined)
         })
     };
+    let mut declarations = BTreeMap::new();
+    for (key, policy) in &template.manifest.files {
+        let path = evaluate_body(key, &format!("files.{key}"))?;
+        // The same conditional expression can suppress both a source and its policy.
+        if path.is_empty() && !key.is_empty() {
+            continue;
+        }
+        crate::render::validate_file_path(&path)?;
+        if let Some((first, _)) = declarations.insert(path.clone(), (key.clone(), policy.once)) {
+            return Err(RenderError::Collision {
+                first,
+                second: key.clone(),
+                rendered: path,
+            }
+            .into());
+        }
+    }
     let mut files = if template.has_ancestors() {
         let entries = template.entries()?;
         let repos = template.repos();
-        crate::render::render_layered_evaluating(&repos, &entries, &mut evaluate_body)?
+        crate::render::render_layered_evaluating(&repos, &entries, baseline, &mut evaluate_body)?
     } else {
         let entries = template.own_entries()?;
         crate::render::render_entries_evaluating(
             template.repo.as_ref(),
             &entries,
+            baseline,
             &mut evaluate_body,
         )?
     };
@@ -1203,6 +1255,7 @@ fn render_resolved_preparing(
     }
     let context = session.finish();
 
+    let mut captured = std::collections::BTreeSet::new();
     let composed = if !template.manifest.compose.is_empty() {
         compose::render(
             &template.manifest.compose,
@@ -1213,11 +1266,30 @@ fn render_resolved_preparing(
             &mut trust,
             &mut files,
             recorded_composed,
+            baseline,
+            &mut captured,
         )?
     } else {
         Vec::new()
     };
 
+    for file in &files {
+        if declarations.get(&file.path).is_some_and(|(_, once)| *once) {
+            captured.insert(file.path.clone());
+        }
+    }
+    if project.is_some() {
+        // Only the outer project restores absent paths: doing this in each child would duplicate siblings.
+        captured.extend(baseline.keys().cloned());
+        let present: std::collections::BTreeSet<_> =
+            files.iter().map(|file| file.path.clone()).collect();
+        for (path, initialized) in baseline {
+            if !present.contains(path) {
+                files.push(initialized.clone());
+            }
+        }
+        files.sort_by(|left, right| left.path.cmp(&right.path));
+    }
     crate::render::validate_paths(&files)?;
     let provenance = Provenance {
         source: source.to_string(),
@@ -1228,6 +1300,7 @@ fn render_resolved_preparing(
         data: loader.provenance().to_vec(),
         extends: template.extends_provenance(),
         composed,
+        once: captured,
         version: crate::VERSION.to_string(),
         template_name: template.manifest.name.clone(),
     };
@@ -1257,6 +1330,8 @@ pub fn render(
     answering: Answering<'_>,
     trust: Trust<'_>,
 ) -> Result<Render, OpError> {
+    let id = TemplateId::resolve(&config.template.source, config.template.id.as_deref())?;
+    let tip = project.resolve_ref(&id.ref_name())?;
     render_preparing(
         project,
         project_root,
@@ -1268,6 +1343,7 @@ pub fn render(
         answering,
         trust,
         Preparation::Update,
+        tip,
     )
 }
 
@@ -1283,7 +1359,9 @@ fn render_preparing(
     answering: Answering<'_>,
     trust: Trust<'_>,
     preparation: Preparation<'_>,
+    tip: Option<Oid>,
 ) -> Result<Render, OpError> {
+    let baseline = once::load(project, tip)?;
     let location = crate::config::source_location(&config.template.source, project_root);
     let rendered = render_files_from_location(
         Target::from_config(config, dirty),
@@ -1296,6 +1374,7 @@ fn render_preparing(
         trust,
         None,
         preparation,
+        &baseline,
     )?;
 
     rendered_tree(project, rendered)
@@ -1531,7 +1610,7 @@ pub fn init(
         merge_after,
         force,
         strict_answers,
-        |config, supplied| {
+        |config, supplied, tip| {
             // Storage rebasing must not change init's consent/default lookup identity.
             let location = crate::config::source_location(&config.template.source, project_root);
             let files = render_files_from_location(
@@ -1548,6 +1627,7 @@ pub fn init(
                 trust,
                 None,
                 Preparation::Init,
+                &once::load(project, tip)?,
             )?;
             rendered_tree(project, files)
         },
@@ -1567,7 +1647,11 @@ fn init_using<T: std::borrow::Borrow<Resolved>>(
     merge_after: bool,
     force: bool,
     strict_answers: bool,
-    render: impl FnOnce(&Config, crate::answers::SuppliedAnswers) -> Result<Render<T>, OpError>,
+    render: impl FnOnce(
+        &Config,
+        crate::answers::SuppliedAnswers,
+        Option<Oid>,
+    ) -> Result<Render<T>, OpError>,
 ) -> Result<InitOutcome, OpError> {
     // Serialize cooperating initializers/updaters through configuration persistence,
     // including the identical-tree path that has no new commit to publish.
@@ -1603,7 +1687,7 @@ fn init_using<T: std::borrow::Borrow<Resolved>>(
     // being collected, and must not silently become this invocation's parent.
     let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
 
-    let mut rendered = render(&config, supplied)?;
+    let mut rendered = render(&config, supplied, parents.first().copied())?;
     let template = rendered.template.borrow();
     rendered.provenance.source = config.template.source.clone();
 
@@ -2153,8 +2237,8 @@ pub fn update(
         reference,
         overrides,
         strict_answers,
-        |config, supplied| {
-            render(
+        |config, supplied, tip| {
+            render_preparing(
                 project,
                 project_root,
                 config,
@@ -2164,6 +2248,8 @@ pub fn update(
                 access,
                 answering,
                 trust,
+                Preparation::Update,
+                tip,
             )
         },
     )
@@ -2177,7 +2263,11 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
     reference: Option<&str>,
     overrides: crate::answers::SuppliedAnswers,
     strict_answers: bool,
-    render: impl FnOnce(&Config, crate::answers::SuppliedAnswers) -> Result<Render<T>, OpError>,
+    render: impl FnOnce(
+        &Config,
+        crate::answers::SuppliedAnswers,
+        Option<Oid>,
+    ) -> Result<Render<T>, OpError>,
 ) -> Result<UpdateOutcome, OpError> {
     let _operation = project.lock_template_operation()?;
     let mut config = Config::load(project_root)?;
@@ -2196,7 +2286,7 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
     let ref_name = id.ref_name();
     let tip = project.resolve_ref(&ref_name)?;
 
-    let rendered = render(&config, supplied)?;
+    let rendered = render(&config, supplied, tip)?;
     let template = rendered.template.borrow();
 
     enforce_strict_answers(
@@ -2227,6 +2317,7 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
     // migrations are skipped rather than firing every migration the template
     // has ever had.
     let migrations = discover_update_migrations(&rendered, recorded_previous.as_ref())?;
+    validate_once_moves(recorded_previous.as_ref(), &migrations)?;
 
     // Every newly discovered migration's moves, in file order, applied
     // against the ref's current tip — never against `rendered.tree`, which
@@ -2241,9 +2332,13 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
     // every later update — the one piece of state this design has no other
     // way to avoid needing.
     let identical = previous.as_ref().is_some_and(|p| p.tree == rendered.tree);
-    let child_changed = recorded_previous
+    let state_changed = recorded_previous
         .as_ref()
-        .is_some_and(|previous| previous.composed != rendered.provenance.composed);
+        // Capturing unchanged bytes still needs a commit or declaration removal would lose ownership.
+        .map_or(!rendered.provenance.once.is_empty(), |previous| {
+            previous.composed != rendered.provenance.composed
+                || previous.once != rendered.provenance.once
+        });
     // Committing an exact dirty snapshot changes provenance, not output bytes.
     // Record the clean boundary so source-history inspection can recover.
     let became_clean = recorded_previous
@@ -2264,7 +2359,7 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
         }
         .into());
     }
-    if migrations.is_empty() && identical && !child_changed && !became_clean {
+    if migrations.is_empty() && identical && !state_changed && !became_clean {
         let answers_changed = config.answers != *rendered.context.answers();
         if composed_changed || answers_changed {
             if let Some(tip) = tip {
@@ -2540,6 +2635,28 @@ pub fn status(
     })
 }
 
+/// Reject migration moves that would rewrite permanent initialized-path identity.
+pub fn validate_once_moves(
+    previous: Option<&Recorded>,
+    migrations: &[AppliedMigration],
+) -> Result<(), OpError> {
+    if let Some(previous) = previous {
+        for movement in migrations.iter().flat_map(|migration| &migration.moves) {
+            for path in &previous.once {
+                // Directory moves can touch initialized descendants, not only exact file names.
+                if [&movement.from, &movement.to].iter().any(|endpoint| {
+                    *endpoint == path
+                        || path.starts_with(&format!("{endpoint}/"))
+                        || endpoint.starts_with(&format!("{path}/"))
+                }) {
+                    return Err(OpError::OnceMove { path: path.clone() });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Validate moves against the old rendering, also for previews that publish nothing.
 pub fn plan_migration_moves(
     project: &dyn GitBackend,
@@ -2626,6 +2743,8 @@ pub fn render_preview(
     let current_keys: std::collections::BTreeSet<_> = overrides.keys().cloned().collect();
     let supplied = merge_answers(config.answers.clone(), overrides);
 
+    let (_, ref_name) = identify(project_root)?;
+    let tip = project.resolve_ref(&ref_name)?;
     let rendered = render_preparing(
         project,
         project_root,
@@ -2637,6 +2756,7 @@ pub fn render_preview(
         answering,
         trust,
         Preparation::Files,
+        tip,
     )?;
 
     enforce_strict_answers(
@@ -2653,8 +2773,7 @@ pub fn render_preview(
     // Parented on the rendered ref's tip when there is one, so the merge base
     // is the same one a real update would produce and the preview matches what
     // merging would actually do.
-    let (_, ref_name) = identify(project_root)?;
-    let parents: Vec<Oid> = project.resolve_ref(&ref_name)?.into_iter().collect();
+    let parents: Vec<Oid> = tip.into_iter().collect();
 
     Ok(Preview {
         commit: project.create_commit(

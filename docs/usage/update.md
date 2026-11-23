@@ -77,6 +77,23 @@ flowchart TD
     child --> ref
 ```
 
+## One-shot files
+
+Templates can initialize user-owned assets with [`[files]`](../templates/format.md#files).
+After first capture, `update` retains each initialized blob and Git mode in the rendered ref.
+Source changes, source deletion, declaration removal and `once = false` do not replace or delete it.
+Your committed replacement or deletion then merges cleanly because the template side has not changed that path.
+Ordinary files continue updating normally.
+
+Declaring an existing file one-shot can create a provenance-only commit with no file changes.
+Previews and dry runs use the same retained baseline as updates.
+Migration moves touching initialized paths fail with `tpl::ops::once_move`.
+`switch` and forced `init` preserve captures when continuing the same rendered ref.
+
+Capture state travels in rendered history, not project configuration.
+If your rendered ref is absent, [restore it](fetch.md#restoring-an-absent-local-ref) before updating to retain that state.
+Standalone rendering uses current sources and has no retained baseline.
+
 ## Opt-in merging
 
 ```sh

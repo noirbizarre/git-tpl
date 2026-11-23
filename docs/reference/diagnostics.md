@@ -94,6 +94,7 @@ A missing rendered ref uses `tpl::ops::no_rendered_ref`; invalid endpoint refere
 |---|---|
 | `tpl::render::content` | A file failed to render. The cause names the expression. |
 | `tpl::render::path` | A path segment failed to render. |
+| `tpl::render::file_path` | A `[files]` key is not a canonical relative output path. Use the final output name, without unsafe components or a source-root prefix. |
 | `tpl::render::escapes_tree` | A piece of a rendered path is `..`, contains a backslash, or is the file's own name vanishing (empty or `.` in the last position). A segment may otherwise contain `/` — fanning out into real directories — or render `.` on a directory segment, which is transparent rather than an error. |
 | `tpl::render::collision` | Two template files render to the same output path. |
 | `tpl::render::partial_not_utf8` | A `.jinja` file outside the render root is not text. |
@@ -199,6 +200,8 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::ops::no_rendered_ref` | `refs/tpl/<id>` is absent. In a fresh clone, [restore the original ref](../usage/fetch.md#restoring-an-absent-local-ref) before updating; fetching alone does not adopt it. |
 | `tpl::ops::no_such_directory` | `init`'s destination does not exist. Create it, or pass `--init` to create it and the repository. |
 | `tpl::ops::no_such_path` | The path is not in the rendering. |
+| `tpl::ops::once_missing` | A captured path is absent from its rendered tree. Restore intact rendered history or fetch a valid ref before updating. |
+| `tpl::ops::once_move` | A migration move touches an initialized one-shot path. Remove that move; captured paths keep their original identity. |
 | `tpl::ops::write_failed` | Generated output could not be written — see the reason. |
 | `tpl::ops::stdout_failed` | Raw output could not be written or flushed. Check the destination or receiving process. |
 
@@ -217,6 +220,7 @@ The reasoning is [ADR-020](../adr/020-backport-is-a-patch.md).
 | `tpl::backport::stale_rendering` | The recorded answers no longer reproduce `refs/tpl/<id>`, so every line of the patch would be measured against the wrong file. Run `update` first. |
 | `tpl::backport::unknown_path` | A named path is neither produced by the template nor present in the project. |
 | `tpl::backport::non_leaf` | A modified output belongs to an inherited or composed repository. Edit its owning repository directly or exclude the path. |
+| `tpl::backport::one_shot` | Modified output is an initialized one-shot file. Exclude it, or edit the template directly to change placeholders for new projects. |
 | `tpl::backport::symlink` | A changed path is a symlink on one side. Edit the link in the owning template directly or exclude it. |
 | `tpl::backport::output_write` | The patch could not be written to `--output`. |
 | `tpl::backport::hunk_refused` | One of the hunks selected with `-p` or `--hunk` cannot be backported. The refusal underneath keeps its own code and its own advice; this names the hunk. Run again and leave that hunk out. See [Choosing hunks](../usage/backport.md#choosing-hunks). |

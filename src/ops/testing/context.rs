@@ -194,6 +194,7 @@ pub(super) fn render(
             Some(_) => super::super::Preparation::Init,
             None => super::super::Preparation::Files,
         },
+        &super::super::once::for_project(project)?,
         |session| {
             if let Some(expect) = expect.filter(|expect| !expect.is_empty()) {
                 expect.check(session, template, failures)?;

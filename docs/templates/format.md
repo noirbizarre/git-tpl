@@ -144,6 +144,48 @@ no rendered output or attachment changes are published on that failure.
 `ref` and `path` go together: a half-declared triple is refused at load time.
 See [Git data sources](../data/git.md).
 
+### `[files]`
+
+Declare per-file attributes by **rendered output path**:
+
+```toml
+[files]
+"assets/logo.svg" = { once = true }
+"{{ project_name }}/favicon.png" = { once = true }
+```
+
+| Attribute | Type | Default | Meaning |
+|---|---|---|---|
+| `once` | bool | `false` | Initialize once, then retain the initialized bytes and Git mode in rendered history. |
+
+For example, `template/assets/logo.svg.jinja` produces the key `assets/logo.svg`.
+Changing `root` to `scaffold` changes where sources are discovered, but the key stays `assets/logo.svg`.
+Keys support expressions in the template's own context and match exact, case-sensitive final paths.
+They do not use globs or strip `.jinja`: an output actually named `asset.jinja` needs that complete key.
+Use `/` separators and canonical relative paths, without empty, `.`, `..`, `.git`, backslash or NUL components.
+Absolute paths and drive prefixes are rejected, as are two declarations evaluating to the same path.
+
+A declaration with no matching output waits until the file first appears, such as after enabling a conditional source.
+An expression key evaluating to empty declares nothing for that rendering.
+`init` renders matching files normally and records their first capture.
+Later updates preserve their initial bytes and mode without evaluating replacement source bodies.
+This also applies to a file first introduced during an update.
+
+The capture is permanent for that rendered history, even if the source, declaration or composed module disappears,
+or the declaration changes to `once = false`.
+A dynamic key changing to another path initializes a new path and retains the old one.
+Existing captured files still participate in file/descendant collision checks.
+Template migration moves cannot rename or overwrite initialized one-shot paths.
+
+Inheritance merges `[files]` by key, with the nearest complete declaration winning before the first capture.
+A parent can also declare a final path emitted by a composed child.
+Children can declare their own policies using their own context; see [composition](composition.md#one-shot-module-files).
+Standalone `git tpl render` has no previous rendered history and renders current sources normally.
+
+Replace the generated placeholder with your own asset and commit it as usual.
+The template side keeps its initial blob unchanged, letting an ordinary merge keep your replacement or deletion.
+See [one-shot files during update](../usage/update.md#one-shot-files) and [ADR-053](../adr/053-one-shot-rendered-files.md).
+
 ### `[remotes]`
 
 Git remotes to add on `init`, as `<name> = "<url>"`.

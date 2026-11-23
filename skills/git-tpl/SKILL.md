@@ -18,6 +18,15 @@ metadata:
 # git-tpl
 
 A dirty-to-clean update can create a provenance-only commit even when rendered bytes are unchanged.
+`[files]` maps final output path expressions to `{ once = true }` for user-owned placeholders.
+Capture occurs when output first appears; keys use the owning template's context, relative to output rather than `root`.
+Updates, previews, forced init and source switches retain captured bytes and modes on the same rendered history,
+even after source, declaration or composed-module removal, or `once = false`.
+Standalone render uses current sources; a newly captured policy can require a provenance-only commit.
+Restore a missing rendered ref before updating to preserve its capture records.
+For `tpl::render::file_path`, use canonical relative output keys; empty expression keys wait for conditional output.
+For `tpl::ops::once_missing`, restore intact rendered history; `tpl::ops::once_move` requires removing a protected move.
+For `tpl::backport::one_shot`, exclude the initialized file or edit the template placeholder directly.
 `update --dry-run` validates migration moves without publishing commits or saving configuration.
 Personal defaults also seed standalone interactive `render` and `context`, but never noninteractive rendering.
 `status.renderingCount` counts provenance-bearing renderings, excluding intermediate migration rename commits.

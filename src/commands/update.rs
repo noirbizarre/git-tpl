@@ -346,11 +346,16 @@ fn dry_run(
         .as_ref()
         .and_then(|commit| tpl::provenance::Provenance::parse(&commit.message));
     let migrations = ops::discover_update_migrations(&rendered, recorded.as_ref())?;
+    ops::validate_once_moves(recorded.as_ref(), &migrations)?;
     // A successful preflight must reject the same impossible moves as update.
     ops::plan_migration_moves(&ctx.repo, previous_tree, &migrations)?;
-    let child_changed = recorded
-        .as_ref()
-        .is_some_and(|previous| previous.composed != rendered.provenance.composed);
+    let state_changed =
+        recorded
+            .as_ref()
+            .map_or(!rendered.provenance.once.is_empty(), |previous| {
+                previous.composed != rendered.provenance.composed
+                    || previous.once != rendered.provenance.once
+            });
     let became_clean = recorded
         .as_ref()
         .is_some_and(|previous| previous.dirty && !rendered.provenance.dirty);
@@ -369,7 +374,7 @@ fn dry_run(
 
     if previous_tree == Some(rendered.tree)
         && migrations.is_empty()
-        && !child_changed
+        && !state_changed
         && !became_clean
     {
         if answers_changed || composed_changed {

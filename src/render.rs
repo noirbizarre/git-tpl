@@ -8,7 +8,7 @@
 //! Rendering is deterministic — see `docs/concepts/determinism.md` for the
 //! full list of hazards and how each is handled.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use miette::Diagnostic;
 use thiserror::Error;
@@ -29,6 +29,20 @@ const BINARY_SNIFF_LEN: usize = 8192;
 /// Errors from rendering.
 #[derive(Debug, Error, Diagnostic)]
 pub enum RenderError {
+    /// Declaration keys are exact output paths, not normalizable source expressions.
+    #[error("invalid [files] path `{path}`: {reason}")]
+    #[diagnostic(
+        code(tpl::render::file_path),
+        help(
+            "use a relative output path without empty, '.', '..', '.git', backslash, NUL, or drive-prefix components; omit the source root and keep the final filename suffix"
+        )
+    )]
+    FilePath {
+        /// The evaluated declaration key.
+        path: String,
+        /// Why it cannot name an output file.
+        reason: String,
+    },
     /// Data acquisition keeps its own actionable diagnostic instead of becoming a syntax error.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -165,6 +179,8 @@ pub enum Origin {
     Inherited(usize),
     /// A separately rendered module owns it, regardless of its own inheritance.
     Composed(String),
+    /// Initialized output retained from history, with no current upstream ownership.
+    Retained,
 }
 
 /// A rendered file, before it becomes a tree.
@@ -249,19 +265,24 @@ pub fn render_entries(
     partials: &Arc<Partials>,
     undefined: Undefined,
 ) -> Result<Vec<Rendered>, RenderError> {
-    render_entries_evaluating(template, entries, &mut |text, location| {
-        render_string_with(text, context, location, partials, undefined)
-    })
+    render_entries_evaluating(
+        template,
+        entries,
+        &BTreeMap::new(),
+        &mut |text, location| render_string_with(text, context, location, partials, undefined),
+    )
 }
 
 pub(crate) fn render_entries_evaluating(
     template: &dyn GitBackend,
     entries: &[TreeEntry],
+    retained: &BTreeMap<String, Rendered>,
     evaluate: &mut dyn FnMut(&str, &str) -> Result<String, EvalError>,
 ) -> Result<Vec<Rendered>, RenderError> {
     render_indexed(
         entries.iter().map(|entry| (entry, 0)).collect(),
         |_origin, oid| template.read_blob(oid),
+        retained,
         evaluate,
     )
 }
@@ -296,7 +317,7 @@ pub fn render_layered_entries(
     partials: &Arc<Partials>,
     undefined: Undefined,
 ) -> Result<Vec<Rendered>, RenderError> {
-    render_layered_evaluating(repos, entries, &mut |text, location| {
+    render_layered_evaluating(repos, entries, &BTreeMap::new(), &mut |text, location| {
         render_string_with(text, context, location, partials, undefined)
     })
 }
@@ -304,6 +325,7 @@ pub fn render_layered_entries(
 pub(crate) fn render_layered_evaluating(
     repos: &[&dyn GitBackend],
     entries: &[LayeredEntry],
+    retained: &BTreeMap<String, Rendered>,
     evaluate: &mut dyn FnMut(&str, &str) -> Result<String, EvalError>,
 ) -> Result<Vec<Rendered>, RenderError> {
     render_indexed(
@@ -312,6 +334,7 @@ pub(crate) fn render_layered_evaluating(
             .map(|layered| (&layered.entry, layered.origin))
             .collect(),
         |origin, oid| repos[origin].read_blob(oid),
+        retained,
         evaluate,
     )
 }
@@ -325,6 +348,7 @@ pub(crate) fn render_layered_evaluating(
 fn render_indexed(
     mut entries: Vec<(&TreeEntry, usize)>,
     read_blob: impl Fn(usize, Oid) -> Result<Vec<u8>, crate::git::GitError>,
+    retained: &BTreeMap<String, Rendered>,
     evaluate: &mut dyn FnMut(&str, &str) -> Result<String, EvalError>,
 ) -> Result<Vec<Rendered>, RenderError> {
     // Sorted input in, sorted output out. Rendering can reorder paths — a
@@ -348,6 +372,19 @@ fn render_indexed(
             // a whole subtree conditional.
             continue;
         };
+
+        if let Some(initialized) = retained.get(&path) {
+            if let Some(first) = seen.insert(path.clone(), entry.path.clone()) {
+                return Err(RenderError::Collision {
+                    first,
+                    second: entry.path.clone(),
+                    rendered: path,
+                });
+            }
+            // A replaced body may now be invalid; user-owned output must not evaluate it at all.
+            out.push(initialized.clone());
+            continue;
+        }
 
         let source = read_blob(origin, entry.oid)?;
         // A binary blob is copied even when it is named `.jinja`, so
@@ -378,14 +415,14 @@ fn render_indexed(
             source
         };
 
-        if let Some(first) = seen.get(&path) {
+        // Preserve ordinary rendering's error priority: body acquisition can fail before a collision.
+        if let Some(first) = seen.insert(path.clone(), entry.path.clone()) {
             return Err(RenderError::Collision {
-                first: first.clone(),
+                first,
                 second: entry.path.clone(),
                 rendered: path,
             });
         }
-        seen.insert(path.clone(), entry.path.clone());
 
         out.push(Rendered {
             path,
@@ -422,6 +459,23 @@ pub fn validate_paths(files: &[Rendered]) -> Result<(), RenderError> {
                 });
             }
         }
+    }
+    Ok(())
+}
+
+/// Validate exact declaration keys without source-path normalization or suffix stripping.
+pub(crate) fn validate_file_path(path: &str) -> Result<(), RenderError> {
+    if path.is_empty()
+        || path.contains(['\\', '\0'])
+        || path.split('/').any(|part| {
+            part.is_empty() || matches!(part, "." | "..") || part.eq_ignore_ascii_case(".git")
+        })
+        || path.as_bytes().get(1) == Some(&b':')
+    {
+        return Err(RenderError::FilePath {
+            path: path.into(),
+            reason: "expected a canonical, relative Git output path".into(),
+        });
     }
     Ok(())
 }

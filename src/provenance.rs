@@ -46,6 +46,7 @@ mod keys {
     pub const DATA: &str = "Data-Source";
     pub const EXTENDS: &str = "Template-Extends";
     pub const COMPOSE: &str = "Template-Compose";
+    pub const ONCE: &str = "Template-Once";
     pub const VERSION: &str = "Tpl-Version";
 }
 
@@ -74,6 +75,8 @@ pub struct Provenance {
     pub extends: Vec<ExtendsProvenance>,
     /// Exact selected child commits, even when a moving branch renders identical files.
     pub composed: Vec<ComposedRevision>,
+    /// Permanently captured output paths; their bytes and modes remain in the tree.
+    pub once: std::collections::BTreeSet<String>,
     /// The git-tpl version that rendered it.
     pub version: String,
     /// The template's name, for the subject line.
@@ -141,6 +144,10 @@ impl Provenance {
                     "commit": child.revision.to_hex(),
                 })
             ));
+        }
+        for path in &self.once {
+            // JSON keeps path control characters on a single trailer line.
+            message.push_str(&format!("{}: {}\n", keys::ONCE, serde_json::json!(path)));
         }
         message.push_str(&format!("{}: {}\n", keys::VERSION, self.version));
 
@@ -229,6 +236,12 @@ impl Provenance {
                     });
                     found_any = true;
                 }
+                keys::ONCE => {
+                    if let Ok(path) = serde_json::from_str::<String>(value) {
+                        recorded.once.insert(path);
+                        found_any = true;
+                    }
+                }
                 keys::VERSION => {
                     recorded.version = Some(value.to_string());
                     found_any = true;
@@ -266,6 +279,8 @@ pub struct Recorded {
     pub extends: Vec<(String, String)>,
     /// Child commits of that historical rendered ref, not moving branch tips.
     pub composed: Vec<ComposedRevision>,
+    /// Cumulative captured paths, empty for renderings predating one-shot files.
+    pub once: std::collections::BTreeSet<String>,
     /// The git-tpl version that rendered it.
     pub version: Option<String>,
 }
@@ -300,6 +315,31 @@ mod tests {
     use super::*;
     use crate::data::SourceKind;
 
+    #[test]
+    fn captured_paths_round_trip_in_sorted_order_without_injecting_trailers() {
+        let mut provenance = sample();
+        provenance.once = ["z\nTemplate-Source: injected", "a/\"quoted\""]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let message = provenance.to_message();
+        assert_eq!(Provenance::parse(&message).unwrap().once, provenance.once);
+        assert!(
+            message.find("Template-Once: \"a/").unwrap()
+                < message.find("Template-Once: \"z").unwrap()
+        );
+        let message = format!(
+            "{message}Template-Once: not-json\nTemplate-Once: 1\nTemplate-Once: \"a/\\\"quoted\\\"\"\n"
+        );
+        assert_eq!(Provenance::parse(&message).unwrap().once, provenance.once);
+        assert!(
+            Provenance::parse(&sample().to_message())
+                .unwrap()
+                .once
+                .is_empty()
+        );
+    }
+
     fn oid(hex: &str) -> Oid {
         Oid::parse(hex).unwrap()
     }
@@ -321,6 +361,7 @@ mod tests {
             }],
             extends: Vec::new(),
             composed: Vec::new(),
+            once: Default::default(),
             version: "0.1.0".into(),
             template_name: "rust-library".into(),
         }

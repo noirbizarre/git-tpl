@@ -134,6 +134,7 @@ A newly crossed migration still needs a commit to advance its provenance, and a 
 [composed child revision](../templates/composition.md) can require a provenance-only commit so its pinned commit
 is recorded even when its rendered output is unchanged.
 Committing an exact previously dirty snapshot also requires a provenance-only commit to record its clean boundary.
+Capturing a newly declared [one-shot path](../templates/format.md#files) also records its policy with identical bytes.
 
 Occasionally `update` adds two commits rather than one: a template [migration](../usage/update.md#migrations) that
 moves a file gets a content-identical rename commit first,
@@ -195,6 +196,7 @@ See [an existing project](../usage/init.md#an-existing-project).
 ## What is in the commit
 
 The tree is exactly the rendered output.
+For initialized one-shot paths, that includes their original bytes and modes carried forward from the previous rendering.
 Nothing else — no manifest, no lockfile, no `.git-tpl/` directory.
 A `git tpl diff` shows real file differences and nothing you would have to learn to ignore.
 
@@ -209,6 +211,7 @@ Template-Commit: 4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29
 Answers-Digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 Data-Source: licenses = template:data/licenses.toml@4f2c1a9
 Template-Extends: https://github.com/org/base-template@a1b2c3d
+Template-Once: "assets/logo.svg"
 Tpl-Version: X.Y.Z
 ```
 
@@ -218,7 +221,10 @@ The subject names the template's manifest `name` and the reference asked for.
 `Template-Extends` appears once per ancestor, nearest parent first, only for a template with an
 [`[extends]`](../templates/format.md#extends) chain — see [ADR-034](../adr/034-template-inheritance.md).
 
-`git tpl status` reads them back. So can you:
+`Template-Once` is repeated for each initialized output path as a JSON string, in sorted order.
+The cumulative set survives declaration removal; see [ADR-053](../adr/053-one-shot-rendered-files.md).
+
+`git tpl status` reads provenance back. So can you:
 
 ```sh
 git show --no-patch refs/tpl/github-com-noirbizarre-rust-library-template
