@@ -9,7 +9,8 @@ git tpl log [REVISION] [-n COUNT | --all] [--no-relative-date]
 Without a reference, show the latest **20 source commits up to the template version applied to your current branch**.
 An update you rendered but have not merged does not advance that boundary.
 
-With a reference, show its complete reachable history.
+With a reference, select its reachable history, still displaying at most 20 commits by default.
+Use `--all` for complete history or `-n COUNT` to choose another limit, including for ranges.
 Use a two-dot range to exclude the left endpoint and all its ancestors from the right endpoint's history:
 
 ```sh

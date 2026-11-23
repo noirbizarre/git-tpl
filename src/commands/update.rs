@@ -337,6 +337,7 @@ fn dry_run(
         rendered.template.manifest.questions.keys().cloned(),
     )?;
     report_ignored(&ctx.out, &rendered.ignored_answers);
+    report_ignored_paths(&ctx.out, &rendered.template.ignored);
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
     let tip = ctx.repo.resolve_ref(&ref_name)?;
@@ -349,13 +350,11 @@ fn dry_run(
     ops::validate_once_moves(recorded.as_ref(), &migrations)?;
     // A successful preflight must reject the same impossible moves as update.
     ops::plan_migration_moves(&ctx.repo, previous_tree, &migrations)?;
-    let state_changed =
-        recorded
-            .as_ref()
-            .map_or(!rendered.provenance.once.is_empty(), |previous| {
-                previous.composed != rendered.provenance.composed
-                    || previous.once != rendered.provenance.once
-            });
+    let state_changed = recorded
+        .as_ref()
+        .map_or(!rendered.provenance.once.is_empty(), |previous| {
+            !rendered.provenance.matches_recorded_state(previous)
+        });
     let became_clean = recorded
         .as_ref()
         .is_some_and(|previous| previous.dirty && !rendered.provenance.dirty);

@@ -7,6 +7,58 @@ mod common;
 use common::{World, file_url, tpl, tpl_colored};
 
 #[test]
+fn dirty_update_previews_warn_once_about_globally_ignored_template_files() {
+    let world = World::new();
+    world.init(&[]).success();
+    common::global_gitignore(world.project.config_home(), "*.local\n");
+    world
+        .template
+        .repo
+        .write("template/secret.local", "hidden\n");
+    let before = world.project.working_state();
+    let tip = world.project.rev_parse(&world.ref_name());
+    for json in [false, true] {
+        let mut args = vec!["update", "--dirty", "--dry-run", "--defaults"];
+        if json {
+            args.push("--json");
+        }
+        let output = tpl(&world.project, &args).success();
+        assert_eq!(
+            output.stderr.matches("skipped by .gitignore").count(),
+            1,
+            "{}",
+            output.stderr
+        );
+        if json {
+            assert_eq!(output.json()["dryRun"], true);
+        }
+        assert_eq!(world.project.working_state(), before);
+        assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+    }
+}
+
+#[test]
+fn unsafe_updated_paths_preserve_the_ref_and_all_project_state() {
+    let world = World::new();
+    world.init(&[]).success();
+    world
+        .template
+        .repo
+        .write("template/{{ '.GiT' }}/config", "unsafe")
+        .commit_all("unsafe output");
+    let before = world.project.working_state();
+    let tip = world.project.rev_parse(&world.ref_name());
+    assert_eq!(
+        tpl(&world.project, &["--json", "update", "--defaults"])
+            .failure()
+            .error_code(),
+        "tpl::render::escapes_tree"
+    );
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+}
+
+#[test]
 fn an_unsupported_engine_preserves_all_project_state_and_the_template_ref() {
     let world = World::new();
     world.init(&[]).success();

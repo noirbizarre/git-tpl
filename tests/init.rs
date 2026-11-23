@@ -234,6 +234,107 @@ fn attachment_refuses_active_git_operations_even_with_a_clean_index() {
 use common::{World, global_identity, tpl, tpl_outside};
 
 #[test]
+fn dirty_init_previews_warn_once_about_globally_ignored_template_files() {
+    let world = World::new();
+    common::global_gitignore(world.project.config_home(), "*.local\n");
+    world
+        .template
+        .repo
+        .write("template/secret.local", "hidden\n");
+    let before = world.project.working_state();
+    for defaults in [false, true] {
+        for json in [false, true] {
+            let mut args = vec![
+                "init",
+                world.template.repo.path.to_str().unwrap(),
+                "--dirty",
+                "--dry-run",
+            ];
+            if defaults {
+                args.push("--defaults");
+            }
+            if json {
+                args.push("--json");
+            }
+            let output = tpl(&world.project, &args).success();
+            assert_eq!(
+                output.stderr.matches("skipped by .gitignore").count(),
+                1,
+                "{}",
+                output.stderr
+            );
+            if json {
+                assert_eq!(output.json()["dryRun"], true);
+            }
+            assert_eq!(world.project.working_state(), before);
+        }
+    }
+}
+
+#[test]
+fn init_reports_the_recorded_source_for_relative_and_absolute_destination_inputs() {
+    for absolute in [false, true] {
+        let world = World::new();
+        let source = if absolute {
+            world.template.source()
+        } else {
+            "template".to_string()
+        };
+        let before = world.project.working_state();
+        let preview = tpl_outside(
+            world.dir.path(),
+            world.project.config_home(),
+            &[
+                "--json",
+                "init",
+                &source,
+                "project",
+                "--defaults",
+                "--dry-run",
+            ],
+        )
+        .success();
+        assert_eq!(preview.json()["template"], "../template");
+        assert_eq!(world.project.working_state(), before);
+        let output = tpl_outside(
+            world.dir.path(),
+            world.project.config_home(),
+            &["--json", "init", &source, "project", "--defaults"],
+        )
+        .success();
+        let config = tpl::config::Config::load(&world.project.path).unwrap();
+        assert_eq!(output.json()["template"], config.template.source);
+        let human = tpl_outside(
+            world.dir.path(),
+            world.project.config_home(),
+            &["init", &source, "project", "--defaults", "--force"],
+        )
+        .success();
+        let displayed = human
+            .stderr
+            .lines()
+            .find_map(|line| line.strip_prefix("Template:"))
+            .unwrap()
+            .trim();
+        assert_eq!(displayed, config.template.source);
+        let reference = world
+            .project
+            .git(&["for-each-ref", "--format=%(refname)", "refs/tpl/"]);
+        let recorded = tpl::provenance::Provenance::parse(&world.project.git(&[
+            "show",
+            "-s",
+            "--format=%B",
+            reference.trim(),
+        ]))
+        .unwrap();
+        assert_eq!(
+            recorded.source.as_deref(),
+            Some(config.template.source.as_str())
+        );
+    }
+}
+
+#[test]
 fn rebasing_a_hostname_like_local_path_records_the_original_id_explicitly() {
     let world = World::new();
     let nested = world.dir.path().join("sources.local");

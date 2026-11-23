@@ -201,14 +201,16 @@ Uncommitted changes are refused with the same message Git would give you.
 
 ## An empty repository
 
-`init` in a repository with no commits works: the orphan template commit becomes the first commit on the branch
-directly, with no merge — there is nothing to merge it with.
+`init` in a repository with no commits works: integration fast-forwards the branch to the orphan template commit.
+It then creates a separate attachment commit containing `.config/git.tpl.toml`:
 
 ```
-main:  G0
+refs/tpl/<id>:  G0
+main:          G0 → attachment configuration
 ```
 
-Which is the cleanest possible history for a project generated from a template.
+The rendered ref stays at `G0`, whose tree contains only rendered output.
+The completed initialization leaves `HEAD` at the attachment commit.
 
 ## An existing project
 
@@ -272,12 +274,18 @@ genuine merge base — the same experience as a project generated from the templ
 
 !!! tip "Look before you merge"
 
-    `git tpl init <template> --no-merge` creates the ref without merging, so `git tpl diff` shows exactly what
-    the merge would reconcile.
+    `git tpl init <template> --no-merge` creates the ref without merging, so `git tpl diff` can preview reconciliation.
+    The preview does not execute merge drivers; native integration can produce different results.
     When you are ready, `git tpl merge` performs it.
     `--dry-run` is smaller still: it reports what would be asked and rendered, and creates nothing.
 
 ## Machine-readable output
+
+The displayed Template and JSON `template` values use the source spelling recorded in the destination project.
+Local CLI paths are rebased relative to that project.
+A dry run predicts this spelling when it discovers a project root;
+without an existing repository it reports the expanded invocation source.
+Dirty dry runs warn about ignored template files on stderr, including schema-only previews and JSON mode.
 
 `git tpl --json init` emits its outcome on stdout as a single JSON object, with the prose on stderr.
 The payload is described in [JSON output](../reference/json.md#init).

@@ -1,7 +1,21 @@
 # Composing module templates
 
+All final child output paths obey the same safety checks as parent output.
+In particular, `.git` components are rejected in any letter case, including in composition paths.
+
 `[[compose]]` renders sibling template repositories alongside a parent.
 It is different from `[extends]`: a child provides its own files and questions, rather than overriding the parent.
+
+Each child instance's actually loaded data sources are recorded separately from its revision lock:
+
+```text
+Template-Compose-Data: {"from":"sources","module":"jira","name":"catalog","location":"template:data.toml@8b3e7d1"}
+```
+
+The declaration, module and source name together identify the independent data namespace.
+`location` includes the source's resolved revision or checksum using the ordinary data provenance format.
+Historical commits without these trailers have no recorded child data evidence.
+Enriching that evidence alone does not create a new rendered commit during an otherwise unchanged update.
 
 ```toml
 [questions.modules]

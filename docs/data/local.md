@@ -93,9 +93,13 @@ Template data records the template commit it was read from:
 Data-Source: licenses = template:data/licenses.toml@8b3e7d1
 ```
 
-Project data records the path only — the project's own commit is the containing commit, so recording it would be
-circular:
+Project data records the path only:
 
 ```
 Data-Source: overrides = local:config/tpl-data.toml
 ```
+
+The containing commit belongs to the rendered ref, not the project branch.
+Project data can be uncommitted or untracked and need not appear in the rendered tree.
+This trailer does not preserve or identify its historical bytes;
+reproduction requires preserving those bytes, optionally checked against a declared checksum.

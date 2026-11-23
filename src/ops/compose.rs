@@ -10,7 +10,7 @@ use super::{Answering, OpError, Request, Trust, resolve};
 use crate::context::Context;
 use crate::data::{Decision, REMOTE_LIMIT_BYTES, RemoteRequest, SourceKind};
 use crate::eval::{Partials, Undefined, render_string_with};
-use crate::provenance::ComposedRevision;
+use crate::provenance::{ComposedDataProvenance, ComposedRevision};
 use crate::render::Rendered;
 use crate::template::{ComposeDecl, Value};
 use crate::userconfig::UserConfig;
@@ -100,6 +100,15 @@ fn valid_id(name: &str) -> bool {
         && !name.ends_with('-')
 }
 
+/// Revision locks are declaration-wide; data evidence is specific to each rendered module.
+#[derive(Default)]
+pub struct Composition {
+    /// Exact selected child revisions.
+    pub revisions: Vec<ComposedRevision>,
+    /// Actually consumed data with independent child namespaces retained.
+    pub data: Vec<ComposedDataProvenance>,
+}
+
 /// Render each child's ordered module list, allowing different lists to share an ID.
 // Acquisition policy is invocation-owned, independent of child trust and recorded revision locks.
 #[allow(clippy::too_many_arguments)]
@@ -114,7 +123,7 @@ pub fn render(
     recorded: Option<&[ComposedRevision]>,
     baseline: &super::once::Baseline,
     captured: &mut std::collections::BTreeSet<String>,
-) -> Result<Vec<ComposedRevision>, ComposeError> {
+) -> Result<Composition, ComposeError> {
     render_traced(
         entries, context, partials, user, access, trust, parent, recorded, baseline, captured, None,
     )
@@ -134,9 +143,10 @@ pub(super) fn render_traced(
     baseline: &super::once::Baseline,
     captured: &mut std::collections::BTreeSet<String>,
     mut backport_trace: Option<&mut super::backport_trace::Trace>,
-) -> Result<Vec<ComposedRevision>, ComposeError> {
+) -> Result<Composition, ComposeError> {
     let mut paths: HashSet<String> = parent.iter().map(|file| file.path.clone()).collect();
     let mut revisions = Vec::new();
+    let mut data = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
         let source = render_string_with(
             &entry.source,
@@ -301,6 +311,19 @@ pub(super) fn render_traced(
                 source: Box::new(error),
             })?;
             captured.extend(rendered.provenance.once);
+            // Module answers can select different sources even at the same child commit.
+            data.extend(
+                rendered
+                    .provenance
+                    .data
+                    .iter()
+                    .map(|used| ComposedDataProvenance {
+                        from: entry.from.clone(),
+                        module: id.to_string(),
+                        name: used.name.clone(),
+                        location: used.trailer(),
+                    }),
+            );
             if let Some(trace) = backport_trace.as_deref_mut() {
                 // Resolution used the historical SHA; metadata must retain the reference the declaration requested.
                 for file in &rendered.files {
@@ -327,5 +350,5 @@ pub(super) fn render_traced(
         }
     }
     parent.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(revisions)
+    Ok(Composition { revisions, data })
 }

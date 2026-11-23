@@ -72,8 +72,8 @@ It writes a Git tree directly and advances the rendered ref.
 Changed answers or composed child locks can update `.config/git.tpl.toml` as an unstaged edit.
 You decide when to merge, and merging is an ordinary Git operation you can abort.
 
-**Template refs are not pushed automatically.** A contributor cloning the project does not need template state to
-work on it.
+**Template refs are not pushed by default.** A contributor cloning the project does not need template state to work on it.
+`tpl.autoPush` or `git tpl update --push` explicitly opts into publication after an update creates a rendering.
 `git push` and `git pull` ignore `refs/tpl/*` entirely; `git tpl push` and `git tpl fetch` are explicit.
 
 ## Read next

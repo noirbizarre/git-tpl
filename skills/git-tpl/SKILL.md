@@ -17,6 +17,9 @@ metadata:
 
 # git-tpl
 
+Rendered output rejects `.git` components in any letter case, traversal, NUL, backslashes and drive prefixes
+with `tpl::render::escapes_tree`, before standalone output is created or cleared.
+
 A dirty-to-clean update can create a provenance-only commit even when rendered bytes are unchanged.
 `[files]` maps final output path expressions to `{ once = true }` for user-owned placeholders.
 Capture occurs when output first appears; keys use the owning template's context, relative to output rather than `root`.
@@ -28,6 +31,7 @@ For `tpl::render::file_path`, use canonical relative output keys; empty expressi
 For `tpl::ops::once_missing`, restore intact rendered history; `tpl::ops::once_move` requires removing a protected move.
 For `tpl::backport::one_shot`, exclude the initialized file or edit the template placeholder directly.
 `update --dry-run` validates migration moves without publishing commits or saving configuration.
+It shares update's semantic child-provenance comparison: enriching legacy ancestry evidence alone stays `upToDate`.
 Personal defaults also seed standalone interactive `render` and `context`, but never noninteractive rendering.
 `status.renderingCount` counts provenance-bearing renderings, excluding intermediate migration rename commits.
 On `diff` and `show`, answer flags require `--dirty`; ordinary inspection never renders answer overrides.
@@ -90,6 +94,9 @@ One case tests one direct update; use explicit `to` cases for intermediate upgra
 Removed/overridden output and binary payloads are excluded; other static rules keep their existing scope.
 
 `init --dry-run` honors `--trust` for ancestors.
+Dirty init/update dry runs warn about ignored template files on stderr, even with `--json`.
+Init's Template display and JSON `template` use the recorded source spelling, rebased for local destinations.
+Dry runs predict that spelling when a project root is known; otherwise they show the expanded invocation source.
 With `--defaults`, rendering must succeed to return a file list; without it, JSON `files` is null (schema only).
 
 `questions` resolves static template-local choices using render-time formats, checksums and inherited origins.
@@ -151,7 +158,8 @@ Apply the result with an explicit `git tpl merge` (or plain `git merge refs/tpl/
 `git tpl pull` explicitly combines update and merge, including integration after an unchanged rendering.
 `update --merge` opts into the same integration phase and JSON `{update, merge}` shape;
 it requires existing history and a clean index/worktree before rendering, and conflicts with `--dry-run`.
-It supports update options except `--dry-run`, plus merge's `--no-commit` and `--message`, but not `--abort`.
+`pull` supports update options except `--dry-run`, plus merge's `--no-commit` and `--message`, but not `--abort`.
+`update --merge` uses default integration controls; use `pull` for those additional merge options.
 Its JSON has `update` and `merge` objects with their usual payloads and one top-level `ok`.
 It refuses a missing local rendered ref before updating; recover original ancestry before retrying.
 Saved configuration edits remain unstaged; conflicts use normal Git recovery and report `merge.result: "conflicted"`.
@@ -592,7 +600,8 @@ stderr carries human prose, warnings, and errors. `--json` and `--quiet` suppres
 but warnings and errors remain visible.
 
 `log` defaults to the latest 20 source commits up to the template rendering actually merged into `HEAD`.
-An explicit `REF` resolves in that rendering's source repository and shows its full reachable history.
+An explicit `REF` resolves in that rendering's source repository and selects its reachable history.
+The default display limit remains 20 for references and ranges; use `--all` for complete output or `-n COUNT`.
 Two-dot `A..B` selects B's history excluding A's ancestry; omitted endpoints mean the applied source revision.
 Use `..main` for pending updates and `main..` for applied commits absent from upstream main.
 Bare `..` is empty; three-dot ranges are unsupported.

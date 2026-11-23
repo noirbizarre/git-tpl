@@ -479,7 +479,7 @@ pub fn materialise<'a, E>(
     let paths: std::collections::BTreeSet<_> = files.iter().map(|(path, _, _)| *path).collect();
     for (path, _, mode) in &files {
         let invalid = |reason| std::io::Error::new(std::io::ErrorKind::InvalidInput, reason);
-        if path.is_empty()
+        if !crate::render::is_output_path(path)
             || paths.len() != files.len()
             || path.contains('\\')
             || Path::new(path)
@@ -1292,7 +1292,7 @@ fn render_resolved_preparing(
             matches!(preparation, Preparation::Backport).then_some(&mut backport_trace),
         )?
     } else {
-        Vec::new()
+        compose::Composition::default()
     };
 
     for file in &files {
@@ -1321,7 +1321,8 @@ fn render_resolved_preparing(
         answers_digest: context.answers_digest(),
         data: loader.provenance().to_vec(),
         extends: template.extends_provenance(),
-        composed,
+        composed: composed.revisions,
+        composed_data: composed.data,
         once: captured,
         version: crate::VERSION.to_string(),
         template_name: template.manifest.name.clone(),
@@ -1556,6 +1557,8 @@ pub struct DeclaredRemote {
 
 /// The result of an `init`.
 pub struct InitOutcome {
+    /// Source spelling persisted relative to the destination project.
+    pub source: String,
     /// The template id, and so the ref name.
     pub id: TemplateId,
     /// The commit created on the rendered ref.
@@ -1841,6 +1844,7 @@ fn init_using<T: std::borrow::Borrow<Resolved>>(
     let remotes = add_remotes(project, &rendered)?;
 
     Ok(InitOutcome {
+        source: config.template.source,
         id,
         commit,
         changes,
@@ -2359,14 +2363,7 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
         .as_ref()
         // Capturing unchanged bytes still needs a commit or declaration removal would lose ownership.
         .map_or(!rendered.provenance.once.is_empty(), |previous| {
-            previous.composed.len() != rendered.provenance.composed.len()
-                || !rendered
-                    .provenance
-                    .composed
-                    .iter()
-                    .zip(&previous.composed)
-                    .all(|(new, old)| new.matches_recorded(old))
-                || previous.once != rendered.provenance.once
+            !rendered.provenance.matches_recorded_state(previous)
         });
     // Committing an exact dirty snapshot changes provenance, not output bytes.
     // Record the clean boundary so source-history inspection can recover.

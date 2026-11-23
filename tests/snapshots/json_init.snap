@@ -7,7 +7,7 @@ exit: 0
 {
   "id": "template",
   "ref": "refs/tpl/template",
-  "template": "[tmp]/template",
+  "template": "../template",
   "revision": {
     "reference": "main",
     "commit": "[sha]",

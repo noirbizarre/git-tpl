@@ -1,5 +1,9 @@
 # JSON output
 
+For `init`, `template` is the recorded source, including destination-project-relative local paths.
+An init dry run predicts that spelling when a project root is known;
+otherwise it reports the expanded invocation source.
+
 Template test context assertions report `contextMissing`, `contextUnexpected`, `contextMismatch` and `contextExpression`.
 Path failures include `path` and `actualPresent`; missing values omit `actual` rather than encoding absence as null.
 Equality failures include typed `expected` and, when present, typed `actual`, preserving null recursively.
@@ -623,6 +627,9 @@ this project has.
 
 Documented with the command, at [`git tpl test`](../usage/test.md).
 The payload carries `summary` and a `cases` array, each with its `failures`.
+Under `test --write`, selected non-snapshot cases report `snapshot: "skipped"` without rendering or checking assertions.
+Their failure-free outcomes have `passed: true` and count toward `summary.total` and `summary.passed`.
+These are selected-outcome counts, not a count of assertion runs.
 Under `--write`, a case's `snapshot: "updated"` can mean only that its legacy `MANIFEST` was migrated or removed.
 Such a format-only update has an empty `snapshotChanges` array and counts toward `summary.snapshotsWritten`.
 An equal snapshot already using only `manifest.toml` reports `unchanged` and is not rewritten.

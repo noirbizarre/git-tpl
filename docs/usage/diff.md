@@ -14,7 +14,8 @@ git tpl diff [--stat] [--name-only] [--reverse] [--exit-code] [--dirty] [-- <pat
 
 It merges `refs/tpl/<id>` into `HEAD` in memory — no ref, no index and no worktree file is touched — and diffs
 `HEAD` against the result.
-What you see is what `git tpl merge` would do, before you do it.
+This is a non-executing merge preview.
+Explicit `git tpl merge` uses native Git and configured merge drivers, so its results can differ from the preview.
 
 ```console
 $ git tpl diff --stat

@@ -198,6 +198,39 @@ fn a_file_inside_the_render_root_is_not_importable() {
     world.init(&[]).failure().says("defines no partials");
 }
 
+#[test]
+fn whole_repository_roots_never_make_output_importable() {
+    for root in [".", ""] {
+        let world = World::with_shared_template(
+            &format!("root = '{root}'\n{MANIFEST}"),
+            &[],
+            &[
+                ("header.jinja", "{% macro title() %}header{% endmacro %}"),
+                (
+                    "README.md.jinja",
+                    "{% import 'header.jinja' as m %}{{ m.title() }}",
+                ),
+            ],
+        );
+        world.init(&[]).failure().says("defines no partials");
+    }
+}
+
+#[test]
+fn whole_repository_roots_copy_binary_jinja_output_without_parsing_it_as_a_partial() {
+    for root in [".", ""] {
+        let world = World::with_shared_template(&format!("root = '{root}'\n{MANIFEST}"), &[], &[]);
+        let bytes = b"\0\xffbinary";
+        std::fs::write(world.template.repo.path.join("opaque.jinja"), bytes).unwrap();
+        world.template.repo.commit_all("binary output");
+        world.init(&[]).success();
+        assert_eq!(
+            std::fs::read(world.project.path.join("opaque")).unwrap(),
+            bytes
+        );
+    }
+}
+
 /// `{% extends %}`/`{% block %}` share the loader too — it hands MiniJinja
 /// whatever bytes a name resolves to, with no distinction between an import,
 /// an include and an extends. `{{ super() }}` proves a block can *extend*

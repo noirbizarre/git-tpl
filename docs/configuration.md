@@ -50,11 +50,13 @@ ci = true
 
 ```toml
 ref = "main"        # a branch — moves as the template moves
-ref = "v1.4.0"      # a tag — pinned until you change it
-ref = "8b3e7d1"     # a commit — fully pinned
+ref = "v1.4.0"      # a release tag — may move if upstream retags it
+ref = "8b3e7d19a4c6e8f0123456789abcdef012345678" # a full commit ID — immutable
 ```
 
 A branch is the usual choice.
+Tags are stable only by upstream convention and are refreshed online.
+Use a full commit ID when an immutable pin is required.
 `git tpl update` resolves it fresh each time, which is the point: `update` is how you find out the template moved.
 
 **`id`** is normally derived and normally left out.

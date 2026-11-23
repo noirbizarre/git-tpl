@@ -629,8 +629,10 @@ Things worth knowing:
   checked, under `--write` — recording a broken rendering is not the same as passing it. Run a plain
   `git tpl test` afterward (or let CI do it) to prove the recording still holds. See
   [ADR-032](../adr/032-write-only-writes.md).
-- **A case with no `snapshot = true` is skipped entirely under `--write`** — not rendered, not checked, not
-  counted as run. `--write`'s only reason to look at a case is to write its snapshot.
+- **A case with no `snapshot = true` is skipped under `--write`** — not rendered or checked.
+  It still has a selected outcome in JSON: `snapshot` is `"skipped"`, and `passed` is true because it has no failures.
+  It contributes to `summary.total` and `summary.passed`; these counters do not prove assertions ran.
+  `--write`'s only reason to render a case is to write its snapshot.
 
 `--write` writes into the checked-out template's working tree — there is nowhere else for a snapshot to go.
 
