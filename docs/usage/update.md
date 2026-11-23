@@ -179,6 +179,9 @@ Occasionally `update` adds **two** commits instead of one: a migration that move
 change gets a content-identical rename commit first, then the ordinary rendered commit as its child.
 Both are ordinary commits on the same append-only history; see [Migrations](#migrations).
 
+Dry-run and publication use the same comparison of recorded child revisions and one-shot capture policy.
+Newly available child ancestry evidence alone does not require a commit when older trailers lack that evidence.
+
 ## Migrations
 
 A template repository may declare **migrations** in a `migrations/` directory, sibling to `template.toml`.

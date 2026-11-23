@@ -129,6 +129,17 @@ impl ExtendsProvenance {
 }
 
 impl Provenance {
+    /// Preview and publication must agree about policy changes even when output bytes are identical.
+    pub fn matches_recorded_state(&self, recorded: &Recorded) -> bool {
+        self.once == recorded.once
+            && self.composed.len() == recorded.composed.len()
+            && self
+                .composed
+                .iter()
+                .zip(&recorded.composed)
+                .all(|(new, old)| new.matches_recorded(old))
+    }
+
     /// The full commit message: a subject, a blank line, then the trailers.
     pub fn to_message(&self) -> String {
         let mut message = String::new();
@@ -382,6 +393,30 @@ impl fmt::Display for Recorded {
 mod tests {
     use super::*;
     use crate::data::SourceKind;
+
+    #[test]
+    fn state_comparison_tolerates_legacy_ancestry_but_detects_recorded_changes() {
+        let mut provenance = sample();
+        provenance.composed.push(ComposedRevision {
+            from: "modules".into(),
+            source: "child".into(),
+            reference: "main".into(),
+            revision: provenance.revision,
+            extends: Some(Vec::new()),
+        });
+        let mut recorded = Provenance::parse(&provenance.to_message()).unwrap();
+        assert!(provenance.matches_recorded_state(&recorded));
+        recorded.composed[0].extends = None;
+        assert!(provenance.matches_recorded_state(&recorded));
+        recorded.composed[0].extends = Some(vec![ExtendsProvenance {
+            source: "ancestor".into(),
+            revision: provenance.revision,
+        }]);
+        assert!(!provenance.matches_recorded_state(&recorded));
+        recorded.composed[0].extends = None;
+        recorded.composed[0].reference = "other".into();
+        assert!(!provenance.matches_recorded_state(&recorded));
+    }
 
     #[test]
     fn scoped_child_data_round_trips_without_hiding_legacy_or_valid_sibling_evidence() {

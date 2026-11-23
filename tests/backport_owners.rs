@@ -535,7 +535,21 @@ fn legacy_child_evidence_alone_does_not_manufacture_an_update_commit() {
         .project
         .git(&["for-each-ref", "--format=%(refname)", "refs/tpl/"]);
     let tip = world.project.rev_parse(reference.trim());
-    tpl(&world.project, &["update", "--defaults"]).success();
+    let before = world.project.working_state();
+    let preview = tpl(
+        &world.project,
+        &["--json", "update", "--defaults", "--dry-run"],
+    )
+    .success()
+    .json();
+    assert_eq!(preview["result"], "upToDate");
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.rev_parse(reference.trim()), tip);
+    let updated = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+    assert_eq!(updated["result"], "upToDate");
+    assert_eq!(world.project.working_state(), before);
     assert_eq!(world.project.rev_parse(reference.trim()), tip);
     world
         .project

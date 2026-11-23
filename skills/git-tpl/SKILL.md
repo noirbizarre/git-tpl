@@ -31,6 +31,7 @@ For `tpl::render::file_path`, use canonical relative output keys; empty expressi
 For `tpl::ops::once_missing`, restore intact rendered history; `tpl::ops::once_move` requires removing a protected move.
 For `tpl::backport::one_shot`, exclude the initialized file or edit the template placeholder directly.
 `update --dry-run` validates migration moves without publishing commits or saving configuration.
+It shares update's semantic child-provenance comparison: enriching legacy ancestry evidence alone stays `upToDate`.
 Personal defaults also seed standalone interactive `render` and `context`, but never noninteractive rendering.
 `status.renderingCount` counts provenance-bearing renderings, excluding intermediate migration rename commits.
 On `diff` and `show`, answer flags require `--dirty`; ordinary inspection never renders answer overrides.

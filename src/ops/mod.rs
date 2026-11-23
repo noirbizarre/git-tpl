@@ -2360,14 +2360,7 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
         .as_ref()
         // Capturing unchanged bytes still needs a commit or declaration removal would lose ownership.
         .map_or(!rendered.provenance.once.is_empty(), |previous| {
-            previous.composed.len() != rendered.provenance.composed.len()
-                || !rendered
-                    .provenance
-                    .composed
-                    .iter()
-                    .zip(&previous.composed)
-                    .all(|(new, old)| new.matches_recorded(old))
-                || previous.once != rendered.provenance.once
+            !rendered.provenance.matches_recorded_state(previous)
         });
     // Committing an exact dirty snapshot changes provenance, not output bytes.
     // Record the clean boundary so source-history inspection can recover.
