@@ -9,6 +9,30 @@
 mod common;
 
 #[test]
+fn an_incompatible_source_keeps_available_status_unknown() {
+    let world = common::World::new();
+    world.init(&[]).success();
+    let manifest = world.template.repo.read("template.toml");
+    world
+        .template
+        .repo
+        .write(
+            "template.toml",
+            &format!(
+                "minimum_version = '{}'\n{manifest}",
+                common::future_version()
+            ),
+        )
+        .commit_all("require newer engine");
+    let json = common::tpl(&world.project, &["--json", "status"])
+        .success()
+        .json();
+    assert_eq!(json["ok"], true);
+    assert!(json["availableCommit"].is_null());
+    assert_eq!(json["templateMoved"], false);
+}
+
+#[test]
 fn migration_scaffolding_is_not_counted_as_a_rendering() {
     let world = common::World::new();
     world.init(&[]).success();

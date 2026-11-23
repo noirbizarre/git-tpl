@@ -3,6 +3,25 @@
 mod common;
 
 #[test]
+fn an_unsupported_engine_never_attaches_the_template() {
+    let world = common::World::with_template(
+        &format!(
+            "name = 'future'\nminimum_version = '{}'\n",
+            common::future_version()
+        ),
+        &[("README.md", "future output")],
+    );
+    let before = world.project.working_state();
+    assert_eq!(
+        world.init(&["--json"]).failure().error_code(),
+        "tpl::resolve::minimum_version"
+    );
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.git(&["for-each-ref", "refs/tpl/"]), "");
+    assert!(!world.project.exists(".config/git.tpl.toml"));
+}
+
+#[test]
 fn files_staged_during_the_questionnaire_never_enter_an_attachment_commit() {
     use tpl::eval::{EvalError, Prompter};
     use tpl::git::{GitError, LibGit2};

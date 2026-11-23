@@ -42,6 +42,25 @@ pub enum ResolveError {
     #[diagnostic(transparent)]
     Manifest(#[from] ManifestError),
 
+    /// This engine cannot interpret the template's declared format requirements.
+    #[error(
+        "template `{origin}` requires git-tpl {required} or newer; installed version is {installed}"
+    )]
+    #[diagnostic(
+        code(tpl::resolve::minimum_version),
+        help(
+            "upgrade git-tpl using your installation method, then retry; for Cargo installations, run `cargo install git-tpl --force`"
+        )
+    )]
+    MinimumVersion {
+        /// The incompatible template source, which may be an ancestor or child.
+        origin: String,
+        /// The oldest supported engine.
+        required: semver::Version,
+        /// The engine interpreting this manifest.
+        installed: semver::Version,
+    },
+
     /// An `[extends]` chain could not be resolved or merged.
     #[error(transparent)]
     #[diagnostic(transparent)]
@@ -470,6 +489,9 @@ fn resolve_layer(
             })?;
     let manifest_text = String::from_utf8_lossy(&manifest_bytes);
     let manifest = Manifest::parse(&manifest_text, MANIFEST_NAME)?;
+    // Check every layer before interpreting its root or evaluating expressions:
+    // a newer format must not fail misleadingly as a missing directory or answer.
+    check_minimum_version(&manifest, source, crate::VERSION)?;
 
     let root = root_override.unwrap_or(&manifest.root).to_string();
     let root_tree = match repo.subtree(tree, &root)? {
@@ -507,6 +529,26 @@ fn resolve_layer(
         ignored,
         _cache: cache,
     })
+}
+
+fn check_minimum_version(
+    manifest: &Manifest,
+    origin: &str,
+    installed: &str,
+) -> Result<(), ResolveError> {
+    if let Some(required) = &manifest.minimum_version {
+        let installed = semver::Version::parse(installed)
+            .expect("the package version is a valid semantic version");
+        // Build metadata identifies a build, not a newer engine capability.
+        if installed.cmp_precedence(required).is_lt() {
+            return Err(ResolveError::MinimumVersion {
+                origin: origin.into(),
+                required: required.clone(),
+                installed,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Keeps source objects leased without requiring a valid template manifest.
@@ -781,6 +823,37 @@ pub fn local_path(source: &str) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    #[test]
+    fn minimum_versions_follow_semver_precedence_rather_than_build_identity() {
+        for (required, installed, allowed) in [
+            ("0.17.0", "0.17.0", true),
+            ("0.17.0", "0.18.0", true),
+            ("0.17.0", "0.16.0", false),
+            ("0.10.0", "0.9.0", false),
+            ("0.9.0", "0.10.0", true),
+            ("0.17.0", "0.17.0-rc.1", false),
+            ("0.17.0-rc.1", "0.17.0", true),
+            ("0.17.0-rc.2", "0.17.0-rc.1", false),
+            ("0.17.0+zzz", "0.17.0+aaa", true),
+            ("0.17.0+zzz", "0.17.0", true),
+        ] {
+            let manifest = Manifest::parse(
+                &format!("name = 'x'\nminimum_version = '{required}'\n"),
+                MANIFEST_NAME,
+            )
+            .unwrap();
+            let result = check_minimum_version(&manifest, "template-source", installed);
+            assert_eq!(result.is_ok(), allowed, "{installed} against {required}");
+            if let Err(error) = result {
+                assert!(
+                    matches!(error, ResolveError::MinimumVersion { origin, .. } if origin == "template-source")
+                );
+            }
+        }
+        let manifest = Manifest::parse("name = 'x'", MANIFEST_NAME).unwrap();
+        assert!(check_minimum_version(&manifest, "template-source", "0.0.0").is_ok());
+    }
 
     #[rstest]
     #[case("https://github.com/a/b")]

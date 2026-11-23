@@ -215,6 +215,7 @@ const DOCUMENTED: &[&str] = &[
     "tpl::render::path",
     "tpl::resolve::cache",
     "tpl::resolve::dirty_needs_local",
+    "tpl::resolve::minimum_version",
     "tpl::resolve::missing_root",
     "tpl::testing::case_parse",
     "tpl::testing::case_shape",

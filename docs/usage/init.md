@@ -37,6 +37,12 @@ git tpl init <template> [<dir>] [--ref <ref>] [--answer k=v]... [options]
 Steps 11 and 12 come last, after everything git-tpl did itself, and happen on `init` only.
 `git tpl update` does neither: it is a ref-only operation, and that is most of its value.
 
+A template, ancestor, or selected composed child can declare a
+[`minimum_version`](../templates/format.md#minimum-engine-version).
+An incompatible engine stops before publishing rendered files, attachment configuration, commits, refs, or merges.
+With `--init`, the initial empty directory and repository may already have been created.
+Upgrade git-tpl to the version reported in the diagnostic and retry.
+
 ## What a template may and may not do afterwards
 
 It may add a Git remote, and it may say something to you.

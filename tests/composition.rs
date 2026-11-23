@@ -5,6 +5,51 @@ mod common;
 use common::{Repo, tpl};
 
 #[test]
+fn only_selected_children_impose_a_minimum_engine_version() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let manifest = source.read("template.toml");
+    source
+        .write(
+            "template.toml",
+            &format!(
+                "minimum_version = '{}'\n{manifest}",
+                common::future_version()
+            ),
+        )
+        .commit_all("require newer child engine");
+    let project = Repo::init("project");
+    // Empty selection never acquires the unsupported child.
+    tpl(
+        &project,
+        &["init", parent.path.to_str().unwrap(), "--defaults"],
+    )
+    .success();
+    let before = project.working_state();
+    let tip = project.rev_parse("refs/tpl/parent");
+    let json = tpl(
+        &project,
+        &[
+            "--json",
+            "update",
+            "--defaults",
+            "--answer",
+            "sources=[\"jira\"]",
+        ],
+    )
+    .failure()
+    .json();
+    assert_eq!(json["error"]["code"], "tpl::compose::child_failed");
+    assert_eq!(
+        json["error"]["causes"][0]["code"],
+        "tpl::resolve::minimum_version"
+    );
+    assert_eq!(project.working_state(), before);
+    assert_eq!(project.rev_parse("refs/tpl/parent"), tip);
+}
+
+#[test]
 fn missing_child_locks_are_saved_on_changed_and_identical_renderings() {
     for changes_output in [false, true] {
         let source = child("source");

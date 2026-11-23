@@ -17,6 +17,11 @@ Inspect the current ref before retrying; the failed publication does not save ne
 
 Re-render the template and advance `refs/tpl/<id>`.
 
+If a template, ancestor, or selected composed child requires a newer engine through
+[`minimum_version`](../templates/format.md#minimum-engine-version), update fails before publication.
+The template ref, configuration, HEAD, index, and rendered worktree files remain unchanged.
+Upgrade git-tpl to the version reported by `tpl::resolve::minimum_version` and retry.
+
 To update and immediately integrate in one invocation, add `--merge` or use [`git tpl pull`](pull.md).
 To change the configured template and reuse compatible answers, use [`git tpl switch`](switch.md).
 
