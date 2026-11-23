@@ -400,6 +400,18 @@ impl Value {
                     input: input.to_string(),
                     expected: "an integer",
                 }),
+            // Finiteness is checked with question context so every answer source
+            // receives the same actionable diagnostic, including CLI overflow.
+            "a float" => {
+                input
+                    .trim()
+                    .parse::<f64>()
+                    .map(Value::Float)
+                    .map_err(|_| ValueError::Parse {
+                        input: input.to_string(),
+                        expected: "a float",
+                    })
+            }
             // A list on the command line is comma-separated. Anything richer
             // belongs in the configuration file, where it has real TOML syntax.
             "an array" => Ok(Value::Array(

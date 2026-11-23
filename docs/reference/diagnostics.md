@@ -139,7 +139,10 @@ These two are about the flags rather than the template, so they are raised as er
 | `tpl::eval::wrong_type` | An answer is not of the declared type. |
 | `tpl::eval::invalid_choice` | An answer is not one of the choices. |
 | `tpl::eval::choice_count` | A selection count violates its bounds, or too few choices can satisfy the minimum. |
-| `tpl::eval::invalid_list` | A free-form list contains a non-string, empty, or pattern-mismatching item, or its command-line answer is not a JSON array of strings. |
+| `tpl::eval::numeric_bound` | A numeric answer is non-finite or violates an inclusive numeric bound. |
+| `tpl::eval::string_length` | A string's Unicode character count violates an inclusive length bound. |
+| `tpl::eval::item_count` | A free-form list's item count violates an inclusive bound. |
+| `tpl::eval::invalid_list` | A list item is not text, is empty, or violates length/pattern rules; or CLI array syntax is invalid. |
 | `tpl::eval::pattern_mismatch` | An answer does not match the question's `pattern`. |
 | `tpl::eval::unanswered` | A question has no default and no answer was supplied. Usual cause of a failing `--defaults` run. |
 | `tpl::eval::cancelled` | The user interrupted the questionnaire. |

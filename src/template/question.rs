@@ -14,6 +14,8 @@ pub enum QuestionKind {
     Boolean,
     /// A whole number.
     Integer,
+    /// A finite number, including whole numbers.
+    Float,
     /// One of a fixed set.
     Choice,
     /// Multiple selections from a fixed set, optionally bounded. The answer is an array.
@@ -29,6 +31,7 @@ impl QuestionKind {
             QuestionKind::String => "a string",
             QuestionKind::Boolean => "a boolean",
             QuestionKind::Integer => "an integer",
+            QuestionKind::Float => "a float",
             QuestionKind::Choice => "a string",
             QuestionKind::MultiChoice => "an array",
             QuestionKind::List => "a list",
@@ -49,6 +52,7 @@ impl QuestionKind {
             QuestionKind::String => "string",
             QuestionKind::Boolean => "boolean",
             QuestionKind::Integer => "integer",
+            QuestionKind::Float => "float",
             QuestionKind::Choice => "choice",
             QuestionKind::MultiChoice => "multi_choice",
             QuestionKind::List => "list",
@@ -66,8 +70,29 @@ impl QuestionKind {
             QuestionKind::String | QuestionKind::Choice => matches!(value, Value::String(_)),
             QuestionKind::Boolean => matches!(value, Value::Bool(_)),
             QuestionKind::Integer => matches!(value, Value::Integer(_)),
+            QuestionKind::Float => matches!(value, Value::Integer(_) | Value::Float(_)),
             QuestionKind::MultiChoice => matches!(value, Value::Array(_)),
             QuestionKind::List => matches!(value, Value::Array(_)),
+        }
+    }
+}
+
+/// Numeric bounds retain integer precision rather than rounding through a float.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum NumericBound {
+    /// An exact whole-number bound.
+    Integer(i64),
+    /// A floating-point bound, permitted only for float questions.
+    Float(f64),
+}
+
+impl NumericBound {
+    /// Float questions deliberately widen integer declarations to floating point.
+    pub fn as_f64(self) -> f64 {
+        match self {
+            Self::Integer(value) => value as f64,
+            Self::Float(value) => value,
         }
     }
 }
@@ -78,6 +103,31 @@ pub struct Question {
     /// What kind of answer it wants.
     #[serde(rename = "type")]
     pub kind: QuestionKind,
+
+    /// Inclusive lower numeric bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<NumericBound>,
+    /// Inclusive upper numeric bound.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<NumericBound>,
+    /// Minimum Unicode scalar count for a string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_length: Option<usize>,
+    /// Maximum Unicode scalar count for a string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_length: Option<usize>,
+    /// Minimum number of free-form list entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_items: Option<usize>,
+    /// Maximum number of free-form list entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<usize>,
+    /// Minimum Unicode scalar count of each list entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_min_length: Option<usize>,
+    /// Maximum Unicode scalar count of each list entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_max_length: Option<usize>,
 
     /// Shown to the user. Defaults to the question's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -316,6 +366,14 @@ mod tests {
     fn a_non_string_default_is_never_treated_as_an_expression() {
         let question = Question {
             kind: QuestionKind::Boolean,
+            min: None,
+            max: None,
+            min_length: None,
+            max_length: None,
+            min_items: None,
+            max_items: None,
+            item_min_length: None,
+            item_max_length: None,
             prompt: None,
             help: None,
             default: Some(Value::Bool(true)),
@@ -344,6 +402,14 @@ mod tests {
     ) {
         let question = Question {
             kind: QuestionKind::String,
+            min: None,
+            max: None,
+            min_length: None,
+            max_length: None,
+            min_items: None,
+            max_items: None,
+            item_min_length: None,
+            item_max_length: None,
             prompt: None,
             help: None,
             default: None,
@@ -373,6 +439,14 @@ mod tests {
     ) {
         let question = Question {
             kind: QuestionKind::String,
+            min: None,
+            max: None,
+            min_length: None,
+            max_length: None,
+            min_items: None,
+            max_items: None,
+            item_min_length: None,
+            item_max_length: None,
             prompt: None,
             help: None,
             default: None,

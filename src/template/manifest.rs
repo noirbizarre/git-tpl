@@ -515,6 +515,81 @@ impl Manifest {
         }
 
         for (name, question) in &self.questions {
+            use super::{NumericBound, QuestionKind};
+            let invalid = |reason: String| ManifestError::InvalidQuestion {
+                name: name.clone(),
+                reason,
+            };
+            // An empty-only string question cannot meaningfully collect text.
+            if question.max_length == Some(0) {
+                return Err(invalid("`max_length` must be greater than zero".into()));
+            }
+            for (lower_name, upper_name, lower, upper, kind) in [
+                (
+                    "min_length",
+                    "max_length",
+                    question.min_length,
+                    question.max_length,
+                    QuestionKind::String,
+                ),
+                (
+                    "min_items",
+                    "max_items",
+                    question.min_items,
+                    question.max_items,
+                    QuestionKind::List,
+                ),
+                (
+                    "item_min_length",
+                    "item_max_length",
+                    question.item_min_length,
+                    question.item_max_length,
+                    QuestionKind::List,
+                ),
+            ] {
+                if (lower.is_some() || upper.is_some()) && question.kind != kind {
+                    return Err(invalid(format!(
+                        "`{lower_name}` and `{upper_name}` only apply to `{}` questions",
+                        kind.declared_name()
+                    )));
+                }
+                if let (Some(lower), Some(upper)) = (lower, upper)
+                    && lower > upper
+                {
+                    return Err(invalid(format!(
+                        "`{lower_name}` must not exceed `{upper_name}`"
+                    )));
+                }
+            }
+            for (field, bound) in [("min", question.min), ("max", question.max)] {
+                if let Some(bound) = bound {
+                    if !matches!(question.kind, QuestionKind::Integer | QuestionKind::Float) {
+                        return Err(invalid(format!(
+                            "`{field}` only applies to integer or float questions"
+                        )));
+                    }
+                    if question.kind == QuestionKind::Integer
+                        && !matches!(bound, NumericBound::Integer(_))
+                    {
+                        return Err(invalid(format!(
+                            "`{field}` must be an integer for an integer question"
+                        )));
+                    }
+                    if !bound.as_f64().is_finite() {
+                        return Err(invalid(format!("`{field}` must be finite")));
+                    }
+                }
+            }
+            if let (Some(min), Some(max)) = (question.min, question.max) {
+                // Integer bounds must stay exact even beyond floating-point integer precision.
+                let inverted = match (min, max) {
+                    (NumericBound::Integer(min), NumericBound::Integer(max)) => min > max,
+                    _ => min.as_f64() > max.as_f64(),
+                };
+                if inverted {
+                    return Err(invalid("`min` must not exceed `max`".into()));
+                }
+            }
             if (question.min_choices.is_some() || question.max_choices.is_some())
                 && question.kind != super::QuestionKind::MultiChoice
             {

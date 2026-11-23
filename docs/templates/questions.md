@@ -15,7 +15,11 @@ help = "Used for the package name and the README title"
 
 | Key | Type | Meaning |
 |---|---|---|
-| `type` | string | `string`, `boolean`, `integer`, `choice`, `multi_choice`, `list`. |
+| `type` | string | `string`, `boolean`, `integer`, `float`, `choice`, `multi_choice`, `list`. |
+| `min`, `max` | number | Inclusive numeric bounds for `integer` or `float`. |
+| `min_length`, `max_length` | integer | Inclusive Unicode character bounds for `string`. |
+| `min_items`, `max_items` | integer | Inclusive item-count bounds for `list`. |
+| `item_min_length`, `item_max_length` | integer | Inclusive Unicode character bounds for each `list` item. |
 | `prompt` | string | Shown to the user. Defaults to the question's name. |
 | `help` | string | A line of explanation under the prompt. |
 | `default` | any / expression | The pre-filled value. |
@@ -57,6 +61,19 @@ help = "Used for the package name and the README title"
     type = "integer"
     prompt = "Port"
     default = 8080
+    min = 1
+    max = 65535
+    ```
+
+=== "float"
+
+    ```toml
+    [questions.timeout]
+    type = "float"
+    prompt = "Request timeout"
+    default = 2.5
+    min = 0.1
+    max = 60.0
     ```
 
 === "choice"
@@ -117,11 +134,61 @@ help = "Used for the package name and the README title"
 
     The answer is an ordered array of strings, with no predefined choices.
     Supply CLI answers as JSON arrays, e.g. `--answer 'modules=["jira","confluence"]'`.
-    An empty array is valid; each item is checked independently against `item_pattern`.
+    An empty array is valid unless `min_items` requires entries.
+    Each item must be nonempty and is checked independently against `item_pattern`.
 
 Types are enforced.
 Supplying `--answer port=nope` for an `integer` question is an error naming the question, the value and the
 expected type — not a silent coercion to a string.
+
+## Primitive constraints
+
+Every bound is inclusive; omit either end to leave it unrestricted.
+Integer questions require integer answers and integer bounds, with exact whole-number comparisons.
+Float questions accept integer and floating-point answers and bounds, compared as floating-point numbers.
+NaN and positive or negative infinity are rejected even without bounds.
+Typed strings such as `"2.5"` remain strings; only CLI text is parsed as the declared numeric type.
+
+```toml
+[questions.project_name]
+type = "string"
+min_length = 2
+max_length = 64
+pattern = "^[a-z][a-z0-9-]*$"
+
+[questions.modules]
+type = "list"
+min_items = 1
+max_items = 10
+item_min_length = 2
+item_max_length = 32
+item_pattern = "^[a-z][a-z0-9-]*$"
+```
+
+String and item lengths count Unicode scalar values rather than UTF-8 bytes or grapheme clusters.
+For example, `é` has length one, while `e` followed by a combining accent has length two.
+Answers are not normalized or trimmed before counting.
+Length constraints and existing patterns must both pass.
+List counts include every entry in order, including duplicates; entries must still be nonempty strings.
+`max_length` must be greater than zero and at least `min_length` when both are set.
+`max_items = 0` allows only an empty list.
+
+Lengths and counts must be nonnegative integers, minimums must not exceed maximums,
+and constraints on incompatible question types are rejected when the manifest is loaded.
+List counts use `min_items`/`max_items`; `min_choices`/`max_choices` remain exclusive to `multi_choice`.
+
+The same checks apply to interactive answers, CLI and answer-file input, selected literal or expression defaults,
+computed-derived defaults, recorded answers, and defaults injected by `default_when_skipped`.
+An unused default is not evaluated when an explicit answer is supplied.
+Interactive prompts explain invalid input and retry the current question or list item.
+Non-interactive failures identify the question and violated bound; values are never clamped or truncated.
+An update whose recorded answer no longer satisfies a constraint fails before changing the rendered ref or config.
+
+List entry errors retry the current entry; blank completion below `min_items` requests more entries.
+At `max_items`, the list finishes once any remaining defaults have been explicitly removed with `-`.
+Non-interactive failures identify the question and violated bound:
+`tpl::eval::numeric_bound`, `tpl::eval::string_length`, `tpl::eval::item_count`,
+or `tpl::eval::invalid_list` for invalid entries.
 
 ## Conditional questions
 

@@ -8,6 +8,45 @@ use tpl::template::Value;
 
 const BASE: &str = "name = 'base'\n[questions.name]\ntype = 'string'\ndefault = 'original'\n";
 
+#[test]
+fn primitive_constraints_filter_switch_candidates_but_reject_explicit_invalid_answers() {
+    let world = World::with_template(BASE, &[("name.jinja", "{{ name }}")]);
+    world.init(&[]).success();
+    let replacement = target(
+        "name = 'bounded'\n[questions.name]\ntype = 'string'\nmax_length = 3\ndefault = 'new'\n",
+        &[("name.jinja", "{{ name }}")],
+    );
+    let before = world.project.working_state();
+    assert_eq!(
+        tpl(
+            &world.project,
+            &[
+                "--json",
+                "switch",
+                &replacement.source(),
+                "--defaults",
+                "--answer",
+                "name=oversized"
+            ]
+        )
+        .failure()
+        .error_code(),
+        "tpl::eval::string_length"
+    );
+    assert_eq!(world.project.working_state(), before);
+    let result = tpl(
+        &world.project,
+        &["--json", "switch", &replacement.source(), "--defaults"],
+    )
+    .success()
+    .json();
+    assert_eq!(result["reusedAnswers"], serde_json::json!([]));
+    assert_eq!(
+        Config::load(&world.project.path).unwrap().answers["name"],
+        Value::String("new".into())
+    );
+}
+
 fn target(manifest: &str, files: &[(&str, &str)]) -> Template {
     let repo = Repo::init("replacement");
     repo.write("template.toml", manifest);

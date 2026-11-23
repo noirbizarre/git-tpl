@@ -32,6 +32,10 @@ is what anything driving git-tpl non-interactively needs first.
 Question JSON includes string validation as `pattern`/`message` and list-item validation as
 `itemPattern`/`itemMessage`, plus multiselect bounds as `minChoices`/`maxChoices`. Unset constraints are `null`;
 messages include the same effective fallback used when validating answers.
+Numeric questions expose `min`/`max`, strings expose `minLength`/`maxLength`,
+and lists expose `minItems`/`maxItems` and `itemMinLength`/`itemMaxLength`.
+The `float` type accepts finite integer or floating-point answers.
+See [primitive constraints](../templates/questions.md#primitive-constraints) for validation semantics.
 
 ```sh
 git tpl --json questions ./tpl \
