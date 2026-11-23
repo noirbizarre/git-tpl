@@ -4,6 +4,72 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0](https://github.com/noirbizarre/git-tpl/compare/0.16.0..0.17.0) - 2026-11-23
+
+### 💫 Features
+
+- **backport** Route changes to owning template repositories ([#237](https://github.com/noirbizarre/git-tpl/issues/237)) - ([dd4bf68](https://github.com/noirbizarre/git-tpl/commit/dd4bf68326d653d468065636ab7280d82dd70f91))
+- **data** Cache checksum-pinned HTTP sources ([#230](https://github.com/noirbizarre/git-tpl/issues/230)) - ([56fcca8](https://github.com/noirbizarre/git-tpl/commit/56fcca8b834479071a4705966437530fb13e3fe6))
+- **log**  🚨 **breaking** Align revision and range syntax with git log ([#215](https://github.com/noirbizarre/git-tpl/issues/215)) - ([9484ee3](https://github.com/noirbizarre/git-tpl/commit/9484ee39e87ed83bcf7c953bbdbd4374c168ca47))
+- **manifest** Support one-shot rendered files ([#236](https://github.com/noirbizarre/git-tpl/issues/236)) - ([66136b0](https://github.com/noirbizarre/git-tpl/commit/66136b03eb6e448f8b0d39eabf4cac655013bc49))
+- **manifest** Support minimum engine versions ([#234](https://github.com/noirbizarre/git-tpl/issues/234)) - ([4c7460e](https://github.com/noirbizarre/git-tpl/commit/4c7460ea8290145592c3a5dd3eb9fd4d0c9f62d0))
+- **merge** Honor Git-configured external merge drivers ([#233](https://github.com/noirbizarre/git-tpl/issues/233)) - ([ce7d956](https://github.com/noirbizarre/git-tpl/commit/ce7d956bd5995a04d96952738b554db518319e0a))
+- **pull** Update and merge templates in one command ([#214](https://github.com/noirbizarre/git-tpl/issues/214)) - ([0b31a1e](https://github.com/noirbizarre/git-tpl/commit/0b31a1e77646c64c53b77cabf43d3452bbc10f93))
+- **questions** Add primitive value constraints ([#235](https://github.com/noirbizarre/git-tpl/issues/235)) - ([64e0b2f](https://github.com/noirbizarre/git-tpl/commit/64e0b2f04faf54c039458ca0dd4d9e1140b28b82))
+- **questions** Add optional multiselect selection bounds ([#222](https://github.com/noirbizarre/git-tpl/issues/222)) - ([89d8ebe](https://github.com/noirbizarre/git-tpl/commit/89d8ebe9e8733df61a6604082697d7f14992d686))
+- **switch** Change templates while preserving answers and history ([#229](https://github.com/noirbizarre/git-tpl/issues/229)) - ([ac2b9ab](https://github.com/noirbizarre/git-tpl/commit/ac2b9ab79693d328ce03c79ff932fff723ea6bd6))
+- **test**  🚨 **breaking** Store snapshot paths and modes in TOML ([#217](https://github.com/noirbizarre/git-tpl/issues/217)) - ([ac7f31e](https://github.com/noirbizarre/git-tpl/commit/ac7f31e9405cd5ddf722a5ddab406b4bd9d72aaa))
+- **test**  🚨 **breaking** Assert evaluated context in template cases ([#211](https://github.com/noirbizarre/git-tpl/issues/211)) - ([1b44c00](https://github.com/noirbizarre/git-tpl/commit/1b44c00cae2928c33609f78bc00dacaea7941ebf))
+
+### 🐛 Bug Fixes
+
+- **ci** Use direct Dev Drive paths and reliable prompt cancellation - ([b89bcc8](https://github.com/noirbizarre/git-tpl/commit/b89bcc8621f30d1691025983b8c6e2894d6a572e))
+- **cli** Warn about ignored files in dirty dry-runs - ([38fe4ef](https://github.com/noirbizarre/git-tpl/commit/38fe4ef41168ebcd6a8823b671980548a4eec4cb))
+- **compose** Retain module-scoped data provenance - ([7f85735](https://github.com/noirbizarre/git-tpl/commit/7f857357b42ca79000c3afc6febfdd5dfe19f89e))
+- **init** Report the persisted template source - ([46c45da](https://github.com/noirbizarre/git-tpl/commit/46c45dab49e66cb6cd2389637d2bc2108e8ff6b1))
+- **render** Keep whole-repository output out of partials - ([4b35604](https://github.com/noirbizarre/git-tpl/commit/4b35604f6619d703066638fd971513382ee0083b))
+- **render** Reject reserved paths before writing output - ([2d0d3c8](https://github.com/noirbizarre/git-tpl/commit/2d0d3c8d8700612fcbd6c619d3457c0df2ceb3ad))
+- **update** Match dry-run and legacy provenance semantics - ([819a616](https://github.com/noirbizarre/git-tpl/commit/819a616ee3fba90ab91c24e062c4ae4c49979780))
+- Align rendering safety, provenance and documented behavior ([#238](https://github.com/noirbizarre/git-tpl/issues/238)) - ([543338b](https://github.com/noirbizarre/git-tpl/commit/543338b125652788ad707798ffa81261346fcc8a))
+
+### 📚 Documentation
+
+- **log** Clarify count limits for explicit references - ([71cb177](https://github.com/noirbizarre/git-tpl/commit/71cb17764f6082bf31e487d9bec83e4e102acd9e))
+- **skill** Attribute extra merge controls to pull - ([03f1958](https://github.com/noirbizarre/git-tpl/commit/03f19586bab999e4e9df93baa26c4d872324211a))
+- **test** Explain skipped write-mode summary counts - ([004148a](https://github.com/noirbizarre/git-tpl/commit/004148a0131701ff4d8e55f568f906a398ab3850))
+- Clarify explicit automatic publication consent - ([54d763d](https://github.com/noirbizarre/git-tpl/commit/54d763d2bcf1c9b449ace4713504b7952785ca9e))
+- Scope diagnostic guarantees to runtime failures - ([b2744bc](https://github.com/noirbizarre/git-tpl/commit/b2744bc5154fb2c354c5a5c6d7de2b1501e5b019))
+- Show completed empty-repository attachment history - ([710e398](https://github.com/noirbizarre/git-tpl/commit/710e39856b9b1815a6d57a46eee26a254c79811a))
+- Align loading descriptions with demand evaluation - ([c2cbea0](https://github.com/noirbizarre/git-tpl/commit/c2cbea0b9b9dd6b4f4280b84f5a25fe5318d676c))
+- Correct project data provenance rationale - ([254dcef](https://github.com/noirbizarre/git-tpl/commit/254dcef1a156595a53b31ef4a88017370de24d47))
+- Include one-shot history in reproduction inputs - ([7b0cbb8](https://github.com/noirbizarre/git-tpl/commit/7b0cbb83d5ff2d7f5c9a5a4fc3bb866d7f563a7a))
+- Qualify non-executing merge preview guarantees - ([a078bd3](https://github.com/noirbizarre/git-tpl/commit/a078bd3518630a5868010dfcc668d9e416c41d70))
+- Distinguish release tags from immutable pins - ([811fe6b](https://github.com/noirbizarre/git-tpl/commit/811fe6bd1c2d62364a0a96e945198f71a45f7634))
+- Avoid pinning an outdated GitTPL action version in README ([#227](https://github.com/noirbizarre/git-tpl/issues/227)) - ([958dc0b](https://github.com/noirbizarre/git-tpl/commit/958dc0b0208d5c00ccb7175fd55b9b96b40b439a))
+
+### 🧪 Tests
+
+- **data** Assert revision diagnostics without terminal wrapping - ([e24e938](https://github.com/noirbizarre/git-tpl/commit/e24e93821ca7692819794a500bbafa6ed7b629d7))
+- **init** Update recorded-source output snapshots - ([40aa203](https://github.com/noirbizarre/git-tpl/commit/40aa203d3049dc86cbe517004635cd4a6ba0a5a2))
+
+### 🏗️ Build
+
+- **deps** Update Cargo and mise locks - ([472247c](https://github.com/noirbizarre/git-tpl/commit/472247c562d4279c8d78cc7e075396fa359e113c))
+- **deps** Update mise.lock - ([37f3d63](https://github.com/noirbizarre/git-tpl/commit/37f3d63980121c7dc3b74de8b54597a57762969f))
+- **deps** Update mise.lock - ([607a4f7](https://github.com/noirbizarre/git-tpl/commit/607a4f7e6b35059526f17d33f9f12337b2fed3b8))
+
+### 🧹 Chores
+
+- **tpl** Merge latest rust.tpl update - ([fb74aa8](https://github.com/noirbizarre/git-tpl/commit/fb74aa8676a35356bc3e50e3b774c80b67917062))
+- **tpl** Merge latest rust.tpl update - ([2a3acca](https://github.com/noirbizarre/git-tpl/commit/2a3accaefc7e2792fac11fa31fdc14b5d0d8c0a1))
+- Update template and locked dependencies ([#232](https://github.com/noirbizarre/git-tpl/issues/232)) - ([5c08711](https://github.com/noirbizarre/git-tpl/commit/5c0871103d661211a781905524b36fbb19972018))
+
+### Tpl
+
+- Render rust at main - ([9b988a9](https://github.com/noirbizarre/git-tpl/commit/9b988a9a242e6187953f78b2d67bffbbd38decc6))
+- Render rust at main - ([0027a55](https://github.com/noirbizarre/git-tpl/commit/0027a559461c344fc12148869102ea40feed5e98))
+- Render rust at main - ([0636758](https://github.com/noirbizarre/git-tpl/commit/06367582cbc7a15d07f0126da9384a1f65a2f2c2))
+
 ## [0.16.0](https://github.com/noirbizarre/git-tpl/compare/0.15.0..0.16.0) - 2026-11-03
 
 ### 💫 Features
