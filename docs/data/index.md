@@ -48,8 +48,8 @@ Instead, a template *declares* the data it wants. The data layer owns:
 - provenance — recording what contributed to a rendering
 - error handling
 
-Expressions consume the result.
-They cannot cause a load.
+Expressions can demand declared data sources, triggering acquisition through the data layer.
+They cannot load undeclared resources or perform arbitrary I/O.
 
 ## Kinds
 

@@ -70,7 +70,8 @@ parent's entirely and keeps the parent's position, and a name new to the child i
 
 ## Available while prompting
 
-A computed value is resolved as soon as its dependencies are, which means a *later* question can use it:
+A computed value resolves when demanded, after resolving the dependencies its expression actually accesses.
+Unused computed values remain unresolved; a *later* question can demand one while prompting:
 
 ```toml
 [questions.project_name]
