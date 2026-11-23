@@ -58,6 +58,10 @@ id = "{{ id }}"
 
 The parent manifest names each child ref; `.config/git.tpl.toml` records its resolved commit on `init` and `update`.
 The rendered ref also records child commits so historical backport renders the same bytes after a branch moves.
+New render commits additionally record each child's complete inherited source chain.
+Backport routes a composed file to its actual child or ancestor owner, using that module's original answers and partials.
+Mixed owners require separate mailboxes through `--output-dir` or `--json`;
+see [backport](../usage/backport.md#several-owning-repositories) for the review and application workflow.
 Project-free `render` reports those commits without creating a project config.
 To add a module later, edit the `modules` answer in `.config/git.tpl.toml`, run `git tpl update --defaults`,
 review `git tpl diff`, and run `git tpl merge`.

@@ -120,8 +120,15 @@ Only file additions, deletions and mode changes need manifest edits.
 Legacy snapshots remain readable; when both manifests exist, `manifest.toml` is authoritative.
 Backport rejects links and file/link conversions with `tpl::backport::symlink`, including hunk listings.
 
-Backport refuses inherited/composed outputs with `tpl::backport::non_leaf`, including hunk listings.
-Use the owning repository directly or exclude the output; a matching leaf source path does not establish ownership.
+Backport routes inherited/composed outputs to their actual historical source owner; leaf overrides remain leaf-owned.
+Several owners require `--output-dir DIR` (a new directory, numbered mailboxes plus `manifest.json`) or `--json`.
+Grouped JSON has `result: "grouped"` and `owners[]`, each with its own `template`, `revision`, `patch` and `applyCommand`.
+Never concatenate owners' mailboxes or apply them to the configured leaf indiscriminately.
+`tpl::backport::history` means missing/mismatched historical evidence or multiple base revisions of one owner.
+Restore recorded sources/pins or edit upstream; new renders record full child ancestry, but unchanged updates do not.
+`tpl::backport::source_conflict` means module instances propose different edits to one source.
+`tpl::backport::shared_source` means an edit changes an unselected instance; select corresponding changes too.
+`tpl::backport::multiple_owners` asks for separate directory/JSON output; `output_write` includes publication failures.
 
 Configured local template sources are relative to the project root, including for log and backport.
 CLI init paths are relative to the invocation directory and are rebased when recorded.
@@ -254,7 +261,7 @@ do not assume it is preinstalled.
    handle `tpl::git::dirty_index` by committing/unstaging, and `tpl::git::repository_busy` by finishing/aborting it.
    `[extends].rev` resolves exact tags or unique 7–40-character commit-object prefixes, never hexadecimal branches.
    Ambiguous/noncommit object pins produce `tpl::git::no_such_revision`; tags win branch-name collisions.
-9. **`backport` never applies its own patch.** It only ever emits one, to stdout or `--output <file>`.
+9. **`backport` never applies its own patch.** It emits owner-specific mailboxes to stdout, files, a directory or JSON.
    Hand it to `git -C <template-clone> am` yourself (or give it to the human to review first).
    Under `--json`, `-p`/`--patch` (interactive hunk selection) is refused with `tpl::backport::not_interactive` —
    pass `--unsubstitute` instead of trying to force interactivity.
@@ -303,6 +310,7 @@ do not assume it is preinstalled.
 | List the local changes that could go upstream | `git tpl backport --list-hunks --json` |
 | Send chosen hunks upstream | `git tpl backport --unsubstitute --json --hunk <path>:<id>... -o x.patch` |
 | Send every local change upstream | `git tpl backport --unsubstitute --json` |
+| Review mailboxes for several source owners | `git tpl backport --unsubstitute --json --output-dir /tmp/new-review-dir` |
 | Share a rendering with the team | `git tpl push` / `git tpl fetch` |
 | Run a template's own test suite | `git tpl test --json` (check `summary.failed`, not just `ok`) |
 
@@ -427,8 +435,9 @@ git tpl backport --list-hunks --json
 
 `plan[]` has one entry per changed file (`rendered`, `source`, `added`), each with `hunks[]`:
 `spec` (what `--hunk` takes), `header`, `insertions`, `deletions`, and `lines` (the hunk body, prefixed ` `/`-`/`+`).
-No patch is produced yet. Eligible leaf-owned text files are listed before substitution and round-trip proof checks.
-Symlink changes and inherited or composed content can fail before listing;
+No patch is produced yet. Eligible text files are listed before substitution and round-trip proof checks.
+Non-leaf entries include `owner: {source, commit}`; the source path alone does not establish ownership.
+Symlink changes and insufficient historical evidence can fail before listing;
 exclude those paths and retry, or edit their owning template directly.
 A file the template never produced appears only if you name it as a `<pathspec>`.
 `skipped[]` holds what cannot be backported at all (a locally deleted file, a binary file).
@@ -458,6 +467,10 @@ git tpl backport --unsubstitute --json \
 ```
 
 One invocation per change, each against the same baseline, so the patches are independent of each other.
+For a change spanning owners, replace `-o` with `--output-dir /tmp/new-change-directory`.
+Read each `owners[]` payload or the versioned manifest and deliver one mailbox per owner.
+`sourceOutputs` maps each deduplicated source edit to all selected module outputs.
+Shared-source edits must also preserve every unselected instance's baseline.
 `--unsubstitute` is what makes this safe for a non-interactive caller;
 read `unsubstituted[]` in the payload and carry every entry into the change's description for the reviewer —
 a reversed substitution changes what the template produces for every project.
@@ -469,7 +482,9 @@ and carry on with the other changes.
 `tpl::backport::unknown_hunk` means the project changed since step 2: list again.
 
 **6. Deliver each patch.**
-Find the template with `template` in the payload (`config.template.source` in `.config/git.tpl.toml`).
+Find each actual owner with `template` and the full `revision.commit` in its payload.
+An ancestor or child owner can differ from `config.template.source`; use its own checkout and mailbox.
+Review its recorded base commit before applying; these patches do not automatically advance any inheritance pin.
 Never run `applyCommand` blindly: for a URL it contains the placeholder `<your-template-clone>`.
 
 - **The upstream is on GitHub** (`https://github.com/<owner>/<repo>`, `git@github.com:<owner>/<repo>.git`):
@@ -555,7 +570,7 @@ case-level `trust` only controls data loading during cases, and `test` has no in
 | `diff` | `git tpl diff [--stat] [--name-only] [--exit-code] [-- <path>...]` | `conflicts[]`,`changes[]{path,kind,insertions,deletions}` |
 | `merge` | `git tpl merge [--no-commit] [-m <msg>]` / `git tpl merge --abort` | `result`(`upToDate`\|`fastForward`\|`merged`\|`staged`\|`conflicted`\|`aborted`),`commit`,`conflicts[]` |
 | `show` | `git tpl show <path>` | no envelope — stdout **is** the file's bytes |
-| `backport` | `git tpl backport [<pathspec>...] [--exclude g]... [-o file] [--unsubstitute] [--list-hunks \| --hunk <path>:<id>...]` | `result`(`patched`\|`nothingToBackport`\|`plan`),`template`,`patch`,`files[]`,`skipped[]`,`unsubstituted[]`,`plan[]{rendered,source,added,hunks[]{id,spec,header,insertions,deletions,lines}}` |
+| `backport` | `git tpl backport [<pathspec>...] [-o file \| --output-dir dir] [--exclude g]... [--unsubstitute] [--list-hunks \| --hunk <path>:<id>...]` | Single owner: `result`,`template`,`revision`,`patch`,`files[]`,`skipped[]`,`unsubstituted[]`,`plan[]`; grouped: `result: grouped`,`owners[]`,`outputDirectory` |
 | `fetch` | `git tpl fetch [--remote name] [--dry-run]` | `state`(`absent`\|`synced`\|`diverged`\|`behind`\|`ahead`),`relation{ahead,behind}` |
 | `push` | `git tpl push [--remote name] [--dry-run]` | `remote`,`ref` |
 | `cache list` | `git tpl cache list` | `root`,`entries[]{id,kind,source,lastUsed,bytes}` |

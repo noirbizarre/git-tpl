@@ -2,12 +2,10 @@
 
 Hunk IDs include both complete file contents, so even a distant edit invalidates a previously listed selection.
 
-Only files owned by the attached leaf template can be backported.
+Changes are routed to the repository and source revision that produced each rendered file.
+Inherited sources belong to their ancestor; composed sources belong to the child or its actual ancestor.
 Symbolic-link target changes and file/link conversions fail with `tpl::backport::symlink`, including hunk listings.
 Change links directly in their owning template.
-Content changes owned by inherited or composed repositories fail with `tpl::backport::non_leaf`,
-including during `--list-hunks`, even if the leaf has a source with the same path.
-Edit the owning repository directly or exclude the path.
 A leaf override of an inherited source is leaf-owned and can be backported normally.
 Initialized [one-shot files](../templates/format.md#files) belong to the project.
 Their content changes fail with `tpl::backport::one_shot`, including hunk listings,
@@ -20,7 +18,7 @@ Selecting an added symbolic link still fails with `tpl::backport::symlink`.
 Emit a patch that carries a local fix back to the template it came from.
 
 ```sh
-git tpl backport [<pathspec>...] [--exclude <glob>]... [-o <file>]
+git tpl backport [<pathspec>...] [--exclude <glob>]... [-o <file> | --output-dir <dir>]
                  [-p | --list-hunks | --hunk <path>:<id>...] [--trust] [--unsubstitute]
 ```
 
@@ -91,6 +89,53 @@ Nothing to backport: the project matches the template's rendering.
 That is the whole feature.
 
 ## Applying it
+
+### Several owning repositories
+
+A single owner still produces one mailbox on stdout, or in `-o FILE`.
+When selected changes span repositories, use a new directory:
+
+```sh
+git tpl backport --output-dir ../backport-review
+```
+
+The directory contains `0001.patch`, `0002.patch`, and so on, plus `manifest.json`.
+The versioned manifest identifies each mailbox's repository, full base commit, source/output mappings and reversals.
+Review each mailbox and apply it only in a checkout of its identified owner at the stated base commit.
+The printed apply command names that particular mailbox; remote owners require your own clone.
+git-tpl never applies it or changes any template checkout.
+
+An existing output directory, including an empty directory or symlink, is refused.
+All patches are proved and staged before publication; the manifest is published last as the completion marker.
+An ordinary publication failure cleans up the newly reserved directory.
+A no-op creates no directory.
+
+Multiple-owner raw stdout and `-o FILE` fail with `tpl::backport::multiple_owners`.
+Mailboxes for different owners are never concatenated into a stream that could be piped into one repository.
+`--json` instead returns `result: "grouped"` and an `owners` array with a separate mailbox per owner.
+Save and review those mailbox strings individually; see the [JSON reference](../reference/json.md#backport).
+
+### Historical and shared sources
+
+Routing uses the rendered ref's historical source commits, including recorded child commits after branches move.
+Reproducing identical output is also required, but does not by itself establish historical source ownership.
+Missing or inconsistent provenance, moved ancestor pins and multiple base revisions of one repository fail
+with `tpl::backport::history`.
+Restore the recorded pins or edit the owning source directly.
+New renders record complete child ancestry; legacy child ancestry is accepted when every edge uses a full commit SHA.
+An unchanged `update` does not create a commit merely to upgrade old provenance.
+
+Several modules may render the same upstream file with different answers.
+Identical source edits are emitted once and checked in every consuming module's original rendering environment.
+Different proposals for that file fail with `tpl::backport::source_conflict`.
+An edit that would alter an unselected module fails with `tpl::backport::shared_source`:
+make and select the corresponding change in all affected modules, or edit upstream directly.
+The proof covers the captured answers and environments, not every answer a future project might supply.
+
+Explicit project-only additions target the attached leaf, regardless of their output directory.
+An addition that would overwrite an existing or inherited source is refused.
+
+### One mailbox
 
 `git am` reads a mailbox on stdin, so the pipe needs nothing from git-tpl:
 
@@ -298,11 +343,12 @@ Four rules make this safe to run unattended:
   List again rather than guessing which hunk was meant.
 - **Selection still happens before the patch is built**, exactly as with `-p`.
   A named hunk that cannot be carried is refused as `hunk_refused`, and the listing does not pre-judge it:
-  eligible leaf-owned text files are listed before substitution and round-trip proof checks.
-  Symlink changes and inherited or composed content can still fail before listing.
+  eligible text files from every provable owner are listed before substitution and round-trip proof checks.
+  Symlink changes and insufficient historical evidence can still fail before listing.
   Exclude those paths and list again, or edit their owning template directly.
 
-`--hunk` conflicts with `-p` and `--list-hunks`; `--list-hunks` conflicts with `-o`, since it writes no patch.
+`--hunk` conflicts with `-p` and `--list-hunks`;
+`--list-hunks` conflicts with `-o` and `--output-dir`, since it writes no patch.
 See [ADR-037](../adr/037-non-interactive-hunk-selection.md).
 
 ## Changing a line that holds a placeholder

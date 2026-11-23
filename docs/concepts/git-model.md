@@ -210,7 +210,7 @@ Template-Ref: v1.4.0
 Template-Commit: 4f2c1a9e6b3d8f05a1c7e2b94d6f8a03c5e17b29
 Answers-Digest: sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 Data-Source: licenses = template:data/licenses.toml@4f2c1a9
-Template-Extends: https://github.com/org/base-template@a1b2c3d
+Template-Extends: https://github.com/org/base-template@a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
 Template-Once: "assets/logo.svg"
 Tpl-Version: X.Y.Z
 ```
@@ -220,6 +220,12 @@ The subject names the template's manifest `name` and the reference asked for.
 [Data sources](../data/index.md#provenance).
 `Template-Extends` appears once per ancestor, nearest parent first, only for a template with an
 [`[extends]`](../templates/format.md#extends) chain — see [ADR-034](../adr/034-template-inheritance.md).
+New ancestor trailers use full commit IDs; older abbreviated IDs remain readable.
+`Template-Compose` records each child declaration's source, requested ref and full child commit as JSON.
+New records also carry `ancestryVersion: 1` and `extends`, an ordered array of ancestor `source`/`commit` objects.
+An empty array proves no child ancestry; an absent or null array is legacy evidence of unknown ancestry.
+Backport validates these historical identities independently of rendered-tree equality
+before routing patches to their owners ([ADR-054](../adr/054-owner-routed-backports.md)).
 
 `Template-Once` is repeated for each initialized output path as a JSON string, in sorted order.
 The cumulative set survives declaration removal; see [ADR-053](../adr/053-one-shot-rendered-files.md).

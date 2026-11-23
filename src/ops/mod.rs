@@ -5,6 +5,7 @@
 //! operations the CLI exposes.
 
 pub mod backport;
+mod backport_trace;
 pub mod compose;
 pub mod extends;
 pub mod hunks;
@@ -46,7 +47,7 @@ pub use switch::{SwitchOutcome, switch};
 
 pub use crate::migration::{self, Migration, MigrationError, Move};
 pub use backport::{
-    Backport, BackportError, BackportedFile, PlannedFile, PlannedHunk, Skipped, backport,
+    Backport, BackportError, BackportedFile, PlannedFile, PlannedHunk, Skipped, backport, backports,
 };
 pub use hunks::{Hunk, HunkSelection, Picker, Picking, Selection};
 pub use unsubstitute::{Proposal, Unsubstitute, Unsubstituter, Unsubstitution, Verdict};
@@ -698,6 +699,7 @@ impl Trust<'_> {
 /// `git tpl lint` need the files and the context, and have no repository to
 /// write blobs into. [`Render`] is this plus the tree.
 pub struct RenderedFiles {
+    backport_trace: backport_trace::Trace,
     /// The resolved template.
     pub template: Resolved,
     /// The resolved context.
@@ -767,6 +769,7 @@ impl<'a> Target<'a> {
 /// two answer sets against two different revisions if the branch moved between
 /// them.
 pub struct RenderedOnce {
+    backport_trace: backport_trace::Trace,
     /// The resolved context.
     pub context: Context,
     /// The rendered files, sorted by output path.
@@ -919,6 +922,7 @@ fn render_files_from_location(
     )?;
 
     Ok(RenderedFiles {
+        backport_trace: rendered.backport_trace,
         template,
         context: rendered.context,
         files: rendered.files,
@@ -1024,6 +1028,7 @@ pub fn render_context(
         },
     )?;
     Ok(RenderedFiles {
+        backport_trace: rendered.backport_trace,
         template,
         context: rendered.context,
         files: rendered.files,
@@ -1034,6 +1039,7 @@ pub fn render_context(
 
 #[derive(Clone, Copy)]
 enum Preparation<'a> {
+    Backport,
     Files,
     Init,
     Update,
@@ -1256,8 +1262,23 @@ fn render_resolved_preparing(
     let context = session.finish();
 
     let mut captured = std::collections::BTreeSet::new();
+    let mut backport_trace = if matches!(preparation, Preparation::Backport) {
+        backport_trace::capture(
+            template,
+            source,
+            &files,
+            backport_trace::Environment {
+                context: context.clone(),
+                partials: partials.clone(),
+                undefined,
+            },
+        )?
+    } else {
+        BTreeMap::new()
+    };
+
     let composed = if !template.manifest.compose.is_empty() {
-        compose::render(
+        compose::render_traced(
             &template.manifest.compose,
             &context,
             &partials,
@@ -1268,6 +1289,7 @@ fn render_resolved_preparing(
             recorded_composed,
             baseline,
             &mut captured,
+            matches!(preparation, Preparation::Backport).then_some(&mut backport_trace),
         )?
     } else {
         Vec::new()
@@ -1306,6 +1328,7 @@ fn render_resolved_preparing(
     };
 
     Ok(RenderedOnce {
+        backport_trace,
         context,
         files,
         provenance,
@@ -2336,7 +2359,13 @@ fn update_using<T: std::borrow::Borrow<Resolved>>(
         .as_ref()
         // Capturing unchanged bytes still needs a commit or declaration removal would lose ownership.
         .map_or(!rendered.provenance.once.is_empty(), |previous| {
-            previous.composed != rendered.provenance.composed
+            previous.composed.len() != rendered.provenance.composed.len()
+                || !rendered
+                    .provenance
+                    .composed
+                    .iter()
+                    .zip(&previous.composed)
+                    .all(|(new, old)| new.matches_recorded(old))
                 || previous.once != rendered.provenance.once
         });
     // Committing an exact dirty snapshot changes provenance, not output bytes.
@@ -2590,7 +2619,13 @@ pub fn status(
         .map(|rendered| rendered.provenance.composed)
     });
     let composed_moved = match (&available_composed, &recorded) {
-        (Some(available), Some(previous)) => available != &previous.composed,
+        (Some(available), Some(previous)) => {
+            available.len() != previous.composed.len()
+                || !available
+                    .iter()
+                    .zip(&previous.composed)
+                    .all(|(new, old)| new.matches_recorded(old))
+        }
         _ => false,
     };
 

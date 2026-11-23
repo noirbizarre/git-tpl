@@ -18,6 +18,10 @@ use crate::userconfig::UserConfig;
 /// Fail before writing a Git tree when a child cannot be pinned, rendered or placed safely.
 #[derive(Debug, Error, Diagnostic)]
 pub enum ComposeError {
+    /// Backport requires historical source identity as well as matching output bytes.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Backport(#[from] super::backport::BackportError),
     /// An answered module list contains an unsafe or repeated ID within that list.
     #[error("`[[compose]]` for `{from}`: {reason}")]
     #[diagnostic(
@@ -111,6 +115,26 @@ pub fn render(
     baseline: &super::once::Baseline,
     captured: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<ComposedRevision>, ComposeError> {
+    render_traced(
+        entries, context, partials, user, access, trust, parent, recorded, baseline, captured, None,
+    )
+}
+
+/// Backport alone retains source snapshots and the effective environment of each child instance.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_traced(
+    entries: &[ComposeDecl],
+    context: &Context,
+    partials: &Arc<Partials>,
+    user: &UserConfig,
+    access: &crate::git::cache::Access,
+    trust: &mut Trust<'_>,
+    parent: &mut Vec<Rendered>,
+    recorded: Option<&[ComposedRevision]>,
+    baseline: &super::once::Baseline,
+    captured: &mut std::collections::BTreeSet<String>,
+    mut backport_trace: Option<&mut super::backport_trace::Trace>,
+) -> Result<Vec<ComposedRevision>, ComposeError> {
     let mut paths: HashSet<String> = parent.iter().map(|file| file.path.clone()).collect();
     let mut revisions = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
@@ -161,6 +185,15 @@ pub fn render(
         }
         let locked =
             recorded.and_then(|children| children.iter().find(|child| child.from == entry.from));
+        if backport_trace.is_some() && locked.is_none() {
+            return Err(super::backport::BackportError::History {
+                reason: format!(
+                    "missing historical lock for composed child `{}`",
+                    entry.from
+                ),
+            }
+            .into());
+        }
         if let Some(previous) = locked
             && (previous.source != source || previous.reference != entry.reference)
         {
@@ -214,7 +247,19 @@ pub fn render(
             source: source.clone(),
             reference: entry.reference.clone(),
             revision: child.revision,
+            extends: Some(child.extends_provenance()),
         });
+        if backport_trace.is_some() {
+            let proven = locked.and_then(|lock| lock.extends.as_ref()).map_or_else(
+                || child.backport_ancestry_pinned(),
+                |chain| child.extends_provenance() == *chain,
+            );
+            if !proven {
+                return Err(super::backport::BackportError::History {
+                    reason: format!("historical ancestry of composed child `{}` ({source}) cannot be established", entry.from),
+                }.into());
+            }
+        }
         for id in ids {
             let mut answers = BTreeMap::new();
             answers.insert("module_name".into(), Value::String(id.to_string()));
@@ -234,7 +279,7 @@ pub fn render(
                 Trust::Refuse(_) => Trust::refuse(),
                 Trust::Decided(decided) => Trust::Ask(decided),
             };
-            let rendered = super::render_resolved_preparing(
+            let mut rendered = super::render_resolved_preparing(
                 &child,
                 &source,
                 None,
@@ -243,7 +288,11 @@ pub fn render(
                 Answering::defaults(),
                 child_trust,
                 None,
-                super::Preparation::Files,
+                if backport_trace.is_some() {
+                    super::Preparation::Backport
+                } else {
+                    super::Preparation::Files
+                },
                 baseline,
                 |_| Ok(()),
             )
@@ -252,6 +301,19 @@ pub fn render(
                 source: Box::new(error),
             })?;
             captured.extend(rendered.provenance.once);
+            if let Some(trace) = backport_trace.as_deref_mut() {
+                // Resolution used the historical SHA; metadata must retain the reference the declaration requested.
+                for file in &rendered.files {
+                    if file.origin == crate::render::Origin::Leaf {
+                        rendered
+                            .backport_trace
+                            .get_mut(&file.path)
+                            .expect("captured child output")
+                            .reference = entry.reference.clone();
+                    }
+                }
+                trace.extend(rendered.backport_trace);
+            }
             for mut file in rendered.files {
                 // The same pre-render path can exist in parent and child; the path is not ownership.
                 if file.origin != crate::render::Origin::Retained {

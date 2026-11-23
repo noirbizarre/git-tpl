@@ -191,6 +191,77 @@ pub struct Resolved {
 }
 
 impl Resolved {
+    /// Capture the actual owner's bytes while its cache lease is alive.
+    pub(super) fn backport_source(
+        &self,
+        source: &str,
+        file: &crate::render::Rendered,
+    ) -> Result<(String, Oid, String, String, Vec<u8>), super::OpError> {
+        let (repo, owner, revision, reference, root, tree) = match file.origin {
+            crate::render::Origin::Leaf => (
+                self.repo.as_ref(),
+                source,
+                self.revision,
+                &self.reference,
+                &self.root,
+                self.root_tree,
+            ),
+            crate::render::Origin::Inherited(n) => {
+                let ancestor = &self.ancestors[n - 1];
+                (
+                    ancestor.repo.as_ref(),
+                    ancestor.source.as_str(),
+                    ancestor.revision,
+                    &ancestor.reference,
+                    &ancestor.root,
+                    ancestor.root_tree,
+                )
+            }
+            crate::render::Origin::Composed(_) => unreachable!("capture precedes composition"),
+            crate::render::Origin::Retained => {
+                return Err(super::backport::BackportError::OneShot {
+                    path: file.path.clone(),
+                }
+                .into());
+            }
+        };
+        let bytes = repo.read_path(tree, &file.source)?.ok_or_else(|| {
+            super::backport::BackportError::UnknownPath {
+                path: file.source.clone(),
+            }
+        })?;
+        let path = if root.is_empty() || root == "." {
+            file.source.clone()
+        } else {
+            format!("{root}/{}", file.source)
+        };
+        Ok((owner.to_string(), revision, reference.clone(), path, bytes))
+    }
+
+    /// Check abbreviated historical commits in the owning repository, where ambiguity is detectable.
+    pub(super) fn backport_ancestry_matches(&self, recorded: &[(String, String)]) -> bool {
+        self.ancestors.len() == recorded.len()
+            && self
+                .ancestors
+                .iter()
+                .zip(recorded)
+                .all(|(a, (source, commit))| {
+                    a.source == *source
+                        && (7..=40).contains(&commit.len())
+                        && commit.bytes().all(|b| b.is_ascii_hexdigit())
+                        && a.repo
+                            .resolve_revision(commit, source)
+                            .is_ok_and(|oid| oid == a.revision)
+                })
+    }
+
+    /// A legacy child chain needs no extra evidence only when every edge is immutable in its manifest.
+    pub(super) fn backport_ancestry_pinned(&self) -> bool {
+        self.ancestors
+            .iter()
+            .all(|a| Oid::parse(&a.reference) == Some(a.revision))
+    }
+
     /// Apply an attachment's retained root without resolving a moving ref again.
     pub(super) fn select_root(&mut self, root: &str, retained: bool) -> Result<(), ResolveError> {
         self.root_tree = match self.repo.subtree(self.tree, root)? {

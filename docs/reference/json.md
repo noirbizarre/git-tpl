@@ -485,7 +485,40 @@ A conflicted merge is a success, not a failure: the index is left as Git leaves 
   "skipped": [], "unsubstituted": [], "insertions": 1, "deletions": 1 }
 ```
 
-`result` is `patched`, `nothingToBackport`, or `plan` (with `--list-hunks`, below).
+For one owner, `result` is `patched`, `nothingToBackport`, or `plan` (with `--list-hunks`, below).
+`template` and `revision` identify the actual owner, which may be an ancestor or composed child's repository.
+
+Multiple owners produce a grouped payload instead:
+
+```json
+{ "ok": true, "result": "grouped", "outputDirectory": "../backport-review",
+  "owners": [
+    { "result": "patched", "template": "../base-template", "sourceLocation": "/work/base-template",
+      "revision": { "reference": "v1", "commit": "937573e…", "dirty": false },
+      "mailbox": "0001.patch", "patch": "From 0000000…\n…",
+      "applyCommand": "git -C /work/base-template am /work/backport-review/0001.patch",
+      "files": [ { "rendered": "README.md", "source": "template/README.md.jinja",
+                   "insertions": 1, "deletions": 1, "added": false } ],
+      "sourceOutputs": { "template/README.md.jinja": ["README.md"] },
+      "output": null, "skipped": [], "unsubstituted": [], "insertions": 1, "deletions": 1 }
+  ] }
+```
+
+Each owner has the single-owner fields plus `mailbox`, `sourceOutputs` and `sourceLocation`.
+`sourceLocation` is a canonical absolute local path or the exact remote source identity,
+so a manifest saved outside the project does not make a project-relative `template` ambiguous.
+Groups and source paths are sorted; filenames are numbered without incorporating untrusted source names.
+`sourceOutputs` retains all selected rendered instances when identical source edits are deduplicated.
+Statistics and `files` count each source edit once.
+`outputDirectory` is `null` without `--output-dir`; save each owner's `patch` to its suggested mailbox separately.
+The grouped object deliberately has no top-level `patch`, `template`, `revision` or `applyCommand`.
+
+`--output-dir` writes a version-1 `manifest.json` containing this grouped structure plus `version: 1`,
+with each owner's `patch` omitted because it is stored in the named mailbox file.
+It does so even when there is only one owner.
+Single-owner JSON with `--output-dir` also adds `outputDirectory`, `sourceLocation` and `sourceOutputs`.
+Single-owner JSON also includes `sourceOutputs` when one source edit covers several selected output instances.
+No directory is created for an empty result.
 
 `revision.reference` is `null` when a commit was recorded but no reference was — a hand-edited commit on the ref, or
 an older trailer format — and `backport` declines to guess which reference it might have come from.
@@ -514,7 +547,7 @@ Worth branching on: a reversed substitution changes what the template produces f
 part of a patch that should not be merged unread ([ADR-022](../adr/022-backport-unsubstitutes.md)).
 
 `applyCommand` is the `git am` invocation git-tpl declines to run ([ADR-020](../adr/020-backport-is-a-patch.md)),
-built from the configured source.
+built from the actual owning source and the particular output artifact when one was requested.
 When the template is a URL it contains the literal `<your-template-clone>`, because there is no local clone to
 name.
 
@@ -538,9 +571,10 @@ With `--list-hunks`, `result` is `plan`, `patch` is `""`, `files` is empty, and 
 `id` is derived from the hunk's content and the file's path, so it is stable while the file is unchanged and stops
 matching when it changes.
 `lines` is the hunk body, each line prefixed with a space, `-` or `+`.
-Eligible leaf-owned text files are listed before substitution and round-trip proof checks;
+Eligible text files from every provable owner are listed before substitution and round-trip proof checks;
 a binary file appears in `skipped` instead.
-Symlink changes and inherited or composed content can fail before listing.
+Non-leaf entries additionally carry `owner: {"source": "…", "commit": "…"}`.
+Symlink changes and insufficient historical provenance can fail before listing.
 Exclude unsupported paths and retry, or edit their owning template directly.
 
 A refusal is a failure, with a `tpl::backport::*` [code](diagnostics.md#backport).
