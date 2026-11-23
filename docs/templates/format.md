@@ -232,8 +232,12 @@ remove = ["template/.github/workflows/ci.yml.jinja"]
 | Key | Type | Default | Meaning |
 |---|---|---|---|
 | `source` | string | *required* | Any Git URL, or a path on this machine — the same shape as `git tpl init`'s own template argument. |
-| `rev` | string | *required* | The revision the parent is pinned to. **Must be a tag or a commit SHA, never a branch** — an unpinned parent would make the same child revision render two different trees on two different days. |
+| `rev` | string | *required* | The parent reference. **Must be a tag or a commit SHA, never a branch.** Tags select named releases but can move; only a full commit ID is immutable. |
 | `remove` | array of strings | `[]` | Paths to drop from the merge, relative to the *parent's own repository root* — including its `root` prefix, so a partial can be removed too. Naming a path the parent does not have is an error. |
+
+Rejecting branches prevents following a parent's development branch implicitly.
+Tags remain accepted as release references, whose stability depends on upstream convention.
+Use a full commit ID to guarantee the same parent revision across resolutions.
 
 A child renders on top of its parent: it may add questions, data sources, computed values and remotes, override
 any of them by name, add files, and replace files the parent renders. The rules, applied uniformly:
