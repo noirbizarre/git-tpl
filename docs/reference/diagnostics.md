@@ -1,7 +1,8 @@
 # Diagnostic codes
 
-Every failure carries a code of the form `tpl::<area>::<kind>`.
+Every runtime diagnostic after successful argument parsing carries a code of the form `tpl::<area>::<kind>`.
 Under [`--json`](json.md) it is the `error.code` field; in text output it is the first line of the diagnostic.
+Argument-parser failures have no JSON envelope or `error.code`; see [JSON failures](json.md#failure).
 
 **The codes are the stable surface.**
 Messages are not, and are expected to improve.

@@ -184,8 +184,10 @@ enforces the 120-character ceiling, not the "semantic" half — that's a review 
 
 ## Driving git-tpl without a person
 
-Every command takes `--json` and every failure carries a stable `error.code` — `docs/reference/diagnostics.md` is
-the catalogue. Branch on the code, never on the message; messages are expected to improve and are pinned nowhere.
+Every command takes `--json` and runtime diagnostics after successful argument parsing carry a stable `error.code`.
+`docs/reference/diagnostics.md` is the catalogue.
+Argument-parser failures have no JSON envelope or code; see `docs/reference/json.md`.
+Branch on the code, never on the message; messages are expected to improve and are pinned nowhere.
 
 Almost every command also emits a success payload. `show`, `completion` and `man` do not: their stdout is already
 the payload — a file's bytes, a shell script, troff — and wrapping it would leave nothing able to read, source or
