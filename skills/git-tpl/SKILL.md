@@ -158,7 +158,8 @@ Apply the result with an explicit `git tpl merge` (or plain `git merge refs/tpl/
 `git tpl pull` explicitly combines update and merge, including integration after an unchanged rendering.
 `update --merge` opts into the same integration phase and JSON `{update, merge}` shape;
 it requires existing history and a clean index/worktree before rendering, and conflicts with `--dry-run`.
-It supports update options except `--dry-run`, plus merge's `--no-commit` and `--message`, but not `--abort`.
+`pull` supports update options except `--dry-run`, plus merge's `--no-commit` and `--message`, but not `--abort`.
+`update --merge` uses default integration controls; use `pull` for those additional merge options.
 Its JSON has `update` and `merge` objects with their usual payloads and one top-level `ok`.
 It refuses a missing local rendered ref before updating; recover original ancestry before retrying.
 Saved configuration edits remain unstaged; conflicts use normal Git recovery and report `merge.result: "conflicted"`.
