@@ -7,7 +7,7 @@ exit: 0
 <empty>
 --- stderr ---
 
-Template:  [tmp]/template
+Template:  ../template
 Revision:  main ([short])
 
 Created refs/tpl/template
