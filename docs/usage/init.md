@@ -272,8 +272,8 @@ genuine merge base — the same experience as a project generated from the templ
 
 !!! tip "Look before you merge"
 
-    `git tpl init <template> --no-merge` creates the ref without merging, so `git tpl diff` shows exactly what
-    the merge would reconcile.
+    `git tpl init <template> --no-merge` creates the ref without merging, so `git tpl diff` can preview reconciliation.
+    The preview does not execute merge drivers; native integration can produce different results.
     When you are ready, `git tpl merge` performs it.
     `--dry-run` is smaller still: it reports what would be asked and rendered, and creates nothing.
 
