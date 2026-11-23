@@ -598,7 +598,8 @@ stderr carries human prose, warnings, and errors. `--json` and `--quiet` suppres
 but warnings and errors remain visible.
 
 `log` defaults to the latest 20 source commits up to the template rendering actually merged into `HEAD`.
-An explicit `REF` resolves in that rendering's source repository and shows its full reachable history.
+An explicit `REF` resolves in that rendering's source repository and selects its reachable history.
+The default display limit remains 20 for references and ranges; use `--all` for complete output or `-n COUNT`.
 Two-dot `A..B` selects B's history excluding A's ancestry; omitted endpoints mean the applied source revision.
 Use `..main` for pending updates and `main..` for applied commits absent from upstream main.
 Bare `..` is empty; three-dot ranges are unsupported.
