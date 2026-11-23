@@ -142,11 +142,16 @@ pub fn collect_partials(
     tree: Oid,
     root: &str,
 ) -> Result<Partials, RenderError> {
+    let root = root.trim_end_matches('/');
+    // Whole-repository roots have no outside files; output must never gain a second meaning as a partial.
+    if root.is_empty() || root == "." {
+        return Ok(Partials::new(Vec::new()));
+    }
     // `list_tree` is already in Git-canonical sorted order, and `Partials` is a
     // `BTreeMap`, so the resulting name order does not vary between runs.
     let entries = template.list_tree(tree)?;
 
-    let prefix = format!("{}/", root.trim_end_matches('/'));
+    let prefix = format!("{root}/");
     let mut out = Vec::new();
 
     for entry in entries {

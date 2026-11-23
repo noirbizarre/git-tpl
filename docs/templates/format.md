@@ -486,6 +486,9 @@ path reads better as one expression.
 
 ### Shared partials
 
+With a whole-repository render root (`root = "."` or `root = ""`), no files are outside the root.
+Such a template has no own partials: its `.jinja` files are output, including opaque binary files.
+
 A `.jinja` file **outside** the rendered subdirectory is a partial.
 It is never written into a project, and it can be imported by name from any file that is:
 
