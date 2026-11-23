@@ -231,4 +231,7 @@ Data-Source: registry = remote:https://example.com/registry.json@sha256:9f86d081
 A template file records the template commit it was read at; a remote source records the sha256 of the bytes it
 returned.
 Either way you can answer "what produced this tree?" from Git alone.
+Composed children record their used sources in `Template-Compose-Data` JSON trailers,
+scoped by declaration (`from`), selected `module` and data `name`, with the same source evidence in `location`.
+Older rendered commits may lack these trailers; absence means child data evidence was not recorded.
 See [Reproducibility](reproducibility.md).

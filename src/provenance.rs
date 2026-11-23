@@ -10,6 +10,19 @@ use std::fmt;
 use crate::data::Provenance as DataProvenance;
 use crate::git::Oid;
 
+/// Data evidence belongs to a module instance, not just its shared child revision.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ComposedDataProvenance {
+    /// Parent question identifying the composition declaration.
+    pub from: String,
+    /// Selected module ID within that declaration.
+    pub module: String,
+    /// The child's declared source name, independent of other child namespaces.
+    pub name: String,
+    /// Existing data trailer value, including resolved revision or checksum.
+    pub location: String,
+}
+
 /// The exact selected child revision used to render one group of modules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComposedRevision {
@@ -57,6 +70,7 @@ mod keys {
     pub const DATA: &str = "Data-Source";
     pub const EXTENDS: &str = "Template-Extends";
     pub const COMPOSE: &str = "Template-Compose";
+    pub const COMPOSE_DATA: &str = "Template-Compose-Data";
     pub const ONCE: &str = "Template-Once";
     pub const VERSION: &str = "Tpl-Version";
 }
@@ -86,6 +100,8 @@ pub struct Provenance {
     pub extends: Vec<ExtendsProvenance>,
     /// Exact selected child commits, even when a moving branch renders identical files.
     pub composed: Vec<ComposedRevision>,
+    /// Actually loaded child data, in declaration, module and load order.
+    pub composed_data: Vec<ComposedDataProvenance>,
     /// Permanently captured output paths; their bytes and modes remain in the tree.
     pub once: std::collections::BTreeSet<String>,
     /// The git-tpl version that rendered it.
@@ -166,6 +182,14 @@ impl Provenance {
                     "extends": extends,
                     "ancestryVersion": 1,
                 })
+            ));
+        }
+        for data in &self.composed_data {
+            // Structured scope prevents collisions and escapes control characters in data locations.
+            message.push_str(&format!(
+                "{}: {}\n",
+                keys::COMPOSE_DATA,
+                serde_json::to_string(data).expect("string-only provenance is serializable")
             ));
         }
         for path in &self.once {
@@ -271,6 +295,13 @@ impl Provenance {
                     });
                     found_any = true;
                 }
+                keys::COMPOSE_DATA => {
+                    // A malformed individual trailer must not hide valid siblings or legacy provenance.
+                    if let Ok(data) = serde_json::from_str::<ComposedDataProvenance>(value) {
+                        recorded.composed_data.push(data);
+                        found_any = true;
+                    }
+                }
                 keys::ONCE => {
                     if let Ok(path) = serde_json::from_str::<String>(value) {
                         recorded.once.insert(path);
@@ -314,6 +345,8 @@ pub struct Recorded {
     pub extends: Vec<(String, String)>,
     /// Child commits of that historical rendered ref, not moving branch tips.
     pub composed: Vec<ComposedRevision>,
+    /// Scoped child data evidence; absent in older renderings, not proof of unused data.
+    pub composed_data: Vec<ComposedDataProvenance>,
     /// Cumulative captured paths, empty for renderings predating one-shot files.
     pub once: std::collections::BTreeSet<String>,
     /// The git-tpl version that rendered it.
@@ -349,6 +382,38 @@ impl fmt::Display for Recorded {
 mod tests {
     use super::*;
     use crate::data::SourceKind;
+
+    #[test]
+    fn scoped_child_data_round_trips_without_hiding_legacy_or_valid_sibling_evidence() {
+        let mut provenance = sample();
+        for module in ["one", "two\nTemplate-Source: injected"] {
+            provenance.composed_data.push(ComposedDataProvenance {
+                from: "sources".into(),
+                module: module.into(),
+                name: "catalog".into(),
+                location: "git:git@host:repo:data/\"quoted\".toml@abcdef0".into(),
+            });
+        }
+        let message = format!(
+            "{}Template-Compose-Data: {{broken}}\nTemplate-Compose-Data: {{\"from\":\"incomplete\"}}\n",
+            provenance.to_message()
+        );
+        let parsed = Provenance::parse(&message).unwrap();
+        assert_eq!(parsed.composed_data, provenance.composed_data);
+        assert_eq!(parsed.source, Some(provenance.source));
+        assert_eq!(
+            parsed.data,
+            Provenance::parse(&sample().to_message()).unwrap().data
+        );
+        assert!(
+            Provenance::parse(&sample().to_message())
+                .unwrap()
+                .composed_data
+                .is_empty()
+        );
+        let extended = "Template-Compose-Data: {\"from\":\"sources\",\"module\":\"one\",\"name\":\"catalog\",\"location\":\"local:data.toml\",\"future\":true}";
+        assert_eq!(Provenance::parse(extended).unwrap().composed_data.len(), 1);
+    }
 
     #[test]
     fn captured_paths_round_trip_in_sorted_order_without_injecting_trailers() {
@@ -396,6 +461,7 @@ mod tests {
             }],
             extends: Vec::new(),
             composed: Vec::new(),
+            composed_data: Vec::new(),
             once: Default::default(),
             version: "0.1.0".into(),
             template_name: "rust-library".into(),

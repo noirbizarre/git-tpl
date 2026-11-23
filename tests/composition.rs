@@ -5,6 +5,158 @@ mod common;
 use common::{Repo, tpl};
 
 #[test]
+fn child_data_evidence_keeps_module_namespaces_and_tracks_moving_external_inputs() {
+    use tpl::provenance::Provenance;
+    let data = Repo::init("data");
+    data.write("jira.toml", "value = 'first'\n")
+        .write("github.toml", "value = 'second'\n")
+        .commit_all("initial data");
+    let source = child("source");
+    let integration = integration_with_own_file();
+    for (child, output) in [(&source, "module"), (&integration, "integration")] {
+        child.write("template.toml", &format!(
+            "{}\n[data.catalog]\nsource = '{}'\nref = 'main'\npath = '{{{{ module_name }}}}.toml'\n[data.unused]\nsource = 'missing.toml'\n",
+            child.read("template.toml"), common::file_url(&data.path)));
+        child
+            .write(
+                &format!("template/{{{{ module_path }}}}/{output}.txt.jinja"),
+                "{{ data.catalog.value }}\n",
+            )
+            .commit_all("consume module data");
+    }
+    let parent = parent(&source, &integration, "main", "main");
+    parent.write(
+        "template.toml",
+        &format!(
+            "{}\n[data.catalog]\nsource = 'catalog.toml'\n",
+            parent.read("template.toml")
+        ),
+    );
+    parent
+        .write("catalog.toml", "value = 'parent'\n")
+        .write("template/README.md.jinja", "{{ data.catalog.value }}\n");
+    parent
+        .remove("template/README.md")
+        .commit_all("parent data namespace");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "init",
+            parent.path.to_str().unwrap(),
+            "--defaults",
+            "--trust",
+            "--answer",
+            "sources=[\"jira\",\"github\"]",
+            "--answer",
+            "integrations=[\"jira\"]",
+        ],
+    )
+    .success();
+    let message = project.git(&["show", "-s", "--format=%B", "refs/tpl/parent"]);
+    let recorded = Provenance::parse(&message).unwrap();
+    assert_eq!(recorded.data.len(), 1);
+    assert_eq!(recorded.data[0].0, "catalog");
+    assert_eq!(recorded.composed_data.len(), 3);
+    for (record, (from, module)) in recorded.composed_data.iter().zip([
+        ("sources", "jira"),
+        ("sources", "github"),
+        ("integrations", "jira"),
+    ]) {
+        assert_eq!(
+            (&*record.from, &*record.module, &*record.name),
+            (from, module, "catalog")
+        );
+        assert!(record.location.ends_with(&data.rev_parse("HEAD")[..7]));
+        assert!(record.location.contains(&format!("{module}.toml")));
+    }
+    // Simulate older history without data evidence without rewriting the append-only ref.
+    let tip = project.rev_parse("refs/tpl/parent");
+    let tree = project.rev_parse("refs/tpl/parent^{tree}");
+    let legacy = message
+        .lines()
+        .filter(|line| !line.starts_with("Template-Compose-Data: "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let legacy_tip = project.git(&["commit-tree", &tree, "-p", &tip, "-m", &legacy]);
+    project.git(&["update-ref", "refs/tpl/parent", &legacy_tip, &tip]);
+    let before = project.working_state();
+    tpl(&project, &["update", "--defaults", "--trust"]).success();
+    assert_eq!(project.rev_parse("refs/tpl/parent"), legacy_tip);
+    assert_eq!(project.working_state(), before);
+    data.write("jira.toml", "value = 'changed'\n")
+        .commit_all("change external data only");
+    tpl(&project, &["update", "--defaults", "--trust"]).success();
+    let updated =
+        Provenance::parse(&project.git(&["show", "-s", "--format=%B", "refs/tpl/parent"])).unwrap();
+    assert_eq!(updated.composed, recorded.composed);
+    assert!(
+        updated
+            .composed_data
+            .iter()
+            .all(|record| record.location.ends_with(&data.rev_parse("HEAD")[..7]))
+    );
+    assert_eq!(project.rev_parse("refs/tpl/parent^"), legacy_tip);
+    assert_eq!(project.working_state(), before);
+}
+
+#[test]
+fn inherited_child_data_records_the_ancestor_that_supplied_its_bytes() {
+    let ancestor = Repo::init("ancestor");
+    ancestor
+        .write("template/ancestor.txt", "ancestor\n")
+        .write(
+            "template.toml",
+            "name = 'ancestor'\n[data.catalog]\nsource = 'catalog.toml'\n",
+        )
+        .write("catalog.toml", "value = 'inherited'\n")
+        .commit_all("ancestor data");
+    let revision = ancestor.rev_parse("HEAD");
+    let source = child("source");
+    source
+        .write(
+            "template.toml",
+            &format!(
+                "{}\n[extends]\nsource = '{}'\nrev = '{revision}'\n",
+                source.read("template.toml"),
+                ancestor.path.display()
+            ),
+        )
+        .write(
+            "template/{{ module_path }}/module.txt.jinja",
+            "{{ data.catalog.value }}\n",
+        )
+        .commit_all("inherit child data");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "init",
+            parent.path.to_str().unwrap(),
+            "--defaults",
+            "--answer",
+            "sources=[\"jira\"]",
+        ],
+    )
+    .success();
+    let recorded = tpl::provenance::Provenance::parse(&project.git(&[
+        "show",
+        "-s",
+        "--format=%B",
+        "refs/tpl/parent",
+    ]))
+    .unwrap();
+    assert_eq!(recorded.composed_data.len(), 1);
+    assert_eq!(
+        recorded.composed_data[0].location,
+        format!("template:catalog.toml@{}", &revision[..7])
+    );
+    assert_eq!(project.read("modules/jira/module.txt"), "inherited\n");
+}
+
+#[test]
 fn unsafe_child_paths_preserve_the_project_and_rendered_ref() {
     let source = child("source");
     let integration = child("integration");

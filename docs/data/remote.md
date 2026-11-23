@@ -32,6 +32,8 @@ Data-Source: licenses = remote:https://example.com/licenses.toml@sha256:9f86d081
 
 The digest is recorded whether or not the template pinned one, so the question "why did this tree change when
 nothing changed?" is always answerable.
+For a composed child, the same digest appears in its owner-scoped `Template-Compose-Data` location.
+Older commits may lack child data evidence.
 Making it *not happen* requires pinning — see [Reproducibility](reproducibility.md).
 
 ## Rules

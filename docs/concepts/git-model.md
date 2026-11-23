@@ -227,6 +227,10 @@ An empty array proves no child ancestry; an absent or null array is legacy evide
 Backport validates these historical identities independently of rendered-tree equality
 before routing patches to their owners ([ADR-054](../adr/054-owner-routed-backports.md)).
 
+`Template-Compose-Data` records actually loaded child data separately, as JSON with `from`, `module`, `name`
+and `location` fields, so identical source names in different modules remain distinct.
+Older commits may lack this evidence; adding it alone does not require a new rendered commit.
+
 `Template-Once` is repeated for each initialized output path as a JSON string, in sorted order.
 The cumulative set survives declaration removal; see [ADR-053](../adr/053-one-shot-rendered-files.md).
 

@@ -1292,7 +1292,7 @@ fn render_resolved_preparing(
             matches!(preparation, Preparation::Backport).then_some(&mut backport_trace),
         )?
     } else {
-        Vec::new()
+        compose::Composition::default()
     };
 
     for file in &files {
@@ -1321,7 +1321,8 @@ fn render_resolved_preparing(
         answers_digest: context.answers_digest(),
         data: loader.provenance().to_vec(),
         extends: template.extends_provenance(),
-        composed,
+        composed: composed.revisions,
+        composed_data: composed.data,
         once: captured,
         version: crate::VERSION.to_string(),
         template_name: template.manifest.name.clone(),
