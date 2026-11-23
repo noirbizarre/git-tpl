@@ -120,7 +120,7 @@ fn mixed_owners_publish_separate_applicable_mailboxes_without_touching_any_repos
                     .as_ref(),
                 )
                 .unwrap()
-                    == repo.path
+                    == repo.path.canonicalize().unwrap()
             })
             .unwrap_or_else(|| panic!("unknown owner: {owner}"));
         let (_directory, clone) = apply_in_clone(
@@ -262,7 +262,10 @@ fn a_composed_inherited_source_uses_its_ancestor_root_and_its_module_environment
     )
     .success()
     .json();
-    assert_eq!(output["template"], ancestor.path.to_str().unwrap());
+    assert_eq!(
+        output["template"],
+        ancestor.path.canonicalize().unwrap().to_str().unwrap()
+    );
     assert_eq!(
         output["files"][0]["source"],
         "sources/{{ module_path }}/inherited.txt.jinja"
@@ -379,7 +382,10 @@ fn named_hunks_emit_only_the_selected_owner_and_empty_runs_create_no_directory()
         .success()
         .json();
     assert_eq!(output["result"], "patched");
-    assert_eq!(output["template"], world.base.path.to_str().unwrap());
+    assert_eq!(
+        output["template"],
+        world.base.path.canonicalize().unwrap().to_str().unwrap()
+    );
 }
 
 fn rewrite_provenance(project: &Repo, rewrite: impl FnOnce(String) -> String) {
@@ -618,7 +624,10 @@ fn transitive_inherited_sources_are_proved_with_leaf_answers_and_overridden_part
     });
     project.write("file.txt", "leaf project\nfixed\n");
     let output = tpl(&project, &["--json", "backport"]).success().json();
-    assert_eq!(output["template"], base.path.to_str().unwrap());
+    assert_eq!(
+        output["template"],
+        base.path.canonicalize().unwrap().to_str().unwrap()
+    );
     let (_directory, clone) = apply_in_clone(
         &base,
         output["revision"]["commit"].as_str().unwrap(),

@@ -222,7 +222,10 @@ fn a_child_with_the_same_source_path_as_its_parent_cannot_backport_into_the_pare
         args.extend(extra);
         let output = tpl(&project, &args).success().json();
         if output["result"] != "plan" {
-            assert_eq!(output["template"], source.path.to_str().unwrap());
+            assert_eq!(
+                output["template"],
+                source.path.canonicalize().unwrap().to_str().unwrap()
+            );
             assert!(
                 output["patch"]
                     .as_str()
@@ -745,7 +748,10 @@ fn backport_never_mistakes_a_child_generated_file_for_a_parent_template_file() {
     let output = tpl(&project, &["--json", "backport", "modules/jira/module.txt"])
         .success()
         .json();
-    assert_eq!(output["template"], source.path.to_str().unwrap());
+    assert_eq!(
+        output["template"],
+        source.path.canonicalize().unwrap().to_str().unwrap()
+    );
     assert!(output["patch"].as_str().unwrap().contains("+A local edit."));
 }
 

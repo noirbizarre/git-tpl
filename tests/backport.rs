@@ -68,7 +68,10 @@ fn inherited_sources_target_the_ancestor_but_leaf_overrides_target_the_leaf() {
         if output["result"] == "plan" {
             assert_eq!(output["plan"][0]["source"], "template/shared.txt");
         } else {
-            assert_eq!(output["template"], parent.path.to_str().unwrap());
+            assert_eq!(
+                output["template"],
+                parent.path.canonicalize().unwrap().to_str().unwrap()
+            );
             assert!(output["patch"].as_str().unwrap().contains("+changed"));
         }
     }
