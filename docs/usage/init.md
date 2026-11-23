@@ -285,6 +285,7 @@ The displayed Template and JSON `template` values use the source spelling record
 Local CLI paths are rebased relative to that project.
 A dry run predicts this spelling when it discovers a project root;
 without an existing repository it reports the expanded invocation source.
+Dirty dry runs warn about ignored template files on stderr, including schema-only previews and JSON mode.
 
 `git tpl --json init` emits its outcome on stdout as a single JSON object, with the prose on stderr.
 The payload is described in [JSON output](../reference/json.md#init).

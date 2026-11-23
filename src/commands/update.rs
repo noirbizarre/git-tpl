@@ -337,6 +337,7 @@ fn dry_run(
         rendered.template.manifest.questions.keys().cloned(),
     )?;
     report_ignored(&ctx.out, &rendered.ignored_answers);
+    report_ignored_paths(&ctx.out, &rendered.template.ignored);
 
     let (id, ref_name) = ops::identify(&ctx.root)?;
     let tip = ctx.repo.resolve_ref(&ref_name)?;

@@ -94,6 +94,7 @@ One case tests one direct update; use explicit `to` cases for intermediate upgra
 Removed/overridden output and binary payloads are excluded; other static rules keep their existing scope.
 
 `init --dry-run` honors `--trust` for ancestors.
+Dirty init/update dry runs warn about ignored template files on stderr, even with `--json`.
 Init's Template display and JSON `template` use the recorded source spelling, rebased for local destinations.
 Dry runs predict that spelling when a project root is known; otherwise they show the expanded invocation source.
 With `--defaults`, rendering must succeed to return a file list; without it, JSON `files` is null (schema only).

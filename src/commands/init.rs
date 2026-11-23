@@ -342,6 +342,7 @@ fn dry_run(
         &mut preview_trust,
     )?;
     let graph = tpl::graph::Graph::build(&template.manifest)?;
+    report_ignored_paths(out, &template.ignored);
     let mut attachment = tpl::config::Config::new(source, args.r#ref.clone());
     if let Some((_, root)) = project {
         // A known project root lets the preview predict the same persisted spelling as init.

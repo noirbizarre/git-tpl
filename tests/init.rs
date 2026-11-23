@@ -234,6 +234,44 @@ fn attachment_refuses_active_git_operations_even_with_a_clean_index() {
 use common::{World, global_identity, tpl, tpl_outside};
 
 #[test]
+fn dirty_init_previews_warn_once_about_globally_ignored_template_files() {
+    let world = World::new();
+    common::global_gitignore(world.project.config_home(), "*.local\n");
+    world
+        .template
+        .repo
+        .write("template/secret.local", "hidden\n");
+    let before = world.project.working_state();
+    for defaults in [false, true] {
+        for json in [false, true] {
+            let mut args = vec![
+                "init",
+                world.template.repo.path.to_str().unwrap(),
+                "--dirty",
+                "--dry-run",
+            ];
+            if defaults {
+                args.push("--defaults");
+            }
+            if json {
+                args.push("--json");
+            }
+            let output = tpl(&world.project, &args).success();
+            assert_eq!(
+                output.stderr.matches("skipped by .gitignore").count(),
+                1,
+                "{}",
+                output.stderr
+            );
+            if json {
+                assert_eq!(output.json()["dryRun"], true);
+            }
+            assert_eq!(world.project.working_state(), before);
+        }
+    }
+}
+
+#[test]
 fn init_reports_the_recorded_source_for_relative_and_absolute_destination_inputs() {
     for absolute in [false, true] {
         let world = World::new();

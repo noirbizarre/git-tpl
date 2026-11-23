@@ -180,6 +180,7 @@ change gets a content-identical rename commit first, then the ordinary rendered 
 Both are ordinary commits on the same append-only history; see [Migrations](#migrations).
 
 Dry-run and publication use the same comparison of recorded child revisions and one-shot capture policy.
+Dirty dry runs also warn about ignored template files on stderr, including in JSON mode.
 Newly available child ancestry evidence alone does not require a commit when older trailers lack that evidence.
 
 ## Migrations
