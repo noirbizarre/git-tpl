@@ -308,7 +308,7 @@ pub(super) fn run_case(
             true,
             false,
             true,
-            |_, supplied| {
+            |_, supplied, _| {
                 render_captured(
                     &old,
                     source,
@@ -338,7 +338,7 @@ pub(super) fn run_case(
             Some(&target.reference),
             crate::answers::typed(case.answers.clone()),
             true,
-            |config, supplied| {
+            |config, supplied, _| {
                 render_captured(
                     target,
                     &config.template.source,

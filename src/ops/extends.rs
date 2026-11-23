@@ -180,6 +180,7 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
         note_file: leaf.note_file.clone(),
         remotes: IndexMap::new(),
         compose: leaf.compose.clone(),
+        files: BTreeMap::new(),
         // Kept for introspection (`git tpl status`, `--json`) even though
         // nothing merges further from it -- the chain has already been
         // walked by the time this runs.
@@ -194,6 +195,8 @@ pub fn merge_chain(layers: &[&Manifest]) -> Result<Merged, ExtendsError> {
         merge_by_name(&mut manifest.questions, &layer.questions);
         merge_by_name(&mut manifest.computed, &layer.computed);
         merge_by_name(&mut manifest.remotes, &layer.remotes);
+        // A nearer declaration overrides the entire policy before the first capture.
+        manifest.files.extend(layer.files.clone());
 
         for (name, decl) in &layer.data {
             manifest.data.insert(name.clone(), decl.clone());

@@ -95,7 +95,8 @@ pub fn switch(
         .as_deref()
         .unwrap_or(&template.manifest.root)
         .to_string();
-    template.select_root(&root)?;
+    let baseline = super::once::load(project, Some(tip))?;
+    template.select_root(&root, !baseline.is_empty())?;
 
     let explicit_keys: std::collections::BTreeSet<_> = supplied.keys().cloned().collect();
     let mut rendered = render_resolved_preparing(
@@ -108,6 +109,7 @@ pub fn switch(
         trust,
         None,
         Preparation::Switch(&initial.answers),
+        &baseline,
         |_| Ok(()),
     )?;
     enforce_strict_answers(
@@ -148,6 +150,7 @@ pub fn switch(
             old.source.as_deref() != Some(rendered.provenance.source.as_str())
                 || old.revision != Some(template.revision)
                 || old.composed != rendered.provenance.composed
+                || old.once != rendered.provenance.once
                 || old.dirty != template.dirty
         });
     if Config::load(project_root)? != initial {

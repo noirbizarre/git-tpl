@@ -26,8 +26,10 @@ project.
    `tests/update.rs` fingerprints `HEAD`, the index and the worktree, including expected configuration edits.
    Explicit `update --merge` and `switch --merge` run ordinary merge as a separate command-layer phase (ADR-050).
 
-2. **Rendering is deterministic.** Same template revision, same answers, same data → byte-identical tree. This is
-   what makes an unchanged template produce no commit. Never introduce a timestamp, an environment read, a hash-map
+2. **Rendering is deterministic.** Same template revision, answers, data and retained one-shot baseline → identical tree.
+   The baseline is the previous rendered tree and cumulative capture trailers, never the user's worktree (ADR-053).
+   This is what makes an unchanged template produce no commit.
+   Never introduce a timestamp, an environment read, a hash-map
    iteration over user data, or a filesystem traversal order.
 
 3. **Template refs are append-only.** The parent is the previous tip, always. Never amend, never force. Rewriting

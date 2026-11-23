@@ -6,7 +6,7 @@ use std::sync::Arc;
 use miette::Diagnostic;
 use thiserror::Error;
 
-use super::{Answering, OpError, Request, Trust, render_resolved, resolve};
+use super::{Answering, OpError, Request, Trust, resolve};
 use crate::context::Context;
 use crate::data::{Decision, REMOTE_LIMIT_BYTES, RemoteRequest, SourceKind};
 use crate::eval::{Partials, Undefined, render_string_with};
@@ -108,6 +108,8 @@ pub fn render(
     trust: &mut Trust<'_>,
     parent: &mut Vec<Rendered>,
     recorded: Option<&[ComposedRevision]>,
+    baseline: &super::once::Baseline,
+    captured: &mut std::collections::BTreeSet<String>,
 ) -> Result<Vec<ComposedRevision>, ComposeError> {
     let mut paths: HashSet<String> = parent.iter().map(|file| file.path.clone()).collect();
     let mut revisions = Vec::new();
@@ -186,7 +188,7 @@ pub fn render(
             }
         }
         let pin = locked.map(|child| child.revision.to_hex());
-        let child = resolve::resolve(
+        let child = resolve::resolve_with_retained(
             Request {
                 source: &source,
                 reference: pin.as_deref().or(Some(&entry.reference)),
@@ -196,6 +198,7 @@ pub fn render(
             user,
             access,
             trust,
+            !baseline.is_empty(),
         )
         .map_err(|error| ComposeError::Child {
             origin: source.clone(),
@@ -231,7 +234,7 @@ pub fn render(
                 Trust::Refuse(_) => Trust::refuse(),
                 Trust::Decided(decided) => Trust::Ask(decided),
             };
-            let rendered = render_resolved(
+            let rendered = super::render_resolved_preparing(
                 &child,
                 &source,
                 None,
@@ -239,14 +242,21 @@ pub fn render(
                 user,
                 Answering::defaults(),
                 child_trust,
+                None,
+                super::Preparation::Files,
+                baseline,
+                |_| Ok(()),
             )
             .map_err(|error| ComposeError::Child {
                 origin: source.clone(),
                 source: Box::new(error),
             })?;
+            captured.extend(rendered.provenance.once);
             for mut file in rendered.files {
                 // The same pre-render path can exist in parent and child; the path is not ownership.
-                file.origin = crate::render::Origin::Composed(source.clone());
+                if file.origin != crate::render::Origin::Retained {
+                    file.origin = crate::render::Origin::Composed(source.clone());
+                }
                 if !paths.insert(file.path.clone()) {
                     return Err(ComposeError::Collision { path: file.path });
                 }

@@ -50,6 +50,75 @@ fn only_selected_children_impose_a_minimum_engine_version() {
 }
 
 #[test]
+fn child_capture_uses_its_own_context_and_survives_source_and_module_removal() {
+    let source = child("source");
+    let original_manifest = source.read("template.toml");
+    source.write(
+        "template.toml",
+        &format!(
+            "{original_manifest}\n[files]\n'{{{{ module_path }}}}/module.txt' = {{ once = true }}\n"
+        ),
+    );
+    source.write("template/{{ module_path }}/ordinary", "ordinary\n");
+    source.commit_all("declare child placeholder");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "init",
+            parent.path.to_str().unwrap(),
+            "--defaults",
+            "--answer",
+            "sources=[\"jira\",\"github\"]",
+        ],
+    )
+    .success();
+    let original = project.rev_parse("refs/tpl/parent:modules/jira/module.txt");
+    source.write(
+        "template/{{ module_path }}/module.txt.jinja",
+        "changed {{ module_name }}\n",
+    );
+    source.commit_all("change child placeholder");
+    tpl(&project, &["update", "--defaults"]).success();
+    assert_eq!(
+        project.rev_parse("refs/tpl/parent:modules/jira/module.txt"),
+        original
+    );
+    source.write("template.toml", &original_manifest);
+    source.remove("template/{{ module_path }}/module.txt.jinja");
+    source.commit_all("remove child source and declaration");
+    tpl(&project, &["update", "--defaults"]).success();
+    assert_eq!(
+        project.rev_parse("refs/tpl/parent:modules/jira/module.txt"),
+        original
+    );
+    tpl(
+        &project,
+        &["update", "--defaults", "--answer", "sources=[]"],
+    )
+    .success();
+    for module in ["jira", "github"] {
+        assert_eq!(
+            project.git(&[
+                "show",
+                &format!("refs/tpl/parent:modules/{module}/module.txt")
+            ]),
+            module
+        );
+        assert_eq!(
+            project.git(&[
+                "ls-tree",
+                "refs/tpl/parent",
+                &format!("modules/{module}/ordinary")
+            ]),
+            ""
+        );
+    }
+}
+
+#[test]
 fn missing_child_locks_are_saved_on_changed_and_identical_renderings() {
     for changes_output in [false, true] {
         let source = child("source");

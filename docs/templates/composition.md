@@ -67,3 +67,19 @@ provenance-only rendered-ref commit; removing all modules drops the child's reco
 For a project with a manually overlaid integration, add its ID to the `integrations` answer and update as usual.
 Git preserves project-specific files when the new child adds different paths; if both sides add the same path,
 resolve the ordinary merge conflict before committing.
+
+## One-shot module files
+
+A child can initialize a user-owned placeholder using its own module context:
+
+```toml
+[files]
+"{{ module_path }}/logo.svg" = { once = true }
+```
+
+Each selected module captures its own final path and initial Git entry in the parent's rendered history.
+Later child changes, source or declaration removal, module deselection, and compose-declaration removal retain that entry.
+Ordinary module files still disappear when deselected.
+A retained entry can therefore outlive the module that originally supplied it.
+Parent declarations may also capture exact final child output paths.
+See the [`[files]` contract](format.md#files).

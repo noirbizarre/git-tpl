@@ -9,6 +9,10 @@ Content changes owned by inherited or composed repositories fail with `tpl::back
 including during `--list-hunks`, even if the leaf has a source with the same path.
 Edit the owning repository directly or exclude the path.
 A leaf override of an inherited source is leaf-owned and can be backported normally.
+Initialized [one-shot files](../templates/format.md#files) belong to the project.
+Their content changes fail with `tpl::backport::one_shot`, including hunk listings,
+because retained output may no longer map to a current template source.
+Exclude these paths with `--exclude`, or edit the template directly to change placeholders for new projects.
 Executable-mode-only changes are silently ignored, including on inherited or composed files.
 Project-only additions are ignored unless selected by a pathspec, including symbolic links.
 Selecting an added symbolic link still fails with `tpl::backport::symlink`.

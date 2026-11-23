@@ -8,8 +8,14 @@ So the rule is absolute:
 
 !!! info "The determinism guarantee"
 
-    The same template revision, the same answers and the same data produce a byte-identical tree.
+    The same template revision, answers, data and retained one-shot baseline produce a byte-identical tree.
     Always, on every platform.
+
+For an initial or standalone render, the retained baseline is empty.
+History-aware renders explicitly carry initialized [one-shot files](../templates/format.md#files) from the previous
+rendered tree and its cumulative capture trailers, never from the project worktree.
+That history is an input to rendering, not an ambient runtime value or part of the template context.
+See [ADR-053](../adr/053-one-shot-rendered-files.md).
 
 ## What that requires
 

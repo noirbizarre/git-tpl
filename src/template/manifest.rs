@@ -31,6 +31,7 @@ pub const TOP_LEVEL_KEYS: &[&str] = &[
     "data",
     "description",
     "extends",
+    "files",
     "minimum_version",
     "name",
     "note",
@@ -293,6 +294,15 @@ impl ExtendsDecl {
     }
 }
 
+/// Per-output-file policy, separate from source discovery.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileDecl {
+    /// Capture this output path once, then preserve its initialized Git entry.
+    #[serde(default)]
+    pub once: bool,
+}
+
 /// The parsed `template.toml`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -405,6 +415,9 @@ pub struct Manifest {
     /// Pinned sibling templates to render below this project's root.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compose: Vec<ComposeDecl>,
+    /// Policies keyed by final output path expressions, independent of the source root.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub files: BTreeMap<String, FileDecl>,
 }
 
 fn default_root() -> String {
@@ -947,6 +960,7 @@ mod tests {
         let manifest = Manifest {
             name: "x".into(),
             minimum_version: Some(semver::Version::new(0, 17, 0)),
+            files: BTreeMap::from([("logo.svg".into(), FileDecl { once: true })]),
             description: Some("d".into()),
             root: "template".into(),
             strict: Some(true),
@@ -991,6 +1005,26 @@ mod tests {
         keys.sort_unstable();
 
         assert_eq!(keys, TOP_LEVEL_KEYS);
+    }
+
+    #[test]
+    fn file_attributes_are_typed_and_unknown_attributes_are_rejected() {
+        for declaration in ["{ once = 'yes' }", "{ once = true, typo = true }"] {
+            assert!(
+                Manifest::parse(
+                    &format!("name = 'x'\n[files]\n'logo' = {declaration}\n"),
+                    "template.toml"
+                )
+                .is_err()
+            );
+        }
+        let manifest = Manifest::parse(
+            "name = 'x'\n[files]\n'logo' = { once = true }\n'other' = {}\n",
+            "template.toml",
+        )
+        .unwrap();
+        assert!(manifest.files["logo"].once);
+        assert!(!manifest.files["other"].once);
     }
 
     #[test]

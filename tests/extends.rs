@@ -38,6 +38,46 @@ fn a_leaf_cannot_weaken_its_ancestors_minimum_version() {
     }
 }
 
+#[test]
+fn file_policies_inherit_by_key_and_nearer_overrides_apply_only_before_capture() {
+    for override_policy in [false, true] {
+        let world = common::World::with_template(
+            "name = 'base'\n[files]\n'asset' = { once = true }\n",
+            &[("asset.jinja", "base\n"), ("keep", "keep\n")],
+        );
+        let extra = if override_policy {
+            "[files]\n'asset' = { once = false }\n"
+        } else {
+            ""
+        };
+        let child = Template::extending(
+            "child",
+            &world.template,
+            "base-v1",
+            extra,
+            &[("asset.jinja", "child\n")],
+        );
+        tpl(&world.project, &["init", &child.source(), "--defaults"]).success();
+        child.repo.write("template/asset.jinja", "changed\n");
+        child.repo.commit_all("change overriding source");
+        tpl(&world.project, &["update", "--defaults"]).success();
+        assert_eq!(
+            world.project.git(&["show", "refs/tpl/child:asset"]),
+            if override_policy { "changed" } else { "child" }
+        );
+        child.repo.remove("template/asset.jinja");
+        let manifest = child.repo.read("template.toml").replace(
+            "rev = \"base-v1\"",
+            "rev = \"base-v1\"\nremove = ['template/asset.jinja']",
+        );
+        child.repo.write("template.toml", &manifest);
+        child.repo.commit_all("remove inherited source");
+        tpl(&world.project, &["update", "--defaults"]).success();
+        let entry = world.project.git(&["ls-tree", "refs/tpl/child", "asset"]);
+        assert_eq!(entry.is_empty(), override_policy);
+    }
+}
+
 /// A scratch directory that is deliberately not a repository, for the
 /// project-free `render`/`questions`/`context` commands.
 struct Scratch {

@@ -41,6 +41,9 @@ The command reports reused and skipped keys without exposing answer values.
 
 ## History and working files
 
+Initialized [one-shot paths](../templates/format.md#files) remain captured on the same rendered ref,
+even when the replacement source has no corresponding file or declaration.
+
 Switch keeps the existing `refs/tpl/<id>` and explicitly records that ID in configuration.
 The target rendering descends from the previous rendering even when the sources are unrelated.
 This preserves Git's merge base, so a later ordinary merge can distinguish project customizations from old output

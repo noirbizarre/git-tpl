@@ -192,10 +192,10 @@ pub struct Resolved {
 
 impl Resolved {
     /// Apply an attachment's retained root without resolving a moving ref again.
-    pub(super) fn select_root(&mut self, root: &str) -> Result<(), ResolveError> {
+    pub(super) fn select_root(&mut self, root: &str, retained: bool) -> Result<(), ResolveError> {
         self.root_tree = match self.repo.subtree(self.tree, root)? {
             Some(tree) => tree,
-            None if self.has_ancestors() => self.repo.build_tree(&[])?,
+            None if self.has_ancestors() || retained => self.repo.build_tree(&[])?,
             None => return Err(ResolveError::MissingRoot { root: root.into() }),
         };
         self.root = root.into();
@@ -378,6 +378,17 @@ pub fn resolve(
     access: &Access,
     trust: &mut Trust<'_>,
 ) -> Result<Resolved, ResolveError> {
+    resolve_with_retained(request, user, access, trust, false)
+}
+
+/// A previous capture can outlive the last source file, so Git may no longer store the render root.
+pub(super) fn resolve_with_retained(
+    request: Request<'_>,
+    user: &UserConfig,
+    access: &Access,
+    trust: &mut Trust<'_>,
+    retained: bool,
+) -> Result<Resolved, ResolveError> {
     let leaf = resolve_layer(
         request.source,
         request.reference,
@@ -385,12 +396,13 @@ pub fn resolve(
         request.dirty,
         false,
         access,
+        retained,
     )?;
 
     // A template with no `[extends]` is a chain of one: its own manifest is
     // already the effective one, and there is nothing to fold.
     let (ancestors, manifest, data_origin, question_origin) = if leaf.manifest.extends.is_some() {
-        resolve_ancestors(&leaf, request.source, user, access, trust)?
+        resolve_ancestors(&leaf, request.source, user, access, trust, retained)?
     } else {
         (
             Vec::new(),
@@ -432,6 +444,7 @@ fn resolve_layer(
     dirty: bool,
     pinned: bool,
     access: &Access,
+    retained: bool,
 ) -> Result<Layer, ResolveError> {
     let local = local_path(source);
 
@@ -504,7 +517,8 @@ fn resolve_layer(
         // since the merge (`Resolved::entries`) may still produce real output
         // from an ancestor. A template with no `[extends]` keeps the strict
         // reading: an empty root there is almost always a typo in `root`.
-        None if manifest.extends.is_some() => repo.build_tree(&[])?,
+        // Retaining the last initialized file must also work after its source directory disappears.
+        None if manifest.extends.is_some() || retained => repo.build_tree(&[])?,
         None => return Err(ResolveError::MissingRoot { root: root.clone() }),
     };
 
@@ -618,6 +632,7 @@ fn resolve_ancestors(
     user: &UserConfig,
     access: &Access,
     trust: &mut Trust<'_>,
+    retained: bool,
 ) -> Result<AncestorChain, ResolveError> {
     let mut ancestors: Vec<Ancestor> = Vec::new();
     // `(source, revision)` rather than `source` alone: the same source at two
@@ -650,6 +665,7 @@ fn resolve_ancestors(
             false,
             true,
             access,
+            retained,
         )?;
 
         let key = (declared.source.clone(), layer.revision);

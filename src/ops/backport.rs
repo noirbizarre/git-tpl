@@ -58,6 +58,18 @@ pub enum BackportError {
         /// Output whose owner is outside the leaf repository.
         path: String,
     },
+    /// Captured output no longer has a reproducible mapping to today's template source.
+    #[error("`{path}` is an initialized one-shot file owned by the project")]
+    #[diagnostic(
+        code(tpl::backport::one_shot),
+        help(
+            "exclude `{path}` with --exclude; to change the placeholder for new projects, edit the template directly"
+        )
+    )]
+    OneShot {
+        /// The permanently initialized path.
+        path: String,
+    },
     /// A change lands on a line that rendering substituted into.
     ///
     /// The expected refusal, and the one users will meet most. Reversing the
@@ -415,6 +427,7 @@ pub fn backport(
         trust,
         recorded.as_ref().map(|r| r.composed.as_slice()),
         super::Preparation::Files,
+        &super::once::load(project, Some(tip))?,
     )?;
 
     // The proof depends on the rendering we hold matching the one the ref
@@ -586,6 +599,12 @@ pub fn backport(
                 // Mode-only changes above need no owner, but content changes must be checked
                 // before reading leaf bytes or publishing a hunk: identical source paths in
                 // different repositories otherwise produce a plausible patch against the wrong owner.
+                if file.origin == crate::render::Origin::Retained {
+                    return Err(BackportError::OneShot {
+                        path: change.path.clone(),
+                    }
+                    .into());
+                }
                 if file.origin != crate::render::Origin::Leaf {
                     return Err(BackportError::NonLeaf {
                         path: change.path.clone(),
