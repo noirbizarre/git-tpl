@@ -95,7 +95,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let template = ctx.user.expand(&args.template).into_owned();
 
     let mut prompter = Interactive;
-    let mut confirmer = Confirmer;
+    let mut confirmer = Confirmer(ctx.out.theme.clone());
     let outcome = ops::init(
         &ctx.repo,
         &ctx.root,
@@ -422,7 +422,7 @@ fn dry_run(
     // the whole questionnaire, which is precisely what a dry run is avoiding.
     let mut files = None;
     if args.answers.defaults {
-        let mut confirmer = crate::prompt::Confirmer;
+        let mut confirmer = crate::prompt::Confirmer(out.theme.clone());
         // Reuse the exact revision whose schema was listed. A second resolve
         // could observe a moving branch, and swallowing errors would claim a
         // broken or incomplete render was a successful preview.

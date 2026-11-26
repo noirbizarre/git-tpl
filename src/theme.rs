@@ -149,6 +149,63 @@ pub fn decide(
 
 // --- line helpers -----------------------------------------------------------
 
+/// Inline code in UI prose; values are kept literal even if they contain backticks.
+pub fn inline_code(theme: &Theme, text: &str) -> String {
+    if theme.is_colored() {
+        theme.command.apply_to(text).to_string()
+    } else {
+        format!("`{text}`")
+    }
+}
+
+/// Interpret only single-backtick spans in already-composed diagnostic prose.
+pub fn prose(theme: &Theme, text: &str) -> String {
+    if !theme.is_colored() {
+        return text.to_owned();
+    }
+    text.split_inclusive('\n')
+        .map(|line| prose_line(theme, line))
+        .collect()
+}
+
+fn prose_line(theme: &Theme, line: &str) -> String {
+    let mut result = String::with_capacity(line.len());
+    let mut rest = line;
+    while let Some(start) = rest.find('`') {
+        let prefix = &rest[..start];
+        result.push_str(prefix);
+        rest = &rest[start..];
+        let run = rest.bytes().take_while(|byte| *byte == b'`').count();
+        if run > 1 {
+            result.push_str(&rest[..run]);
+            rest = &rest[run..];
+            continue;
+        }
+        let Some(end) = rest[1..].find('`').map(|end| end + 1) else {
+            break;
+        };
+        // A doubled closing delimiter is literal, not half of a code span.
+        if rest[end..].starts_with("``") {
+            result.push('`');
+            rest = &rest[1..];
+            continue;
+        }
+        let is_word = |character: char| character.is_alphanumeric() || character == '_';
+        // Interpolated filenames can contain backticks. If delimiters touch
+        // surrounding words, keep the entire ambiguous line rather than naming
+        // a different file by deleting literal characters from its path.
+        if prefix.chars().next_back().is_some_and(is_word)
+            || rest[end + 1..].chars().next().is_some_and(is_word)
+        {
+            return line.to_owned();
+        }
+        result.push_str(&inline_code(theme, &rest[1..end]));
+        rest = &rest[end + 1..];
+    }
+    result.push_str(rest);
+    result
+}
+
 /// A compact source-history row. Only our styles may reach the terminal.
 pub fn log_entry(
     theme: &Theme,
@@ -375,16 +432,22 @@ pub fn reversal(theme: &Theme, proposal: &Proposal<'_>) -> String {
     // *inside* one, they meant to change their answer, not the template.
     let kept = expressions
         .iter()
-        .map(|expression| format!("`{expression}`"))
+        .map(|expression| inline_code(theme, expression))
         .collect::<Vec<_>>()
         .join(" and ");
 
     format!(
         "\n{}\n\n  rendered  {rendered}\n  yours     {project}\n  upstream  {patched}\n\n{}\n",
-        format_args!("`{path}` line {line} was changed around a value the template substitutes."),
+        format_args!(
+            "{} line {line} was changed around a value the template substitutes.",
+            inline_code(theme, path)
+        ),
         muted(
             theme,
-            &format!("It keeps {kept} and sends the rest of the line to `{template_path}`."),
+            &format!(
+                "It keeps {kept} and sends the rest of the line to {}.",
+                inline_code(theme, template_path)
+            ),
         ),
     )
 }
@@ -449,6 +512,12 @@ pub fn patch_line(theme: &Theme, line: &str) -> String {
 
 /// A dimmed note.
 pub fn muted(theme: &Theme, text: &str) -> String {
+    // An inline style's full reset must not undim the rest of the note.
+    let text = if theme.is_colored() {
+        text.replace("\x1b[0m", "\x1b[0m\x1b[2m")
+    } else {
+        text.to_owned()
+    };
     theme.muted.apply_to(text).to_string()
 }
 
@@ -526,6 +595,45 @@ pub fn note_block(theme: &Theme, sanitised: &str) -> String {
 mod tests {
     use super::*;
     use rstest::rstest;
+
+    #[test]
+    fn inline_code_preserves_values_but_replaces_presentation_delimiters_with_color() {
+        assert_eq!(inline_code(&Theme::plain(), "a`b"), "`a`b`");
+        assert_eq!(inline_code(&Theme::colored(), "a`b"), "\x1b[36ma`b\x1b[0m");
+        let source = "Use `café` and `git tpl update`.";
+        assert_eq!(prose(&Theme::plain(), source), source);
+        assert_eq!(
+            prose(&Theme::colored(), source),
+            "Use \x1b[36mcafé\x1b[0m and \x1b[36mgit tpl update\x1b[0m."
+        );
+    }
+
+    #[test]
+    fn prose_leaves_unmatched_multiline_and_multiple_backticks_literal() {
+        for source in [
+            "an unmatched `tick",
+            "`two\nlines`",
+            "``",
+            "``literal``",
+            "```code```",
+            "`one``two`",
+        ] {
+            assert_eq!(prose(&Theme::colored(), source), source);
+        }
+    }
+
+    #[test]
+    fn inline_color_restores_the_surrounding_dimmed_style() {
+        let theme = Theme::colored();
+        let text = muted(
+            &theme,
+            &format!("before {} after", inline_code(&theme, "code")),
+        );
+        assert_eq!(
+            text,
+            "\x1b[2mbefore \x1b[36mcode\x1b[0m\x1b[2m after\x1b[0m"
+        );
+    }
 
     fn formatted_note(source: &str) -> String {
         note_block(

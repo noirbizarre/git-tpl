@@ -10,6 +10,7 @@
 
 mod cli;
 mod commands;
+mod diagnostic;
 mod exit;
 mod prompt;
 mod report;
@@ -130,8 +131,13 @@ fn install_diagnostic_hook(cli: &Cli) {
     // installed, and miette's default is perfectly serviceable. Refusing to
     // start over terminal formatting would be absurd.
     let _ = miette::set_hook(Box::new(move |_| {
-        Box::new(
-            miette::MietteHandlerOpts::new()
+        Box::new(diagnostic::Handler {
+            theme: if colored {
+                theme::Theme::colored()
+            } else {
+                theme::Theme::plain()
+            },
+            inner: miette::MietteHandlerOpts::new()
                 .color(colored)
                 .unicode(colored)
                 .context_lines(2)
@@ -141,6 +147,6 @@ fn install_diagnostic_hook(cli: &Cli) {
                 .with_cause_chain()
                 .terminal_links(verbose)
                 .build(),
-        )
+        })
     }));
 }

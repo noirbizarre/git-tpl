@@ -19,7 +19,7 @@ pub fn run(args: SwitchArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     });
     let source = ctx.user.expand(&args.template).into_owned();
     let mut prompter = Interactive;
-    let mut confirmer = Confirmer;
+    let mut confirmer = Confirmer(ctx.out.theme.clone());
     let outcome = ops::switch(
         &ctx.repo,
         &ctx.root,

@@ -23,6 +23,49 @@ fn has_color(bytes: &[u8]) -> bool {
 }
 
 #[test]
+fn runtime_diagnostics_highlight_code_instead_of_printing_delimiters() {
+    for (args, env, colored) in [
+        (vec!["--color=always", "status"], vec![], true),
+        (vec!["status"], vec![("FORCE_COLOR", "1")], true),
+        (
+            vec!["--color=never", "status"],
+            vec![("FORCE_COLOR", "1")],
+            false,
+        ),
+        (vec!["status"], vec![("NO_COLOR", "1")], false),
+    ] {
+        let out = help(&args, &env);
+        assert_eq!(out.status.code(), Some(1), "{out:?}");
+        let text = String::from_utf8(out.stderr).unwrap();
+        if colored {
+            assert!(text.contains("\x1b[36mgit init\x1b[0m"), "{text}");
+            assert!(!text.contains("`git init`"), "{text}");
+        } else {
+            assert!(text.contains("`git init`"), "{text}");
+            assert!(!has_color(text.as_bytes()), "{text}");
+        }
+    }
+}
+
+#[test]
+fn json_diagnostic_text_keeps_backticks_even_when_color_is_forced() {
+    let plain = help(&["--json", "--color=never", "status"], &[]);
+    let colored = help(&["--json", "--color=always", "status"], &[]);
+    for out in [&plain, &colored] {
+        assert_eq!(out.status.code(), Some(1));
+        assert!(out.stderr.is_empty(), "{out:?}");
+        assert!(!has_color(&out.stdout));
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(
+            json["error"]["help"]
+                .as_str()
+                .unwrap()
+                .contains("`git init`")
+        );
+    }
+}
+
+#[test]
 fn help_works_without_a_repository_or_manual_pages() {
     for args in [vec!["help"], vec!["--json", "help"], vec!["--help"]] {
         let out = help(&args, &[]);

@@ -199,7 +199,7 @@ fn preview(
     }
     let preferences = tpl::gitconfig::Preferences::load(&ctx.repo)?;
     let mut prompter = Interactive;
-    let mut confirmer = Confirmer;
+    let mut confirmer = Confirmer(ctx.out.theme.clone());
     ops::render_preview(
         &ctx.repo,
         &ctx.root,

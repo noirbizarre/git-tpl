@@ -567,6 +567,21 @@ default = "demo"
     let json = output.json();
     let help = json["diagnostics"][0]["help"].as_str().expect("help");
     assert!(help.contains("project_name"), "no suggestion in: {help}");
+
+    let args = ["lint", &world.template.source()];
+    let plain = common::tpl(&world.template.repo, &args).success();
+    let colored = common::tpl_colored(&world.template.repo, &args).success();
+    assert!(plain.stderr.contains("`projct_name`"), "{}", plain.stderr);
+    assert!(
+        colored.stderr.contains("\x1b[36mprojct_name\x1b[0m"),
+        "{}",
+        colored.stderr
+    );
+    assert!(
+        !colored.stderr.contains("`projct_name`"),
+        "{}",
+        colored.stderr
+    );
 }
 
 /// The gap #88 closes: `docs_accent` is declared, so `undeclared` has nothing

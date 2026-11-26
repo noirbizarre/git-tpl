@@ -100,9 +100,17 @@ fn print_text(ctx: &Standalone, verdicts: &[Verdict], errors: usize, denied: usi
         if let Some(path) = &finding.path {
             ctx.out.warn(muted(&ctx.out.theme, &format!("  {path}")));
         }
-        ctx.out.warn(format!("  {}", finding.message));
-        ctx.out
-            .warn(muted(&ctx.out.theme, &format!("  help: {}", finding.help)));
+        ctx.out.warn(format!(
+            "  {}",
+            crate::theme::prose(&ctx.out.theme, &finding.message)
+        ));
+        ctx.out.warn(muted(
+            &ctx.out.theme,
+            &format!(
+                "  help: {}",
+                crate::theme::prose(&ctx.out.theme, &finding.help)
+            ),
+        ));
         ctx.out.blank();
     }
 

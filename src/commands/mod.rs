@@ -302,7 +302,10 @@ pub fn report_ignored_paths(out: &Reporter, ignored: &[String]) {
     } else {
         out.warn(crate::theme::muted(
             &out.theme,
-            "  run with -v to list them, or `git check-ignore -v <path>` to find the rule",
+            &format!(
+                "  run with -v to list them, or {} to find the rule",
+                crate::theme::inline_code(&out.theme, "git check-ignore -v <path>")
+            ),
         ));
     }
 }

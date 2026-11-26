@@ -32,7 +32,7 @@ pub fn run(args: RenderArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // the prompter is available unless `--defaults` says otherwise, exactly as
     // it is for `init`.
     let mut prompter = Interactive;
-    let mut confirmer = Confirmer;
+    let mut confirmer = Confirmer(ctx.out.theme.clone());
 
     let rendered = ops::render_files(
         Target {
