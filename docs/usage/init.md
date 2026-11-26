@@ -161,7 +161,7 @@ Created refs/tpl/github-com-noirbizarre-rust-library-template
 
 Merged into main.
 
-Answers recorded in .config/git.tpl.toml and committed.
+  Answers recorded in .config/git.tpl.toml and committed.
 ```
 
 **Template** is the recorded source after any shortcut expansion, not the manifest's `name`: it is what
@@ -262,7 +262,7 @@ warning: the merge left conflicts. Resolve them and commit:
   git status
   git commit
 
-Answers recorded in .config/git.tpl.toml and staged.
+  Answers recorded in .config/git.tpl.toml and staged.
 
 $ git mergetool          # or edit the markers by hand
 $ git commit

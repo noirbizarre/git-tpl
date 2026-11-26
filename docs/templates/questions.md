@@ -419,7 +419,7 @@ accept, exactly as a [withdrawn choice](#when-a-choice-is-withdrawn) does:
 ```
 `My-Thing` is not a valid answer for `slug`
 
-  help: must be lowercase and start with a letter
+    help: must be lowercase and start with a letter
         if this answer was recorded by an earlier render, the template has
         since narrowed what it accepts — edit `slug` in `.config/git.tpl.toml`
 ```
@@ -569,7 +569,7 @@ That is reported, not silently discarded:
 ```
 `ap` is not a valid choice for `region`
 
-  help: choose one of: eu, us
+    help: choose one of: eu, us
         if this answer was recorded by an earlier render, the template no
         longer offers it — edit `region` in `.config/git.tpl.toml`
 ```

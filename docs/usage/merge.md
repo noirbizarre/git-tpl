@@ -59,7 +59,7 @@ mistake this design exists to avoid.
 ```console
 $ git tpl merge
 Merged refs/tpl/github-com-noirbizarre-rust-library-template into the current branch
-Merge commit 2fff441.
+  Merge commit 2fff441.
 ```
 
 Fast-forwards when it can, and says so:
@@ -71,7 +71,7 @@ Checkout runs against the original HEAD before the branch moves; a refused check
 ```console
 $ git tpl merge
 Fast-forwarded refs/tpl/github-com-noirbizarre-rust-library-template into the current branch
-Now at 15b50a5.
+  Now at 15b50a5.
 ```
 
 With `--no-commit`, a non-fast-forward merge is staged and left for you to commit.

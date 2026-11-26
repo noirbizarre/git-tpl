@@ -5,7 +5,7 @@ use tpl::ops::{self, OpError};
 
 use super::Session;
 use crate::cli::{GlobalArgs, MergeArgs};
-use crate::theme::{command, headline, muted, warning};
+use crate::theme::{child, command, headline, muted, warning};
 
 pub fn run(args: MergeArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -55,8 +55,10 @@ pub(super) fn present(
                 "Fast-forwarded",
                 &format!("{} into the current branch", id.ref_name()),
             ));
-            ctx.out
-                .say(muted(&ctx.out.theme, &format!("Now at {}.", to.short())));
+            ctx.out.say(muted(
+                &ctx.out.theme,
+                &child(&format!("Now at {}.", to.short())),
+            ));
         }
         MergeOutcome::Merged { commit } => {
             ctx.out.say(headline(
@@ -66,7 +68,7 @@ pub(super) fn present(
             ));
             ctx.out.say(muted(
                 &ctx.out.theme,
-                &format!("Merge commit {}.", commit.short()),
+                &child(&format!("Merge commit {}.", commit.short())),
             ));
         }
         MergeOutcome::Staged => {

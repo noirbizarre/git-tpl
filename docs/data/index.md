@@ -213,10 +213,10 @@ Rendering with a partially-loaded context would produce a tree that looks plausi
 would become a commit.
 
 ```
-x could not load template data source `licenses`
-help: source: https://example.com/licenses.toml
-      kind:   remote
-      reason: timed out reading response
+  x could not load template data source `licenses`
+    help: source: https://example.com/licenses.toml
+          kind:   remote
+          reason: timed out reading response
 ```
 
 ## Provenance

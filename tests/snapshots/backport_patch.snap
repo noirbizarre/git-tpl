@@ -29,6 +29,6 @@ backport main ([short])
 
   template/ci.yml <- ci.yml
 
-1 file changed, 1 insertion(+)
+  1 file changed, 1 insertion(+)
 
 apply:       git tpl backport | git -C ../template am

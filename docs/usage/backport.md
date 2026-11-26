@@ -46,7 +46,7 @@ backport main (e754104)
 
   template/ci.yml <- ci.yml
 
-1 file changed, 1 insertion(+), 1 deletion(-)
+  1 file changed, 1 insertion(+), 1 deletion(-)
 
 apply:       git tpl backport | git -C ../my-template am
 ```
@@ -76,7 +76,7 @@ Your working tree was not modified.
 
 $ git tpl merge
 Merged refs/tpl/my-template into the current branch
-Merge commit e91261a.
+  Merge commit e91261a.
 ```
 
 Git merges your change with the identical change now coming from upstream, and there is nothing left to send:
@@ -285,10 +285,10 @@ $ git tpl backport -p
 tpl::backport::hunk_refused
 
   x hunk 2 of `README.md` cannot be backported
-  help: the hunk at `@@ -8,3 +9,3 @@` is the one that failed. Run
-        the backport again without it — leave it out of the `-p` selection,
-        or of the `--hunk` list — to send the rest, or edit `README.md.jinja`
-        by hand to carry it.
+    help: the hunk at `@@ -8,3 +9,3 @@` is the one that failed. Run
+          the backport again without it — leave it out of the `-p` selection,
+          or of the `--hunk` list — to send the rest, or edit `README.md.jinja`
+          by hand to carry it.
 ```
 
 Deselecting every hunk of a file simply leaves that file out.
@@ -363,7 +363,7 @@ backport main (937573e)
 
   template/README.md.jinja <- README.md
 
-1 file changed, 1 insertion(+), 1 deletion(-)
+  1 file changed, 1 insertion(+), 1 deletion(-)
 ```
 
 ```diff
@@ -474,10 +474,10 @@ $ git tpl backport
 tpl::backport::substituted_region
 
   x `README.md` was changed where the template substitutes a value
-  help: line 1 of `README.md` is produced by an expression in
-        `README.md.jinja`, not copied from it, so there is no one-to-one
-        change to send upstream. Edit `README.md.jinja` by hand, or restrict
-        the backport with a pathspec.
+    help: line 1 of `README.md` is produced by an expression in
+          `README.md.jinja`, not copied from it, so there is no one-to-one
+          change to send upstream. Edit `README.md.jinja` by hand, or restrict
+          the backport with a pathspec.
 ```
 
 The same code covers every line whose provenance is not exact enough to reverse:
