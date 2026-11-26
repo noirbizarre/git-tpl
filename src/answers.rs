@@ -18,11 +18,13 @@ use thiserror::Error;
 use crate::data::format::{self, Format};
 use crate::template::Value;
 
-/// An input's origin determines whether textual CLI parsing is permitted.
+/// An input's origin determines which textual compatibility parsing is permitted.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SuppliedAnswer {
-    /// A file, recorded configuration or internal caller already chose a type.
+    /// A file or internal caller already chose a type.
     Typed(Value),
+    /// Saved project answers permit legacy comma-separated strings for array questions.
+    Recorded(Value),
     /// Only `--answer` text may be parsed as the question's declared type.
     Cli(String),
 }

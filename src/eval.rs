@@ -628,11 +628,22 @@ fn coerce(
 ) -> Result<Value, EvalError> {
     use crate::answers::SuppliedAnswer;
     let value = match supplied {
-        SuppliedAnswer::Typed(value) => value.clone(),
+        SuppliedAnswer::Typed(value) | SuppliedAnswer::Recorded(value) => value.clone(),
         SuppliedAnswer::Cli(text) => Value::String(text.clone()),
     };
     if question.kind.accepts(&value) {
         return Ok(value.clone());
+    }
+
+    // Templates formerly used comma-separated string questions for lists. Only
+    // saved answers get this migration; explicitly supplied files remain typed.
+    if matches!(
+        question.kind,
+        QuestionKind::List | QuestionKind::MultiChoice
+    ) && let SuppliedAnswer::Recorded(Value::String(text)) = supplied
+        && let Ok(parsed) = Value::parse_as(text, "an array")
+    {
+        return Ok(parsed);
     }
 
     if question.kind == QuestionKind::List
@@ -647,7 +658,7 @@ fn coerce(
 
     // A supplied answer may have arrived as a string from `--answer k=v`, in
     // which case parsing it as the declared type is correct. Anything else is a
-    // genuine mismatch and must not be silently coerced — `--answer ci=maybe`
+    // genuine mismatch beyond the recorded-list exception — `--answer ci=maybe`
     // becoming the truthy string `"maybe"` would render the wrong template.
     if let SuppliedAnswer::Cli(text) = supplied
         && let Ok(parsed) = Value::parse_as(text, question.kind.type_name())
@@ -1513,6 +1524,77 @@ mod tests {
                 Value::String("extra".into())
             ])
         );
+    }
+
+    #[test]
+    fn only_recorded_array_strings_receive_legacy_comma_splitting() {
+        use crate::answers::SuppliedAnswer::{Cli, Recorded, Typed};
+
+        for kind in ["list", "multi_choice"] {
+            let manifest = Manifest::parse(
+                &format!(
+                    "name = 'legacy'\n[questions.input]\ntype = '{kind}'\n{}",
+                    if kind == "multi_choice" {
+                        "choices = ['a', 'b']\n"
+                    } else {
+                        ""
+                    }
+                ),
+                MANIFEST_NAME,
+            )
+            .unwrap();
+            let question = &manifest.questions["input"];
+            for (text, entries) in [
+                (" b, ,a,b, ", vec!["b", "a", "b"]),
+                ("", vec![]),
+                (" , , ", vec![]),
+                ("[\"a\",\"b\"]", vec!["[\"a\"", "\"b\"]"]),
+            ] {
+                let expected = Value::Array(
+                    entries
+                        .into_iter()
+                        .map(|s| Value::String(s.into()))
+                        .collect(),
+                );
+                assert_eq!(
+                    coerce("input", question, &Recorded(Value::String(text.into()))).unwrap(),
+                    expected
+                );
+                assert!(matches!(
+                    coerce("input", question, &Typed(Value::String(text.into()))),
+                    Err(EvalError::WrongType { .. })
+                ));
+            }
+            let array = Value::Array(vec![Value::String(" a,b ".into())]);
+            assert_eq!(
+                coerce("input", question, &Recorded(array.clone())).unwrap(),
+                array
+            );
+            let cli = if kind == "list" {
+                "[\"a\",\"b\"]"
+            } else {
+                "a,b"
+            };
+            assert_eq!(
+                coerce("input", question, &Cli(cli.into())).unwrap(),
+                Value::Array(vec![Value::String("a".into()), Value::String("b".into())])
+            );
+        }
+        for (kind, text) in [("integer", "42"), ("boolean", "true"), ("float", "1.5")] {
+            let manifest = Manifest::parse(
+                &format!("name = 'legacy'\n[questions.input]\ntype = '{kind}'\n"),
+                MANIFEST_NAME,
+            )
+            .unwrap();
+            assert!(matches!(
+                coerce(
+                    "input",
+                    &manifest.questions["input"],
+                    &Recorded(Value::String(text.into()))
+                ),
+                Err(EvalError::WrongType { .. })
+            ));
+        }
     }
 
     #[test]

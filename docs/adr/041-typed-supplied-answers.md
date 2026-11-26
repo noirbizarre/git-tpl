@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Accepted; the recorded-string restriction is partially superseded by
+[ADR-055](055-recorded-string-list-conversion.md) for saved list migration during update and previews.
 
 ## Context
 

@@ -2236,7 +2236,11 @@ pub fn merge_answers(
     recorded: BTreeMap<String, Value>,
     overrides: crate::answers::SuppliedAnswers,
 ) -> crate::answers::SuppliedAnswers {
-    let mut supplied = crate::answers::typed(recorded);
+    // Keep saved origin separate so legacy list migration cannot loosen file typing.
+    let mut supplied: crate::answers::SuppliedAnswers = recorded
+        .into_iter()
+        .map(|(key, value)| (key, crate::answers::SuppliedAnswer::Recorded(value)))
+        .collect();
     supplied.extend(overrides);
     supplied
 }

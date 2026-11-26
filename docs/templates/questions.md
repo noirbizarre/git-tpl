@@ -138,6 +138,9 @@ help = "Used for the package name and the README title"
     Each item must be nonempty and is checked independently against `item_pattern`.
 
 Types are enforced.
+For existing projects, update and dirty previews can migrate saved comma-separated strings to either array kind
+before applying the usual validation; see [saved list migration](../usage/update.md#migrating-saved-lists).
+This compatibility rule does not apply to answer files or defaults.
 Supplying `--answer port=nope` for an `integer` question is an error naming the question, the value and the
 expected type — not a silent coercion to a string.
 

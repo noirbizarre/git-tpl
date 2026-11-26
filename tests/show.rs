@@ -4,6 +4,25 @@ mod common;
 
 use common::{World, tpl};
 
+#[test]
+fn dirty_show_migrates_saved_list_strings_without_writing_configuration() {
+    let world = World::with_template(
+        "name = 'legacy'\n[questions.input]\ntype = 'string'\ndefault = 'b, a'\n",
+        &[("out.jinja", "{{ input }}")],
+    );
+    world.init(&[]).success();
+    world.template.repo.write(
+        "template.toml",
+        "name = 'legacy'\n[questions.input]\ntype = 'list'\n",
+    );
+    let before = world.project.working_state();
+    let tip = world.project.rev_parse(&world.ref_name());
+    let output = tpl(&world.project, &["show", "out", "--dirty", "--defaults"]).success();
+    assert_eq!(output.stdout, "[\"b\", \"a\"]");
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+}
+
 #[cfg(target_os = "linux")]
 #[test]
 fn a_failed_output_destination_makes_show_fail() {

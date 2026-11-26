@@ -77,6 +77,25 @@ flowchart TD
     child --> ref
 ```
 
+## Migrating saved lists
+
+When a template replaces a comma-separated string question with `list` or `multi_choice`,
+`update` automatically converts the saved string answer into an array.
+For example, `" b, ,a,b, "` becomes `["b", "a", "b"]`.
+Conversion splits on literal commas, trims surrounding whitespace, discards empty segments,
+and preserves order and duplicates.
+An empty or comma-only string becomes `[]`; quoting and JSON syntax receive no special treatment.
+
+The converted array must satisfy the question's usual choice, item and count constraints.
+Failed validation leaves configuration and the rendered ref unchanged.
+Successful updates save the array in `.config/git.tpl.toml` as an unstaged edit,
+even when the rendered output is identical and no new commit is needed.
+`--dry-run` and dirty `diff`/`show` previews resolve the same converted values without saving them.
+
+This exception applies only to saved answers replayed by update and its shared previews.
+Answer files remain strictly typed, and CLI `list` answers still require JSON arrays.
+Template switching retains its compatible-candidate fallback rules.
+
 ## One-shot files
 
 Templates can initialize user-owned assets with [`[files]`](../templates/format.md#files).
