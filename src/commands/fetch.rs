@@ -5,7 +5,7 @@ use tpl::ops::{self, OpError};
 
 use super::Session;
 use crate::cli::{GlobalArgs, RemoteArgs};
-use crate::theme::{command, muted};
+use crate::theme::{child, command, muted};
 
 pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -78,10 +78,10 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             ctx.out
                 .say(format!("{ref_name} has {}.", relation.describe()));
             ctx.out.blank();
-            ctx.out.say(
+            ctx.out.say(child(
                 "Preserve both histories. No automatic rendered-ref reconciliation is available.",
-            );
-            ctx.out.say("A project merge does not advance the rendered ref; do not force or reset either history.");
+            ));
+            ctx.out.say(child("A project merge does not advance the rendered ref; do not force or reset either history."));
             "diverged"
         }
         Some(relation) if relation.behind > 0 => {
@@ -94,8 +94,8 @@ pub fn run(args: RemoteArgs, global: &GlobalArgs) -> Result<u8, OpError> {
             // Fetching never moves the local ref. What to do about a newer
             // remote copy is a decision, and adopting someone else's rendering
             // silently would be a surprising thing for a fetch to do.
-            ctx.out.say("Review its provenance and ancestry before conditionally fast-forwarding the local rendered ref.");
-            ctx.out.say("See https://noirbizarre.github.io/git-tpl/usage/fetch/#fast-forwarding-an-existing-local-ref");
+            ctx.out.say(child("Review its provenance and ancestry before conditionally fast-forwarding the local rendered ref."));
+            ctx.out.say(child("See https://noirbizarre.github.io/git-tpl/usage/fetch/#fast-forwarding-an-existing-local-ref"));
             "behind"
         }
         Some(relation) => {

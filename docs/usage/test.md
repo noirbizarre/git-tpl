@@ -421,6 +421,10 @@ A case in progress shows on stderr: a spinner naming the current case and phase 
 command — on a real terminal, or the same events as plain scrolling lines when stderr is not one (a CI log, say).
 Neither shows under `--quiet` or `--json`.
 
+In the final report, failure explanations and successful snapshot-change details start under the case name,
+after its status marker.
+Supporting hints and patch lines nest further beneath the explanation they belong to.
+
 `-v`/`--verbose` replaces the spinner with a full scrolling log: every phase, and every command's own stdout/stderr
 forwarded live, exactly as it writes it — ANSI included. The final report no longer repeats a failed command's
 captured output in that case, since it was already shown as it happened; `--json` is unaffected either way, and

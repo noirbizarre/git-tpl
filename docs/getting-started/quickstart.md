@@ -108,7 +108,7 @@ Created refs/tpl/rust-library-template
 
 Merged into main.
 
-Answers recorded in .config/git.tpl.toml and committed.
+  Answers recorded in .config/git.tpl.toml and committed.
 ```
 
 Look at what happened:
@@ -153,14 +153,14 @@ Updated refs/tpl/rust-library-template
 
   modified  README.md
 
-Your working tree was not modified.
+  Your rendered worktree files were not modified.
 
-Run:
-  git tpl diff
-  git tpl merge
+  Run:
+    git tpl diff
+    git tpl merge
 ```
 
-Note "Your working tree was not modified."
+Note "Your rendered worktree files were not modified."
 `update` moved a ref and nothing else — `git status` is still clean, `HEAD` has not moved.
 
 ```sh

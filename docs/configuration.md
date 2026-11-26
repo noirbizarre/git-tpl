@@ -405,3 +405,16 @@ while `auto` leaves Git's `color.diff`, `color.ui` and stdout terminal detection
 
 None of these reach a template.
 A rendered tree cannot depend on where it was rendered — that is [invariant 2](concepts/determinism.md).
+
+## Terminal message blocks
+
+Supporting details are nested under the statement they explain, in error, warning, and success reports.
+When a statement has an icon, `help:` starts under its text rather than under the icon:
+
+```text
+  x Something failed
+    help: Review the answers and try again.
+```
+
+Other child blocks use two spaces per level; lists and suggested commands inside them keep their extra indentation.
+Wrapped help continues under the help text, and explicit line breaks and nested lists are preserved.

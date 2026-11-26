@@ -10,7 +10,7 @@ use super::{
 };
 use crate::cli::{GlobalArgs, UpdateArgs, UpdateOptions};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, headline, muted, note_block, transition};
+use crate::theme::{change, child, command, field, headline, muted, note_block, transition};
 
 pub fn run(args: UpdateArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -105,12 +105,14 @@ pub(super) fn execute(
             report_ignored(&ctx.out, &ignored_answers);
             report_ignored_paths(&ctx.out, &ignored);
             if answers_changed {
-                ctx.out
-                    .say("The recorded answers changed, so .config/git.tpl.toml was updated.");
+                ctx.out.say(child(
+                    "The recorded answers changed, so .config/git.tpl.toml was updated.",
+                ));
             }
             if composed_changed {
-                ctx.out
-                    .say("The resolved child commits were corrected in .config/git.tpl.toml.");
+                ctx.out.say(child(
+                    "The resolved child commits were corrected in .config/git.tpl.toml.",
+                ));
             }
 
             // The id is not in the outcome, because nothing was created. It is
@@ -193,7 +195,7 @@ pub(super) fn execute(
                 let sanitised = tpl::note::sanitise(raw, formatting);
                 let block = note_block(&ctx.out.theme, &sanitised);
                 if !block.is_empty() {
-                    ctx.out.say(block);
+                    ctx.out.say(child(&block));
                     ctx.out.blank();
                 }
             }
@@ -202,7 +204,7 @@ pub(super) fn execute(
             // the tool, and a user who does not believe it will not use it.
             if !pulling {
                 ctx.out
-                    .say("Your rendered worktree files were not modified.");
+                    .say(child("Your rendered worktree files were not modified."));
             }
 
             if answers_changed {
@@ -213,13 +215,13 @@ pub(super) fn execute(
                 // cause it cannot tell apart from the other.
                 ctx.out.say(muted(
                     &ctx.out.theme,
-                    "The recorded answers changed, so .config/git.tpl.toml was updated.",
+                    &child("The recorded answers changed, so .config/git.tpl.toml was updated."),
                 ));
             }
             if composed_changed {
                 ctx.out.say(muted(
                     &ctx.out.theme,
-                    "The resolved child commits changed; .config/git.tpl.toml was updated.",
+                    &child("The resolved child commits changed; .config/git.tpl.toml was updated."),
                 ));
             }
 
@@ -232,7 +234,7 @@ pub(super) fn execute(
                 ctx.out.say(muted(
                     &ctx.out.theme,
                     &format!(
-                        "No {} existed here, so this update started a new history.\n\
+                        "No {} existed here, so this update started a new history.\n  \
                          Preserve this history and inspect the original rendering before merging: \
                          fetching alone cannot repair an orphan's missing merge base.",
                         id.ref_name()
@@ -242,9 +244,10 @@ pub(super) fn execute(
 
             if !pulling {
                 ctx.out.blank();
-                ctx.out.say("Run:");
-                ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
-                ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
+                ctx.out.say(child("Run:"));
+                ctx.out.say(child(&command(&ctx.out.theme, "git tpl diff")));
+                ctx.out
+                    .say(child(&command(&ctx.out.theme, "git tpl merge")));
             }
 
             // The push happens under `--json` too. Only its prose is silenced;

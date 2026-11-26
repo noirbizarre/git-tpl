@@ -131,22 +131,6 @@ fn install_diagnostic_hook(cli: &Cli) {
     // installed, and miette's default is perfectly serviceable. Refusing to
     // start over terminal formatting would be absurd.
     let _ = miette::set_hook(Box::new(move |_| {
-        Box::new(diagnostic::Handler {
-            theme: if colored {
-                theme::Theme::colored()
-            } else {
-                theme::Theme::plain()
-            },
-            inner: miette::MietteHandlerOpts::new()
-                .color(colored)
-                .unicode(colored)
-                .context_lines(2)
-                // The cause chain is noise in the common case — the diagnostic
-                // already carries the actionable part in `help` — but it is
-                // exactly what is wanted when something unexpected goes wrong.
-                .with_cause_chain()
-                .terminal_links(verbose)
-                .build(),
-        })
+        Box::new(diagnostic::Handler::new(colored, verbose))
     }));
 }

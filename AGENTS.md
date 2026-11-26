@@ -159,9 +159,9 @@ applied to a Rust field, would forbid the string form this object replaces.
 carry the two things the user does not already know: what specifically failed, and what to do. Compare:
 
 ```
-x could not load template data source `things`          ← useless
-help: source: data/absent.toml                          ← useful
-      reason: no such file in the template repository at revision ffa9b4a
+  x could not load template data source `things`          ← useless
+    help: source: data/absent.toml                        ← useful
+          reason: no such file in the template repository at revision ffa9b4a
 ```
 
 Diagnostic codes are `tpl::<area>::<kind>`, where `<area>` is the declaring module's own name and a `mod.rs` takes

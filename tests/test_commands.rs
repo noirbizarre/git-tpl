@@ -252,7 +252,8 @@ fn a_failing_command_names_the_step_and_the_command() {
     tpl(&template.repo, &["test"])
         .code(1)
         .says("[before]")
-        .says("ls does-not-exist");
+        .says("ls does-not-exist")
+        .says("\n          [before] `ls does-not-exist` exited");
 }
 
 /// Guards the fix for `TestProgress::Line`'s duplicate announcement: before

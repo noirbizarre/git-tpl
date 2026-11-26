@@ -14,7 +14,7 @@ use super::{
 };
 use crate::cli::{GlobalArgs, InitArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, heading, headline, muted, note_block, warning};
+use crate::theme::{change, child, command, field, heading, headline, muted, note_block, warning};
 
 pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     // Where the project goes. Not a `chdir` — see `Session::discover_at`: a
@@ -163,12 +163,13 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         None => {
             ctx.out.say(muted(
                 &ctx.out.theme,
-                "The rendered ref was created but not merged.",
+                &child("The rendered ref was created but not merged."),
             ));
             ctx.out.blank();
-            ctx.out.say("Run:");
-            ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
-            ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
+            ctx.out.say(child("Run:"));
+            ctx.out.say(child(&command(&ctx.out.theme, "git tpl diff")));
+            ctx.out
+                .say(child(&command(&ctx.out.theme, "git tpl merge")));
         }
     }
 
@@ -179,11 +180,11 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         .unwrap_or(&outcome.config_path);
     ctx.out.say(muted(
         &ctx.out.theme,
-        &if outcome.config_committed {
+        &child(&if outcome.config_committed {
             format!("Answers recorded in {} and committed.", relative.display())
         } else {
             format!("Answers recorded in {} and staged.", relative.display())
-        },
+        }),
     ));
 
     // The template's own additions come last, below everything git-tpl did
@@ -208,7 +209,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
                     ctx.out.warn(warning(
                         &ctx.out.theme,
                         &format!(
-                            "remote {} was left alone.\n  it points at {existing}\n  \
+                            "remote {} was left alone.\nit points at {existing}\n\
                              the template asked for {}",
                             remote.name, remote.url
                         ),

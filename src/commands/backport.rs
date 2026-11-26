@@ -7,7 +7,7 @@ use tpl::ops::{self, Backport, OpError};
 use super::Session;
 use crate::cli::{BackportArgs, GlobalArgs};
 use crate::prompt::{Chooser, Confirmer, Reverser};
-use crate::theme::{command, diff_summary, field, headline, muted, warning};
+use crate::theme::{child, command, diff_summary, field, headline, muted, warning};
 
 pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -378,11 +378,11 @@ fn print_text(ctx: &Session, args: &BackportArgs, result: &Backport) {
     }
     ctx.out.say(muted(
         &ctx.out.theme,
-        &diff_summary(
+        &child(&diff_summary(
             result.files.len(),
             result.files.iter().map(|f| f.insertions).sum(),
             result.files.iter().map(|f| f.deletions).sum(),
-        ),
+        )),
     ));
 
     ctx.out.blank();
@@ -445,11 +445,11 @@ fn print_plan(ctx: &Session, result: &Backport) {
             &format!("  {} <- {}", file.source, file.rendered),
         ));
         if let Some((owner, revision)) = &file.owner {
-            ctx.out.say(field(
+            ctx.out.say(child(&child(&field(
                 &ctx.out.theme,
                 "owner",
                 &format!("{owner} at {revision}"),
-            ));
+            ))));
         }
         for hunk in &file.hunks {
             // The spec exactly as `--hunk` takes it, so it can be copied.

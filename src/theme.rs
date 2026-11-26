@@ -377,7 +377,21 @@ pub fn diff_summary(files: usize, insertions: usize, deletions: usize) -> String
 
 /// A suggested command, indented.
 pub fn command(theme: &Theme, text: &str) -> String {
-    format!("  {}", theme.command.apply_to(text))
+    child(&theme.command.apply_to(text).to_string())
+}
+
+/// Nest a human-report block without flattening its existing hierarchy.
+pub fn child(text: &str) -> String {
+    text.split_inclusive('\n')
+        .map(|line| {
+            // Empty separators must stay empty, including at the end of a block.
+            if line == "\n" {
+                line.to_owned()
+            } else {
+                format!("  {line}")
+            }
+        })
+        .collect()
 }
 
 /// A section heading.
@@ -528,7 +542,13 @@ pub fn bold(theme: &Theme, text: &str) -> String {
 
 /// A warning line.
 pub fn warning(theme: &Theme, text: &str) -> String {
-    format!("{} {text}", theme.warning.apply_to("warning:"))
+    let (statement, details) = text.split_once('\n').unwrap_or((text, ""));
+    let mut block = format!("{} {statement}", theme.warning.apply_to("warning:"));
+    if !details.is_empty() {
+        block.push('\n');
+        block.push_str(&child(details));
+    }
+    block
 }
 
 /// The template's own words, framed and attributed to it.
@@ -632,6 +652,28 @@ mod tests {
         assert_eq!(
             text,
             "\x1b[2mbefore \x1b[36mcode\x1b[0m\x1b[2m after\x1b[0m"
+        );
+    }
+
+    #[test]
+    fn child_blocks_preserve_nested_lines_and_empty_separators() {
+        assert_eq!(
+            child("statement\n  child\n\nlast\n"),
+            "  statement\n    child\n\n  last\n"
+        );
+        assert_eq!(child(""), "");
+        assert_eq!(child(&child("detail")), "    detail");
+        assert_eq!(child("\x1b[31mcolored\x1b[0m"), "  \x1b[31mcolored\x1b[0m");
+    }
+
+    #[test]
+    fn warning_details_nest_below_the_statement_without_losing_their_own_children() {
+        assert_eq!(
+            warning(
+                &Theme::plain(),
+                "Something needs attention\nExplanation\n  nested detail"
+            ),
+            "warning: Something needs attention\n  Explanation\n    nested detail",
         );
     }
 
