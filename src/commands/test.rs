@@ -19,7 +19,7 @@ use tpl::ops::{self, OpError, Target};
 
 use super::{Standalone, report_ignored_paths};
 use crate::cli::{GlobalArgs, TestArgs};
-use crate::theme::{Theme, bold, child, field, heading, muted, patch_line};
+use crate::theme::{Theme, bold, child, field, heading, inline_code, muted, patch_line, prose};
 
 pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
@@ -536,7 +536,10 @@ fn print_text(ctx: &Standalone, report: &Report, write: bool) {
         if skipped > 0 {
             ctx.out.say(muted(
                 theme,
-                &format!("{skipped} skipped (no `snapshot = true`)"),
+                &format!(
+                    "{skipped} skipped (no {})",
+                    inline_code(theme, "snapshot = true")
+                ),
             ));
         }
 
@@ -591,8 +594,9 @@ fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize, write: bool) {
         ctx.out.say(muted(
             theme,
             &format!(
-                "  {status}  {:width$}   skipped (no `snapshot = true`)",
-                case.name
+                "  {status}  {:width$}   skipped (no {})",
+                case.name,
+                inline_code(theme, "snapshot = true")
             ),
         ));
         return;
@@ -715,7 +719,7 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
             say(format!(
                 "{assertion}{}: {message}",
                 path.as_ref()
-                    .map(|path| format!(" `{path}`"))
+                    .map(|path| format!(" {}", inline_code(theme, path)))
                     .unwrap_or_default()
             ));
         }
@@ -724,31 +728,44 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
             if let Some(near) = closest {
                 lines.push(muted(
                     theme,
-                    &format!("      the template rendered `{near}`"),
+                    &format!("      the template rendered {}", inline_code(theme, near)),
                 ));
             }
         }
         Failure::UnexpectedFile { path } => say(format!("unexpected file   {path}")),
         Failure::ContainsMissingFile { path } => {
-            say(format!("missing file      {path} (named by `contains`)"));
+            say(format!(
+                "missing file      {path} (named by {})",
+                inline_code(theme, "contains")
+            ));
         }
         Failure::ContainsMissing { path, needle } => {
-            say(format!("`{path}` does not contain: {needle}"));
+            say(format!(
+                "{} does not contain: {needle}",
+                inline_code(theme, path)
+            ));
         }
         Failure::ContainsNotUtf8 { path } => {
             say(format!(
-                "`{path}` is not text, so `contains` cannot look in it"
+                "{} is not text, so {} cannot look in it",
+                inline_code(theme, path),
+                inline_code(theme, "contains")
             ));
         }
         Failure::LacksMissingFile { path } => {
-            say(format!("missing file      {path} (named by `lacks`)"));
+            say(format!(
+                "missing file      {path} (named by {})",
+                inline_code(theme, "lacks")
+            ));
         }
         Failure::LacksPresent { path, needle } => {
-            say(format!("`{path}` contains: {needle}"));
+            say(format!("{} contains: {needle}", inline_code(theme, path)));
         }
         Failure::LacksNotUtf8 { path } => {
             say(format!(
-                "`{path}` is not text, so `lacks` cannot look in it"
+                "{} is not text, so {} cannot look in it",
+                inline_code(theme, path),
+                inline_code(theme, "lacks")
             ));
         }
         Failure::ExpectedError { code } => {
@@ -758,7 +775,8 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
         }
         Failure::UnexpectedError { code, message } => {
             say(format!(
-                "the render failed: {message}{}",
+                "the render failed: {}{}",
+                prose(theme, message),
                 code.as_deref()
                     .map(|code| format!(" [{code}]"))
                     .unwrap_or_default()
@@ -766,7 +784,10 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
             if let Some(code) = code {
                 lines.push(muted(
                     theme,
-                    &format!("      add `error = \"{code}\"` if that is the point of the case"),
+                    &format!(
+                        "      add {} if that is the point of the case",
+                        inline_code(theme, &format!("error = \"{code}\""))
+                    ),
                 ));
             }
         }
@@ -776,7 +797,7 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
             message,
         } => {
             say(format!("expected {expected}, got {}", actual.join(" → ")));
-            lines.push(muted(theme, &format!("      {message}")));
+            lines.push(muted(theme, &format!("      {}", prose(theme, message))));
         }
         Failure::SnapshotDiff { changes } => {
             say(format!(
@@ -801,12 +822,21 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
             }
             lines.push(muted(
                 theme,
-                "      re-record with `git tpl test --write` once the change is intended",
+                &format!(
+                    "      re-record with {} once the change is intended",
+                    inline_code(theme, "git tpl test --write")
+                ),
             ));
         }
         Failure::SnapshotMissing => {
             say("snapshot requested but never recorded".to_string());
-            lines.push(muted(theme, "      record one with `git tpl test --write`"));
+            lines.push(muted(
+                theme,
+                &format!(
+                    "      record one with {}",
+                    inline_code(theme, "git tpl test --write")
+                ),
+            ));
         }
         Failure::CommandFailed {
             step,
@@ -816,8 +846,16 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
             stderr,
         } => {
             match code {
-                Some(code) => say(format!("[{}] `{command}` exited {code}", step.as_str())),
-                None => say(format!("[{}] `{command}` could not be run", step.as_str())),
+                Some(code) => say(format!(
+                    "[{}] {} exited {code}",
+                    step.as_str(),
+                    inline_code(theme, command)
+                )),
+                None => say(format!(
+                    "[{}] {} could not be run",
+                    step.as_str(),
+                    inline_code(theme, command)
+                )),
             }
             // Under `-v` this was already shown live, byte for byte, as the
             // command produced it — repeating the captured (lossily
@@ -1262,6 +1300,26 @@ mod tests {
             false,
         );
         assert_eq!(lines, vec!["    `a.toml` does not contain: x".to_string()]);
+    }
+
+    #[test]
+    fn highlighting_a_failed_command_keeps_its_captured_output_literal() {
+        let lines = failure_lines(
+            &Theme::colored(),
+            &Failure::CommandFailed {
+                step: CommandStep::Rendered,
+                command: "check `file`".into(),
+                code: Some(1),
+                stdout: String::new(),
+                stderr: "missing `file`".into(),
+            },
+            false,
+        );
+        assert!(
+            lines[0].contains("\x1b[36mcheck `file`\x1b[0m"),
+            "{lines:?}"
+        );
+        assert_eq!(console::strip_ansi_codes(&lines[1]), "      missing `file`");
     }
 
     #[test]

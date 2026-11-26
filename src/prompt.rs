@@ -226,7 +226,7 @@ fn cancelled(_error: std::io::Error) -> EvalError {
 /// Rendering never requires trust: no template can execute anything, trusted or
 /// not. This gates only what a template asks *git-tpl* to do on its behalf, and
 /// today that is exactly two things — fetch a URL, and clone a repository.
-pub struct Confirmer;
+pub struct Confirmer(pub Theme);
 
 impl TrustGate for Confirmer {
     fn confirm(
@@ -274,16 +274,18 @@ impl TrustGate for Confirmer {
                 SourceKind::Git => ("Clone", "Clone it"),
                 _ => ("Fetch", "Fetch it"),
             };
-            let choice = Select::new(format!("{question} `{}`?", request.name))
-                .description(&request.source)
-                .option(DemandOption::new("fetch").label(label))
-                .option(
-                    DemandOption::new("skip")
-                        .label("Skip it — the render will fail if it is needed"),
-                )
-                .option(DemandOption::new("abort").label("Abort"))
-                .run()
-                .map_err(|_| DataError::Cancelled)?;
+            let choice = Select::new(format!(
+                "{question} {}?",
+                crate::theme::inline_code(&self.0, &request.name)
+            ))
+            .description(&request.source)
+            .option(DemandOption::new("fetch").label(label))
+            .option(
+                DemandOption::new("skip").label("Skip it — the render will fail if it is needed"),
+            )
+            .option(DemandOption::new("abort").label("Abort"))
+            .run()
+            .map_err(|_| DataError::Cancelled)?;
 
             match choice {
                 "fetch" => decisions.insert(request.name.clone(), Decision::Allow),
@@ -306,9 +308,8 @@ fn verb(request: &RemoteRequest) -> &'static str {
 
 /// Confirms reversing one substitution, on a terminal.
 ///
-/// A type of its own rather than another `impl` on [`Confirmer`], because it
-/// needs a [`Theme`] and `Confirmer` is constructed in eight places that have
-/// no use for one.
+/// Separate from [`Confirmer`] because substitution consent and network consent
+/// implement independent operation-layer capabilities.
 pub struct Reverser(pub Theme);
 
 impl Unsubstituter for Reverser {

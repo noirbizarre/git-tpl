@@ -17,7 +17,7 @@ pub fn run(args: ShowArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let against = if args.dirty {
         let preferences = tpl::gitconfig::Preferences::load(&ctx.repo)?;
         let mut prompter = Interactive;
-        let mut confirmer = Confirmer;
+        let mut confirmer = Confirmer(ctx.out.theme.clone());
         let preview = ops::render_preview(
             &ctx.repo,
             &ctx.root,

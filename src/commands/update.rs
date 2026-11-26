@@ -63,7 +63,7 @@ pub(super) fn execute(
     }
 
     let mut prompter = Interactive;
-    let mut confirmer = Confirmer;
+    let mut confirmer = Confirmer(ctx.out.theme.clone());
     let outcome = ops::update(
         &ctx.repo,
         &ctx.root,
@@ -316,7 +316,7 @@ fn dry_run(
     // `--dry-run` still fetches: it reports what *would* change, and a render
     // that skipped its data would report a different tree than the real one.
     let mut prompter = Interactive;
-    let mut confirmer = Confirmer;
+    let mut confirmer = Confirmer(ctx.out.theme.clone());
     let rendered = ops::render(
         &ctx.repo,
         &ctx.root,

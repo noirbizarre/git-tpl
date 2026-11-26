@@ -21,7 +21,7 @@ pub fn run(args: ContextArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let source = ctx.user.expand(&args.template).into_owned();
 
     let mut prompter = Interactive;
-    let mut confirmer = Confirmer;
+    let mut confirmer = Confirmer(ctx.out.theme.clone());
 
     let rendered = ops::render_context(
         Target {

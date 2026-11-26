@@ -1826,6 +1826,27 @@ fn the_human_output_explains_every_kind_of_failure() {
         .says("snapshot requested but never recorded")
         .says("record one with `git tpl test --write`")
         .says("0 passed, 9 failed");
+
+    let colored = run_colored(&built, &[]).code(1);
+    assert!(
+        colored
+            .stderr
+            .contains("\x1b[36mpyproject.toml\x1b[0m does not contain: nowhere"),
+        "{}",
+        colored.stderr
+    );
+    assert!(
+        colored
+            .stderr
+            .contains("\x1b[36mgit tpl test --write\x1b[0m"),
+        "{}",
+        colored.stderr
+    );
+    assert!(
+        !colored.stderr.contains("`pyproject.toml`"),
+        "{}",
+        colored.stderr
+    );
 }
 
 #[test]

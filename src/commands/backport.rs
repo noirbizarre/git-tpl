@@ -12,7 +12,7 @@ use crate::theme::{child, command, diff_summary, field, headline, muted, warning
 pub fn run(args: BackportArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
     let preferences = tpl::gitconfig::Preferences::load(&ctx.repo)?;
-    let mut confirmer = Confirmer;
+    let mut confirmer = Confirmer(ctx.out.theme.clone());
     let mut reverser = Reverser(ctx.out.theme.clone());
 
     // Never prompts in practice: the recorded answers cover every question the

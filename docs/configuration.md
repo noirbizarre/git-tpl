@@ -394,6 +394,9 @@ what CI systems set to get coloured logs, and a build that asked for colour expl
 heuristic has not.
 
 These rules govern git-tpl's own output.
+In command messages, diagnostics and prompts, inline code such as paths, identifiers and suggested commands
+uses cyan highlighting when colour is enabled, and backtick delimiters in plain output.
+JSON retains the original text without terminal styling.
 They also apply to built-in help and argument-parsing errors, using the same stderr terminal detection.
 For command-specific help, put colour options first: `git tpl --color always help update`.
 On malformed input, colour options encountered after the parsing failure may not affect its diagnostic.
