@@ -12,7 +12,7 @@ use tpl::ops::{self, OpError};
 
 use super::Standalone;
 use crate::cli::{GlobalArgs, LintArgs};
-use crate::theme::{heading, muted, warning};
+use crate::theme::{child, heading, muted, warning};
 
 pub fn run(args: LintArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
@@ -101,8 +101,10 @@ fn print_text(ctx: &Standalone, verdicts: &[Verdict], errors: usize, denied: usi
             ctx.out.warn(muted(&ctx.out.theme, &format!("  {path}")));
         }
         ctx.out.warn(format!("  {}", finding.message));
-        ctx.out
-            .warn(muted(&ctx.out.theme, &format!("  help: {}", finding.help)));
+        ctx.out.warn(muted(
+            &ctx.out.theme,
+            &child(&child(&format!("help: {}", finding.help))),
+        ));
         ctx.out.blank();
     }
 

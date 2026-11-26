@@ -723,6 +723,7 @@ dependencies = [
  "similar 3.2.1",
  "tempfile",
  "termimad",
+ "textwrap",
  "thiserror 2.0.21",
  "time",
  "toml",

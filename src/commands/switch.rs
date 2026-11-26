@@ -6,7 +6,7 @@ use tpl::ops::{self, OpError};
 use super::{Session, answering, report_ignored, report_ignored_paths, supplied, trust};
 use crate::cli::{GlobalArgs, SwitchArgs};
 use crate::prompt::{Confirmer, Interactive};
-use crate::theme::{change, command, field, headline};
+use crate::theme::{change, child, command, field, headline};
 
 pub fn run(args: SwitchArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Session::discover(global)?;
@@ -53,19 +53,20 @@ pub fn run(args: SwitchArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         ctx.out.say(change(&ctx.out.theme, item.kind, &item.path));
     }
     if !outcome.reused_answers.is_empty() {
-        ctx.out.say(format!(
+        ctx.out.say(child(&format!(
             "Reused answers: {}.",
             outcome.reused_answers.join(", ")
-        ));
+        )));
     }
     if !outcome.skipped_answers.is_empty() {
-        ctx.out.say(format!(
+        ctx.out.say(child(&format!(
             "Recorded answers not reused: {}.",
             outcome.skipped_answers.join(", ")
-        ));
+        )));
     }
-    ctx.out
-        .say("Configuration changes were left unstaged in .config/git.tpl.toml.");
+    ctx.out.say(child(
+        "Configuration changes were left unstaged in .config/git.tpl.toml.",
+    ));
     let switched = serde_json::json!({
         "result": "switched",
         "previousTemplate": outcome.previous_source,
@@ -85,10 +86,12 @@ pub fn run(args: SwitchArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         let merged = super::pull::integrate(&ctx, None, true)?;
         serde_json::json!({ "switch": switched, "merge": merged })
     } else {
+        ctx.out.say(child(
+            "Your rendered worktree files were not modified. Run:",
+        ));
+        ctx.out.say(child(&command(&ctx.out.theme, "git tpl diff")));
         ctx.out
-            .say("Your rendered worktree files were not modified. Run:");
-        ctx.out.say(command(&ctx.out.theme, "git tpl diff"));
-        ctx.out.say(command(&ctx.out.theme, "git tpl merge"));
+            .say(child(&command(&ctx.out.theme, "git tpl merge")));
         switched
     };
     if global.json {

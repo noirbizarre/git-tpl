@@ -19,7 +19,7 @@ use tpl::ops::{self, OpError, Target};
 
 use super::{Standalone, report_ignored_paths};
 use crate::cli::{GlobalArgs, TestArgs};
-use crate::theme::{Theme, bold, field, heading, muted, patch_line};
+use crate::theme::{Theme, bold, child, field, heading, muted, patch_line};
 
 pub fn run(args: TestArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     let ctx = Standalone::new(global)?;
@@ -630,11 +630,12 @@ fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize, write: bool) {
             let note = if change.mode_only { " (mode)" } else { "" };
             ctx.out.say(muted(
                 theme,
-                &format!("      {} {}{note}", change.kind.label(), change.path),
+                &format!("          {} {}{note}", change.kind.label(), change.path),
             ));
             if let Some(patch) = &change.patch {
                 for line in patch.lines() {
-                    ctx.out.say(format!("        {}", patch_line(theme, line)));
+                    ctx.out
+                        .say(format!("            {}", patch_line(theme, line)));
                 }
             }
         }
@@ -654,7 +655,7 @@ fn print_case(ctx: &Standalone, case: &CaseOutcome, width: usize, write: bool) {
 /// it (`command_output`, above).
 fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String> {
     let mut lines = Vec::new();
-    let mut say = |text: String| lines.push(format!("    {text}"));
+    let mut say = |text: String| lines.push(child(&child(&text)));
 
     match failure {
         Failure::ContextMissing { path, expected } => {
@@ -700,7 +701,11 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
                 "migration {from} → {to} [{phase}]; crossed: {}",
                 migrations.join(", ")
             ));
-            lines.extend(failure_lines(theme, failure, verbose));
+            lines.extend(
+                failure_lines(theme, failure, verbose)
+                    .into_iter()
+                    .map(|line| child(&line)),
+            );
         }
         Failure::MigrationAssertion {
             assertion,
@@ -835,7 +840,9 @@ fn failure_lines(theme: &Theme, failure: &Failure, verbose: bool) -> Vec<String>
 
 fn print_failure(ctx: &Standalone, failure: &Failure) {
     for line in failure_lines(&ctx.out.theme, failure, ctx.out.global.verbose > 0) {
-        ctx.out.say(line);
+        // The case name follows the padded status marker at column ten.
+        // Keep failure details under that name, rather than under the marker.
+        ctx.out.say(child(&child(&child(&line))));
     }
 }
 

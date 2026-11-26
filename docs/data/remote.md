@@ -135,10 +135,10 @@ When there is nobody to ask — `--defaults`, `tpl.interactive false`, CI — an
 entry, every remote source is **refused**, loudly, naming what was refused:
 
 ```
-x data source `licenses` was not loaded, because the template is not trusted
-help: source: https://example.com/licenses.toml
-      pass `--trust` to allow this template's network data sources for this
-      run, or answer the confirmation interactively
+  x data source `licenses` was not loaded, because the template is not trusted
+    help: source: https://example.com/licenses.toml
+          pass `--trust` to allow this template's network data sources for this
+          run, or answer the confirmation interactively
 ```
 
 Never silently accepted: a CI runner is the worst possible place to grant a capability by omission.
@@ -179,8 +179,8 @@ plausible-looking tree that is quietly wrong, and that tree would be committed.
 Verified checksum-addressed content is an exact match for an immutable pin, not a failure fallback.
 
 ```
-x could not load template data source `licenses`
-help: source: https://example.com/licenses.toml
-      kind:   remote
-      reason: timed out reading response
+  x could not load template data source `licenses`
+    help: source: https://example.com/licenses.toml
+          kind:   remote
+          reason: timed out reading response
 ```

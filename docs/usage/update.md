@@ -144,16 +144,16 @@ Updated refs/tpl/github-com-noirbizarre-rust-library-template
   modified  README.md
   added     .github/workflows/release.yml
 
-── from the template ──────────────────────────────────────
-  0.4 split `config.rs` into a module; your overrides moved
-  with it.
-────────────────────────────────────────────────────────────
+  ── from the template ──────────────────────────────────────
+    0.4 split `config.rs` into a module; your overrides moved
+    with it.
+  ────────────────────────────────────────────────────────────
 
-Your rendered worktree files were not modified.
+  Your rendered worktree files were not modified.
 
-Run:
-  git tpl diff
-  git tpl merge
+  Run:
+    git tpl diff
+    git tpl merge
 ```
 
 ## When nothing changed
