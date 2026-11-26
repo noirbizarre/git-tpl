@@ -7,6 +7,142 @@ mod common;
 use common::{World, file_url, tpl, tpl_colored};
 
 #[test]
+fn saved_comma_separated_answers_migrate_on_changed_and_identical_renderings() {
+    for kind in ["list", "multi_choice"] {
+        for changes_output in [false, true] {
+            let world = World::with_template(
+                "name = 'legacy'\n[questions.input]\ntype = 'string'\ndefault = ' b, ,a,b, '\n",
+                &[(
+                    "out.jinja",
+                    if changes_output {
+                        "{{ input }}\n"
+                    } else {
+                        "constant\n"
+                    },
+                )],
+            );
+            world.init(&[]).success();
+            world
+                .template
+                .repo
+                .write(
+                    "template.toml",
+                    &format!(
+                        "name = 'legacy'\n[questions.input]\ntype = '{kind}'\n{}",
+                        if kind == "multi_choice" {
+                            "choices = ['a', 'b']\n"
+                        } else {
+                            ""
+                        }
+                    ),
+                )
+                .commit_all("replace string question with array");
+            let before = world.project.working_state();
+            let tip = world.project.rev_parse(&world.ref_name());
+            let preview = tpl(
+                &world.project,
+                &["--json", "update", "--defaults", "--dry-run"],
+            )
+            .success()
+            .json();
+            assert_eq!(preview["answersChanged"], true);
+            assert_eq!(world.project.working_state(), before);
+            assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+
+            let result = tpl(&world.project, &["--json", "update", "--defaults"])
+                .success()
+                .json();
+            assert_eq!(result["answersChanged"], true);
+            assert_eq!(
+                result["result"],
+                if changes_output {
+                    "updated"
+                } else {
+                    "upToDate"
+                }
+            );
+            let config = tpl::config::Config::load(&world.project.path).unwrap();
+            assert_eq!(
+                config.answers["input"],
+                tpl::Value::Array(
+                    ["b", "a", "b"]
+                        .into_iter()
+                        .map(|s| tpl::Value::String(s.into()))
+                        .collect()
+                )
+            );
+            let after = world.project.working_state();
+            assert_eq!(before.head, after.head);
+            assert_eq!(before.index, after.index);
+            assert_eq!(world.project.status(), "M .config/git.tpl.toml");
+            if changes_output {
+                assert_eq!(
+                    world
+                        .project
+                        .git(&["show", &format!("{}:out", world.ref_name())]),
+                    "[\"b\", \"a\", \"b\"]"
+                );
+            } else {
+                assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+            }
+            let saved = world.project.read(".config/git.tpl.toml");
+            let tip = world.project.rev_parse(&world.ref_name());
+            let again = tpl(&world.project, &["--json", "update", "--defaults"])
+                .success()
+                .json();
+            assert_eq!(again["answersChanged"], false);
+            assert_eq!(again["result"], "upToDate");
+            assert_eq!(world.project.read(".config/git.tpl.toml"), saved);
+            assert_eq!(world.project.working_state(), after);
+            assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+        }
+    }
+}
+
+#[test]
+fn invalid_migrated_array_answers_preserve_all_project_state() {
+    for (schema, code) in [
+        ("type = 'list'\nmax_items = 1\n", "tpl::eval::item_count"),
+        (
+            "type = 'list'\nitem_pattern = '^a$'\n",
+            "tpl::eval::invalid_list",
+        ),
+        (
+            "type = 'multi_choice'\nchoices = ['a', 'b']\nmax_choices = 1\n",
+            "tpl::eval::choice_count",
+        ),
+        (
+            "type = 'multi_choice'\nchoices = ['a']\n",
+            "tpl::eval::invalid_choice",
+        ),
+    ] {
+        let world = World::with_template(
+            "name = 'legacy'\n[questions.input]\ntype = 'string'\ndefault = 'a,b'\n",
+            &[("out.jinja", "{{ input }}")],
+        );
+        world.init(&[]).success();
+        world
+            .template
+            .repo
+            .write(
+                "template.toml",
+                &format!("name = 'legacy'\n[questions.input]\n{schema}"),
+            )
+            .commit_all("constrain array question");
+        let before = world.project.working_state();
+        let tip = world.project.rev_parse(&world.ref_name());
+        assert_eq!(
+            tpl(&world.project, &["--json", "update", "--defaults"])
+                .failure()
+                .error_code(),
+            code
+        );
+        assert_eq!(world.project.working_state(), before);
+        assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+    }
+}
+
+#[test]
 fn dirty_update_previews_warn_once_about_globally_ignored_template_files() {
     let world = World::new();
     world.init(&[]).success();

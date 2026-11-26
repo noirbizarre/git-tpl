@@ -63,3 +63,4 @@ explains the code that existed.
 | [052](052-native-explicit-merge.md) | Native Git owns explicit integration, including configured merge drivers |
 | [053](053-one-shot-rendered-files.md) | One-shot files retain initialized entries in rendered history |
 | [054](054-owner-routed-backports.md) | Backport routes separate mailboxes to historical source owners |
+| [055](055-recorded-string-list-conversion.md) | Update migrates saved comma-separated strings for array questions |

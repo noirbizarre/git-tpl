@@ -103,8 +103,11 @@ With `--defaults`, rendering must succeed to return a file list; without it, JSO
 `choicesResolved` stays a string array; `choicesResolvedDetails` adds normalized value/label/help records.
 Invalid static data fails; dynamic, project-local and network data remain unresolved.
 
-Files and recorded answers preserve types: quoted booleans, integers or arrays remain strings and fail type checks.
-Only `--answer` text is coerced; correct old wrong-type configuration explicitly.
+Files preserve types; `--answer` text is parsed as the question's declared type.
+Update and dirty previews migrate saved strings for `list`/`multi_choice` by splitting on commas,
+trimming whitespace and dropping empty segments, preserving order and duplicates before normal validation.
+Update saves successful conversions as unstaged config edits, including with identical output; previews never save them.
+Other wrong-type saved strings require explicit correction; CLI `list` answers still require JSON arrays.
 Strict dirty `diff`/`show` ignore obsolete recorded keys, but reject unknown keys supplied by flags or answers files.
 
 Persistent trust in a composing parent covers its data only.

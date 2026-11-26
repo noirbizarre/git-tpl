@@ -71,6 +71,9 @@ fn structured_strings_are_not_coerced_but_cli_text_is() {
                 &format!("input={text}"),
             ])
             .success();
+        if kind == "list" {
+            continue;
+        }
         let mut config = tpl::config::Config::load(&world.project.path).unwrap();
         config
             .answers
@@ -84,6 +87,44 @@ fn structured_strings_are_not_coerced_but_cli_text_is() {
             "tpl::eval::wrong_type"
         );
         assert_eq!(world.project.read(".config/git.tpl.toml"), before);
+    }
+}
+
+#[test]
+fn a_file_string_override_does_not_inherit_recorded_array_migration() {
+    for kind in ["list", "multi_choice"] {
+        let world = World::with_template(
+            "name = 'legacy'\n[questions.input]\ntype = 'string'\ndefault = 'a,b'\n",
+            &[("out.jinja", "{{ input }}")],
+        );
+        world.init(&[]).success();
+        world
+            .template
+            .repo
+            .write(
+                "template.toml",
+                &format!(
+                    "name = 'legacy'\n[questions.input]\ntype = '{kind}'\n{}",
+                    if kind == "multi_choice" {
+                        "choices = ['a', 'b']\n"
+                    } else {
+                        ""
+                    }
+                ),
+            )
+            .commit_all("use array answers");
+        let path = answers_file(&world, "override.toml", "input = 'a,b'\n");
+        let before = world.project.working_state();
+        assert_eq!(
+            tpl(
+                &world.project,
+                &["--json", "update", "--defaults", "--answers-from", &path]
+            )
+            .failure()
+            .error_code(),
+            "tpl::eval::wrong_type"
+        );
+        assert_eq!(world.project.working_state(), before);
     }
 }
 

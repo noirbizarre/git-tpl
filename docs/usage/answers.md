@@ -32,10 +32,13 @@ CLI surface permanently.
 Strict dirty previews (`diff` and `show`) check keys supplied on the current invocation.
 Obsolete recorded keys are ignored, as on `update`; explicitly supplying an obsolete key still fails strict checking.
 
-Strings in files and recorded configuration keep their type, even if they look like integers, booleans or arrays.
-Only `--answer` text is parsed as the question's declared type.
-Correct previously recorded wrong-type strings explicitly, or override them with `--answer`;
-failed validation does not migrate configuration.
+Strings in files keep their type, even if they look like integers, booleans or arrays.
+`--answer` text is parsed as the question's declared type.
+Saved project answers have one compatibility exception during update and dirty previews:
+a string for a `list` or `multi_choice` question becomes a comma-separated array.
+Whitespace is trimmed and empty segments discarded; order and duplicates are preserved.
+See [migrating saved lists](update.md#migrating-saved-lists) for persistence and validation rules.
+Other wrong-type saved strings require an explicit correction or override with `--answer`.
 
 Either a flat table of `name = value`:
 
