@@ -17,7 +17,7 @@ git tpl init <template> [<dir>] [--ref <ref>] [--answer k=v]... [options]
 ## What it does
 
 1. Discovers a Git repository at or above the destination — `<dir>`, or the current directory if omitted.
-   With `--init`, creates missing directories and initializes a repository only if discovery finds none.
+   With `--create`, creates missing directories and initializes a repository only if discovery finds none.
    Rendering and attachment use the discovered repository root, even when the destination is a subdirectory.
 2. Resolves the template source and its revision.
 3. Loads the template manifest and any data sources it needs.
@@ -41,7 +41,7 @@ Steps 11 and 12 come last, after everything git-tpl did itself, and happen on `i
 A template, ancestor, or selected composed child can declare a
 [`minimum_version`](../templates/format.md#minimum-engine-version).
 An incompatible engine stops before publishing rendered files, attachment configuration, commits, refs, or merges.
-With `--init`, the initial empty directory and repository may already have been created.
+With `--create`, the initial empty directory and repository may already have been created.
 Upgrade git-tpl to the version reported in the diagnostic and retry.
 
 ## What a template may and may not do afterwards
@@ -129,7 +129,7 @@ the expanded URL that is recorded in the project, so the shortcut never leaves y
 |---|---|
 | `<dir>` | Where to start upward repository discovery. Defaults to the current directory. Rendering uses the discovered root. Template paths and `--answers-from` remain invocation-relative. |
 | `--ref <ref>` | Branch, tag or commit. Defaults to a local template's checked-out branch, or a URL's remote default branch. |
-| `--init` | Create missing directories; initialize a repository only if none is discoverable at or above the destination. |
+| `--create` | Create missing directories; initialize a repository only if none is discoverable at or above the destination. |
 | `--answer k=v` | Supply an answer, skipping its prompt. Repeatable. |
 | `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
 | `--defaults` | Accept every default without prompting. |
@@ -172,13 +172,16 @@ Merged into main.
 
 ## Starting from nothing
 
-Outside any existing repository, `<dir>` plus `--init` creates the directory and repository and attaches the template:
+`--create` replaces the former `--init` flag, which is no longer accepted.
+Update existing scripts to use `--create`.
+
+Outside any existing repository, `<dir>` plus `--create` creates the directory and repository and attaches the template:
 
 ```console
-$ git tpl init https://github.com/noirbizarre/rust-library-template my-project --init
+$ git tpl init https://github.com/noirbizarre/rust-library-template my-project --create
 ```
 
-Repository discovery searches upward, including with `--init`.
+Repository discovery searches upward, including with `--create`.
 Inside an existing repository, this command attaches at that repository's root rather than creating a nested repository.
 To create an independent project there, initialize its repository explicitly first:
 
@@ -187,14 +190,14 @@ git init my-project
 git tpl init https://github.com/noirbizarre/rust-library-template my-project
 ```
 
-Without `--init`, a missing destination is refused.
+Without `--create`, a missing destination is refused.
 An existing destination is accepted when a repository can be discovered there or in a parent directory.
 
 ## Preconditions
 
 **A Git repository discoverable at or above the destination** — the current directory by default, or `<dir>` if given.
 `init` needs somewhere to put a ref.
-Pass `--init` to create missing directories and initialize a repository when none is discoverable.
+Pass `--create` to create missing directories and initialize a repository when none is discoverable.
 Explicitly run `git init <dir>` first when you intend an independent repository inside another repository.
 `--dry-run` is exempt: it creates nothing, so it previews against the template alone, even against a
 destination that does not exist yet or is not a Git repository.

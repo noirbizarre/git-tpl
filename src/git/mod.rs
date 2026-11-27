@@ -353,7 +353,7 @@ pub enum GitError {
     #[error("`{}` is not a Git repository", path.display())]
     #[diagnostic(
         code(tpl::git::not_a_repository),
-        help("run `git init` first, or `git tpl init --init` to do both")
+        help("run `git init` first, or `git tpl init --create` to do both")
     )]
     NotARepository {
         /// The path that was searched from.

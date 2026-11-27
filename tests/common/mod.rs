@@ -94,7 +94,7 @@ pub fn global_gitignore(config_home: &Path, rules: &str) {
     .expect("write global config");
 }
 
-/// Give libgit2's global config an identity, for `init --init`: the
+/// Give libgit2's global config an identity, for `init --create`: the
 /// repository does not exist yet when the command starts, so there is no
 /// local config to set it on — as [`Repo::configure`] does for every other
 /// test — and `init` needs an identity to build the orphan commit's

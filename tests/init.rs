@@ -1399,8 +1399,8 @@ fn a_destination_directory_is_rendered_into_instead_of_the_current_one() {
     );
 }
 
-/// `--init` now makes the directory as well as the repository, so
-/// `init <template> <dir> --init` works from nothing — `mkdir -p` and
+/// `--create` makes the directory as well as the repository, so
+/// `init <template> <dir> --create` works from nothing — `mkdir -p` and
 /// `git init` in one step.
 #[test]
 fn init_creates_the_destination_and_the_repository_when_asked() {
@@ -1408,7 +1408,7 @@ fn init_creates_the_destination_and_the_repository_when_asked() {
     let source = world.template.source();
     // Nested, to prove this is `mkdir -p` and not a single `mkdir`.
     let destination = world.dir.path().join("fresh").join("my-project");
-    // The repository does not exist until `--init` creates it, so there is no
+    // The repository does not exist until `--create` creates it, so there is no
     // local config to give it an identity — see `global_identity`.
     global_identity(world.project.config_home());
 
@@ -1420,7 +1420,7 @@ fn init_creates_the_destination_and_the_repository_when_asked() {
             &source,
             &destination.to_string_lossy(),
             "--defaults",
-            "--init",
+            "--create",
         ],
     )
     .success();
@@ -1429,7 +1429,7 @@ fn init_creates_the_destination_and_the_repository_when_asked() {
     assert!(destination.join("Cargo.toml").exists());
 }
 
-/// Without `--init`, a missing destination is refused with the fix named —
+/// Without `--create`, a missing destination is refused with the fix named —
 /// the diagnostic the clap "unexpected argument" error in #84 stood in for.
 #[test]
 fn a_missing_destination_says_how_to_create_it() {
@@ -1451,6 +1451,12 @@ fn a_missing_destination_says_how_to_create_it() {
     .failure();
 
     assert_eq!(output.error_code(), "tpl::ops::no_such_directory");
+    assert!(
+        output.json()["error"]["help"]
+            .as_str()
+            .expect("help")
+            .contains("--create")
+    );
 }
 
 /// A destination that exists but is not a repository, and was not asked to
@@ -1476,6 +1482,12 @@ fn a_destination_that_is_not_a_repository_says_so() {
     .failure();
 
     assert_eq!(output.error_code(), "tpl::git::not_a_repository");
+    assert!(
+        output.json()["error"]["help"]
+            .as_str()
+            .expect("help")
+            .contains("--create")
+    );
 }
 
 /// A destination below a repository's root discovers upward, exactly as
@@ -1521,7 +1533,7 @@ fn a_relative_template_path_stays_relative_to_the_current_directory() {
     assert!(world.project.has_ref(&world.ref_name()));
 }
 
-/// A dry run creates nothing, so it must not require `--init` to have already
+/// A dry run creates nothing, so it must not require `--create` to have already
 /// made the destination a repository — it previews on the template alone.
 #[test]
 fn a_dry_run_against_a_destination_that_does_not_exist_creates_nothing() {
@@ -1642,7 +1654,7 @@ fn init_previews_demand_init_metadata_even_when_already_attached_or_projectless(
             "init",
             &source,
             destination.to_str().unwrap(),
-            "--init",
+            "--create",
             "--dry-run",
         ];
         // Schema-only previews must not acquire metadata data sources.
@@ -1676,7 +1688,7 @@ fn init_previews_do_not_demand_update_migration_metadata_from_the_old_attachment
     world.init(&["--force", "--no-merge"]).success();
 }
 
-/// `--init` with no destination argument: the existing single-directory form,
+/// `--create` with no destination argument: the existing single-directory form,
 /// which nothing in the suite exercised before this change.
 #[test]
 fn init_creates_the_repository_when_there_is_none() {
@@ -1689,7 +1701,7 @@ fn init_creates_the_repository_when_there_is_none() {
     tpl_outside(
         &bare,
         world.project.config_home(),
-        &["init", &source, "--defaults", "--init"],
+        &["init", &source, "--defaults", "--create"],
     )
     .success();
 

@@ -231,7 +231,7 @@ do not assume it is preinstalled.
    This is a complete semantic version, not a range; every ancestor and selected composed child is checked.
    On `tpl::resolve::minimum_version`, upgrade git-tpl to the reported minimum or newer and retry.
    For composed failures, inspect `error.causes` for this code beneath `tpl::compose::child_failed`.
-   Compatibility failures publish no output or attachment changes; `init --init` may have created an empty repository.
+   Compatibility failures publish no output or attachment changes; `init --create` may have created an empty repository.
 2. **Never run `init`/`update`/`switch`/`pull`/`show --dirty` interactively.**
    Build the answer set first with `git tpl --json questions <template>`,
    then supply it with repeated `--answer k=v`, one or more `--answers-from file.toml`, and/or `--defaults`.
@@ -322,7 +322,7 @@ do not assume it is preinstalled.
 | Task | Command |
 |---|---|
 | See a template's questions before answering them | `git tpl --json questions <template>` |
-| Scaffold a new project | `git tpl init <template> <dir> --init --answers-from a.toml --defaults --json` |
+| Scaffold a new project | `git tpl init <template> <dir> --create --answers-from a.toml --defaults --json` |
 | Adopt git-tpl in an existing project | `git tpl init <template> --answers-from a.toml --defaults --json` |
 | Check whether the template moved | `git tpl status --json` (exit `2` = pending) |
 | Advance the rendered ref | `git tpl update --defaults --json` |
@@ -349,22 +349,22 @@ git tpl --json questions https://github.com/org/some-template \
 # edit answers.toml with the real values
 
 git tpl init https://github.com/org/some-template my-project \
-  --init --dry-run --json   # preview: nothing is created yet
+  --create --dry-run --json   # preview: nothing is created yet
 
 git tpl init https://github.com/org/some-template my-project \
-  --init --answers-from answers.toml --defaults --json
+  --create --answers-from answers.toml --defaults --json
 ```
 
-Repository discovery searches upward from the destination, including with `--init`.
+Repository discovery searches upward from the destination, including with `--create`.
 Rendering and attachment use the discovered repository root, not necessarily the requested directory.
-`--init` creates missing directories and initializes a repository only when discovery finds none.
+`--create` creates missing directories and initializes a repository only when discovery finds none.
 For an independent project inside an existing repository, run `git init my-project` explicitly before attaching there.
 On success `init` has already merged the rendered commit into the branch —
 there is nothing further to apply, unlike `update`.
 
 ### Adopt git-tpl in an existing project
 
-Same command, run inside the existing repository, **without** `--init`:
+Same command, run inside the existing repository, **without** `--create`:
 
 ```sh
 cd my-existing-project
@@ -592,7 +592,7 @@ case-level `trust` only controls data loading during cases, and `test` has no in
 | Command | Synopsis | Key JSON fields |
 |---|---|---|
 | `questions` | `git tpl --json questions <template>` | `questions[]{name,default,defaultIsExpression,when,choices,defaultWhenSkipped}` |
-| `init` | `git tpl init <template> [<dir>] [--init] [--answer k=v]... [--answers-from f]... [--defaults] [--dry-run]` | `id`,`ref`,`revision`,`commit`,`changes[]`,`merge{result,...}` |
+| `init` | `git tpl init <template> [<dir>] [--create] [--answer k=v]... [--answers-from f]... [--defaults] [--dry-run]` | `id`,`ref`,`revision`,`commit`,`changes[]`,`merge{result,...}` |
 | `status` | `git tpl status` | `templateMoved`,`merged`,`availableReferenceDescription`,`availableCommit`,`renderedReference`,`worktreeClean`,`remote{ahead,behind}` |
 | `log` | `git tpl log [REVISION] [-n COUNT \| --all] [--no-relative-date]` | `applied`,`target`,`exclude`,`mode`,`entries[]{commit,subject,committedAt,conventional}` |
 | `update` | `git tpl update [--answer k=v]... [--defaults] [--dry-run] [--push] [--merge]` | `result`(`upToDate`\|`updated`\|`wouldUpdate`),`previousRevision`,`revision`,`changes[]`,`migrations[]`,`movedCommit`; with merge: `update`, `merge` |
