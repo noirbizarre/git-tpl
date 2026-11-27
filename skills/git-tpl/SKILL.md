@@ -254,6 +254,10 @@ do not assume it is preinstalled.
 6. **`git tpl status --json` exits `2`**, not `0` or `1`,
    when a template update is pending (`"templateMoved": true`, `"composedMoved": true`, or `"merged": false`).
    Treat that as a normal branch, not a failure.
+   Exit `0` means no pending changes were detected, not verified freshness: `availableCommit` can be null.
+   If present, null `availableComposed` means child availability is unknown; movement flags remain false on probe failure.
+   Composition fields are omitted without recorded or successfully resolved children, so absence is not proof of freshness.
+   Require known availability explicitly, or a successful `update --dry-run --defaults` for full render/composition checking.
 7. **`"ok": true` can accompany a nonzero exit status.**
    `diff --exit-code` exits `1` for a nonempty comparison; inspect `changes[]`.
    `lint` exits `1` for errors or denied warnings; inspect top-level `errors`/`denied` and `diagnostics[]`.

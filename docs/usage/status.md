@@ -81,15 +81,39 @@ Use `git tpl diff --dirty` for a content-sensitive merge preview without committ
 
 | Code | Meaning |
 |---|---|
-| `0` | Up to date and merged. |
+| `0` | No pending changes detected; availability may be unknown. |
 | `1` | An error. |
 | `2` | Something is pending — the template or a composed child moved, or the ref is not merged. |
 
-Useful in CI, where `--quiet` — a global flag — suppresses the report and leaves only the exit code:
+`pending` is true when the template moved, a composed child moved, or an existing rendered ref is unmerged.
+Unknown availability does not set either movement flag, so exit `0` alone does not verify freshness.
+Resolution failures, including unavailable sources or missing trust, can leave availability unknown.
+
+For a best-effort CI check, `--quiet` suppresses the report and leaves only the exit code:
 
 ```sh
 git tpl status --quiet || echo "template drift detected"
 ```
+
+For a stricter check, require a successful report, a recorded rendering, known parent availability,
+known child availability whenever the report includes composition, and no detected pending changes:
+
+```sh
+status=$(git tpl --json status) || exit "$?"
+printf '%s\n' "$status" | jq -e '
+  .ok == true
+  and .tip != null
+  and .renderedCommit != null
+  and .availableCommit != null
+  and .pending == false
+  and (if has("availableComposed") then .availableComposed != null else true end)
+' >/dev/null
+```
+
+This rejects reported unknown availability as well as pending changes.
+Composition fields are omitted when no recorded or successfully resolved children exist;
+their absence cannot prove that a failed composition probe would not have selected new children.
+Use `git tpl update --dry-run --defaults` when CI must also require a successful render and composition probe.
 
 ## JSON
 
@@ -132,6 +156,10 @@ parent first, as `{source, revision}` objects — `[]`, not `null`, for a templa
 reached right now.
 `availableCommit` is `null` exactly when `availableReferenceDescription` is — no template resolves, typically because
 fetching it failed.
+`availableComposed` is an array when child probing succeeds and `null` when it cannot complete.
+`renderedComposed`, `availableComposed` and `composedMoved` appear only when recorded or resolved children exist.
+An empty available array means probing succeeded and selected no children; it is distinct from unknown availability.
+When probing fails, `composedMoved` is false rather than evidence that the children are unchanged.
 Human output goes to stderr, so `--json` leaves stdout machine-readable.
 
 ## Detaching
