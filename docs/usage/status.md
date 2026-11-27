@@ -160,6 +160,8 @@ fetching it failed.
 `renderedComposed`, `availableComposed` and `composedMoved` appear only when recorded or resolved children exist.
 An empty available array means probing succeeded and selected no children; it is distinct from unknown availability.
 When probing fails, `composedMoved` is false rather than evidence that the children are unchanged.
+Child probing replays saved answers with the same compatibility rules as `update`,
+including legacy comma-separated list answers, without rewriting the configuration.
 Human output goes to stderr, so `--json` leaves stdout machine-readable.
 
 ## Detaching

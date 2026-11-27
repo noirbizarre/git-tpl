@@ -266,6 +266,7 @@ do not assume it is preinstalled.
    If present, null `availableComposed` means child availability is unknown; movement flags remain false on probe failure.
    Composition fields are omitted without recorded or successfully resolved children, so absence is not proof of freshness.
    Require known availability explicitly, or a successful `update --dry-run --defaults` for full render/composition checking.
+   Child probing accepts legacy recorded list strings like `update` and leaves the saved configuration untouched.
 7. **`"ok": true` can accompany a nonzero exit status.**
    `diff --exit-code` exits `1` for a nonempty comparison; inspect `changes[]`.
    `lint` exits `1` for errors or denied warnings; inspect top-level `errors`/`denied` and `diagnostics[]`.

@@ -2708,7 +2708,9 @@ pub fn status(
             template,
             &config.template.source,
             Some((project, project_root)),
-            crate::answers::typed(config.answers.clone()),
+            // Saved answers need the same legacy list conversion as update;
+            // treating them as typed overrides would hide child availability.
+            merge_answers(config.answers.clone(), BTreeMap::new()),
             user,
             Answering::defaults(),
             Trust::refuse(),

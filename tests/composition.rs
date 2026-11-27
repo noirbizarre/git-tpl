@@ -771,6 +771,56 @@ fn moving_a_child_branch_with_identical_output_records_a_new_commit_and_lock() {
 }
 
 #[test]
+fn status_detects_child_movement_using_legacy_recorded_module_lists_without_writing_them() {
+    let source = child("source");
+    let integration = child("integration");
+    let parent = parent(&source, &integration, "main", "main");
+    let project = Repo::init("project");
+    tpl(
+        &project,
+        &[
+            "init",
+            parent.path.to_str().unwrap(),
+            "--answer",
+            "sources=[\"jira\",\"github\"]",
+            "--defaults",
+        ],
+    )
+    .success();
+    // Older attachments stored lists as strings. Probing must migrate them
+    // in memory exactly as update does, without rewriting the user's config.
+    let mut config = tpl::config::Config::load(&project.path).unwrap();
+    config.answers.insert(
+        "sources".into(),
+        tpl::template::Value::String("jira,github".into()),
+    );
+    config.save(&project.path).unwrap();
+    let config_bytes = project.read(".config/git.tpl.toml");
+    let before = project.working_state();
+    let tip = project.rev_parse("refs/tpl/parent");
+    let current = tpl(&project, &["--json", "status"]).success().json();
+    assert_eq!(current["availableComposed"].as_array().unwrap().len(), 1);
+    assert_eq!(current["composedMoved"], false);
+
+    source
+        .write("README.md", "the child branch advanced\n")
+        .commit_all("advance the child without changing output");
+    let revision = source.rev_parse("HEAD");
+    let status = tpl(&project, &["--json", "status"]).code(2).json();
+    assert_eq!(status["templateMoved"], false);
+    assert_eq!(status["composedMoved"], true);
+    assert_eq!(status["pending"], true);
+    let available = status["availableComposed"].as_array().unwrap();
+    assert_eq!(available.len(), 1);
+    for module in available {
+        assert_eq!(module["commit"], revision);
+    }
+    assert_eq!(project.read(".config/git.tpl.toml"), config_bytes);
+    assert_eq!(project.working_state(), before);
+    assert_eq!(project.rev_parse("refs/tpl/parent"), tip);
+}
+
+#[test]
 fn a_child_branch_that_changes_rendered_bytes_is_pending_and_updates_its_selected_modules() {
     let source = child("source");
     let integration = child("integration");
