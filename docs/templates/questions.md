@@ -356,6 +356,15 @@ Only `string` questions accept `default_from`, in either form — a seed is text
 The expression is parsed, and its namespaces checked, when the manifest is loaded rather than when the prompt
 appears, so a typo is your problem on your first render and never your users'.
 
+Runtime acquisition and expression evaluation wait until immediately before an actual prompt.
+A false `when`, an empty choice catalogue, a supplied answer, or a compatible recorded answer reused by
+`switch` skips them entirely.
+A type-compatible personal `[defaults]` value also wins without reading or evaluating `default_from`.
+The machine context for derived expressions is captured at the first prompt that needs it and shared by later
+prompts in the same render.
+An acquisition or runtime expression error is reported only when that seed is needed;
+syntax and namespace errors still fail when the manifest is loaded, even for skipped questions.
+
 !!! warning "It seeds the prompt, never the context"
 
     If the question is **not asked** — `--defaults`, `tpl.interactive false`, CI — `default_from` is not read at

@@ -58,6 +58,52 @@ fn target(manifest: &str, files: &[(&str, &str)]) -> Template {
 }
 
 #[test]
+fn compatible_switch_candidates_skip_runtime_seed_acquisition() {
+    struct NeverAsk;
+    impl tpl::eval::Prompter for NeverAsk {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &tpl::template::Question,
+            _: Option<&tpl::Value>,
+            _: Option<&tpl::Value>,
+            _: Option<&[tpl::template::Choice]>,
+        ) -> Result<tpl::Value, tpl::eval::EvalError> {
+            panic!("the recorded compatible answer must be reused")
+        }
+    }
+    let world = World::with_template(BASE, &[("name.jinja", "{{ name }}")]);
+    world.init(&[]).success();
+    let replacement = target(
+        "name = 'replacement'\n[questions.name]\ntype = 'string'\ndefault_from = '{{ git.user.name() }}'\n",
+        &[("name.jinja", "{{ name }}")],
+    );
+    world
+        .project
+        .git(&["config", "tpl.autoPush", "not-a-boolean"]);
+    let repo = tpl::git::libgit2::LibGit2::open(&world.project.path).unwrap();
+    let result = tpl::ops::switch(
+        &repo,
+        &world.project.path,
+        &replacement.source(),
+        None,
+        Default::default(),
+        false,
+        false,
+        &Default::default(),
+        &tpl::git::cache::Access::new(None, false),
+        tpl::ops::Answering::Interactive(&mut NeverAsk),
+        tpl::ops::Trust::always(),
+    )
+    .unwrap();
+    assert_eq!(result.reused_answers, ["name"]);
+    assert_eq!(
+        Config::load(&world.project.path).unwrap().answers["name"],
+        Value::String("original".into())
+    );
+}
+
+#[test]
 fn direct_and_transitive_children_preserve_answers_config_and_rendered_ancestry() {
     for transitive in [false, true] {
         let world = World::with_template(BASE, &[("name.jinja", "{{ name }}")]);

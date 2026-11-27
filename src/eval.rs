@@ -298,11 +298,25 @@ pub(crate) fn resolve_session_with_candidates<'a, 'repo>(
     loader: &'a mut Loader<'repo>,
     prompter: &mut dyn Prompter,
 ) -> Result<Session<'a, 'repo>, EvalError> {
+    let seeds = evaluation.seeds;
+    resolve_session_with_seed_provider(evaluation, candidates, loader, prompter, &mut |name, _| {
+        Ok(seeds.get(name).cloned())
+    })
+}
+
+/// Keep acquisition outside eval while preserving the caller's original typed failures.
+pub(crate) fn resolve_session_with_seed_provider<'a, 'repo, E: From<EvalError>>(
+    evaluation: Evaluation<'a>,
+    candidates: &BTreeMap<String, Value>,
+    loader: &'a mut Loader<'repo>,
+    prompter: &mut dyn Prompter,
+    seed: &mut impl FnMut(&str, &Question) -> Result<Option<Value>, E>,
+) -> Result<Session<'a, 'repo>, E> {
     let Evaluation {
         manifest,
         graph,
         supplied,
-        seeds,
+        seeds: _,
         partials,
     } = evaluation;
 
@@ -389,7 +403,7 @@ pub(crate) fn resolve_session_with_candidates<'a, 'repo>(
                             reason: format!(
                                 "at least {min} required, but only {available} distinct choices are available; lower `min_choices` or expand the catalogue"
                             ),
-                        });
+                        }.into());
                     }
                 }
 
@@ -408,13 +422,18 @@ pub(crate) fn resolve_session_with_candidates<'a, 'repo>(
                 let answer = match (supplied.get(&node.key), candidate) {
                     (Some(value), _) => coerce(&node.key, question, value)?,
                     (None, Some(value)) => value.clone(),
-                    (None, None) => prompter.ask(
-                        &node.key,
-                        question,
-                        default.as_ref(),
-                        seeds.get(&node.key),
-                        choices.as_deref(),
-                    )?,
+                    (None, None) => {
+                        // A machine value is needed only at an actual prompt: gated
+                        // questions and replayed answers must not acquire or evaluate it.
+                        let seed = seed(&node.key, question)?;
+                        prompter.ask(
+                            &node.key,
+                            question,
+                            default.as_ref(),
+                            seed.as_ref(),
+                            choices.as_deref(),
+                        )?
+                    }
                 };
 
                 // Defaults and custom prompters must obey the same schema as
@@ -2672,6 +2691,75 @@ mod tests {
     }
 
     // --- prompt seeds -------------------------------------------------------
+
+    #[test]
+    fn seed_acquisition_runs_only_for_the_question_that_reaches_a_prompt() {
+        use crate::git::GitBackend;
+        let manifest = Manifest::parse(
+            "name = 'lazy'\n\
+             [computed]\ncatalogue = '{{ [] }}'\n\
+             [questions.gated]\ntype = 'string'\nwhen = '{{ false }}'\n\
+             [questions.empty]\ntype = 'choice'\nchoices_from = 'catalogue'\n\
+             [questions.supplied]\ntype = 'string'\n\
+             [questions.recorded]\ntype = 'string'\n\
+             [questions.prompted]\ntype = 'string'\ndefault = 'fallback'\n",
+            MANIFEST_NAME,
+        )
+        .unwrap();
+        let graph = Graph::build(&manifest).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let repo = crate::git::libgit2::LibGit2::init(dir.path()).unwrap();
+        let tree = repo.build_tree(&[]).unwrap();
+        let mut loader = Loader::new(
+            crate::data::TemplateTree {
+                repo: &repo,
+                tree,
+                revision: tree,
+                reference: "test".into(),
+            },
+            None,
+        );
+        let seeds = BTreeMap::new();
+        let candidates = BTreeMap::from([("recorded".into(), Value::String("reused".into()))]);
+        let mut acquired = Vec::new();
+        let mut prompter = Recording { seen: Vec::new() };
+        let context = resolve_session_with_seed_provider(
+            Evaluation {
+                manifest: &manifest,
+                graph: &graph,
+                supplied: BTreeMap::from([(
+                    "supplied".into(),
+                    crate::answers::SuppliedAnswer::Cli("explicit".into()),
+                )]),
+                seeds: &seeds,
+                partials: no_partials(),
+            },
+            &candidates,
+            &mut loader,
+            &mut prompter,
+            &mut |name, _| -> Result<_, EvalError> {
+                acquired.push(name.to_string());
+                Ok(Some(Value::String("seed".into())))
+            },
+        )
+        .unwrap()
+        .finish();
+        assert_eq!(acquired, ["prompted"]);
+        assert_eq!(
+            prompter.seen,
+            [(
+                "prompted".into(),
+                Some(Value::String("fallback".into())),
+                Some(Value::String("seed".into()))
+            )]
+        );
+        assert_eq!(
+            context.answers()["recorded"],
+            Value::String("reused".into())
+        );
+        assert!(!context.answers().contains_key("gated"));
+        assert!(!context.answers().contains_key("empty"));
+    }
 
     const SEEDED: &str = r#"
         name = "t"
