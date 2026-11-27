@@ -112,12 +112,24 @@ This is the cheapest way to find a cycle or a typo in an expression, since both 
 
 ## Pointing an existing project at a different template
 
-Edit `[template] source` in `.config/git.tpl.toml` and run `git tpl update`.
+Use [`git tpl switch`](../usage/switch.md) to change the source while preserving the existing rendered ref and ancestry:
+
+```sh
+git tpl switch ../my-template --defaults
+git tpl diff
+git tpl merge
+```
+
+Switch validates recorded answers against the target and reuses compatible ones.
+It saves the new attachment configuration unstaged and leaves rendered worktree files untouched until you merge.
+This also handles a template moving to a new address without starting over.
+
+Manual source/ID editing is available when you deliberately want a new attachment history.
 
 The rendered ref is keyed by the template id, so pointing at a *renamed* source whose id differs starts a new ref
 with no shared history — and because the first merge from it has no common ancestor, everything that differs
 between the two renderings conflicts, including files you customised that neither template changed.
-If the two templates are genuinely the same template at a new address, keep the id stable:
+If manually repairing an attachment to the same template at a new address, keep the id stable:
 
 ```toml
 [template]

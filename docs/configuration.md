@@ -80,15 +80,19 @@ It determines the ref name, `refs/tpl/<id>`:
 The SSH and HTTPS forms of the same repository derive the *same* id, so switching between them does not orphan
 the ref.
 
-Set it explicitly when the template moves address but is conceptually the same template — see
+Use [`git tpl switch`](usage/switch.md) when changing template sources or following a moved address.
+It retains the existing ID and rendered ancestry, reuses compatible answers, and saves configuration unstaged.
+Inspect with `git tpl diff` and integrate with `git tpl merge`.
+For a manual attachment repair, set `id` explicitly to preserve the existing history — see
 [Pointing at a different template](templates/local-development.md#pointing-an-existing-project-at-a-different-template).
 
 Changing the resolved `id` changes the ref name, so the next `git tpl update` finds no ref to advance and writes an
 orphan commit instead: a new history, sharing no merge base with what your branch already merged.
 Changing `source` only has this effect if it also changes the resolved `id`; an explicit `id` or equivalent source
 spellings can keep the same ref.
-That is usually what you want when you deliberately repoint a project, and it is never what you want when you
-have simply not fetched the ref yet.
+Choose manual source/ID editing for a deliberately new attachment history;
+ordinary source changes should use `switch` to retain the merge base.
+A new history is never a substitute for recovering a ref you have not fetched yet.
 `update` says which one it thinks happened — see
 [When there is no ref to advance](usage/update.md#when-there-is-no-ref-to-advance).
 
