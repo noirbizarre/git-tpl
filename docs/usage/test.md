@@ -343,8 +343,9 @@ run = ["pdm run something-that-needs-the-active-venv"]
 alone. Neither adds `$VAR` expansion to a command's own text — a value only ever reaches a process as an
 environment variable, never as text substituted into the command line before it runs.
 
-Every command also sees `TEMPLATE_ROOT`, set to the resolved template's root on disk — the working tree for
-`--dirty`, and the same working tree for a local `--ref`, since `test` never resolves a remote (see
+Every command also sees `TEMPLATE_ROOT`, set to the local template repository's working tree,
+both for the default working-tree input and with `--ref` selecting a committed revision.
+It does not become a checkout of that revision, since `test` never resolves a remote (see
 [ADR-030](../adr/030-test-never-resolves-a-remote-template.md)). It is distinct from both `cwd` (each list's own
 throwaway sandbox) and from a template's declared render subdirectory: a case's script does not live in the
 sandbox, so a command that needs more than a line or two writes it once, commits it in the template repository,
