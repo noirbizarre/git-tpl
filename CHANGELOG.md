@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0](https://github.com/noirbizarre/git-tpl/compare/0.19.0..0.20.0) - 2026-11-27
+
+### 💫 Features
+
+- **eval** Add yesno template filter ([#252](https://github.com/noirbizarre/git-tpl/issues/252)) - ([32b16d3](https://github.com/noirbizarre/git-tpl/commit/32b16d3724b8c11692a8c0c276527bb5cd29da4f))
+- **seed** Add OS login name to prompt defaults ([#250](https://github.com/noirbizarre/git-tpl/issues/250)) - ([ac090ee](https://github.com/noirbizarre/git-tpl/commit/ac090eeec3e5858ecead316648c08fde6c157ad2))
+
 ## [0.19.0](https://github.com/noirbizarre/git-tpl/compare/0.18.0..0.19.0) - 2026-11-27
 
 ### 💫 Features
