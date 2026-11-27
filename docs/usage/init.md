@@ -207,8 +207,9 @@ For targeted changes, use `git tpl update --answer key=value` or `--answers-from
 these override the selected recorded answers and save them while preserving the others.
 Editing `[answers]` in `.config/git.tpl.toml` and running `update` works too.
 
-**A clean worktree**, because step 10 is a merge.
-Uncommitted changes are refused with the same message Git would give you.
+**A clean index and no active Git operation**, including with `--no-merge`, because attachment writes a commit.
+Normal integration into a repository with existing commits also requires a clean worktree.
+`--no-merge` preserves unrelated unstaged edits while committing the attachment configuration.
 
 ## An empty repository
 
