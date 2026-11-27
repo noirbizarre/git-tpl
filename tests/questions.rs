@@ -1085,6 +1085,78 @@ default_from = "git:tpl.ci"
 
 // --- seeds derived from the repository ---------------------------------------
 
+#[test]
+fn unused_runtime_seeds_do_not_fail_interactive_or_defaults_only_rendering() {
+    struct NeverAsk;
+    impl tpl::eval::Prompter for NeverAsk {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &tpl::template::Question,
+            _: Option<&tpl::Value>,
+            _: Option<&tpl::Value>,
+            _: Option<&[tpl::template::Choice]>,
+        ) -> Result<tpl::Value, tpl::eval::EvalError> {
+            panic!("a skipped or supplied question must not prompt")
+        }
+    }
+    for (when, supplied, defaults_only) in [
+        ("false", false, false),
+        ("true", true, false),
+        ("true", false, true),
+    ] {
+        let world = World::with_template(
+            &format!(
+                "name = 'lazy'\n[questions.author]\ntype = 'string'\nwhen = '{{{{ {when} }}}}'\ndefault = 'declared'\ndefault_from = '{{{{ git.user.name() }}}}'\n"
+            ),
+            &[("out.jinja", "{{ author | default('skipped') }}")],
+        );
+        // Invalid acquisition preferences prove we did not merely discard an
+        // evaluated seed. No seed-related configuration may be read at all.
+        world
+            .project
+            .git(&["config", "tpl.autoPush", "not-a-boolean"]);
+        let repo = tpl::git::libgit2::LibGit2::open(&world.project.path).unwrap();
+        let mut answers = tpl::answers::SuppliedAnswers::new();
+        if supplied {
+            answers.insert(
+                "author".into(),
+                tpl::answers::SuppliedAnswer::Cli("supplied".into()),
+            );
+        }
+        let mut prompter = NeverAsk;
+        let result = tpl::ops::render_files(
+            tpl::ops::Target {
+                source: &world.template.source(),
+                reference: None,
+                root: None,
+                dirty: false,
+            },
+            Some((&repo, &world.project.path)),
+            answers,
+            &Default::default(),
+            &tpl::git::cache::Access::new(None, false),
+            if defaults_only {
+                tpl::ops::Answering::defaults()
+            } else {
+                tpl::ops::Answering::Interactive(&mut prompter)
+            },
+            tpl::ops::Trust::always(),
+        )
+        .unwrap();
+        assert_eq!(
+            result.context.answers().get("author").cloned(),
+            if supplied {
+                Some(tpl::Value::String("supplied".into()))
+            } else if defaults_only {
+                Some(tpl::Value::String("declared".into()))
+            } else {
+                None
+            }
+        );
+    }
+}
+
 /// The case the feature exists for: a template asks for a slug, and the project
 /// already knows one — from where it is pushed, or failing that from what the
 /// directory is called.

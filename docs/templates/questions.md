@@ -115,6 +115,10 @@ help = "Used for the package name and the README title"
     The minimum must not exceed the maximum or the number of distinct available choices.
     An upper bound larger than the catalogue is allowed.
     An empty dynamically filtered catalogue still skips the question, including when a minimum is set.
+    Bounds count distinct selected strings: `["serde", "serde"]` counts as one selection.
+    Defaults, supplied answers and recorded answers retain their contents and order, including duplicates.
+    Interactive catalogues offer each value once, keeping its first label, help text and position.
+    This also applies to dynamically resolved choices.
 
     Invalid interactive selections stay in the selector for correction.
     Defaults, supplied answers and recorded answers must satisfy the same bounds;
@@ -355,6 +359,15 @@ It would also put your home directory on screen at a prompt.
 Only `string` questions accept `default_from`, in either form — a seed is text.
 The expression is parsed, and its namespaces checked, when the manifest is loaded rather than when the prompt
 appears, so a typo is your problem on your first render and never your users'.
+
+Runtime acquisition and expression evaluation wait until immediately before an actual prompt.
+A false `when`, an empty choice catalogue, a supplied answer, or a compatible recorded answer reused by
+`switch` skips them entirely.
+A type-compatible personal `[defaults]` value also wins without reading or evaluating `default_from`.
+The machine context for derived expressions is captured at the first prompt that needs it and shared by later
+prompts in the same render.
+An acquisition or runtime expression error is reported only when that seed is needed;
+syntax and namespace errors still fail when the manifest is loaded, even for skipped questions.
 
 !!! warning "It seeds the prompt, never the context"
 

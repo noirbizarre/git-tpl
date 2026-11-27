@@ -331,24 +331,19 @@ fn dry_run(
     } else {
         ops::Trust::refuse()
     };
-    let template = ops::resolve::resolve(
-        ops::Request {
-            source,
-            reference: args.r#ref.as_deref(),
-            root: None,
-            dirty: args.dirty,
-        },
+    let prepared = ops::prepare_init_preview(
+        source,
+        args.r#ref.clone(),
+        args.id.as_deref(),
+        project,
+        args.dirty,
         user,
         access,
         &mut preview_trust,
     )?;
+    let template = &prepared.template;
     let graph = tpl::graph::Graph::build(&template.manifest)?;
     report_ignored_paths(out, &template.ignored);
-    let mut attachment = tpl::config::Config::new(source, args.r#ref.clone());
-    if let Some((_, root)) = project {
-        // A known project root lets the preview predict the same persisted spelling as init.
-        attachment.template.rebase_local(root)?;
-    }
 
     // The same rule `ops::render` applies, and for the same reason — a dry run
     // exists to find exactly this sort of mistake before anything is written.
@@ -365,7 +360,7 @@ fn dry_run(
     report_ignored(out, &ignored);
 
     out.blank();
-    out.say(field(&out.theme, "Template", &attachment.template.source));
+    out.say(field(&out.theme, "Template", &prepared.source));
     let revision_description = ops::describe_revision(&template.reference, template.revision);
     out.say(field(&out.theme, "Revision", &revision_description));
     out.blank();
@@ -427,8 +422,7 @@ fn dry_run(
         // Reuse the exact revision whose schema was listed. A second resolve
         // could observe a moving branch, and swallowing errors would claim a
         // broken or incomplete render was a successful preview.
-        let rendered = ops::render_resolved(
-            &template,
+        let rendered = prepared.render(
             source,
             project,
             answers,
@@ -455,7 +449,7 @@ fn dry_run(
 
     Ok(serde_json::json!({
         "dryRun": true,
-        "template": attachment.template.source,
+        "template": prepared.source,
         "revision": crate::report::revision(
             Some(&template.reference),
             Some(template.revision),

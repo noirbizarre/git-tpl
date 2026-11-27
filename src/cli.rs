@@ -325,8 +325,8 @@ pub struct PullArgs {
 /// Answer supply, shared by the commands that render.
 ///
 /// Flattened into rendering commands rather than made global: it is
-/// meaningless to `diff` and `push`, and a flag that is silently ignored is
-/// worse than one that is refused.
+/// meaningful to dirty `diff`/`show` previews, but not ordinary inspection or
+/// `push`. Refusing inapplicable flags prevents silently ignored answers.
 #[derive(Debug, Clone, clap::Args)]
 pub struct AnswerArgs {
     /// Supply an answer, skipping its prompt (repeatable)

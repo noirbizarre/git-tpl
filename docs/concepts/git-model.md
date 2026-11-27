@@ -216,6 +216,9 @@ Tpl-Version: X.Y.Z
 ```
 
 The subject names the template's manifest `name` and the reference asked for.
+`Answers-Digest` hashes sorted answer keys and canonical values with fixed-width, little-endian length framing.
+Identical answers produce the same digest on 32-bit and 64-bit systems;
+the encoding preserves digests written by earlier 64-bit builds.
 `Data-Source` appears once per data source the rendering actually used — see
 [Data sources](../data/index.md#provenance).
 `Template-Extends` appears once per ancestor, nearest parent first, only for a template with an

@@ -124,6 +124,74 @@ default = "anonymous"
 default_from = "git:user.name"
 "#;
 
+#[test]
+fn personal_defaults_bypass_shadowed_seed_failures_but_wrong_types_do_not() {
+    struct AcceptSeed;
+    impl tpl::eval::Prompter for AcceptSeed {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &tpl::template::Question,
+            _: Option<&tpl::Value>,
+            seed: Option<&tpl::Value>,
+            _: Option<&[tpl::template::Choice]>,
+        ) -> Result<tpl::Value, tpl::eval::EvalError> {
+            Ok(seed
+                .expect("personal preference must prefill the prompt")
+                .clone())
+        }
+    }
+    let world = World::with_template(
+        &SEEDED.replace("git:user.name", "{{ git.user.name() }}"),
+        &[("AUTHORS.jinja", "{{ author }}")],
+    );
+    let repo = tpl::git::libgit2::LibGit2::open(&world.project.path).unwrap();
+    for (preference, invalid_config) in [
+        (tpl::Value::String("personal".into()), true),
+        (tpl::Value::Bool(true), true),
+        (tpl::Value::Bool(true), false),
+    ] {
+        world.project.git(&[
+            "config",
+            "tpl.autoPush",
+            if invalid_config {
+                "not-a-boolean"
+            } else {
+                "false"
+            },
+        ]);
+        let mut user = tpl::userconfig::UserConfig::default();
+        user.defaults.insert("author".into(), preference.clone());
+        let result = tpl::ops::render_files(
+            tpl::ops::Target {
+                source: &world.template.source(),
+                reference: None,
+                root: None,
+                dirty: false,
+            },
+            Some((&repo, &world.project.path)),
+            Default::default(),
+            &user,
+            &tpl::git::cache::Access::new(None, false),
+            tpl::ops::Answering::Interactive(&mut AcceptSeed),
+            tpl::ops::Trust::always(),
+        );
+        if matches!(preference, tpl::Value::String(_)) {
+            assert_eq!(result.unwrap().context.answers()["author"], preference);
+        } else if invalid_config {
+            assert!(
+                matches!(result, Err(tpl::ops::OpError::Git(tpl::git::GitError::Backend { context, .. })) if context == "could not read a configuration value")
+            );
+        } else {
+            // A runtime expression failure keeps its diagnostic variant and location,
+            // rather than being stringified into a generic acquisition error.
+            assert!(
+                matches!(result, Err(tpl::ops::OpError::Eval(tpl::eval::EvalError::Expression { location, .. })) if location == "questions.author.default_from")
+            );
+        }
+    }
+}
+
 /// The claim the whole design rests on, and the reason `[defaults]` is a seed
 /// rather than an answer.
 ///

@@ -343,8 +343,9 @@ run = ["pdm run something-that-needs-the-active-venv"]
 alone. Neither adds `$VAR` expansion to a command's own text — a value only ever reaches a process as an
 environment variable, never as text substituted into the command line before it runs.
 
-Every command also sees `TEMPLATE_ROOT`, set to the resolved template's root on disk — the working tree for
-`--dirty`, and the same working tree for a local `--ref`, since `test` never resolves a remote (see
+Every command also sees `TEMPLATE_ROOT`, set to the local template repository's working tree,
+both for the default working-tree input and with `--ref` selecting a committed revision.
+It does not become a checkout of that revision, since `test` never resolves a remote (see
 [ADR-030](../adr/030-test-never-resolves-a-remote-template.md)). It is distinct from both `cwd` (each list's own
 throwaway sandbox) and from a template's declared render subdirectory: a case's script does not live in the
 sandbox, so a command that needs more than a line or two writes it once, commits it in the template repository,
@@ -496,16 +497,19 @@ user.email = "someone@example.com"
 `commit.gpgsign` off, the branch it lands on — is fixed. `git = false`, or no `git` key at all, is today's plain
 scratch directory, byte for byte: this is opt-in, the same choice `snapshot` already made for the same reason.
 
-**Isolation is by construction, not by fighting the running machine's configuration file by file.** The seed
-commit is written through git-tpl's own Git backend, never a spawned `git` process, so no hook, alias or ambient
-identity is ever consulted for it — the chosen identity lands in the sandbox's own local `.git/config` before
-anything asks for a signature, and Git's own precedence (local always outranks global and system) makes it
-authoritative regardless of what either ambient level says. And because a case's own `[commands]` may still
-invoke a literal `git` — the whole point of seeding a repository at all — every command in a case that set `git`
-is spawned with `GIT_CONFIG_NOSYSTEM=1` and `GIT_CONFIG_GLOBAL` pointed at a path that is never created, so a
-literal `git` sees only the sandbox's own local config: no credential helper, no alias, no `commit.gpgsign` the
-machine running the suite happens to have. `commands.env`/a list's own `env` may still override either variable
-for a case that deliberately wants to.
+**Isolation excludes ordinary global and system configuration files.**
+The seed commit is written through git-tpl's own Git backend, never a spawned `git` process.
+The chosen identity is installed in the sandbox's local `.git/config` before signature creation,
+so ordinary global and system identity settings do not replace it.
+Every command in a case that set `git` is spawned with `GIT_CONFIG_NOSYSTEM=1`
+and `GIT_CONFIG_GLOBAL` pointed at a path that is never created.
+A literal `git` therefore skips the machine's ordinary global and system configuration files.
+
+Commands still inherit the rest of the calling environment.
+Git environment overrides such as `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_*`/`GIT_CONFIG_VALUE_*`,
+`GIT_CONFIG_PARAMETERS` and author/committer variables can affect their behavior.
+This is file-level configuration isolation, not a fully scrubbed Git environment.
+`commands.env` or a list's own `env` can explicitly override the isolation variables too.
 
 See [ADR-033](../adr/033-test-case-git-sandbox.md) for the full reasoning, and issue #155 for where the gap this
 closes came from.

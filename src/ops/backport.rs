@@ -1815,9 +1815,9 @@ fn rfc2822(seconds: i64) -> String {
 /// The `git am` invocation git-tpl declines to run.
 ///
 /// Built from the configured source, not from `Resolved::repo.workdir()`: a
-/// resolved template is very often a throwaway clone in `/tmp`, and naming it
-/// would send the user to apply their patch into a directory that is about to
-/// be deleted.
+/// remote template is acquired into a persistent bare object cache, not an
+/// editable checkout. Naming that cache would direct the user away from the
+/// owner's working repository where the mailbox must be reviewed and applied.
 fn apply_command(source: &str, project_root: &Path) -> String {
     let location = crate::config::source_location(source, project_root);
     let target = match super::resolve::local_path(&location) {

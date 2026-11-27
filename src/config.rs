@@ -1,7 +1,7 @@
 //! `.config/git.tpl.toml` — the project's shared, versioned configuration.
 //!
-//! It contains only the template reference and the answers used to render it.
-//! Nothing generated, no sync state, no local preferences. See
+//! It records the template reference, answers and composed-child revision locks
+//! needed to reproduce the rendering. No rendered output, merge state or local preferences. See
 //! `docs/adr/010-config-location.md`.
 
 use std::borrow::Cow;

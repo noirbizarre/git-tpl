@@ -16,8 +16,9 @@ git tpl init <template> [<dir>] [--ref <ref>] [--answer k=v]... [options]
 
 ## What it does
 
-1. Verifies the destination — `<dir>`, or the current directory if it is omitted — is a Git repository
-   (`--init` creates the directory and the repository).
+1. Discovers a Git repository at or above the destination — `<dir>`, or the current directory if omitted.
+   With `--init`, creates missing directories and initializes a repository only if discovery finds none.
+   Rendering and attachment use the discovered repository root, even when the destination is a subdirectory.
 2. Resolves the template source and its revision.
 3. Loads the template manifest and any data sources it needs.
 4. Builds the dependency graph and validates it.
@@ -57,7 +58,9 @@ A note that says "run `curl … | sh`" is exactly as trustworthy as a `README.md
 
 A note is shown in a block attributed to the template, so it cannot be mistaken for git-tpl's own output, and it
 is stripped of everything a terminal would act on beyond colour and an `https` link.
-It is read from the template repository and is never written into your project.
+Note display reads from the template repository and creates no project file by itself.
+A note file inside the render root is also rendered into the project under the ordinary file-rendering rules.
+Keep it outside the render root if it should only be displayed.
 
 Notes are rendered by Termimad when colour is enabled, with styled headings, emphasis, code, unordered lists and tables.
 Links, images, ordered lists and HTML remain source text.
@@ -124,9 +127,9 @@ the expanded URL that is recorded in the project, so the shortcut never leaves y
 
 | Option | Meaning |
 |---|---|
-| `<dir>` | Where to render it. Defaults to the current directory. Everything else — a template given as a path, `--answers-from` — stays relative to where you ran the command, not to `<dir>`. |
+| `<dir>` | Where to start upward repository discovery. Defaults to the current directory. Rendering uses the discovered root. Template paths and `--answers-from` remain invocation-relative. |
 | `--ref <ref>` | Branch, tag or commit. Defaults to a local template's checked-out branch, or a URL's remote default branch. |
-| `--init` | Create the directory and the repository if there is not one here. |
+| `--init` | Create missing directories; initialize a repository only if none is discoverable at or above the destination. |
 | `--answer k=v` | Supply an answer, skipping its prompt. Repeatable. |
 | `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
 | `--defaults` | Accept every default without prompting. |
@@ -169,20 +172,30 @@ Merged into main.
 
 ## Starting from nothing
 
-`<dir>` plus `--init` is the whole of `mkdir`, `cd`, `git init` and `init` in one line:
+Outside any existing repository, `<dir>` plus `--init` creates the directory and repository and attaches the template:
 
 ```console
 $ git tpl init https://github.com/noirbizarre/rust-library-template my-project --init
 ```
 
-Leave off `--init` and a `my-project` that does not exist yet, or is not a Git repository, is refused with a
-diagnostic naming the fix rather than clap's "unexpected argument" — the problem this option exists to solve.
+Repository discovery searches upward, including with `--init`.
+Inside an existing repository, this command attaches at that repository's root rather than creating a nested repository.
+To create an independent project there, initialize its repository explicitly first:
+
+```sh
+git init my-project
+git tpl init https://github.com/noirbizarre/rust-library-template my-project
+```
+
+Without `--init`, a missing destination is refused.
+An existing destination is accepted when a repository can be discovered there or in a parent directory.
 
 ## Preconditions
 
-**A Git repository at the destination** — the current directory by default, or `<dir>` if given.
+**A Git repository discoverable at or above the destination** — the current directory by default, or `<dir>` if given.
 `init` needs somewhere to put a ref.
-Pass `--init` to create the directory and the repository, or create them yourself first.
+Pass `--init` to create missing directories and initialize a repository when none is discoverable.
+Explicitly run `git init <dir>` first when you intend an independent repository inside another repository.
 `--dry-run` is exempt: it creates nothing, so it previews against the template alone, even against a
 destination that does not exist yet or is not a Git repository.
 
@@ -196,8 +209,9 @@ For targeted changes, use `git tpl update --answer key=value` or `--answers-from
 these override the selected recorded answers and save them while preserving the others.
 Editing `[answers]` in `.config/git.tpl.toml` and running `update` works too.
 
-**A clean worktree**, because step 10 is a merge.
-Uncommitted changes are refused with the same message Git would give you.
+**A clean index and no active Git operation**, including with `--no-merge`, because attachment writes a commit.
+Normal integration into a repository with existing commits also requires a clean worktree.
+`--no-merge` preserves unrelated unstaged edits while committing the attachment configuration.
 
 ## An empty repository
 
@@ -217,6 +231,14 @@ The completed initialization leaves `HEAD` at the attachment commit.
 Dry runs honor explicit `--trust` and persistent trust during ancestor resolution.
 With `--defaults`, a dry run renders the resolved revision and reports any render failure as an error.
 Without `--defaults`, it reports only the schema and JSON `files` is null.
+Schema and output use one resolved template revision.
+The preview selects the requested template ID's ref, including an explicit `--id`,
+and retains that ref's initialized one-shot files even if the source root has disappeared.
+It does not borrow the existing attachment's baseline when targeting a different ID,
+and an existing target ref works even without an attachment configuration.
+With `--defaults`, it evaluates init's note and remote metadata, rather than update's migration metadata.
+It does not check integration preconditions or create destinations, publish refs, save configuration,
+or modify `HEAD`, the index or worktree.
 
 `init` also works on a project that already has files — one generated last year by another tool, or written by
 hand and since grown to resemble a template.

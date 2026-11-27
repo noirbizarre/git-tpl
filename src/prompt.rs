@@ -1,6 +1,6 @@
 //! The interactive prompter, built on `demand`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use demand::{Confirm, DemandOption, Input, MultiSelect, Select};
 use tpl::data::{DataError, Decision, RemoteRequest, SourceKind, TrustGate};
@@ -57,7 +57,7 @@ impl Prompter for Interactive {
                 // back the typed value rather than a label we would have to
                 // match back — which would go wrong the moment two choices
                 // rendered to the same text.
-                for choice in options {
+                for choice in distinct_choices(options) {
                     let value = Value::String(choice.value.clone());
                     let mut option = DemandOption::with_label(choice.label(), value.clone())
                         .selected(default == Some(&value));
@@ -86,7 +86,7 @@ impl Prompter for Interactive {
                 if let Some(help) = help {
                     select = select.description(help);
                 }
-                for choice in options {
+                for choice in distinct_choices(options) {
                     let value = Value::String(choice.value.clone());
                     let mut option = DemandOption::with_label(choice.label(), value.clone())
                         .selected(preselected.contains(&value));
@@ -189,6 +189,15 @@ impl Prompter for Interactive {
             }
         }
     }
+}
+
+fn distinct_choices(choices: &[Choice]) -> impl Iterator<Item = &Choice> {
+    // Widget bounds count rows. Offer each value once so accepting the widget
+    // cannot fail eval's distinct-value bounds; keep the first label/help/order.
+    let mut seen = BTreeSet::new();
+    choices
+        .iter()
+        .filter(move |choice| seen.insert(&choice.value))
 }
 
 /// A single-line input, returning the placeholder when nothing was typed.

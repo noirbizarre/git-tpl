@@ -66,24 +66,20 @@ See [context test assertions](../usage/test.md#context-assertions) and [ADR-048]
 ```mermaid
 flowchart TD
     accTitle: One context for prompting and rendering
-    accDescr: The question engine resolves values in dependency order; prompting and MiniJinja share the same context.
-    revision("Template revision") --> local("Local data sources")
-    revision --> remote("Remote data sources")
-    local --> initial("Initial context")
-    remote --> initial
-    initial --> engine("Question engine: topologically ordered")
-    engine --> answers("Answers")
-    engine --> computed("Computed values")
-    engine --> conditions("Conditions")
-    answers --> context("Resolved context")
-    computed --> context
-    conditions --> context
-    context --> prompting("Prompting")
-    context --> rendering("MiniJinja")
+    accDescr: Questions, paths and file bodies demand values through one shared evaluation session.
+    questions("Question expressions and prompting") --> session("Shared demand-driven evaluation")
+    paths("Templated paths") --> session
+    bodies("File bodies") --> session
+    session --> answers("Answers")
+    session --> computed("Computed values and their accessed dependencies")
+    session --> data("Declared data acquired on access")
 ```
 
-There is no second pass and no second context.
-The renderer receives exactly what the last question saw.
+Questions, templated paths and file bodies share one evaluation session and its resolved values.
+Computed values and declared data resolve only when an expression actually accesses them,
+including dependencies reached through conditions and short-circuiting.
+Rendering can therefore demand values that no question needed; unused values remain unresolved.
+See [computed values](computed.md#available-while-prompting) and [data sources](../data/index.md).
 
 ## What is not in it
 

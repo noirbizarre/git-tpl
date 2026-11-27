@@ -39,7 +39,7 @@ use crate::provenance::{ComposedRevision, Provenance, Recorded};
 use crate::refs::{TemplateId, TemplateIdError};
 use crate::render::{RenderError, Rendered, write_tree};
 use crate::seed::SeedContext;
-use crate::template::{MANIFEST_NAME, Manifest, Value};
+use crate::template::{MANIFEST_NAME, Value};
 use crate::userconfig::UserConfig;
 
 pub use resolve::{Request, ResolveError, Resolved};
@@ -1128,22 +1128,25 @@ fn render_resolved_preparing(
         loader = loader.with_ancestors(template_trees, template.data_origin().clone());
     }
 
-    // Built only when somebody is going to be asked. When nobody is, the map
-    // is empty *and* `DefaultsOnly` ignores it — two guards, because a machine
-    // value reaching the tree would end invariant 2. A derived seed is still
-    // just a seed: widening what a `default_from` may read does not widen where
-    // the result may go, and both guards stay exactly here.
-    let mut seeds = match project {
-        Some((repo, _)) if answering.is_interactive() => {
-            prompt_seeds(repo, &template.manifest, user)?
+    // The evaluator invokes acquisition only after deciding to ask. Cache the
+    // snapshot across those calls so later prompts cannot observe another machine state.
+    let interactive = answering.is_interactive();
+    let mut machine = None;
+    let mut seed = |name: &str, question: &crate::template::Question| {
+        if interactive {
+            prompt_seed(
+                project.map(|(repo, _)| repo),
+                name,
+                question,
+                user,
+                &mut machine,
+            )
+        } else {
+            // Defaults-only must not read machine facts, even for unanswered questions.
+            Ok(None)
         }
-        _ => BTreeMap::new(),
     };
-    // Personal preferences do not require a repository, unlike Git-derived
-    // seeds. Neither may enter a noninteractive render without confirmation.
-    if answering.is_interactive() {
-        apply_user_defaults(&mut seeds, &template.manifest, user);
-    }
+    let seeds = BTreeMap::new();
 
     // Read once, up front, and shared by the manifest expressions below and the
     // file rendering further down — one environment, one set of importable
@@ -1155,7 +1158,7 @@ fn render_resolved_preparing(
         Preparation::Switch(candidates) => candidates,
         _ => &empty_candidates,
     };
-    let mut session = crate::eval::resolve_session_with_candidates(
+    let mut session = crate::eval::resolve_session_with_seed_provider(
         Evaluation {
             manifest: &template.manifest,
             graph: &graph,
@@ -1166,6 +1169,7 @@ fn render_resolved_preparing(
         candidates,
         &mut loader,
         answering.prompter(),
+        &mut seed,
     )?;
 
     // Bytes, not blobs. Turning them into Git objects is `render`'s job, and it
@@ -1233,30 +1237,30 @@ fn render_resolved_preparing(
         })?;
     }
     prepare(&mut session)?;
-    if let Some((repo, root)) = project {
-        // Display metadata is evaluated while acquisition is still scoped and
-        // before callers can publish a ref or mutate the attachment.
-        if matches!(preparation, Preparation::Init) {
-            session.run(|context| template_note_context(template, context))?;
-            for (name, url) in &template.manifest.remotes {
-                session.run(|context| {
-                    crate::eval::render_string(url, context, &format!("remotes.{name}"), &partials)
-                })?;
-            }
+    // Init previews need the same metadata demands even before a destination exists.
+    if matches!(preparation, Preparation::Init) {
+        session.run(|context| template_note_context(template, context))?;
+        for (name, url) in &template.manifest.remotes {
+            session.run(|context| {
+                crate::eval::render_string(url, context, &format!("remotes.{name}"), &partials)
+            })?;
         }
-        if matches!(preparation, Preparation::Update) && Config::path_in(root).exists() {
-            let config = Config::load(root)?;
-            if config.template.source == source {
-                let id = TemplateId::resolve(source, config.template.id.as_deref())?;
-                let previous = repo
-                    .resolve_ref(&id.ref_name())?
-                    .map(|oid| repo.commit(oid))
-                    .transpose()?
-                    .and_then(|commit| Provenance::parse(&commit.message));
-                session.run(|context| {
-                    discover_migrations_context(template, context, previous.as_ref(), source)
-                })?;
-            }
+    }
+    if let Some((repo, root)) = project
+        && matches!(preparation, Preparation::Update)
+        && Config::path_in(root).exists()
+    {
+        let config = Config::load(root)?;
+        if config.template.source == source {
+            let id = TemplateId::resolve(source, config.template.id.as_deref())?;
+            let previous = repo
+                .resolve_ref(&id.ref_name())?
+                .map(|oid| repo.commit(oid))
+                .transpose()?
+                .and_then(|commit| Provenance::parse(&commit.message));
+            session.run(|context| {
+                discover_migrations_context(template, context, previous.as_ref(), source)
+            })?;
         }
     }
     let context = session.finish();
@@ -1418,7 +1422,7 @@ fn rendered_tree(project: &dyn GitBackend, rendered: RenderedFiles) -> Result<Re
     })
 }
 
-/// Collect everything a prompt may be pre-filled with, in precedence order.
+/// Acquire one prompt's seed, in precedence order, only when it will be asked.
 ///
 /// Two sources, and the user's own wins:
 ///
@@ -1441,81 +1445,54 @@ fn rendered_tree(project: &dyn GitBackend, rendered: RenderedFiles) -> Result<Re
 /// A source that is simply unset is absent: a template suggesting `user.name`
 /// must still work for someone who has never set one, and the question's own
 /// `default` covers that. The same goes for an expression rendering to nothing.
-fn prompt_seeds(
-    project: &dyn GitBackend,
-    manifest: &Manifest,
+fn prompt_seed(
+    project: Option<&dyn GitBackend>,
+    name: &str,
+    question: &crate::template::Question,
     user: &UserConfig,
-) -> Result<BTreeMap<String, Value>, OpError> {
-    let mut seeds = BTreeMap::new();
-
-    // Built at most once, and only if some question actually asks for it. A
-    // template with no expression seed must not pay for a configuration
-    // snapshot and a remote lookup.
-    let mut machine: Option<SeedContext> = None;
-
-    for (name, question) in &manifest.questions {
-        // The shorthand keeps its own path: no engine, no parse, and exactly
-        // the behaviour it had before expressions existed.
-        if let Some(key) = question.git_config_key() {
-            if let Some(value) = seed(project, key)? {
-                seeds.insert(name.clone(), Value::String(value));
-            }
-            continue;
-        }
-
-        let Some(expression) = question.default_from_expression() else {
-            continue;
-        };
-
-        let machine = match machine {
-            Some(ref built) => built,
-            None => {
-                // `tpl.remote` and not `--remote`: a flag about where template
-                // refs are pushed must not silently change a prompt default.
-                let remote = Preferences::load(project)?.remote;
-                machine.insert(crate::seed::collect(project, &remote)?)
-            }
-        };
-
-        let rendered = crate::eval::render_seed(
-            expression,
-            machine,
-            &format!("questions.{name}.default_from"),
-        )?;
-
-        // An expression resolving to nothing is an absent seed, not an empty
-        // prompt — the same rule `gitconfig::seed` applies to an unset key.
-        if !rendered.trim().is_empty() {
-            seeds.insert(name.clone(), Value::String(rendered));
-        }
+    machine: &mut Option<SeedContext>,
+) -> Result<Option<Value>, OpError> {
+    // The user's explicit preference wins without evaluating a shadowed expression
+    // (which may fail on this machine). A wrong-type preference is unrelated input.
+    if let Some(value) = user
+        .defaults
+        .get(name)
+        .filter(|value| question.kind.accepts(value))
+    {
+        return Ok(Some(value.clone()));
+    }
+    let Some(project) = project else {
+        return Ok(None);
+    };
+    // The shorthand keeps its own path: no engine, no parse, and exactly
+    // the behaviour it had before expressions existed.
+    if let Some(key) = question.git_config_key() {
+        return Ok(seed(project, key)?.map(Value::String));
     }
 
-    apply_user_defaults(&mut seeds, manifest, user);
+    let Some(expression) = question.default_from_expression() else {
+        return Ok(None);
+    };
 
-    Ok(seeds)
-}
-
-/// Overlay the user's `[defaults]` onto the seeds a manifest asked for.
-///
-/// Split out from [`prompt_seeds`] so the precedence rule can be tested without
-/// a repository — it is the part with a decision in it.
-fn apply_user_defaults(
-    seeds: &mut BTreeMap<String, Value>,
-    manifest: &Manifest,
-    user: &UserConfig,
-) {
-    for (name, value) in &user.defaults {
-        let Some(question) = manifest.questions.get(name) else {
-            continue;
-        };
-        // Type-checked rather than coerced. A seed that does not fit is a
-        // collision with an unrelated template's question of the same name, and
-        // pre-filling a boolean prompt with a string would be worse than not
-        // pre-filling it at all.
-        if question.kind.accepts(value) {
-            seeds.insert(name.clone(), value.clone());
+    let machine = match machine {
+        Some(built) => built,
+        None => {
+            // `tpl.remote` and not `--remote`: a flag about where template
+            // refs are pushed must not silently change a prompt default.
+            let remote = Preferences::load(project)?.remote;
+            machine.insert(crate::seed::collect(project, &remote)?)
         }
-    }
+    };
+
+    let rendered = crate::eval::render_seed(
+        expression,
+        machine,
+        &format!("questions.{name}.default_from"),
+    )?;
+
+    // An expression resolving to nothing is an absent seed, not an empty
+    // prompt — the same rule `gitconfig::seed` applies to an unset key.
+    Ok((!rendered.trim().is_empty()).then_some(Value::String(rendered)))
 }
 
 /// What happened to one declared remote.
@@ -1600,6 +1577,118 @@ pub struct InitOutcome {
     pub remotes: Vec<DeclaredRemote>,
 }
 
+/// A resolved init preview, retaining the requested ref's baseline rather than the old attachment's.
+pub struct PreparedInit {
+    /// The single resolved revision used for both schema and output.
+    pub template: Resolved,
+    /// The source spelling real init would persist at this destination.
+    pub source: String,
+    baseline: once::Baseline,
+}
+
+impl PreparedInit {
+    /// Render the same revision whose schema was inspected, with init-only metadata demands.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render(
+        &self,
+        source: &str,
+        project: Option<(&dyn GitBackend, &Path)>,
+        supplied: crate::answers::SuppliedAnswers,
+        user: &UserConfig,
+        answering: Answering<'_>,
+        trust: Trust<'_>,
+    ) -> Result<RenderedOnce, OpError> {
+        render_resolved_preparing(
+            &self.template,
+            source,
+            project,
+            supplied,
+            user,
+            answering,
+            trust,
+            None,
+            Preparation::Init,
+            &self.baseline,
+            |_| Ok(()),
+        )
+    }
+}
+
+/// Prepare a read-only init, including schema-only and projectless previews.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_init_preview(
+    source: &str,
+    reference: Option<String>,
+    explicit_id: Option<&str>,
+    project: Option<(&dyn GitBackend, &Path)>,
+    dirty: bool,
+    user: &UserConfig,
+    access: &Access,
+    trust: &mut Trust<'_>,
+) -> Result<PreparedInit, OpError> {
+    let (config, _, tip) = init_attachment(source, reference, explicit_id, project)?;
+    resolve_init(&config, source, project, tip, dirty, user, access, trust)
+}
+
+fn init_attachment(
+    source: &str,
+    reference: Option<String>,
+    explicit_id: Option<&str>,
+    project: Option<(&dyn GitBackend, &Path)>,
+) -> Result<(Config, TemplateId, Option<Oid>), OpError> {
+    let mut config = Config::new(source, reference);
+    config.template.id = explicit_id.map(str::to_string);
+    let id = TemplateId::resolve(source, explicit_id)?;
+    let tip = if let Some((repo, root)) = project {
+        config.template.rebase_local(root)?;
+        // Capture before prompting so another renderer cannot silently become this init's parent.
+        repo.resolve_ref(&id.ref_name())?
+    } else {
+        None
+    };
+    Ok((config, id, tip))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_init(
+    config: &Config,
+    source: &str,
+    project: Option<(&dyn GitBackend, &Path)>,
+    tip: Option<Oid>,
+    dirty: bool,
+    user: &UserConfig,
+    access: &Access,
+    trust: &mut Trust<'_>,
+) -> Result<PreparedInit, OpError> {
+    // Missing roots are valid only when this init's target ref supplies retained output.
+    let baseline = match project {
+        Some((repo, _)) => once::load(repo, tip)?,
+        None => once::Baseline::new(),
+    };
+    // Storage rebasing must not change init's consent/default lookup identity.
+    let location = project.map_or_else(
+        || source.to_owned(),
+        |(_, root)| crate::config::source_location(&config.template.source, root).into_owned(),
+    );
+    let template = resolve::resolve_with_retained(
+        Request {
+            source: &location,
+            reference: config.template.r#ref.as_deref(),
+            root: config.template.root.as_deref(),
+            dirty,
+        },
+        user,
+        access,
+        trust,
+        !baseline.is_empty(),
+    )?;
+    Ok(PreparedInit {
+        template,
+        source: config.template.source.clone(),
+        baseline,
+    })
+}
+
 /// Attach a template to a repository and merge the initial rendering.
 ///
 /// The merge is the load-bearing step: without it the template commit is not an
@@ -1637,24 +1726,33 @@ pub fn init(
         force,
         strict_answers,
         |config, supplied, tip| {
-            // Storage rebasing must not change init's consent/default lookup identity.
-            let location = crate::config::source_location(&config.template.source, project_root);
-            let files = render_files_from_location(
-                Target {
-                    source,
-                    ..Target::from_config(config, dirty)
-                },
-                &location,
+            let mut trust = trust;
+            let prepared = resolve_init(
+                config,
+                source,
+                Some((project, project_root)),
+                tip,
+                dirty,
+                user,
+                access,
+                &mut trust,
+            )?;
+            let rendered = prepared.render(
+                source,
                 Some((project, project_root)),
                 supplied,
                 user,
-                access,
                 answering,
                 trust,
-                None,
-                Preparation::Init,
-                &once::load(project, tip)?,
             )?;
+            let files = RenderedFiles {
+                template: prepared.template,
+                context: rendered.context,
+                files: rendered.files,
+                provenance: rendered.provenance,
+                ignored_answers: rendered.ignored_answers,
+                backport_trace: rendered.backport_trace,
+            };
             rendered_tree(project, files)
         },
     )
@@ -1703,15 +1801,14 @@ fn init_using<T: std::borrow::Borrow<Resolved>>(
         return Err(GitError::DirtyWorktree.into());
     }
 
-    let mut config = Config::new(source, reference);
-    config.template.id = explicit_id.map(str::to_string);
-    config.template.rebase_local(project_root)?;
-
-    let id = TemplateId::resolve(source, explicit_id)?;
+    let (mut config, id, tip) = init_attachment(
+        source,
+        reference,
+        explicit_id,
+        Some((project, project_root)),
+    )?;
     let ref_name = id.ref_name();
-    // Capture before prompting: another renderer may publish while answers are
-    // being collected, and must not silently become this invocation's parent.
-    let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
+    let parents: Vec<_> = tip.into_iter().collect();
 
     let mut rendered = render(&config, supplied, parents.first().copied())?;
     let template = rendered.template.borrow();
@@ -2611,7 +2708,9 @@ pub fn status(
             template,
             &config.template.source,
             Some((project, project_root)),
-            crate::answers::typed(config.answers.clone()),
+            // Saved answers need the same legacy list conversion as update;
+            // treating them as typed overrides would hide child availability.
+            merge_answers(config.answers.clone(), BTreeMap::new()),
             user,
             Answering::defaults(),
             Trust::refuse(),
@@ -3376,6 +3475,36 @@ pub fn push(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::template::Manifest;
+
+    // No repository is needed to exercise personal-default matching and precedence.
+    fn apply_user_defaults(
+        seeds: &mut BTreeMap<String, Value>,
+        manifest: &Manifest,
+        user: &UserConfig,
+    ) {
+        for (name, question) in &manifest.questions {
+            if let Some(value) = prompt_seed(None, name, question, user, &mut None).unwrap() {
+                seeds.insert(name.clone(), value);
+            }
+        }
+    }
+
+    // Exercise the per-question provider with one shared render snapshot.
+    fn prompt_seeds(
+        project: &dyn GitBackend,
+        manifest: &Manifest,
+        user: &UserConfig,
+    ) -> Result<BTreeMap<String, Value>, OpError> {
+        let mut machine = None;
+        let mut seeds = BTreeMap::new();
+        for (name, question) in &manifest.questions {
+            if let Some(value) = prompt_seed(Some(project), name, question, user, &mut machine)? {
+                seeds.insert(name.clone(), value);
+            }
+        }
+        Ok(seeds)
+    }
 
     /// A manifest with one question of each of the kinds these tests need.
     fn manifest_with(questions: &str) -> Manifest {
@@ -3480,6 +3609,25 @@ mod tests {
             .unwrap();
 
             assert!(seeds.is_empty(), "expected no seed, got {seeds:?}");
+        }
+
+        #[test]
+        fn later_derived_prompts_reuse_the_first_machine_snapshot() {
+            let (_dir, repo) = project("snapshot");
+            repo.set_config_str("seed.value", "first").unwrap();
+            let manifest = manifest_with(
+                "[questions.value]\ntype = 'string'\ndefault_from = '{{ git.seed.value }}'\n",
+            );
+            let question = &manifest.questions["value"];
+            let user = user_with("");
+            let mut machine = None;
+            let first = prompt_seed(Some(&repo), "value", question, &user, &mut machine).unwrap();
+            // A prompt may take arbitrarily long; another process changing Git
+            // config in between must not split one render across machine states.
+            repo.set_config_str("seed.value", "changed").unwrap();
+            let second = prompt_seed(Some(&repo), "value", question, &user, &mut machine).unwrap();
+            assert_eq!(first, Some(Value::String("first".into())));
+            assert_eq!(second, first);
         }
     }
 

@@ -336,10 +336,12 @@ impl Context {
         let mut hasher = Sha256::new();
         for (key, value) in &self.answers {
             // Length-prefixed so that `{ab: c}` and `{a: bc}` cannot collide.
-            hasher.update(key.len().to_le_bytes());
+            // Fixed-width framing keeps provenance identical on 32/64-bit
+            // hosts while preserving digests already written by 64-bit builds.
+            hasher.update((key.len() as u64).to_le_bytes());
             hasher.update(key.as_bytes());
             let canonical = value.canonical();
-            hasher.update(canonical.len().to_le_bytes());
+            hasher.update((canonical.len() as u64).to_le_bytes());
             hasher.update(canonical.as_bytes());
         }
         format!("sha256:{}", hex::encode(hasher.finalize()))
@@ -489,6 +491,40 @@ mod tests {
         assert!(!value.get_attr("data").unwrap().is_undefined());
         assert!(!value.get_attr("template").unwrap().is_undefined());
         assert!(!value.get_attr("project_name").unwrap().is_undefined());
+    }
+
+    #[test]
+    fn answer_digest_framing_matches_existing_64_bit_provenance_on_every_architecture() {
+        assert_eq!(
+            context().answers_digest(),
+            "sha256:7656fa8f20fb9bb56bb2089e4802daa9a22a2844c68913ce4fbd831fc10066ec"
+        );
+    }
+
+    #[test]
+    fn structured_answer_digests_frame_utf8_byte_lengths_in_sorted_key_order() {
+        let mut ctx = Context::new();
+        ctx.set_answer(
+            "équipe",
+            Value::Table(BTreeMap::from([
+                ("actif".into(), Value::Bool(true)),
+                (
+                    "noms".into(),
+                    Value::Array(vec![
+                        Value::String("Zoë".into()),
+                        Value::Integer(2),
+                        Value::Null,
+                    ]),
+                ),
+            ])),
+        );
+        ctx.set_answer("a", Value::Integer(-2));
+        // A literal digest pins the trailer's portable wire encoding, rather
+        // than comparing two invocations that could share a framing mistake.
+        assert_eq!(
+            ctx.answers_digest(),
+            "sha256:5381c4e123df57e968565f0820b1665720c57f2719f91d8f01a06380d8480392"
+        );
     }
 
     #[test]

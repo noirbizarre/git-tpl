@@ -1606,6 +1606,76 @@ fn defaults_dry_runs_propagate_render_failures_without_creating_the_destination(
     }
 }
 
+#[test]
+fn init_previews_demand_init_metadata_even_when_already_attached_or_projectless() {
+    for metadata in [
+        "note = '{{ data.absent }}'\n",
+        "note_file = '{{ data.absent }}'\n",
+        "[remotes]\norigin = '{{ data.absent }}'\n",
+    ] {
+        let world = World::with_template("name = 'metadata'\n", &[("out", "ok")]);
+        world.init(&[]).success();
+        world.template.repo.write(
+            "template.toml",
+            &format!("name = 'metadata'\n{metadata}[data.absent]\nsource = 'missing.json'\n"),
+        );
+        world
+            .template
+            .repo
+            .commit_all("demand data only through init metadata");
+        let before = world.project.working_state();
+        let refs = world.project.git(&["show-ref"]);
+        let preview = world.init(&["--json", "--dry-run"]).failure().error_code();
+        let real = world
+            .init(&["--json", "--force", "--no-merge"])
+            .failure()
+            .error_code();
+        assert_eq!(preview, real);
+        assert_eq!(preview, "tpl::data::load");
+        assert_eq!(world.project.working_state(), before);
+        assert_eq!(world.project.git(&["show-ref"]), refs);
+
+        let destination = world.dir.path().join("not-yet");
+        let source = world.template.source();
+        let args = [
+            "--json",
+            "init",
+            &source,
+            destination.to_str().unwrap(),
+            "--init",
+            "--dry-run",
+        ];
+        // Schema-only previews must not acquire metadata data sources.
+        let json = tpl_outside(world.dir.path(), world.project.config_home(), &args)
+            .success()
+            .json();
+        assert!(json["files"].is_null());
+        let mut defaults = args.to_vec();
+        defaults.push("--defaults");
+        assert_eq!(
+            tpl_outside(world.dir.path(), world.project.config_home(), &defaults)
+                .failure()
+                .error_code(),
+            real
+        );
+        assert!(!destination.exists());
+    }
+}
+
+#[test]
+fn init_previews_do_not_demand_update_migration_metadata_from_the_old_attachment() {
+    let world = World::with_template("name = 'metadata'\n", &[("out", "ok")]);
+    world.init(&[]).success();
+    world.add_migration("001-note.toml", "message_file = 'missing.md'\n");
+    let before = world.project.working_state();
+    let refs = world.project.git(&["show-ref"]);
+    let json = world.init(&["--json", "--dry-run"]).success().json();
+    assert_eq!(json["files"], serde_json::json!(["out"]));
+    assert_eq!(world.project.working_state(), before);
+    assert_eq!(world.project.git(&["show-ref"]), refs);
+    world.init(&["--force", "--no-merge"]).success();
+}
+
 /// `--init` with no destination argument: the existing single-directory form,
 /// which nothing in the suite exercised before this change.
 #[test]
