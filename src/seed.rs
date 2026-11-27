@@ -3,7 +3,7 @@
 //! A template asking for a project slug or a repository owner can usually guess
 //! the answer from the project it is being applied to. This module gathers the
 //! facts that guess is made of — the Git configuration, the working directory
-//! name, the remote URL, the current UTC datetime — and exposes them to a
+//! name, the remote URL, the current UTC datetime, the OS login name — and exposes them to a
 //! `default_from` expression.
 //!
 //! # What this is not
@@ -27,8 +27,9 @@
 //! | `dir` | `dir.name`, the working directory's own name |
 //! | `remote` | `url`, `host`, `owner`, `name`, `slug` — see [`crate::remote`] |
 //! | `now` | UTC calendar/time components and ISO date, time and datetime strings |
+//! | `user` | `user.name`, the current OS account's login name |
 //!
-//! The set is closed. See ADR-018 and its datetime extension, ADR-056.
+//! The set is closed. See ADR-018 and its extensions, ADR-056 and ADR-057.
 
 use std::collections::BTreeMap;
 use time::{OffsetDateTime, UtcOffset};
@@ -48,7 +49,7 @@ pub struct SeedContext {
 /// Public so that manifest validation can reject an unknown root at load time,
 /// where the author sees it, rather than at prompt time on someone else's
 /// machine.
-pub const NAMESPACES: [&str; 4] = ["dir", "git", "remote", "now"];
+pub const NAMESPACES: [&str; 5] = ["dir", "git", "remote", "now", "user"];
 
 /// Gather the seed context from a project repository.
 ///
@@ -70,8 +71,27 @@ pub fn collect(repo: &dyn GitBackend, remote_name: &str) -> Result<SeedContext, 
         "now".to_string(),
         Value::Table(now_table(OffsetDateTime::now_utc())),
     );
+    // Like the clock, account identity is captured only for interactive seed
+    // suggestions and reused until this render's prompts have finished.
+    roots.insert(
+        "user".to_string(),
+        Value::Table(user_table(whoami::username_os().ok())),
+    );
 
     Ok(SeedContext { roots })
+}
+
+/// An unavailable account leaves an undefined leaf so template fallbacks work.
+fn user_table(name: Option<std::ffi::OsString>) -> BTreeMap<String, Value> {
+    let mut table = BTreeMap::new();
+    // Lossy conversion would suggest a different login; lookup failure must
+    // never prevent an otherwise usable interactive prompt from appearing.
+    if let Some(name) = name.and_then(|name| name.into_string().ok())
+        && !name.trim().is_empty()
+    {
+        table.insert("name".into(), Value::String(name));
+    }
+    table
 }
 
 /// Derive every representation from one UTC instant, including at date boundaries.
@@ -221,6 +241,37 @@ impl SeedContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_login_name_is_preserved_verbatim() {
+        assert_eq!(
+            user_table(Some(" ada ".into())).get("name"),
+            Some(&Value::String(" ada ".into()))
+        );
+    }
+
+    #[test]
+    fn unavailable_or_blank_login_names_allow_expression_fallbacks() {
+        for name in [None, Some("".into()), Some(" \t".into())] {
+            let user = user_table(name);
+            assert!(user.is_empty());
+            let seeds =
+                SeedContext::from_roots(BTreeMap::from([("user".into(), Value::Table(user))]));
+            assert_eq!(
+                crate::eval::render_seed("{{ user.name | default('developer') }}", &seeds, "test")
+                    .unwrap(),
+                "developer"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_login_is_absent_rather_than_mangled() {
+        use std::os::unix::ffi::OsStringExt;
+
+        assert!(user_table(Some(std::ffi::OsString::from_vec(vec![0xff]))).is_empty());
+    }
 
     #[test]
     fn datetime_seeds_share_one_utc_instant_and_use_whole_second_iso_strings() {

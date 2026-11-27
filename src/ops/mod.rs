@@ -1442,7 +1442,7 @@ fn rendered_tree(project: &dyn GitBackend, rendered: RenderedFiles) -> Result<Re
 /// `author` on every run of every template that has no `author` question would
 /// be noise, and noise is how a real warning stops being read.
 ///
-/// A source that is simply unset is absent: a template suggesting `user.name`
+/// A source that is simply unset is absent: a template suggesting `git.user.name`
 /// must still work for someone who has never set one, and the question's own
 /// `default` covers that. The same goes for an expression rendering to nothing.
 fn prompt_seed(

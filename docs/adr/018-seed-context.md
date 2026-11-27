@@ -2,8 +2,9 @@
 
 **Status:** accepted
 
-**Amended by:** [ADR-056](056-utc-datetime-prompt-seeds.md), which adds the prompt-only `now` namespace.
-The original three-namespace decision below records the boundary before that extension.
+**Amended by:** [ADR-056](056-utc-datetime-prompt-seeds.md), which adds the prompt-only `now` namespace,
+and [ADR-057](057-os-user-prompt-seeds.md), which adds the prompt-only `user` namespace.
+The original three-namespace decision below records the boundary before those extensions.
 
 **Relates to:** [ADR-006](006-no-runtime-context.md), [ADR-003](003-minijinja-only.md),
 [ADR-013](013-user-configuration.md)

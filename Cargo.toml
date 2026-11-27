@@ -149,6 +149,9 @@ demand = "2"
 # Calendar conversion for changelog display and prompt-only datetime seeds;
 # UTC avoids host timezone differences.
 time = { version = "0.3", default-features = false, features = ["std"] }
+# Native account lookup keeps prompt-only login suggestions independent of Git
+# identity and environment-variable overrides on Linux, macOS and Windows.
+whoami = { version = "2", default-features = false, features = ["std"] }
 # The `git tpl test` spinner. Pairs with `console` (same author): both decide
 # from the same terminal-detection primitives, so the two never disagree
 # about whether a spinner belongs on screen.
