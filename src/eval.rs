@@ -1059,10 +1059,10 @@ pub fn environment_with(
     // nothing outside its own argument. Anything that would reach outside the
     // context — reading a file, making a request, running a command — is not
     // available to templates, and will not be. There is no plugin point.
-    // See docs/adr/003-minijinja-only.md and docs/concepts/determinism.md#security.
+    // Selected syntactic sugar is admitted by review, not through a plugin API.
+    // See docs/adr/058-reviewed-template-conveniences.md and docs/concepts/determinism.md#security.
     env.add_filter("slugify", slugify_filter);
-    // A list question cannot take arbitrary user-defined names. Splitting its validated string lets a template
-    // iterate the same stable IDs its pinned child composition uses, without introducing a scripting runtime.
+    env.add_filter("yesno", yesno_filter);
 
     // A loader, not an extension point. It resolves a name to bytes already
     // committed at the pinned template revision — it executes nothing and
@@ -1142,6 +1142,12 @@ fn is_template_not_found(error: &minijinja::Error) -> bool {
 /// than a surprising string.
 fn slugify_filter(value: minijinja::Value) -> String {
     slugify(&value.to_string())
+}
+
+/// Use Jinja truthiness rather than parsing text: even `"false"` is a nonempty string.
+fn yesno_filter(value: minijinja::Value) -> &'static str {
+    // Like `default`, this deliberately consumes undefined values even in strict mode.
+    if value.is_true() { "yes" } else { "no" }
 }
 
 /// Transliterate to ASCII, lowercase, and join the alphanumeric runs with `-`.
@@ -2458,6 +2464,86 @@ mod tests {
         assert!(
             !context.answers().contains_key("package_name"),
             "a computed value must not be recorded as an answer"
+        );
+    }
+
+    #[rstest]
+    #[case("true", "yes")]
+    #[case("false", "no")]
+    #[case("0", "no")]
+    #[case("1", "yes")]
+    #[case("-1", "yes")]
+    #[case("0.0", "no")]
+    #[case("1.5", "yes")]
+    #[case("''", "no")]
+    #[case("'hello'", "yes")]
+    #[case("'false'", "yes")]
+    #[case("'0'", "yes")]
+    #[case("[]", "no")]
+    #[case("[false]", "yes")]
+    #[case("{}", "no")]
+    #[case("{'enabled': false}", "yes")]
+    #[case("none", "no")]
+    fn yesno_returns_a_string_using_jinja_truthiness(#[case] input: &str, #[case] expected: &str) {
+        let context = context_with(&[]);
+        let expression = format!("{{{{ {input} | yesno }}}}");
+
+        assert_eq!(
+            evaluate(&expression, &context, "test", no_partials()).unwrap(),
+            Value::String(expected.into())
+        );
+        assert_eq!(
+            render_string(&expression, &context, "test", no_partials()).unwrap(),
+            expected
+        );
+    }
+
+    #[test]
+    fn yesno_is_available_in_rendered_bodies_and_paths() {
+        let context = context_with(&[("enabled", Value::Bool(true))]);
+
+        assert_eq!(
+            render_string(
+                "config/{{ enabled | yesno }}/settings: enabled={{ enabled | yesno }}",
+                &context,
+                "test",
+                no_partials(),
+            )
+            .unwrap(),
+            "config/yes/settings: enabled=yes"
+        );
+    }
+
+    #[rstest]
+    #[case(Undefined::Lenient)]
+    #[case(Undefined::Strict)]
+    fn yesno_treats_an_undefined_input_as_false(#[case] undefined: Undefined) {
+        assert_eq!(
+            render_string_with(
+                "{{ missing | yesno }}",
+                &context_with(&[]),
+                "test",
+                no_partials(),
+                undefined,
+            )
+            .unwrap(),
+            "no"
+        );
+    }
+
+    #[test]
+    fn yesno_is_available_in_seed_expressions() {
+        let seeds = SeedContext::from_roots(BTreeMap::from([(
+            "dir".to_string(),
+            Value::Table(BTreeMap::from([(
+                "name".to_string(),
+                Value::String("project".into()),
+            )])),
+        )]));
+
+        assert_eq!(
+            render_seed("{{ dir.name | yesno }}", &seeds, "test").unwrap(),
+            "yes"
         );
     }
 

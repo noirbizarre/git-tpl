@@ -95,3 +95,11 @@ fetching remains an explicit command.
 
 If you think one of these is wrong, open an issue and make the case. A change of mind belongs in an ADR that
 supersedes the old one.
+
+## Filters and globals
+
+The extra filters and globals supplied by git-tpl are deliberately limited.
+Selected syntactic sugar may be considered, but contributions are reviewed case by case and are not
+guaranteed acceptance, even when pure and deterministic.
+Every addition creates a lasting compatibility surface.
+See [ADR-058](../adr/058-reviewed-template-conveniences.md) for the criteria and isolation requirements.

@@ -66,3 +66,4 @@ explains the code that existed.
 | [055](055-recorded-string-list-conversion.md) | Update migrates saved comma-separated strings for array questions |
 | [056](056-utc-datetime-prompt-seeds.md) | UTC datetime values may seed an interactive prompt |
 | [057](057-os-user-prompt-seeds.md) | The OS login name may seed an interactive prompt |
+| [058](058-reviewed-template-conveniences.md) | Selected template conveniences are admitted by review |

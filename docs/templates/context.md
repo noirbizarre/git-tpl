@@ -132,7 +132,7 @@ Fetching belongs to the [data-source subsystem](../data/index.md), which owns it
 
 ### `slugify`
 
-One filter is added to the built-ins, because it is the one a real template cannot write for itself:
+`slugify` is added to the built-ins because a real template cannot reasonably write it for itself:
 
 ```jinja
 {{ project_name | slugify }}
@@ -161,7 +161,35 @@ The filter is available everywhere any other expression is: in a `default`, in a
 a file body, in a templated path, and in a [`default_from`](questions.md#machine-seeded-defaults) seed
 expression — which is where `{{ remote.name | slugify }}` earns its keep.
 
-**The set of filters is closed.** There is no plugin point, and there will not be one — see
-[ADR-003](../adr/003-minijinja-only.md).
-A filter is only considered if it is pure, deterministic, and reaches nothing outside its own argument, and every
-one added is a compatibility surface that cannot later be removed.
+### `yesno`
+
+`yesno` returns the string `yes` for a truthy value and `no` otherwise:
+
+```jinja
+enabled = {{ enabled | yesno }}
+```
+
+It uses Jinja truthiness, not string parsing:
+
+| Input | Result |
+|---|---|
+| `true`, a nonzero number | `yes` |
+| `false`, `0`, `0.0`, `none` | `no` |
+| An empty string, list or map | `no` |
+| A nonempty string, list or map | `yes` |
+| The strings `"false"` and `"0"` | `yes` |
+
+An undefined value passed to `yesno` yields `no`, even in strict mode.
+An invalid nested lookup can still fail before the filter receives a value.
+Like `slugify`, the filter is available in expressions, rendered files, templated paths and seed expressions.
+
+### Adding filters and globals
+
+**The set of filters and globals is deliberately small and closed by review.**
+There is no plugin point, and templates cannot register code.
+Selected syntactic sugar such as `yesno` may be accepted even when an inline conditional could express it.
+Contributions of filters or globals are not guaranteed acceptance: each addition is a compatibility surface
+that cannot later be removed.
+Custom filters must remain pure, deterministic, and reach nothing outside their arguments;
+render-time globals must likewise stay within the supplied context.
+See [ADR-058](../adr/058-reviewed-template-conveniences.md) for the policy.
