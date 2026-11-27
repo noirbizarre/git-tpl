@@ -495,7 +495,8 @@ and carry on with the other changes.
 **6. Deliver each patch.**
 Find each actual owner with `template` and the full `revision.commit` in its payload.
 An ancestor or child owner can differ from `config.template.source`; use its own checkout and mailbox.
-Review its recorded base commit before applying; these patches do not automatically advance any inheritance pin.
+Apply each mailbox in its identified owner's checkout at the full recorded `revision.commit` base.
+These patches do not automatically advance any inheritance pin.
 Never run `applyCommand` blindly: for a URL it contains the placeholder `<your-template-clone>`.
 
 - **The upstream is on GitHub** (`https://github.com/<owner>/<repo>`, `git@github.com:<owner>/<repo>.git`):
@@ -504,11 +505,13 @@ Never run `applyCommand` blindly: for a URL it contains the placeholder `<your-t
 
   ```sh
   gh repo clone <owner>/<repo> /tmp/tpl-upstream && cd /tmp/tpl-upstream   # or `gh repo fork --clone` without push rights
-  git switch -c backport/pin-ci-actions "$(git symbolic-ref --short refs/remotes/origin/HEAD)"
+  git switch -c backport/pin-ci-actions <recorded-owner-base-commit>
   git am /tmp/pin-ci-actions.patch
   ```
 
-  Reword the commit to the upstream's own convention (`git log` shows it) so the change reads as one commit with a
+  Review the applied change against current upstream and reconcile it onto a fresh default-branch-based delivery branch.
+  Verify the reconciled change before delivery; applying cleanly at the recorded base does not prove current compatibility.
+  Use the upstream's own commit convention (`git log` shows it) so the change reads as one commit with a
   real title.
   Then **show the user the branch's diff and the intended title and body, and ask before pushing and before opening
   the pull request**:
@@ -518,11 +521,12 @@ Never run `applyCommand` blindly: for a URL it contains the placeholder `<your-t
   gh pr create --title "<title>" --body "<summary, then any un-substituted lines>"
   ```
 
-  Branch from the default branch each time, so every pull request is independent.
+  Start each delivery branch from the current default branch, so every pull request is independent.
   Report the pull request URLs when done.
   If `git am` refuses, report that change as failed, `git am --abort`, and continue with the next.
-- **Anything else** (a local path, GitLab, a bare Git server): apply the patch on a fresh branch in a clone of the
-  template (`git -C <path> switch -c ... && git -C <path> am <patch>`), and tell the user the branch name.
+- **Anything else** (a local path, GitLab, a bare Git server): apply the patch on a fresh branch at the recorded base
+  in a clone of its identified owner (`git -C <path> switch -c <branch> <recorded-owner-base-commit>`, then `git am`).
+  Review and reconcile against current upstream separately before delivery, and tell the user the branch name.
   Do not push, and do not open a merge request.
 - **No `gh`, or not authenticated:** leave the patches and tell the user; do not fall back to another way of
   opening a pull request.
