@@ -520,6 +520,28 @@ fn rebasing_a_local_source_preserves_absolute_path_trust() {
 }
 
 #[test]
+fn a_recorded_copyright_year_replays_without_acquiring_a_datetime_seed() {
+    let world = World::with_template(
+        "name = 'copyright'\n[questions.year]\ntype = 'string'\ndefault_from = '{{ now.year }}'\n",
+        &[("COPYRIGHT.jinja", "Copyright {{ year }}\n")],
+    );
+    world.init(&["--answer", "year=1999"]).success();
+    let config = world.project.read(".config/git.tpl.toml");
+    let tip = world.project.git(&["rev-parse", &world.ref_name()]);
+    // There is no ordinary default: only the recorded answer can satisfy a
+    // non-interactive update, regardless of the machine's current year.
+    let before = world.project.working_state();
+    let result = tpl(&world.project, &["--json", "update", "--defaults"])
+        .success()
+        .json();
+    assert_eq!(result["result"], "upToDate");
+    assert_eq!(world.project.read("COPYRIGHT"), "Copyright 1999\n");
+    assert_eq!(world.project.read(".config/git.tpl.toml"), config);
+    assert_eq!(world.project.git(&["rev-parse", &world.ref_name()]), tip);
+    assert_eq!(world.project.working_state(), before);
+}
+
+#[test]
 fn a_changed_rendering_preserves_exact_configuration_bytes_when_answers_and_locks_are_unchanged() {
     let world = World::new();
     world.init(&[]).success();

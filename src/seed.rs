@@ -3,7 +3,8 @@
 //! A template asking for a project slug or a repository owner can usually guess
 //! the answer from the project it is being applied to. This module gathers the
 //! facts that guess is made of — the Git configuration, the working directory
-//! name, the remote URL — and exposes them to a `default_from` expression.
+//! name, the remote URL, the current UTC datetime — and exposes them to a
+//! `default_from` expression.
 //!
 //! # What this is not
 //!
@@ -25,16 +26,18 @@
 //! | `git` | the Git configuration, dotted keys nested: `git.user.name` |
 //! | `dir` | `dir.name`, the working directory's own name |
 //! | `remote` | `url`, `host`, `owner`, `name`, `slug` — see [`crate::remote`] |
+//! | `now` | UTC calendar/time components and ISO date, time and datetime strings |
 //!
-//! The set is closed. See `docs/adr/018-seed-context.md`.
+//! The set is closed. See ADR-018 and its datetime extension, ADR-056.
 
 use std::collections::BTreeMap;
+use time::{OffsetDateTime, UtcOffset};
 
 use crate::git::{GitBackend, GitError};
 use crate::remote;
 use crate::template::Value;
 
-/// The three namespaces a `default_from` expression may read.
+/// The closed namespaces a `default_from` expression may read.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SeedContext {
     roots: BTreeMap<String, Value>,
@@ -45,7 +48,7 @@ pub struct SeedContext {
 /// Public so that manifest validation can reject an unknown root at load time,
 /// where the author sees it, rather than at prompt time on someone else's
 /// machine.
-pub const NAMESPACES: [&str; 3] = ["dir", "git", "remote"];
+pub const NAMESPACES: [&str; 4] = ["dir", "git", "remote", "now"];
 
 /// Gather the seed context from a project repository.
 ///
@@ -61,8 +64,38 @@ pub fn collect(repo: &dyn GitBackend, remote_name: &str) -> Result<SeedContext, 
         "remote".to_string(),
         Value::Table(remote_table(repo, remote_name)?),
     );
+    // Capture once in the lazy prompt-only context: separate prompts must not
+    // disagree across midnight, and replaying recorded answers never reads time.
+    roots.insert(
+        "now".to_string(),
+        Value::Table(now_table(OffsetDateTime::now_utc())),
+    );
 
     Ok(SeedContext { roots })
+}
+
+/// Derive every representation from one UTC instant, including at date boundaries.
+fn now_table(instant: OffsetDateTime) -> BTreeMap<String, Value> {
+    let instant = instant.to_offset(UtcOffset::UTC);
+    let (year, month, day) = instant.to_calendar_date();
+    let month = u8::from(month);
+    let (hour, minute, second) = instant.to_hms();
+    // Explicit whole-second ISO forms avoid locale, offset and fractional-second
+    // differences in suggestions that may later be recorded as answers.
+    let date = format!("{year:04}-{month:02}-{day:02}");
+    let time = format!("{hour:02}:{minute:02}:{second:02}Z");
+    let datetime = format!("{date}T{time}");
+    BTreeMap::from([
+        ("year".into(), Value::Integer(i64::from(year))),
+        ("month".into(), Value::Integer(i64::from(month))),
+        ("day".into(), Value::Integer(i64::from(day))),
+        ("hour".into(), Value::Integer(i64::from(hour))),
+        ("minute".into(), Value::Integer(i64::from(minute))),
+        ("second".into(), Value::Integer(i64::from(second))),
+        ("date".into(), Value::String(date)),
+        ("time".into(), Value::String(time)),
+        ("datetime".into(), Value::String(datetime)),
+    ])
 }
 
 /// The Git configuration as a tree, so `git.user.name` is an ordinary lookup.
@@ -173,7 +206,7 @@ impl SeedContext {
 
     /// The seed context as MiniJinja sees it.
     ///
-    /// All three roots are always present, possibly empty. One defined level of
+    /// All roots are always present, possibly empty. One defined level of
     /// nesting is what lets an absent value fall through `| default(...)`
     /// instead of raising.
     pub fn to_minijinja(&self) -> minijinja::Value {
@@ -188,6 +221,60 @@ impl SeedContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn datetime_seeds_share_one_utc_instant_and_use_whole_second_iso_strings() {
+        let instant = time::Date::from_calendar_date(2024, time::Month::February, 29)
+            .unwrap()
+            .with_hms_nano(3, 4, 5, 123_456_789)
+            .unwrap()
+            .assume_utc();
+        let now = now_table(instant);
+        assert_eq!(now.len(), 9);
+        for (field, value) in [
+            ("year", 2024),
+            ("month", 2),
+            ("day", 29),
+            ("hour", 3),
+            ("minute", 4),
+            ("second", 5),
+        ] {
+            assert_eq!(now[field], Value::Integer(value));
+        }
+        for (field, value) in [
+            ("date", "2024-02-29"),
+            ("time", "03:04:05Z"),
+            ("datetime", "2024-02-29T03:04:05Z"),
+        ] {
+            assert_eq!(now[field], Value::String(value.into()));
+        }
+        let seeds = SeedContext::from_roots(BTreeMap::from([("now".into(), Value::Table(now))]));
+        assert_eq!(
+            crate::eval::render_seed("{{ now.year }}", &seeds, "test").unwrap(),
+            "2024"
+        );
+    }
+
+    #[test]
+    fn datetime_seeds_normalize_to_utc_before_deriving_the_year() {
+        let local = time::Date::from_calendar_date(2027, time::Month::January, 1)
+            .unwrap()
+            .with_hms(0, 30, 0)
+            .unwrap()
+            .assume_offset(UtcOffset::from_hms(1, 0, 0).unwrap());
+        let now = now_table(local);
+        assert_eq!(now["year"], Value::Integer(2026));
+        assert_eq!(
+            now["datetime"],
+            Value::String("2026-12-31T23:30:00Z".into())
+        );
+        let next_year = now_table(local + time::Duration::minutes(30));
+        assert_eq!(next_year["year"], Value::Integer(2027));
+        assert_eq!(
+            next_year["datetime"],
+            Value::String("2027-01-01T00:00:00Z".into())
+        );
+    }
 
     fn table(entries: &[(&str, &str)]) -> BTreeMap<String, Value> {
         let mut table = BTreeMap::new();

@@ -27,7 +27,7 @@ Each of these is a way the guarantee could be lost, and how it is prevented:
 | Line endings | Bytes are never translated. A `\r\n` in the template stays `\r\n` on Linux and on Windows. |
 | File kind and permissions | Source Git modes preserve regular files, executable files, and symbolic links. Other regular-file permission bits are not recorded. See the caveat below for a worktree source. |
 | Binary files | Detected by a NUL byte in the first 8 KiB and copied verbatim, never rendered. |
-| Timestamps | Never injected. The commit's author and committer time are the only timestamps, and they are metadata, not content. |
+| Timestamps | Never injected into rendering. Prompt-only datetime seeds require human confirmation and become recorded answers. |
 | Environment variables | Not exposed to templates. At all. |
 | Machine-specific values | Not exposed to templates. See below. |
 | Imported partials | A `{% import %}` resolves only against the template tree at the pinned revision, never the filesystem. The loadable set is read in Git tree order into a sorted map, so the names — and the diagnostics that list them — do not vary. See [ADR-012](../adr/012-template-loader.md). |
@@ -50,8 +50,8 @@ Making the platforms agree would mean recording a mode Git itself does not, so i
 
 ## No runtime context
 
-git-tpl has no `now()`, no `git.user.name`, no `platform.os` — no expression in a rendered file or a manifest can
-read any of them.
+git-tpl has no ambient clock, Git identity, or platform values in the render context.
+Rendered files and ordinary manifest expressions cannot read them.
 
 The one exception proves the rule rather than weakening it: `default_from` reads its own small
 [seed context](../adr/018-seed-context.md), which is reachable from nowhere else and only ever pre-fills a
@@ -67,6 +67,8 @@ looks at it.
 The usual motivations have better answers:
 
 **A copyright year.** Ask for it, or don't render one — `Copyright (c) Acme` is correct in every year.
+[`default_from = "{{ now.year }}"`](../templates/questions.md#datetime-seeds) suggests the current UTC year
+interactively; once accepted, the recorded year is reused on later updates without reading the clock.
 
 **The author's name and email.** Ask a question, with
 [`default_from = "git:user.name"`](../templates/questions.md#machine-seeded-defaults), which offers the value from

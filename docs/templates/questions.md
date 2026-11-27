@@ -29,7 +29,7 @@ help = "Used for the package name and the README title"
 | `choices_from` | string | A reference to a list, instead of `choices`. |
 | `min_choices` | integer | Inclusive minimum selections for `multi_choice`, defaulting to zero. |
 | `max_choices` | integer | Inclusive maximum selections for `multi_choice`, unlimited when omitted. |
-| `default_from` | string | Where the *prompt default* comes from. `git:<key>`, or an expression over `git`, `dir` and `remote`. |
+| `default_from` | string | Where the *prompt default* comes from. `git:<key>`, or an expression over `git`, `dir`, `remote` and `now`. |
 | `pattern` | string | A regular expression every answer must match. `string` only. |
 | `message` | string | What to say when `pattern` rejects an answer. |
 | `item_pattern` | string | A regular expression each string in a `list` answer must match. |
@@ -325,13 +325,14 @@ A project cloned from `git@github.com:me/Git Tpl.git` offers `git-tpl`, and one 
 
 #### What an expression may read
 
-Three namespaces, and only three:
+Four namespaces, and only four:
 
 | Namespace | Contents |
 |---|---|
 | `git` | The Git configuration, dotted keys nested: `git.user.name`, `git.user.email`. |
 | `dir` | `dir.name` — the project directory's own name. |
 | `remote` | `remote.name`, `remote.owner`, `remote.slug`, `remote.host`, `remote.url`. |
+| `now` | UTC calendar/time components and ISO strings; see [datetime seeds](#datetime-seeds). |
 
 For `git@github.com:acme/widgets.git`, `remote` is:
 
@@ -366,6 +367,7 @@ A false `when`, an empty choice catalogue, a supplied answer, or a compatible re
 A type-compatible personal `[defaults]` value also wins without reading or evaluating `default_from`.
 The machine context for derived expressions is captured at the first prompt that needs it and shared by later
 prompts in the same render.
+Like other machine seeds, these require a project repository; standalone use without one falls back to `default`.
 An acquisition or runtime expression error is reported only when that seed is needed;
 syntax and namespace errors still fail when the manifest is loaded, even for skipped questions.
 
@@ -373,7 +375,7 @@ syntax and namespace errors still fail when the manifest is loaded, even for ski
 
     If the question is **not asked** — `--defaults`, `tpl.interactive false`, CI — `default_from` is not read at
     all and `default` applies.
-    This is true of every form: the directory name and the remote are as machine-varying as `user.name`, and
+    This is true of every form: the directory, remote, and current datetime can vary just as `user.name` does, and
     none of them may reach a rendered file on their own.
     Otherwise the same template would render two different trees on two machines, and
     [determinism](../concepts/determinism.md) is what the whole ref model rests on.
@@ -396,6 +398,40 @@ The user's own [`[defaults]`](../configuration.md#defaults) sits above `default_
 seeds-the-prompt-only rule.
 `default_from` is the template author's guess about where an answer usually comes from; `[defaults]` is the
 person at the keyboard saying it outright, so the person wins.
+
+#### Datetime seeds
+
+Suggest the current UTC year for a copyright question:
+
+```toml
+[questions.copyright_year]
+type = "string"
+default_from = "{{ now.year }}"
+```
+
+Then use `Copyright {{ copyright_year }}` in rendered files.
+Accepting the suggestion records an ordinary string answer in `.config/git.tpl.toml`.
+Later updates reuse that answer, even in a different year; this initializes a year rather than updating it annually.
+For non-interactive use, supply the answer explicitly or add a stable ordinary `default`.
+
+All `now` fields describe one instant captured when the first derived seed is needed in that render:
+
+| Field | Type | Example / range |
+|---|---|---|
+| `now.year` | Integer | `2026` |
+| `now.month` | Integer | `1`–`12` |
+| `now.day` | Integer | `1`–`31` |
+| `now.hour` | Integer | `0`–`23` |
+| `now.minute` | Integer | `0`–`59` |
+| `now.second` | Integer | `0`–`59` |
+| `now.date` | String | `2026-11-27` |
+| `now.time` | String | `14:05:09Z` |
+| `now.datetime` | String | `2026-11-27T14:05:09Z` |
+
+The ISO strings use whole-second precision, zero-padded components, and `Z` for UTC time.
+Numeric fields can be used in expressions, but the rendered seed is always text for a `string` question.
+`now` is available only in `default_from`, never as an ambient value in an ordinary `default` or rendered file.
+See [ADR-056](../adr/056-utc-datetime-prompt-seeds.md).
 
 ## Validation
 

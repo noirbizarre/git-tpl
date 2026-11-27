@@ -1085,6 +1085,97 @@ default_from = "git:tpl.ci"
 
 // --- seeds derived from the repository ---------------------------------------
 
+const DATETIME_SEEDED: &str = r#"
+name = "datetime"
+[questions.copyright_year]
+type = "string"
+default = "2000"
+default_from = "{{ now.year }}"
+"#;
+
+#[test]
+fn a_datetime_seed_is_ignored_without_human_confirmation() {
+    let world = World::with_template(DATETIME_SEEDED, &[("YEAR.jinja", "{{ copyright_year }}\n")]);
+    world.init(&[]).success();
+    assert_eq!(world.project.read("YEAR"), "2000\n");
+    let required = World::with_template(
+        &DATETIME_SEEDED.replace("default = \"2000\"\n", ""),
+        &[("YEAR.jinja", "{{ copyright_year }}\n")],
+    );
+    required.init(&[]).failure().says("copyright_year");
+}
+
+#[test]
+fn an_interactive_datetime_seed_is_offered_as_text_and_personal_defaults_win() {
+    struct AcceptSeed {
+        expected: Option<tpl::Value>,
+    }
+    impl tpl::eval::Prompter for AcceptSeed {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &tpl::template::Question,
+            _: Option<&tpl::Value>,
+            seed: Option<&tpl::Value>,
+            _: Option<&[tpl::template::Choice]>,
+        ) -> Result<tpl::Value, tpl::eval::EvalError> {
+            let seed = seed.expect("the interactive question must offer a seed");
+            if let Some(expected) = &self.expected {
+                assert_eq!(seed, expected);
+            } else {
+                let tpl::Value::String(year) = seed else {
+                    panic!("a numeric seed must become prompt text")
+                };
+                assert!(year.parse::<i32>().is_ok());
+            }
+            Ok(seed.clone())
+        }
+    }
+    for personal in [false, true] {
+        let world =
+            World::with_template(DATETIME_SEEDED, &[("YEAR.jinja", "{{ copyright_year }}\n")]);
+        let repo = tpl::git::libgit2::LibGit2::open(&world.project.path).unwrap();
+        let mut user = tpl::userconfig::UserConfig::default();
+        let expected = personal.then(|| tpl::Value::String("1999".into()));
+        if let Some(value) = &expected {
+            user.defaults.insert("copyright_year".into(), value.clone());
+            // A winning personal default must skip acquisition, not merely
+            // overwrite the clock seed after reading repository preferences.
+            world
+                .project
+                .git(&["config", "tpl.autoPush", "not-a-boolean"]);
+        }
+        let result = tpl::ops::render_files(
+            tpl::ops::Target {
+                source: &world.template.source(),
+                reference: None,
+                root: None,
+                dirty: false,
+            },
+            Some((&repo, &world.project.path)),
+            tpl::answers::SuppliedAnswers::new(),
+            &user,
+            &tpl::git::cache::Access::new(None, false),
+            tpl::ops::Answering::Interactive(&mut AcceptSeed { expected }),
+            tpl::ops::Trust::always(),
+        )
+        .unwrap();
+        assert!(matches!(
+            result.context.answers().get("copyright_year"),
+            Some(tpl::Value::String(_))
+        ));
+    }
+}
+
+#[test]
+fn a_datetime_seed_does_not_make_the_clock_available_to_ordinary_defaults() {
+    let world = World::with_template(
+        &DATETIME_SEEDED.replace("default = \"2000\"", "default = \"{{ now.year }}\""),
+        &[("YEAR.jinja", "{{ copyright_year }}\n")],
+    );
+    world.init(&[]).failure().says("now");
+}
+
 #[test]
 fn unused_runtime_seeds_do_not_fail_interactive_or_defaults_only_rendering() {
     struct NeverAsk;

@@ -95,8 +95,11 @@ where it is invisible and different for everyone.
 
 The one place a machine fact is legible to a template is
 [`default_from`](questions.md#machine-seeded-defaults), which reads its own small
-[seed context](../adr/018-seed-context.md) — the Git configuration, the directory name, the remote.
+[seed context](../adr/018-seed-context.md) — the Git configuration, the directory name, the remote,
+and [UTC datetime seeds](questions.md#datetime-seeds).
 That context is not this one, is reachable from nowhere else, and only ever pre-fills a prompt.
+For example, `default_from = "{{ now.year }}"` suggests a copyright year that becomes an ordinary recorded answer.
+An ambient `now` value is still absent from rendered files and ordinary defaults.
 
 ## Imported names
 
