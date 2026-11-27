@@ -31,6 +31,8 @@ do so are absent.
 
 The use cases have better answers.
 A copyright year should be asked for, or omitted — `Copyright (c) Acme` is correct every year.
+[`default_from = "{{ now.year }}"`](../templates/questions.md#datetime-seeds) can suggest the current UTC year
+at an interactive prompt; the accepted answer is recorded and does not advance automatically on updates.
 An author name should be a question whose *default* the CLI fills from Git configuration: the user presses Enter,
 and the value is then recorded in `.config/git.tpl.toml`, shared with the project, and identical for everyone who
 renders it.
@@ -43,6 +45,7 @@ context, and a non-interactive render never reads it at all.
 See also [ADR-018](018-seed-context.md), which elaborates that escape hatch into three named namespaces — the Git
 configuration, the project directory name and the remote URL — and records why the set is closed.
 It widens what a seed may be *derived from*; the two guards above are what it does not touch.
+[ADR-056](056-utc-datetime-prompt-seeds.md) subsequently adds UTC datetime seeds under the same guards.
 
 That is the general shape: a value that varies by machine belongs in the answers, where it is recorded and
 reviewed, not in the context, where it is invisible.

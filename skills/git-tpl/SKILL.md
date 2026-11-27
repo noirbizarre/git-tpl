@@ -34,6 +34,11 @@ For `tpl::backport::one_shot`, exclude the initialized file or edit the template
 It shares update's semantic child-provenance comparison: enriching legacy ancestry evidence alone stays `upToDate`.
 Personal defaults also seed standalone interactive `render` and `context`, but never noninteractive rendering.
 Machine seeds are acquired only for actual prompts, after supplied or compatible reused answers and personal defaults.
+With a project repository, `default_from = "{{ now.year }}"` suggests a copyright year interactively.
+`now` also offers UTC `month`, `day`, `hour`, `minute`, `second` and ISO `date`, `time`, `datetime` strings.
+ISO strings use whole seconds: `2026-11-27`, `14:05:09Z`, `2026-11-27T14:05:09Z`.
+All fields share one captured instant; accepted text becomes an answer and keeps its value on later updates.
+`--defaults` ignores datetime seeds; supply an answer or a stable ordinary default for noninteractive use.
 Seed syntax and namespace validation remains eager, including with `--defaults`.
 `status.renderingCount` counts provenance-bearing renderings, excluding intermediate migration rename commits.
 On `diff` and `show`, answer flags require `--dirty`; ordinary inspection never renders answer overrides.

@@ -1347,25 +1347,27 @@ mod tests {
         assert_eq!(question.default_from_expression(), None);
     }
 
-    #[test]
-    fn a_seed_expression_is_accepted_and_is_not_a_config_key() {
+    #[rstest::rstest]
+    #[case("{{ remote.name | default(dir.name) | slugify }}")]
+    #[case("{{ now.year }}")]
+    #[case("{{ now.date }} {{ now.time }} {{ now.datetime }}")]
+    fn a_seed_expression_is_accepted_and_is_not_a_config_key(#[case] expression: &str) {
         let manifest = Manifest::parse(
-            r#"
+            &format!(
+                r#"
             name = "x"
             [questions.slug]
             type = "string"
-            default_from = "{{ remote.name | default(dir.name) | slugify }}"
-            "#,
+            default_from = "{expression}"
+            "#
+            ),
             MANIFEST_NAME,
         )
         .unwrap();
 
         let question = &manifest.questions["slug"];
         assert_eq!(question.git_config_key(), None);
-        assert_eq!(
-            question.default_from_expression(),
-            Some("{{ remote.name | default(dir.name) | slugify }}")
-        );
+        assert_eq!(question.default_from_expression(), Some(expression));
     }
 
     /// Parsed with the engine that will evaluate it, so a syntax error is the

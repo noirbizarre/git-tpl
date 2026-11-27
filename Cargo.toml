@@ -146,7 +146,8 @@ console = "0.16"
 # Delegate Markdown parsing, styling and layout rather than maintaining a renderer.
 termimad = { version = "0.35", default-features = false }
 demand = "2"
-# Calendar conversion for changelog display; UTC avoids host timezone differences.
+# Calendar conversion for changelog display and prompt-only datetime seeds;
+# UTC avoids host timezone differences.
 time = { version = "0.3", default-features = false, features = ["std"] }
 # The `git tpl test` spinner. Pairs with `console` (same author): both decide
 # from the same terminal-detection primitives, so the two never disagree
