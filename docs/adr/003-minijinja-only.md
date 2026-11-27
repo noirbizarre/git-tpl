@@ -2,6 +2,9 @@
 
 **Status:** accepted
 
+**Amended by:** [ADR-057](057-reviewed-template-conveniences.md), which permits reviewed syntactic sugar
+and supersedes the filter expressibility requirement below.
+
 ## Context
 
 Template tools tend to accumulate engines: Jinja for Python users, Handlebars for JavaScript users, Tera because it
@@ -51,13 +54,15 @@ filter — where is the extension point?"*
 A template cannot register a filter, and no configuration key will ever let it.
 A filter is code, and code from a template is the one thing this project does not run.
 
-git-tpl itself registers exactly one filter beyond MiniJinja's own — [`slugify`](../templates/context.md#slugify) —
+At the time of this decision, git-tpl registered one filter beyond MiniJinja's own —
+[`slugify`](../templates/context.md#slugify) —
 because `project_name → project_slug` appears in every project template and `lower | replace(' ', '-')` is wrong
 for unicode and for punctuation.
 
 **The set is closed by review.**
 A candidate qualifies only if it is pure, deterministic, and reaches nothing outside its own argument; and even
-then, the bar is that templates cannot reasonably express it with the built-ins.
+then, the original bar was that templates could not reasonably express it with the built-ins.
+[ADR-057](057-reviewed-template-conveniences.md) relaxes that bar to allow selected syntactic sugar.
 The pressure will be to ship a *useful set*.
 It should be resisted: every filter added is a compatibility surface that cannot be removed, and a template that
 depends on one cannot render with an older git-tpl.
