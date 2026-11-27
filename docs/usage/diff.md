@@ -82,7 +82,8 @@ Use whichever you prefer; nothing about git-tpl requires its own diff command.
 Note that a plain `git diff HEAD refs/tpl/<id>` is *not* the same thing.
 It compares the two trees directly, so every file your project has and the template never produced — your own
 sources, your `CHANGELOG.md`, git-tpl's own `.config/git.tpl.toml` — appears as a deletion.
-Merging deletes none of them: they are in the merge base.
+Merging preserves those project-only additions: they are absent from both the previous and current renderings,
+so the template side has not deleted them since the merge base.
 
 ## Reading it
 
