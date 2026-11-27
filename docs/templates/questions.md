@@ -29,7 +29,7 @@ help = "Used for the package name and the README title"
 | `choices_from` | string | A reference to a list, instead of `choices`. |
 | `min_choices` | integer | Inclusive minimum selections for `multi_choice`, defaulting to zero. |
 | `max_choices` | integer | Inclusive maximum selections for `multi_choice`, unlimited when omitted. |
-| `default_from` | string | Where the *prompt default* comes from. `git:<key>`, or an expression over `git`, `dir`, `remote` and `now`. |
+| `default_from` | string | The *prompt default*: `git:<key>`, or an expression over the seed namespaces below. |
 | `pattern` | string | A regular expression every answer must match. `string` only. |
 | `message` | string | What to say when `pattern` rejects an answer. |
 | `item_pattern` | string | A regular expression each string in a `list` answer must match. |
@@ -325,7 +325,7 @@ A project cloned from `git@github.com:me/Git Tpl.git` offers `git-tpl`, and one 
 
 #### What an expression may read
 
-Four namespaces, and only four:
+Five namespaces, and only five:
 
 | Namespace | Contents |
 |---|---|
@@ -333,6 +333,7 @@ Four namespaces, and only four:
 | `dir` | `dir.name` — the project directory's own name. |
 | `remote` | `remote.name`, `remote.owner`, `remote.slug`, `remote.host`, `remote.url`. |
 | `now` | UTC calendar/time components and ISO strings; see [datetime seeds](#datetime-seeds). |
+| `user` | `user.name` — the current OS account's login name; see [user seeds](#user-seeds). |
 
 For `git@github.com:acme/widgets.git`, `remote` is:
 
@@ -398,6 +399,23 @@ The user's own [`[defaults]`](../configuration.md#defaults) sits above `default_
 seeds-the-prompt-only rule.
 `default_from` is the template author's guess about where an answer usually comes from; `[defaults]` is the
 person at the keyboard saying it outright, so the person wins.
+
+#### User seeds
+
+Suggest the current OS account's login name:
+
+```toml
+[questions.username]
+type = "string"
+default_from = "{{ user.name | default('developer') }}"
+```
+
+`user.name` is the OS login name, not the account's full name or the Git display name in `git.user.name`.
+It is read through native account APIs and captured once with the other machine seeds.
+If lookup fails or the name is blank or not valid UTF-8, `user.name` is undefined and `| default(...)` applies.
+Otherwise the name is preserved verbatim; use a filter such as `slugify` when a derived form is needed.
+Like all machine seeds, this requires interactive prompting with a project repository.
+It becomes a recorded answer only after confirmation and is never an ambient value in rendering or ordinary defaults.
 
 #### Datetime seeds
 
