@@ -503,3 +503,86 @@ fn capture_survives_removing_the_entire_source_root_and_declaration() {
     tpl(&world.project, &["update", "--defaults"]).success();
     assert_eq!(blob(&world, "asset"), initial);
 }
+
+#[test]
+fn init_previews_use_the_requested_refs_retained_root_with_or_without_an_attachment() {
+    let world = World::with_template(
+        "name = 'once'\n[files]\n'first' = { once = true }\n",
+        &[("first", "first capture")],
+    );
+    world.init(&["--id", "first"]).success();
+    world.template.repo.remove("template/first");
+    world
+        .template
+        .repo
+        .write("template/second", "second capture");
+    world.template.repo.write(
+        "template.toml",
+        "name = 'once'\n[files]\n'second' = { once = true }\n",
+    );
+    world
+        .template
+        .repo
+        .commit_all("replace source for another attachment");
+    world
+        .init(&["--force", "--id", "second", "--no-merge"])
+        .success();
+    world.template.repo.remove("template/second");
+    world
+        .template
+        .repo
+        .write("template.toml", "name = 'once'\n");
+    world.template.repo.commit_all("remove entire source root");
+    let source = world.template.source();
+
+    for attached in [true, false] {
+        if !attached {
+            world.project.remove(".config/git.tpl.toml");
+            world
+                .project
+                .commit_all("remove attachment but retain rendered refs");
+        }
+        // Dirty state must be previewable without running init's integration preconditions.
+        world.project.write("unrelated", "unstaged edit");
+        let before = world.project.working_state();
+        let refs = world.project.git(&["show-ref"]);
+        let git_config = world.project.git(&["config", "--local", "--list"]);
+        for id in ["first", "second"] {
+            for defaults in [true, false] {
+                let mut args = vec!["--json", "init", &source, "--id", id, "--dry-run"];
+                if defaults {
+                    args.push("--defaults");
+                }
+                let json = tpl(&world.project, &args).success().json();
+                if defaults {
+                    assert_eq!(json["files"], serde_json::json!([id]));
+                } else {
+                    assert!(json["files"].is_null());
+                }
+                assert_eq!(world.project.working_state(), before);
+                assert_eq!(world.project.git(&["show-ref"]), refs);
+                assert_eq!(
+                    world.project.git(&["config", "--local", "--list"]),
+                    git_config
+                );
+            }
+        }
+        // An unrelated attachment must not make a new ID's missing root renderable.
+        tpl(
+            &world.project,
+            &["init", &source, "--id", "new", "--dry-run", "--defaults"],
+        )
+        .failure();
+        assert_eq!(world.project.working_state(), before);
+        assert_eq!(world.project.git(&["show-ref"]), refs);
+    }
+    for id in ["first", "second"] {
+        world.init(&["--force", "--id", id, "--no-merge"]).success();
+        assert_eq!(
+            world
+                .project
+                .git(&["ls-tree", "--name-only", &format!("refs/tpl/{id}")]),
+            id
+        );
+    }
+}

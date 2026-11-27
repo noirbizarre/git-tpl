@@ -231,6 +231,14 @@ The completed initialization leaves `HEAD` at the attachment commit.
 Dry runs honor explicit `--trust` and persistent trust during ancestor resolution.
 With `--defaults`, a dry run renders the resolved revision and reports any render failure as an error.
 Without `--defaults`, it reports only the schema and JSON `files` is null.
+Schema and output use one resolved template revision.
+The preview selects the requested template ID's ref, including an explicit `--id`,
+and retains that ref's initialized one-shot files even if the source root has disappeared.
+It does not borrow the existing attachment's baseline when targeting a different ID,
+and an existing target ref works even without an attachment configuration.
+With `--defaults`, it evaluates init's note and remote metadata, rather than update's migration metadata.
+It does not check integration preconditions or create destinations, publish refs, save configuration,
+or modify `HEAD`, the index or worktree.
 
 `init` also works on a project that already has files — one generated last year by another tool, or written by
 hand and since grown to resemble a template.

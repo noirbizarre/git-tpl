@@ -96,6 +96,12 @@ One case tests one direct update; use explicit `to` cases for intermediate upgra
 Removed/overridden output and binary payloads are excluded; other static rules keep their existing scope.
 
 `init --dry-run` honors `--trust` for ancestors.
+Its schema and output share one resolved revision and the requested ID's retained one-shot baseline,
+including `--id` refs without attachment configuration and retained output whose source root has disappeared.
+With `--defaults`, it validates init note/remote metadata rather than update migrations;
+without it, the preview is schema-only (`files: null`).
+It skips integration preconditions and creates no destination or configuration, publishes no refs,
+and leaves `HEAD`, the index and worktree untouched.
 Dirty init/update dry runs warn about ignored template files on stderr, even with `--json`.
 Init's Template display and JSON `template` use the recorded source spelling, rebased for local destinations.
 Dry runs predict that spelling when a project root is known; otherwise they show the expanded invocation source.

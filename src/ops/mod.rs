@@ -1237,30 +1237,30 @@ fn render_resolved_preparing(
         })?;
     }
     prepare(&mut session)?;
-    if let Some((repo, root)) = project {
-        // Display metadata is evaluated while acquisition is still scoped and
-        // before callers can publish a ref or mutate the attachment.
-        if matches!(preparation, Preparation::Init) {
-            session.run(|context| template_note_context(template, context))?;
-            for (name, url) in &template.manifest.remotes {
-                session.run(|context| {
-                    crate::eval::render_string(url, context, &format!("remotes.{name}"), &partials)
-                })?;
-            }
+    // Init previews need the same metadata demands even before a destination exists.
+    if matches!(preparation, Preparation::Init) {
+        session.run(|context| template_note_context(template, context))?;
+        for (name, url) in &template.manifest.remotes {
+            session.run(|context| {
+                crate::eval::render_string(url, context, &format!("remotes.{name}"), &partials)
+            })?;
         }
-        if matches!(preparation, Preparation::Update) && Config::path_in(root).exists() {
-            let config = Config::load(root)?;
-            if config.template.source == source {
-                let id = TemplateId::resolve(source, config.template.id.as_deref())?;
-                let previous = repo
-                    .resolve_ref(&id.ref_name())?
-                    .map(|oid| repo.commit(oid))
-                    .transpose()?
-                    .and_then(|commit| Provenance::parse(&commit.message));
-                session.run(|context| {
-                    discover_migrations_context(template, context, previous.as_ref(), source)
-                })?;
-            }
+    }
+    if let Some((repo, root)) = project
+        && matches!(preparation, Preparation::Update)
+        && Config::path_in(root).exists()
+    {
+        let config = Config::load(root)?;
+        if config.template.source == source {
+            let id = TemplateId::resolve(source, config.template.id.as_deref())?;
+            let previous = repo
+                .resolve_ref(&id.ref_name())?
+                .map(|oid| repo.commit(oid))
+                .transpose()?
+                .and_then(|commit| Provenance::parse(&commit.message));
+            session.run(|context| {
+                discover_migrations_context(template, context, previous.as_ref(), source)
+            })?;
         }
     }
     let context = session.finish();
@@ -1577,6 +1577,118 @@ pub struct InitOutcome {
     pub remotes: Vec<DeclaredRemote>,
 }
 
+/// A resolved init preview, retaining the requested ref's baseline rather than the old attachment's.
+pub struct PreparedInit {
+    /// The single resolved revision used for both schema and output.
+    pub template: Resolved,
+    /// The source spelling real init would persist at this destination.
+    pub source: String,
+    baseline: once::Baseline,
+}
+
+impl PreparedInit {
+    /// Render the same revision whose schema was inspected, with init-only metadata demands.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render(
+        &self,
+        source: &str,
+        project: Option<(&dyn GitBackend, &Path)>,
+        supplied: crate::answers::SuppliedAnswers,
+        user: &UserConfig,
+        answering: Answering<'_>,
+        trust: Trust<'_>,
+    ) -> Result<RenderedOnce, OpError> {
+        render_resolved_preparing(
+            &self.template,
+            source,
+            project,
+            supplied,
+            user,
+            answering,
+            trust,
+            None,
+            Preparation::Init,
+            &self.baseline,
+            |_| Ok(()),
+        )
+    }
+}
+
+/// Prepare a read-only init, including schema-only and projectless previews.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_init_preview(
+    source: &str,
+    reference: Option<String>,
+    explicit_id: Option<&str>,
+    project: Option<(&dyn GitBackend, &Path)>,
+    dirty: bool,
+    user: &UserConfig,
+    access: &Access,
+    trust: &mut Trust<'_>,
+) -> Result<PreparedInit, OpError> {
+    let (config, _, tip) = init_attachment(source, reference, explicit_id, project)?;
+    resolve_init(&config, source, project, tip, dirty, user, access, trust)
+}
+
+fn init_attachment(
+    source: &str,
+    reference: Option<String>,
+    explicit_id: Option<&str>,
+    project: Option<(&dyn GitBackend, &Path)>,
+) -> Result<(Config, TemplateId, Option<Oid>), OpError> {
+    let mut config = Config::new(source, reference);
+    config.template.id = explicit_id.map(str::to_string);
+    let id = TemplateId::resolve(source, explicit_id)?;
+    let tip = if let Some((repo, root)) = project {
+        config.template.rebase_local(root)?;
+        // Capture before prompting so another renderer cannot silently become this init's parent.
+        repo.resolve_ref(&id.ref_name())?
+    } else {
+        None
+    };
+    Ok((config, id, tip))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_init(
+    config: &Config,
+    source: &str,
+    project: Option<(&dyn GitBackend, &Path)>,
+    tip: Option<Oid>,
+    dirty: bool,
+    user: &UserConfig,
+    access: &Access,
+    trust: &mut Trust<'_>,
+) -> Result<PreparedInit, OpError> {
+    // Missing roots are valid only when this init's target ref supplies retained output.
+    let baseline = match project {
+        Some((repo, _)) => once::load(repo, tip)?,
+        None => once::Baseline::new(),
+    };
+    // Storage rebasing must not change init's consent/default lookup identity.
+    let location = project.map_or_else(
+        || source.to_owned(),
+        |(_, root)| crate::config::source_location(&config.template.source, root).into_owned(),
+    );
+    let template = resolve::resolve_with_retained(
+        Request {
+            source: &location,
+            reference: config.template.r#ref.as_deref(),
+            root: config.template.root.as_deref(),
+            dirty,
+        },
+        user,
+        access,
+        trust,
+        !baseline.is_empty(),
+    )?;
+    Ok(PreparedInit {
+        template,
+        source: config.template.source.clone(),
+        baseline,
+    })
+}
+
 /// Attach a template to a repository and merge the initial rendering.
 ///
 /// The merge is the load-bearing step: without it the template commit is not an
@@ -1614,24 +1726,33 @@ pub fn init(
         force,
         strict_answers,
         |config, supplied, tip| {
-            // Storage rebasing must not change init's consent/default lookup identity.
-            let location = crate::config::source_location(&config.template.source, project_root);
-            let files = render_files_from_location(
-                Target {
-                    source,
-                    ..Target::from_config(config, dirty)
-                },
-                &location,
+            let mut trust = trust;
+            let prepared = resolve_init(
+                config,
+                source,
+                Some((project, project_root)),
+                tip,
+                dirty,
+                user,
+                access,
+                &mut trust,
+            )?;
+            let rendered = prepared.render(
+                source,
                 Some((project, project_root)),
                 supplied,
                 user,
-                access,
                 answering,
                 trust,
-                None,
-                Preparation::Init,
-                &once::load(project, tip)?,
             )?;
+            let files = RenderedFiles {
+                template: prepared.template,
+                context: rendered.context,
+                files: rendered.files,
+                provenance: rendered.provenance,
+                ignored_answers: rendered.ignored_answers,
+                backport_trace: rendered.backport_trace,
+            };
             rendered_tree(project, files)
         },
     )
@@ -1680,15 +1801,14 @@ fn init_using<T: std::borrow::Borrow<Resolved>>(
         return Err(GitError::DirtyWorktree.into());
     }
 
-    let mut config = Config::new(source, reference);
-    config.template.id = explicit_id.map(str::to_string);
-    config.template.rebase_local(project_root)?;
-
-    let id = TemplateId::resolve(source, explicit_id)?;
+    let (mut config, id, tip) = init_attachment(
+        source,
+        reference,
+        explicit_id,
+        Some((project, project_root)),
+    )?;
     let ref_name = id.ref_name();
-    // Capture before prompting: another renderer may publish while answers are
-    // being collected, and must not silently become this invocation's parent.
-    let parents: Vec<_> = project.resolve_ref(&ref_name)?.into_iter().collect();
+    let parents: Vec<_> = tip.into_iter().collect();
 
     let mut rendered = render(&config, supplied, parents.first().copied())?;
     let template = rendered.template.borrow();
