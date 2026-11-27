@@ -27,7 +27,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
     };
 
     if args.dry_run {
-        // A dry run creates nothing, so `--init` is deliberately not honoured
+        // A dry run creates nothing, so `--create` is deliberately not honoured
         // here, and a destination that is not yet a repository previews
         // without a project to seed from rather than failing.
         let base = Standalone::new(global)?;
@@ -57,10 +57,10 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         return Ok(crate::exit::SUCCESS);
     }
 
-    // `--init` has to happen before discovery, since there may be no
+    // `--create` has to happen before discovery, since there may be no
     // repository — and now no directory — to discover yet.
-    if args.init {
-        // `create_dir_all`, so `init <template> a/b --init` behaves like
+    if args.create {
+        // `create_dir_all`, so `init <template> a/b --create` behaves like
         // `mkdir -p`, and an already-existing directory is a no-op rather
         // than an error.
         std::fs::create_dir_all(&destination).map_err(|e| write_failed(&destination, &e))?;
@@ -69,7 +69,7 @@ pub fn run(args: InitArgs, global: &GlobalArgs) -> Result<u8, OpError> {
         }
     } else if !destination.exists() {
         // The error #84 is about: an argument clap accepted but that names
-        // nothing yet, with the fix — `--init` — said outright.
+        // nothing yet, with the fix — `--create` — said outright.
         return Err(OpError::NoSuchDirectory { path: destination });
     }
 
@@ -312,7 +312,7 @@ fn write_failed(path: &Path, error: &std::io::Error) -> OpError {
 ///
 /// `project` is `None` when the destination is not (yet) inside a repository —
 /// a dry run creates nothing, so it previews on the template alone rather than
-/// requiring `--init` to have already run.
+/// requiring `--create` to have already run.
 ///
 /// Returns the machine-readable form so the caller does the single `println!`.
 fn dry_run(

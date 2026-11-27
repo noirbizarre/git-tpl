@@ -214,7 +214,7 @@ pub fn access(global: &GlobalArgs) -> Result<tpl::git::cache::Access, OpError> {
 
 /// The current directory, or an error that says which step failed.
 ///
-/// Shared with `init --init`, which needs it before there is a repository to
+/// Shared with `init --create`, which needs it before there is a repository to
 /// discover — and which had its own copy of this mapping, with the same
 /// context string, until the two were one.
 pub fn current_dir() -> Result<PathBuf, OpError> {

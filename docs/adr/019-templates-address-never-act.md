@@ -21,7 +21,7 @@ It is not. Counting the five commands against what already exists:
 
 | Command | Already served by |
 |---|---|
-| `git init` | `git tpl init --init` |
+| `git init` | `git tpl init --create` |
 | `git add` | `ops::init` stages and commits the attachment |
 | dependency install | nothing, and nothing that respects invariant 5 ever will |
 | hook install | likewise |

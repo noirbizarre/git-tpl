@@ -190,7 +190,7 @@ pub struct InitArgs {
 
     /// Where to render it — the current directory by default
     ///
-    /// It must already be a Git repository, or be one after `--init`. Paths
+    /// It must already be a Git repository, or be one after `--create`. Paths
     /// given to `--answers-from`, and a template given as a path, stay
     /// relative to the directory the command was run from.
     #[arg(value_name = "DIR")]
@@ -224,7 +224,7 @@ pub struct InitArgs {
 
     /// Create the directory and the repository if there is not one here
     #[arg(long)]
-    pub init: bool,
+    pub create: bool,
 
     /// Fetch remote data sources without confirming
     ///
@@ -1088,6 +1088,27 @@ mod tests {
         );
         assert!(Cli::try_parse_from(["git-tpl", "test", "--record-durations", "--write"]).is_err());
         assert!(Cli::try_parse_from(["git-tpl", "test", "--shard", "1/2", "--write"]).is_ok());
+    }
+
+    #[test]
+    fn init_creates_a_repository_only_when_explicitly_requested() {
+        let cli = Cli::try_parse_from(["git-tpl", "init", "../tpl", "--create"]).unwrap();
+        let Command::Init(args) = cli.command else {
+            panic!("expected init")
+        };
+        assert!(args.create);
+
+        let cli = Cli::try_parse_from(["git-tpl", "init", "../tpl"]).unwrap();
+        let Command::Init(args) = cli.command else {
+            panic!("expected init")
+        };
+        assert!(!args.create);
+    }
+
+    #[test]
+    fn init_rejects_the_replaced_creation_flag() {
+        let error = Cli::try_parse_from(["git-tpl", "init", "../tpl", "--init"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 
     #[test]
