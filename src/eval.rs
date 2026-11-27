@@ -1060,7 +1060,7 @@ pub fn environment_with(
     // context — reading a file, making a request, running a command — is not
     // available to templates, and will not be. There is no plugin point.
     // Selected syntactic sugar is admitted by review, not through a plugin API.
-    // See docs/adr/057-reviewed-template-conveniences.md and docs/concepts/determinism.md#security.
+    // See docs/adr/058-reviewed-template-conveniences.md and docs/concepts/determinism.md#security.
     env.add_filter("slugify", slugify_filter);
     env.add_filter("yesno", yesno_filter);
 

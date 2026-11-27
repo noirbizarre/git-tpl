@@ -330,7 +330,9 @@ Pass `--defaults` explicitly to disable their answer prompts.
 For machine-seeded prompt defaults, a question declaring
 [`default_from`](templates/questions.md#machine-seeded-defaults) has the keys it names — `git:user.name`, or
 `git.user.name` inside an expression — read, read-only, to pre-fill its prompt.
-The same applies to the project's remote URL and directory name.
+The same applies to the project's remote URL and directory name, the UTC datetime, and the current OS login name.
+The seed expression `user.name` reads the OS account through native APIs, independently of Git's `git.user.name`.
+An unavailable, blank, or non-UTF-8 login name is undefined, allowing an expression fallback.
 These prompt defaults apply only during interactive answering,
 and a seeded value reaches the project only as an answer you accepted.
 Other Git configuration reads serve ordinary Git operations: commit creation needs `user.name` and `user.email`,

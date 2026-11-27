@@ -1461,6 +1461,20 @@ mod tests {
         .unwrap();
     }
 
+    #[test]
+    fn the_os_login_name_is_a_valid_prompt_seed() {
+        Manifest::parse(
+            r#"
+            name = "x"
+            [questions.username]
+            type = "string"
+            default_from = "{{ user.name | default('developer') }}"
+            "#,
+            MANIFEST_NAME,
+        )
+        .unwrap();
+    }
+
     /// A pattern is checked against text; on any other kind it would either
     /// never fail or always fail, and rendering is a poor way to find out.
     #[test]

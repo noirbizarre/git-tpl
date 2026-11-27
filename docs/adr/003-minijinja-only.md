@@ -2,7 +2,7 @@
 
 **Status:** accepted
 
-**Amended by:** [ADR-057](057-reviewed-template-conveniences.md), which permits reviewed syntactic sugar
+**Amended by:** [ADR-058](058-reviewed-template-conveniences.md), which permits reviewed syntactic sugar
 and supersedes the filter expressibility requirement below.
 
 ## Context
@@ -62,7 +62,7 @@ for unicode and for punctuation.
 **The set is closed by review.**
 A candidate qualifies only if it is pure, deterministic, and reaches nothing outside its own argument; and even
 then, the original bar was that templates could not reasonably express it with the built-ins.
-[ADR-057](057-reviewed-template-conveniences.md) relaxes that bar to allow selected syntactic sugar.
+[ADR-058](058-reviewed-template-conveniences.md) relaxes that bar to allow selected syntactic sugar.
 The pressure will be to ship a *useful set*.
 It should be resisted: every filter added is a compatibility surface that cannot be removed, and a template that
 depends on one cannot render with an older git-tpl.

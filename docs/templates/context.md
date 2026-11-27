@@ -96,10 +96,11 @@ where it is invisible and different for everyone.
 The one place a machine fact is legible to a template is
 [`default_from`](questions.md#machine-seeded-defaults), which reads its own small
 [seed context](../adr/018-seed-context.md) — the Git configuration, the directory name, the remote,
-and [UTC datetime seeds](questions.md#datetime-seeds).
+[UTC datetime seeds](questions.md#datetime-seeds), and the [OS login name](questions.md#user-seeds).
 That context is not this one, is reachable from nowhere else, and only ever pre-fills a prompt.
 For example, `default_from = "{{ now.year }}"` suggests a copyright year that becomes an ordinary recorded answer.
-An ambient `now` value is still absent from rendered files and ordinary defaults.
+Likewise, `default_from = "{{ user.name }}"` suggests the OS login name, independently of Git identity.
+Ambient `now` and `user` values are still absent from rendered files and ordinary defaults.
 
 ## Imported names
 
@@ -191,4 +192,4 @@ Contributions of filters or globals are not guaranteed acceptance: each addition
 that cannot later be removed.
 Custom filters must remain pure, deterministic, and reach nothing outside their arguments;
 render-time globals must likewise stay within the supplied context.
-See [ADR-057](../adr/057-reviewed-template-conveniences.md) for the policy.
+See [ADR-058](../adr/058-reviewed-template-conveniences.md) for the policy.

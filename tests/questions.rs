@@ -1085,6 +1085,107 @@ default_from = "git:tpl.ci"
 
 // --- seeds derived from the repository ---------------------------------------
 
+const USER_SEEDED: &str = r#"
+name = "os-user"
+[questions.username]
+type = "string"
+default = "declared"
+default_from = "{{ user.name | default('developer') }}"
+"#;
+
+#[test]
+fn an_os_login_seed_requires_human_confirmation() {
+    let world = World::with_template(USER_SEEDED, &[("USER.jinja", "{{ username }}\n")]);
+    world.init(&[]).success();
+    assert_eq!(world.project.read("USER"), "declared\n");
+    assert!(
+        world
+            .project
+            .read(".config/git.tpl.toml")
+            .contains("username = \"declared\"")
+    );
+}
+
+#[test]
+fn an_interactive_os_login_seed_is_independent_of_git_identity_and_personal_defaults_win() {
+    struct AcceptSeed(tpl::Value);
+    impl tpl::eval::Prompter for AcceptSeed {
+        fn ask(
+            &mut self,
+            _: &str,
+            _: &tpl::template::Question,
+            _: Option<&tpl::Value>,
+            seed: Option<&tpl::Value>,
+            _: Option<&[tpl::template::Choice]>,
+        ) -> Result<tpl::Value, tpl::eval::EvalError> {
+            assert_eq!(seed, Some(&self.0));
+            Ok(self.0.clone())
+        }
+    }
+    let login = whoami::username_os()
+        .ok()
+        .and_then(|name| name.into_string().ok())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "developer".into());
+    for personal in [false, true] {
+        let world = World::with_template(USER_SEEDED, &[("USER.jinja", "{{ username }}\n")]);
+        // A visibly different Git identity catches accidentally aliasing git.user.name.
+        world
+            .project
+            .git(&["config", "user.name", &format!("Git identity for {login}")]);
+        let repo = tpl::git::libgit2::LibGit2::open(&world.project.path).unwrap();
+        let mut user = tpl::userconfig::UserConfig::default();
+        let expected = tpl::Value::String(if personal {
+            "preferred-login".into()
+        } else {
+            login.clone()
+        });
+        if personal {
+            user.defaults.insert("username".into(), expected.clone());
+            // A winning preference must bypass acquisition, not just replace its result.
+            world
+                .project
+                .git(&["config", "tpl.autoPush", "not-a-boolean"]);
+        }
+        let result = tpl::ops::render_files(
+            tpl::ops::Target {
+                source: &world.template.source(),
+                reference: None,
+                root: None,
+                dirty: false,
+            },
+            Some((&repo, &world.project.path)),
+            tpl::answers::SuppliedAnswers::new(),
+            &user,
+            &tpl::git::cache::Access::new(None, false),
+            tpl::ops::Answering::Interactive(&mut AcceptSeed(expected.clone())),
+            tpl::ops::Trust::always(),
+        )
+        .unwrap();
+        assert_eq!(result.context.answers().get("username"), Some(&expected));
+        let tpl::Value::String(expected) = expected else {
+            unreachable!("the accepted login is text")
+        };
+        let output = result
+            .files
+            .iter()
+            .find(|file| file.path == "USER")
+            .unwrap();
+        assert_eq!(output.content, format!("{expected}\n").as_bytes());
+    }
+}
+
+#[test]
+fn an_os_login_seed_does_not_expose_the_account_to_defaults_or_rendering() {
+    let ordinary_default = World::with_template(
+        &USER_SEEDED.replace("default = \"declared\"", "default = \"{{ user.name }}\""),
+        &[("USER.jinja", "{{ username }}\n")],
+    );
+    ordinary_default.init(&[]).failure().says("user");
+    let rendered = World::with_template(USER_SEEDED, &[("USER.jinja", "{{ user.name }}\n")]);
+    rendered.init(&[]).failure().says("user");
+}
+
 const DATETIME_SEEDED: &str = r#"
 name = "datetime"
 [questions.copyright_year]

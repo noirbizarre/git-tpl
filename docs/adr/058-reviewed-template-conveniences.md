@@ -1,4 +1,4 @@
-# ADR-057: Selected template conveniences are admitted by review
+# ADR-058: Selected template conveniences are admitted by review
 
 **Status:** accepted
 
