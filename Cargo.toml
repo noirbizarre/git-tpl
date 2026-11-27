@@ -221,7 +221,7 @@ insta = { version = "1", features = ["filters"] }
 # touch it. Already a runtime dependency; listed for the tests' own use.
 sha2 = "0.11"
 hex = "0.4"
-rstest = "0.28"
+rstest = "0.29"
 pretty_assertions = "1"
 # A real terminal is needed to prove Git selects the configured diff pager.
 portable-pty = "0.9"
