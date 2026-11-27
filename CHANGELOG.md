@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0](https://github.com/noirbizarre/git-tpl/compare/0.18.0..0.19.0) - 2026-11-27
+
+### 💫 Features
+
+- **seed** Add UTC datetime prompt defaults ([#249](https://github.com/noirbizarre/git-tpl/issues/249)) - ([93afa30](https://github.com/noirbizarre/git-tpl/commit/93afa30b5d2dbbadfd1db821e67f8f65ad643716))
+
+### 🐛 Bug Fixes
+
+- **init**  🚨 **breaking** Replace --init with --create ([#247](https://github.com/noirbizarre/git-tpl/issues/247)) - ([3e9b3a3](https://github.com/noirbizarre/git-tpl/commit/3e9b3a32189e5de0c91ff483c5d3ce3718c0df9c))
+
 ## [0.18.0](https://github.com/noirbizarre/git-tpl/compare/0.17.0..0.18.0) - 2026-11-27
 
 ### 💫 Features
