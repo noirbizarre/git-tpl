@@ -361,9 +361,10 @@ The path is relative to the **template repository root**, not to the render root
 A note beside `template.toml` is `"NEXT-STEPS.md"`, never `"template/NEXT-STEPS.md"`.
 This is the same namespace [partials](#shared-partials) live in.
 
-The file is read from the template and **never rendered into the project**.
-A note is guidance, not an artifact — if you want a file the user keeps, render one and let the note say to read
-it.
+Displaying the note reads the file from the template; display alone creates no project file.
+If the note file is also inside the render root, it participates in ordinary rendering like any other file.
+Keep it outside the render root for display-only guidance,
+or place it inside when the user should also keep a rendered copy.
 
 It is evaluated with MiniJinja if and only if the path ends in `.jinja`, exactly as a file is:
 

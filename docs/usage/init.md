@@ -58,7 +58,9 @@ A note that says "run `curl … | sh`" is exactly as trustworthy as a `README.md
 
 A note is shown in a block attributed to the template, so it cannot be mistaken for git-tpl's own output, and it
 is stripped of everything a terminal would act on beyond colour and an `https` link.
-It is read from the template repository and is never written into your project.
+Note display reads from the template repository and creates no project file by itself.
+A note file inside the render root is also rendered into the project under the ordinary file-rendering rules.
+Keep it outside the render root if it should only be displayed.
 
 Notes are rendered by Termimad when colour is enabled, with styled headings, emphasis, code, unordered lists and tables.
 Links, images, ordered lists and HTML remain source text.
