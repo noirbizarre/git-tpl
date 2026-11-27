@@ -342,7 +342,10 @@ git tpl init https://github.com/org/some-template my-project \
   --init --answers-from answers.toml --defaults --json
 ```
 
-`--init` creates the directory and the Git repository if they do not exist.
+Repository discovery searches upward from the destination, including with `--init`.
+Rendering and attachment use the discovered repository root, not necessarily the requested directory.
+`--init` creates missing directories and initializes a repository only when discovery finds none.
+For an independent project inside an existing repository, run `git init my-project` explicitly before attaching there.
 On success `init` has already merged the rendered commit into the branch —
 there is nothing further to apply, unlike `update`.
 

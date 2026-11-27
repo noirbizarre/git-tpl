@@ -16,8 +16,9 @@ git tpl init <template> [<dir>] [--ref <ref>] [--answer k=v]... [options]
 
 ## What it does
 
-1. Verifies the destination — `<dir>`, or the current directory if it is omitted — is a Git repository
-   (`--init` creates the directory and the repository).
+1. Discovers a Git repository at or above the destination — `<dir>`, or the current directory if omitted.
+   With `--init`, creates missing directories and initializes a repository only if discovery finds none.
+   Rendering and attachment use the discovered repository root, even when the destination is a subdirectory.
 2. Resolves the template source and its revision.
 3. Loads the template manifest and any data sources it needs.
 4. Builds the dependency graph and validates it.
@@ -124,9 +125,9 @@ the expanded URL that is recorded in the project, so the shortcut never leaves y
 
 | Option | Meaning |
 |---|---|
-| `<dir>` | Where to render it. Defaults to the current directory. Everything else — a template given as a path, `--answers-from` — stays relative to where you ran the command, not to `<dir>`. |
+| `<dir>` | Where to start upward repository discovery. Defaults to the current directory. Rendering uses the discovered root. Template paths and `--answers-from` remain invocation-relative. |
 | `--ref <ref>` | Branch, tag or commit. Defaults to a local template's checked-out branch, or a URL's remote default branch. |
-| `--init` | Create the directory and the repository if there is not one here. |
+| `--init` | Create missing directories; initialize a repository only if none is discoverable at or above the destination. |
 | `--answer k=v` | Supply an answer, skipping its prompt. Repeatable. |
 | `--answers-from <path>` | Read answers from a TOML, JSON or YAML file. Repeatable. See [Answers from a file](answers.md). |
 | `--defaults` | Accept every default without prompting. |
@@ -169,20 +170,30 @@ Merged into main.
 
 ## Starting from nothing
 
-`<dir>` plus `--init` is the whole of `mkdir`, `cd`, `git init` and `init` in one line:
+Outside any existing repository, `<dir>` plus `--init` creates the directory and repository and attaches the template:
 
 ```console
 $ git tpl init https://github.com/noirbizarre/rust-library-template my-project --init
 ```
 
-Leave off `--init` and a `my-project` that does not exist yet, or is not a Git repository, is refused with a
-diagnostic naming the fix rather than clap's "unexpected argument" — the problem this option exists to solve.
+Repository discovery searches upward, including with `--init`.
+Inside an existing repository, this command attaches at that repository's root rather than creating a nested repository.
+To create an independent project there, initialize its repository explicitly first:
+
+```sh
+git init my-project
+git tpl init https://github.com/noirbizarre/rust-library-template my-project
+```
+
+Without `--init`, a missing destination is refused.
+An existing destination is accepted when a repository can be discovered there or in a parent directory.
 
 ## Preconditions
 
-**A Git repository at the destination** — the current directory by default, or `<dir>` if given.
+**A Git repository discoverable at or above the destination** — the current directory by default, or `<dir>` if given.
 `init` needs somewhere to put a ref.
-Pass `--init` to create the directory and the repository, or create them yourself first.
+Pass `--init` to create missing directories and initialize a repository when none is discoverable.
+Explicitly run `git init <dir>` first when you intend an independent repository inside another repository.
 `--dry-run` is exempt: it creates nothing, so it previews against the template alone, even against a
 destination that does not exist yet or is not a Git repository.
 
