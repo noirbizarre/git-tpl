@@ -323,11 +323,15 @@ When invoked from elsewhere, the template under test's repository-local configur
 Standalone `render` and `context` do not load `tpl.interactive`, including a globally configured value.
 Pass `--defaults` explicitly to disable their answer prompts.
 
-One family of keys outside `tpl.` is read: a question declaring
+For machine-seeded prompt defaults, a question declaring
 [`default_from`](templates/questions.md#machine-seeded-defaults) has the keys it names — `git:user.name`, or
 `git.user.name` inside an expression — read, read-only, to pre-fill its prompt.
 The same applies to the project's remote URL and directory name.
-None of it is read when nobody is being asked, and a value reaches the project only as an answer you accepted.
+These prompt defaults apply only during interactive answering,
+and a seeded value reaches the project only as an answer you accepted.
+Other Git configuration reads serve ordinary Git operations: commit creation needs `user.name` and `user.email`,
+and native integration and diff presentation honor their normal drivers, hooks, signing and display settings.
+These operational reads are independent of machine-seeded prompt defaults.
 
 ### Precedence
 
