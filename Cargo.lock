@@ -691,7 +691,7 @@ checksum = "1033caf0b349c518623b5396bfb2cf0bddf44f0306d543a250e5743297aafd10"
 
 [[package]]
 name = "git-tpl"
-version = "0.18.0"
+version = "0.19.0"
 dependencies = [
  "assert_cmd",
  "clap",
