@@ -541,10 +541,19 @@ pub fn validate_choice_count(
     question: &Question,
     answer: &Value,
 ) -> Result<(), EvalError> {
+    if question.kind != QuestionKind::MultiChoice {
+        return Ok(());
+    }
     let Value::Array(items) = answer else {
         return Ok(());
     };
-    let count = items.len();
+    // Bounds describe selected values, not repeated entries in a saved answer.
+    // Count without normalizing so replay preserves the template's original input.
+    let count = items
+        .iter()
+        .filter_map(Value::as_str)
+        .collect::<std::collections::BTreeSet<_>>()
+        .len();
     let reason = if let Some(min) = question.min_choices.filter(|min| count < *min) {
         Some(format!("at least {min} required, got {count}"))
     } else {
@@ -1426,6 +1435,9 @@ mod tests {
     #[case("max_choices = 1", "['a', 'b']", false)]
     #[case("max_choices = 0", "[]", true)]
     #[case("max_choices = 0", "['a']", false)]
+    #[case("min_choices = 2", "['a', 'a']", false)]
+    #[case("min_choices = 2\nmax_choices = 2", "['b', 'a', 'b']", true)]
+    #[case("max_choices = 1", "['a', 'a']", true)]
     fn selection_bounds_apply_to_literal_expression_and_supplied_answers(
         #[case] bounds: &str,
         #[case] answer: &str,
@@ -1448,10 +1460,21 @@ mod tests {
                 no_partials(),
             )
             .unwrap();
+            if accepted {
+                assert_eq!(result.unwrap().answers()["pick"], value);
+            }
             assert_eq!(
-                resolve_with(&manifest, &[("pick", value)]).is_ok(),
+                resolve_with(&manifest, &[("pick", value.clone())]).is_ok(),
                 accepted
             );
+            if accepted {
+                assert_eq!(
+                    resolve_with(&manifest, &[("pick", value.clone())])
+                        .unwrap()
+                        .answers()["pick"],
+                    value
+                );
+            }
         }
     }
 
@@ -1466,7 +1489,7 @@ mod tests {
 
     #[test]
     fn impossible_dynamic_minima_fail_but_empty_dynamic_choices_still_skip() {
-        for (choices, accepted) in [("['a']", false), ("[]", true)] {
+        for (choices, accepted) in [("['a']", false), ("['a', 'a']", false), ("[]", true)] {
             let manifest = format!(
                 "name = 'bounds'\n[computed]\noptions = \"{{{{ {choices} }}}}\"\n[questions.pick]\ntype = 'multi_choice'\nchoices_from = 'options'\nmin_choices = 2\ndefault = []\n"
             );

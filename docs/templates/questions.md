@@ -115,6 +115,10 @@ help = "Used for the package name and the README title"
     The minimum must not exceed the maximum or the number of distinct available choices.
     An upper bound larger than the catalogue is allowed.
     An empty dynamically filtered catalogue still skips the question, including when a minimum is set.
+    Bounds count distinct selected strings: `["serde", "serde"]` counts as one selection.
+    Defaults, supplied answers and recorded answers retain their contents and order, including duplicates.
+    Interactive catalogues offer each value once, keeping its first label, help text and position.
+    This also applies to dynamically resolved choices.
 
     Invalid interactive selections stay in the selector for correction.
     Defaults, supplied answers and recorded answers must satisfy the same bounds;

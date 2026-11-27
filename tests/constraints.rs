@@ -6,6 +6,76 @@ use common::{World, tpl};
 use tpl::template::Manifest;
 
 #[test]
+fn multi_choice_bounds_count_distinct_values_without_rewriting_any_answer_source() {
+    for catalogue in [
+        "[questions.pick]\nchoices = ['a', 'b', 'b']\n",
+        "[computed]\noptions = \"{{ ['a', 'b', 'b'] }}\"\n[questions.pick]\nchoices_from = 'options'\n",
+    ] {
+        let manifest = format!(
+            "name = 'distinct'\n{catalogue}type = 'multi_choice'\nmin_choices = 2\nmax_choices = 2\ndefault = ['b', 'a', 'b']\n"
+        );
+        let world = World::with_template(&manifest, &[("out.jinja", "{{ pick | join(',') }}")]);
+        let expected = serde_json::json!(["b", "a", "b"]);
+        for extra in [vec![], vec!["--answer", "pick=b,a,b"]] {
+            let source = world.template.source();
+            let mut args = vec!["--json", "context", &source, "--defaults"];
+            args.extend(extra);
+            assert_eq!(
+                tpl(&world.project, &args).success().json()["answers"]["pick"],
+                expected
+            );
+        }
+        let path = world.dir.path().join("answers.toml");
+        std::fs::write(&path, "pick = ['b', 'a', 'b']\n").unwrap();
+        let json = tpl(
+            &world.project,
+            &[
+                "--json",
+                "context",
+                &world.template.source(),
+                "--defaults",
+                "--answers-from",
+                path.to_str().unwrap(),
+            ],
+        )
+        .success()
+        .json();
+        assert_eq!(json["answers"]["pick"], expected);
+
+        world.init(&[]).success();
+        assert_eq!(world.project.read("out"), "b,a,b");
+        let before = world.project.working_state();
+        let tip = world.project.rev_parse(&world.ref_name());
+        tpl(&world.project, &["update", "--defaults"]).success();
+        assert_eq!(world.project.working_state(), before);
+        assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+
+        // Repetitions cannot satisfy the minimum, even when every entry is offered.
+        assert_eq!(
+            tpl(
+                &world.project,
+                &["--json", "update", "--defaults", "--answer", "pick=a,a"]
+            )
+            .failure()
+            .error_code(),
+            "tpl::eval::choice_count"
+        );
+        assert_eq!(world.project.working_state(), before);
+        assert_eq!(world.project.rev_parse(&world.ref_name()), tip);
+    }
+}
+
+#[test]
+fn ordinary_list_bounds_still_count_duplicate_entries() {
+    let world = World::with_template(
+        "name = 'list'\n[questions.items]\ntype = 'list'\nmin_items = 2\nmax_items = 2\ndefault = ['a', 'a']\n",
+        &[("out.jinja", "{{ items | join(',') }}")],
+    );
+    world.init(&[]).success();
+    assert_eq!(world.project.read("out"), "a,a");
+}
+
+#[test]
 fn incompatible_inverted_and_nonfinite_constraint_declarations_are_rejected() {
     for declaration in [
         "type = 'string'\nmin = 1",
