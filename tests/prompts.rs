@@ -284,7 +284,10 @@ fn escape_clears_a_query_before_cancelling_and_ctrl_c_cancels_immediately() {
             &[("answer.jinja", "{{ pick }}")],
         );
         let mut terminal = render(&world, "never");
-        terminal.answer("beta", b"zzz");
+        // One key produces one no-match redraw. Queuing several lets the first
+        // redraw satisfy expect while later keys still switch terminal modes,
+        // so Ctrl-C can signal the process group instead of reaching the widget.
+        terminal.answer("beta", b"z");
         terminal.expect("No matching options");
         if cancel == b"\x1b" {
             terminal.send(b"\x1b");
