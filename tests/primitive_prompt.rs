@@ -29,6 +29,10 @@ fn questionnaire(declaration: &str, steps: &[(&str, &[u8])], success: bool) {
     let mut command = portable_pty::CommandBuilder::new(assert_cmd::cargo::cargo_bin!("git-tpl"));
     command.cwd(&world.project.path);
     command.env_clear();
+    // The isolated environment must still route child coverage to llvm-cov.
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        command.env("LLVM_PROFILE_FILE", profile);
+    }
     command.env("PATH", std::env::var_os("PATH").unwrap());
     command.env("HOME", world.project.config_home());
     command.env("XDG_CONFIG_HOME", world.project.config_home());

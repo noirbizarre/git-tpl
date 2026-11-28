@@ -41,6 +41,11 @@ impl Terminal {
         command.args(args);
         command.cwd(&world.project.path);
         command.env_clear();
+        // Keep the instrumented child's profile in llvm-cov's collection path;
+        // clearing this would make real prompt interactions invisible to coverage.
+        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+            command.env("LLVM_PROFILE_FILE", profile);
+        }
         command.env("PATH", std::env::var_os("PATH").expect("PATH"));
         command.env("HOME", world.project.config_home());
         command.env("XDG_CONFIG_HOME", world.project.config_home());
