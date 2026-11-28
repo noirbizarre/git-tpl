@@ -110,6 +110,7 @@ fn describe(
         "type": question.kind,
         "prompt": question.prompt_for(name),
         "help": question.help,
+        "fuzzy": question.fuzzy,
         "default": question.default,
         // A default may be an expression: `bin_name` defaulting to
         // `"{{ crate }}"` is derived, not literal, and a caller that treated

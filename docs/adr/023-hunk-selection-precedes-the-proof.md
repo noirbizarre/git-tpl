@@ -102,7 +102,8 @@ would ship a selection nobody approved.
 - A new module, `src/ops/hunks.rs`, holding the hunk type, the cut and the reassembly. It declares no diagnostics
   of its own.
 - A new library trait, `Picker`, beside `Prompter`, `TrustGate` and `Unsubstituter`, with its `demand`
-  implementation in the binary. No `GitBackend` method is added: the patch is `backport`'s own, formatted in
+  implementation in the binary (now replaced by choisir; see [ADR-059](059-interactive-choice-search.md)).
+  No `GitBackend` method is added: the patch is `backport`'s own, formatted in
   process, and libgit2 has no structured hunk to offer that would fit it.
 - Three new diagnostic codes: `hunk_refused`, `cancelled`, `not_interactive`. No existing code changes meaning —
   under `-p` a refusal is wrapped, and `-p` cannot be combined with `--json`, so nothing a script sees is

@@ -26,6 +26,10 @@ use cli::{Cli, Command};
 fn main() -> ExitCode {
     let cli = parse_cli();
 
+    // Choisir owns styles beyond its dialoguer theme. Resolve stderr styling
+    // once at the binary edge so those rows honor the same explicit color policy.
+    console::set_colors_enabled_stderr(theme::Theme::resolve(cli.global.color).is_colored());
+
     install_diagnostic_hook(&cli);
 
     let result = match cli.command {

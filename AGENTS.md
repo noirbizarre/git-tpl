@@ -96,7 +96,7 @@ src/
 ├── cli.rs           argument types only
 ├── report.rs        the --json envelope, success and failure
 ├── theme.rs         formatting helpers that return String
-├── prompt.rs        the demand-based prompter
+├── prompt.rs        choisir selections/confirmations and dialoguer input
 └── commands/        one module per subcommand
 ```
 

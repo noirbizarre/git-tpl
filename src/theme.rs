@@ -425,8 +425,8 @@ pub fn transition(theme: &Theme, from: &str, to: &str, note: Option<&str>) -> St
 /// A proposed un-substitution, laid out for the person who has to judge it.
 ///
 /// Here rather than in `prompt.rs` for the reason at the top of this file: the
-/// layout is the part worth testing, and a `demand` prompt cannot be driven
-/// without a terminal. What is left at the prompt is the question itself.
+/// layout can be tested without a terminal. What is left at the prompt is the
+/// question itself, covered separately by the PTY integration tests.
 ///
 /// Three texts, because two of them do not determine the third — the same edit
 /// has several placements that all render back correctly, and the one chosen is
@@ -469,8 +469,7 @@ pub fn reversal(theme: &Theme, proposal: &Proposal<'_>) -> String {
 /// One file's hunks, laid out for the person choosing between them.
 ///
 /// Here rather than in `prompt.rs` for the same reason as [`reversal`]: the
-/// layout is the part worth testing, and a `demand` prompt cannot be driven
-/// without a terminal.
+/// layout can be tested without a terminal, independently of chooser interaction.
 ///
 /// Coloured in Git's vocabulary — green added, red deleted — because this is
 /// the one place git-tpl shows a diff of the user's own working tree, and it

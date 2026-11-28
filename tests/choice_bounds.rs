@@ -44,6 +44,10 @@ fn invalid_selection_counts_retry_in_place_and_can_be_corrected_or_cancelled() {
             portable_pty::CommandBuilder::new(assert_cmd::cargo::cargo_bin!("git-tpl"));
         command.cwd(&world.project.path);
         command.env_clear();
+        // The isolated environment must still route child coverage to llvm-cov.
+        if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+            command.env("LLVM_PROFILE_FILE", profile);
+        }
         command.env("PATH", std::env::var_os("PATH").unwrap());
         command.env("HOME", world.project.config_home());
         command.env("XDG_CONFIG_HOME", world.project.config_home());
@@ -90,9 +94,9 @@ fn invalid_selection_counts_retry_in_place_and_can_be_corrected_or_cancelled() {
         wait_for(if scenario == 4 {
             "\"ok\":true"
         } else if scenario >= 2 {
-            "Please select at least 2 options"
+            "Select at least 2"
         } else {
-            "Please select an option"
+            "Select at least 1"
         });
         if cancel {
             // Escape exercises cancellation without racing read_key's raw-mode setup:
@@ -101,11 +105,18 @@ fn invalid_selection_counts_retry_in_place_and_can_be_corrected_or_cancelled() {
             writer.flush().unwrap();
             wait_for("tpl::eval::cancelled");
         } else if scenario != 4 {
-            // With duplicate aliases, two rows must still select two distinct values.
-            writer.write_all(b" \x1b[B \r").unwrap();
+            // Inversion can exceed choisir's maximum, whereas toggling another
+            // item at capacity is rejected immediately. Both must stay in place.
+            writer
+                .write_all(if scenario < 2 {
+                    b"\x01\r"
+                } else {
+                    b" \x1b[B \r"
+                })
+                .unwrap();
             writer.flush().unwrap();
             if scenario < 2 {
-                wait_for("Please select only one option");
+                wait_for("Select up to 1");
                 writer.write_all(b" \r").unwrap();
                 writer.flush().unwrap();
             }

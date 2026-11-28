@@ -581,6 +581,9 @@ Failures use `tpl::eval::numeric_bound`, `tpl::eval::string_length`, `tpl::eval:
 or `tpl::eval::invalid_list` for invalid list entries.
 `tpl::eval::choice_count` rejects invalid counts from defaults, supplied or recorded answers;
 correct the answer or the template's bounds. Empty dynamic choice lists still skip the question.
+They also expose `fuzzy`, an interactive-only choice search hint (false means substring typeahead).
+Template authors can set `fuzzy = true` on `choice` or `multi_choice`, including `choices_from` data lists.
+This does not change allowed answers or unattended rendering.
 
 Quiet lint retains diagnostic findings on stderr; JSON lint reports them only in `diagnostics[]`.
 Dirty snapshots preserve tracked files despite ignore rules; ignore exclusions apply to untracked discovery.

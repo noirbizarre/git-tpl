@@ -36,6 +36,8 @@ Numeric questions expose `min`/`max`, strings expose `minLength`/`maxLength`,
 and lists expose `minItems`/`maxItems` and `itemMinLength`/`itemMaxLength`.
 The `float` type accepts finite integer or floating-point answers.
 See [primitive constraints](../templates/questions.md#primitive-constraints) for validation semantics.
+The `fuzzy` boolean exposes the question's interactive search hint.
+False means substring typeahead for choice questions; this hint has no effect on preparing unattended answers.
 
 ```sh
 git tpl --json questions ./tpl \

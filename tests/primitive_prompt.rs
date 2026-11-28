@@ -25,9 +25,14 @@ fn questionnaire(declaration: &str, steps: &[(&str, &[u8])], success: bool) {
             pixel_height: 0,
         })
         .unwrap();
+    let original_termios = format!("{:?}", pair.master.get_termios());
     let mut command = portable_pty::CommandBuilder::new(assert_cmd::cargo::cargo_bin!("git-tpl"));
     command.cwd(&world.project.path);
     command.env_clear();
+    // The isolated environment must still route child coverage to llvm-cov.
+    if let Some(profile) = std::env::var_os("LLVM_PROFILE_FILE") {
+        command.env("LLVM_PROFILE_FILE", profile);
+    }
     command.env("PATH", std::env::var_os("PATH").unwrap());
     command.env("HOME", world.project.config_home());
     command.env("XDG_CONFIG_HOME", world.project.config_home());
@@ -56,14 +61,11 @@ fn questionnaire(declaration: &str, steps: &[(&str, &[u8])], success: bool) {
         }
     });
     let mut output = String::new();
-    for (needle, input) in steps.iter().copied().chain(std::iter::once((
-        if success {
-            "\"ok\":true"
-        } else {
-            "tpl::eval::cancelled"
-        },
-        &b""[..],
-    ))) {
+    for (needle, input) in steps
+        .iter()
+        .copied()
+        .chain(success.then_some(("\"ok\":true", &b""[..])))
+    {
         let deadline = Instant::now() + Duration::from_secs(10);
         while !output.contains(needle) {
             match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
@@ -77,6 +79,15 @@ fn questionnaire(declaration: &str, steps: &[(&str, &[u8])], success: bool) {
         // Consume through the match so a redraw of an earlier prompt cannot satisfy the next step.
         let consumed = output.find(needle).unwrap() + needle.len();
         output.drain(..consumed);
+        if input == b"\x03" {
+            // Send the interrupt to the widget's read rather than race a
+            // cooked-mode redraw and signal the process group ourselves.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while format!("{:?}", pair.master.get_termios()) == original_termios {
+                assert!(Instant::now() < deadline, "input never entered raw mode");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
         writer.write_all(input).unwrap();
         writer.flush().unwrap();
     }
@@ -155,14 +166,15 @@ fn lists_at_capacity_allow_explicit_removal_of_remaining_defaults() {
 }
 
 #[test]
-fn constraint_retry_can_be_cancelled_without_restarting_the_questionnaire() {
+fn constraint_retry_can_be_interrupted_without_restarting_the_questionnaire() {
     questionnaire(
         "type = 'integer'\nmin = 2",
         &[
             ("Constrained input", b"1\r"),
             ("`min` is 2", b""),
-            // Escape avoids sending SIGINT between terminal input sessions.
-            ("Constrained input", b"\x1b"),
+            // Dialoguer text uses Ctrl-C; its current signal-based exit is
+            // characterized separately in prompts.rs and the integration report.
+            ("Constrained input", b"\x03"),
         ],
         false,
     );

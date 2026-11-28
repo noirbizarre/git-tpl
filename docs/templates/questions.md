@@ -21,7 +21,7 @@ help = "Used for the package name and the README title"
 | `min_items`, `max_items` | integer | Inclusive item-count bounds for `list`. |
 | `item_min_length`, `item_max_length` | integer | Inclusive Unicode character bounds for each `list` item. |
 | `prompt` | string | Shown to the user. Defaults to the question's name. |
-| `help` | string | A line of explanation under the prompt. |
+| `help` | string | An explanation printed above the prompt. |
 | `default` | any / expression | The pre-filled value. |
 | `when` | expression | Ask only if this evaluates truthy. |
 | `default_when_skipped` | boolean | Inject `default` into the context even when `when` is false. |
@@ -30,6 +30,7 @@ help = "Used for the package name and the README title"
 | `min_choices` | integer | Inclusive minimum selections for `multi_choice`, defaulting to zero. |
 | `max_choices` | integer | Inclusive maximum selections for `multi_choice`, unlimited when omitted. |
 | `default_from` | string | The *prompt default*: `git:<key>`, or an expression over the seed namespaces below. |
+| `fuzzy` | boolean | Fuzzy search instead of substring typeahead in `choice`/`multi_choice` prompts. Defaults to false. |
 | `pattern` | string | A regular expression every answer must match. `string` only. |
 | `message` | string | What to say when `pattern` rejects an answer. |
 | `item_pattern` | string | A regular expression each string in a `list` answer must match. |
@@ -196,6 +197,49 @@ At `max_items`, the list finishes once any remaining defaults have been explicit
 Non-interactive failures identify the question and violated bound:
 `tpl::eval::numeric_bound`, `tpl::eval::string_length`, `tpl::eval::item_count`,
 or `tpl::eval::invalid_list` for invalid entries.
+
+## Searching choices interactively
+
+Choice and multi-choice prompts support case-insensitive substring typeahead by default.
+Type to filter labels, use Up/Down to move, and Enter to confirm.
+Per-choice help is displayed but is not searched.
+Escape clears an active query first; with an empty query it cancels the prompt.
+Ctrl-C cancels a selection immediately.
+
+Enable noncontiguous fuzzy matching on an individual question with `fuzzy = true`:
+
+```toml
+[questions.command]
+type = "choice"
+choices = ["cargo build", "cargo test"]
+fuzzy = true
+```
+
+The same option works for data-driven lists:
+
+```toml
+[data.countries]
+source = "data/countries.json"
+
+[questions.country]
+type = "choice"
+choices_from = "data.countries"
+fuzzy = true
+```
+
+For multi-choice questions, Space toggles the highlighted option rather than inserting a query space.
+Checked options remain checked when filtered out, and confirmed answers retain original choice order.
+Search changes presentation only: supplied answers, defaults and unattended rendering use the complete choice list.
+`fuzzy = true` on another question type is refused.
+
+Interactive prompts require a terminal on stderr; redirecting stdout remains supported.
+For automation, use `--answer`, `--answers-from`, or `--defaults` instead of piping keystrokes.
+Text input uses Ctrl-C rather than Escape to interrupt.
+Boolean confirmations support Y/N shortcuts, arrow-key selection, and Enter to accept the selected default.
+Escape and Ctrl-C cancel confirmations cleanly.
+All prompts share choisir's theme, including dialoguer's text input.
+Text input currently has a Ctrl-C diagnostic limitation;
+see the [integration report](../development/choisir-integration.md#dialoguer-cancellation-blocker).
 
 ## Conditional questions
 

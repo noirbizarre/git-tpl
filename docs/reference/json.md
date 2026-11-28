@@ -190,12 +190,14 @@ and per-entry `itemMinLength`/`itemMaxLength`.
 Each is `null` when unset; length and count bounds are inclusive nonnegative integers.
 The question `type` also includes `float`, accepting finite integer and floating-point answers.
 `itemMessage` contains the effective validation message, including the default when no custom message is declared.
+Each question also includes `fuzzy`, defaulting to false.
+For choice questions it selects fuzzy search rather than substring typeahead; it never changes the offered values.
 
 ```json
 { "ok": true,
   "template": { "name": "rust", "description": "…", "root": "template" },
   "questions": [{ "name": "crate", "order": 0, "type": "string", "prompt": "Crate name",
-                  "help": null, "default": null, "defaultIsExpression": false,
+                  "help": null, "fuzzy": false, "default": null, "defaultIsExpression": false,
                   "when": null, "defaultWhenSkipped": false, "pattern": "^[a-z0-9-]+$",
                   "message": "…", "defaultFrom": null }],
   "computed": ["lib_name"],
