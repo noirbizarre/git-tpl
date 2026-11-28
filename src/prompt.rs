@@ -1,14 +1,20 @@
-//! The interactive prompter, built on `demand`.
+//! Choisir selections/confirmations and dialoguer input with one shared theme.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use demand::{Confirm, DemandOption, Input, MultiSelect, Select};
+use choisir::{Confirm, MultiSelect, SearchMode, Select, theme::MinimalTheme};
+use console::Term;
+use dialoguer::Input;
 use tpl::data::{DataError, Decision, RemoteRequest, SourceKind, TrustGate};
 use tpl::eval::{EvalError, Prompter};
 use tpl::ops::{Picker, Proposal, Selection, Unsubstituter, Verdict};
 
 use crate::theme::Theme;
 use tpl::template::{Choice, Question, QuestionKind, Value};
+
+// Share choisir's preset with dialoguer too, so moving between text, selection
+// and confirmation prompts does not change the question/answer presentation.
+static PROMPT_THEME: MinimalTheme = MinimalTheme::new();
 
 /// Asks questions on a terminal.
 pub struct Interactive;
@@ -35,38 +41,39 @@ impl Prompter for Interactive {
 
         match question.kind {
             QuestionKind::Boolean => {
-                let mut confirm = Confirm::new(title)
-                    .affirmative("yes")
-                    .negative("no")
-                    // Pre-select the default so Enter accepts it — which is the
-                    // whole point of the template having supplied one.
-                    .selected(matches!(default, Some(Value::Bool(true))));
-                if let Some(help) = help {
-                    confirm = confirm.description(help);
-                }
-                Ok(Value::Bool(confirm.run().map_err(cancelled)?))
+                show_help(help);
+                let answer = Confirm::with_theme(&PROMPT_THEME)
+                    .with_prompt(title)
+                    .default(matches!(default, Some(Value::Bool(true))))
+                    .interact_on_opt(&Term::stderr())
+                    .map_err(cancelled)?
+                    .ok_or(EvalError::Cancelled)?;
+                Ok(Value::Bool(answer))
             }
 
             QuestionKind::Choice => {
                 let options = choices.unwrap_or_default();
-                let mut select = Select::new(title);
-                if let Some(help) = help {
-                    select = select.description(help);
-                }
-                // The `Value` is carried as the option's item, so `run` hands
-                // back the typed value rather than a label we would have to
-                // match back — which would go wrong the moment two choices
-                // rendered to the same text.
-                for choice in distinct_choices(options) {
+                show_help(help);
+                let mut select = Select::new()
+                    .with_theme(&PROMPT_THEME)
+                    .with_prompt(title)
+                    .search(search(question));
+                for (index, choice) in distinct_choices(options).enumerate() {
                     let value = Value::String(choice.value.clone());
-                    let mut option = DemandOption::with_label(choice.label(), value.clone())
-                        .selected(default == Some(&value));
-                    if let Some(help) = &choice.help {
-                        option = option.description(help);
+                    if default == Some(&value) {
+                        select = select.default(index);
                     }
-                    select = select.option(option);
+                    // Carry the value, not the label: duplicate display labels
+                    // must never cause the wrong answer to be returned.
+                    select = if let Some(help) = &choice.help {
+                        select.item_with_description(value, choice.label(), help)
+                    } else {
+                        select.item(value, choice.label())
+                    };
                 }
-                select.run().map_err(cancelled)
+                select
+                    .interact_on(&Term::buffered_stderr())
+                    .map_err(cancelled)
             }
 
             QuestionKind::MultiChoice => {
@@ -76,27 +83,36 @@ impl Prompter for Interactive {
                     _ => &[],
                 };
 
-                let mut select = MultiSelect::new(title);
+                show_help(help);
+                let mut select = MultiSelect::new()
+                    .with_theme(&PROMPT_THEME)
+                    .with_prompt(title)
+                    .search(search(question));
                 if let Some(min) = question.min_choices {
                     select = select.min(min);
                 }
                 if let Some(max) = question.max_choices {
                     select = select.max(max);
                 }
-                if let Some(help) = help {
-                    select = select.description(help);
-                }
-                for choice in distinct_choices(options) {
+                let mut defaults = Vec::new();
+                for (index, choice) in distinct_choices(options).enumerate() {
                     let value = Value::String(choice.value.clone());
-                    let mut option = DemandOption::with_label(choice.label(), value.clone())
-                        .selected(preselected.contains(&value));
-                    if let Some(help) = &choice.help {
-                        option = option.description(help);
+                    if preselected.contains(&value) {
+                        defaults.push(index);
                     }
-                    select = select.option(option);
+                    select = if let Some(help) = &choice.help {
+                        select.item_with_description(value, choice.label(), help)
+                    } else {
+                        select.item(value, choice.label())
+                    };
                 }
 
-                Ok(Value::Array(select.run().map_err(cancelled)?))
+                Ok(Value::Array(
+                    select
+                        .defaults(&defaults)
+                        .interact_on(&Term::buffered_stderr())
+                        .map_err(cancelled)?,
+                ))
             }
 
             QuestionKind::List => {
@@ -176,10 +192,8 @@ impl Prompter for Interactive {
 
                 loop {
                     let value = Value::String(text_input(title, help, &placeholder)?);
-                    // Not `demand`'s own validator hook: `text_input` maps an
-                    // empty submission back to the placeholder, and a validator
-                    // runs on the typed text — so pressing Enter on a
-                    // pre-filled prompt would submit an unchecked default.
+                    // Validate after whitespace/default normalization so the
+                    // effective answer, not merely the typed text, is checked.
                     match tpl::eval::validate_value(name, question, &value) {
                         Ok(()) => return Ok(value),
                         // Re-ask rather than abort, as the integer branch does.
@@ -202,32 +216,43 @@ fn distinct_choices(choices: &[Choice]) -> impl Iterator<Item = &Choice> {
 
 /// A single-line input, returning the placeholder when nothing was typed.
 fn text_input(title: &str, help: Option<&str>, placeholder: &str) -> Result<String, EvalError> {
-    let mut input = Input::new(title);
-    if let Some(help) = help {
-        input = input.description(help);
-    }
+    show_help(help);
+    let mut input = Input::<String>::with_theme(&PROMPT_THEME)
+        .with_prompt(title)
+        .allow_empty(true);
     if !placeholder.is_empty() {
-        input = input.placeholder(placeholder);
+        input = input.default(placeholder.to_string());
     }
 
-    let text = input.run().map_err(cancelled)?;
+    let text = input.interact_text_on(&Term::stderr()).map_err(cancelled)?;
     Ok(if text.trim().is_empty() {
-        // `demand` shows the placeholder but does not return it, so an empty
-        // submission has to be mapped back to the default here. Without this,
-        // pressing Enter on a pre-filled prompt would answer with "".
+        // Dialoguer handles empty input; keep git-tpl's additional rule that
+        // whitespace-only submission also accepts the displayed default.
         placeholder.to_string()
     } else {
         text
     })
 }
 
-/// Treat an interrupted read as a clean cancellation.
-///
-/// `demand` reports Ctrl-C and Esc as `ErrorKind::Interrupted`. Surfacing that
-/// as an I/O error would print a page of diagnostics for what is simply the
-/// user changing their mind.
-fn cancelled(_error: std::io::Error) -> EvalError {
+/// Keep terminal failures at the same cancellation boundary as the old frontend.
+fn cancelled(_error: impl std::fmt::Display) -> EvalError {
     EvalError::Cancelled
+}
+
+fn search(question: &Question) -> SearchMode {
+    if question.fuzzy {
+        SearchMode::Fuzzy
+    } else {
+        SearchMode::Typeahead
+    }
+}
+
+/// Choisir has per-item descriptions but no prompt description yet. Keep the
+/// complete explanation outside its truncated, redrawn frame during this trial.
+fn show_help(help: Option<&str>) {
+    if let Some(help) = help {
+        eprintln!("  {help}");
+    }
 }
 
 /// Confirms a template's network data sources on a terminal.
@@ -283,23 +308,27 @@ impl TrustGate for Confirmer {
                 SourceKind::Git => ("Clone", "Clone it"),
                 _ => ("Fetch", "Fetch it"),
             };
-            let choice = Select::new(format!(
-                "{question} {}?",
-                crate::theme::inline_code(&self.0, &request.name)
-            ))
-            .description(&request.source)
-            .option(DemandOption::new("fetch").label(label))
-            .option(
-                DemandOption::new("skip").label("Skip it — the render will fail if it is needed"),
-            )
-            .option(DemandOption::new("abort").label("Abort"))
-            .run()
-            .map_err(|_| DataError::Cancelled)?;
+            show_help(Some(&request.source));
+            // None is the explicit Abort action; a cancelled interaction also
+            // aborts, never granting consent or silently skipping a source.
+            let choice = Select::new()
+                .with_theme(&PROMPT_THEME)
+                .with_prompt(format!(
+                    "{question} {}?",
+                    crate::theme::inline_code(&self.0, &request.name)
+                ))
+                .item(Some(Decision::Allow), label)
+                .item(
+                    Some(Decision::Skip),
+                    "Skip it — the render will fail if it is needed",
+                )
+                .item(None, "Abort")
+                .interact_on(&Term::buffered_stderr())
+                .map_err(|_| DataError::Cancelled)?;
 
             match choice {
-                "fetch" => decisions.insert(request.name.clone(), Decision::Allow),
-                "skip" => decisions.insert(request.name.clone(), Decision::Skip),
-                _ => return Err(DataError::Cancelled),
+                Some(decision) => decisions.insert(request.name.clone(), decision),
+                None => return Err(DataError::Cancelled),
             };
         }
 
@@ -330,17 +359,19 @@ impl Unsubstituter for Reverser {
         // here is the question, which cannot be asked without a terminal.
         eprint!("{}", crate::theme::reversal(&self.0, proposal));
 
-        let taken = Confirm::new("Send this line upstream?")
-            .description(
-                "It renders back to your file exactly. Whether it is right for every other \
-                 project is what only you can say.",
-            )
-            .affirmative("yes")
-            .negative("no")
-            .run()
-            // Ctrl-C at this prompt is a refusal, not an error. The command
-            // refuses the file and says why, which is where the user was
-            // heading anyway.
+        show_help(Some(
+            "It renders back to your file exactly. Whether it is right for every other \
+                  project is what only you can say.",
+        ));
+        let taken = Confirm::with_theme(&PROMPT_THEME)
+            .with_prompt("Send this line upstream?")
+            // Demand's implicit default was affirmative; preserve Enter's meaning.
+            .default(true)
+            .interact_on_opt(&Term::stderr())
+            // Escape, Ctrl-C and read failures decline this proposal rather
+            // than interrupt the command before it can report the refused file.
+            .ok()
+            .flatten()
             .unwrap_or(false);
 
         if taken {
@@ -368,28 +399,26 @@ impl Picker for Chooser {
         // change visible while the choice is being made.
         eprint!("{}", crate::theme::hunks(&self.0, selection));
 
-        let mut select = MultiSelect::new(format!("Send which hunks of `{}`?", selection.path))
-            .description("Space toggles, Enter confirms. Everything is selected to begin with.");
+        show_help(Some(
+            "Space toggles, Enter confirms. Everything is selected to begin with.",
+        ));
+        let mut select = MultiSelect::new()
+            .with_theme(&PROMPT_THEME)
+            .with_prompt(format!("Send which hunks of `{}`?", selection.path));
 
         for hunk in selection.hunks {
             // The index travels on the option, not a label matched back: two
             // hunks of a file can render to the same header text, and pairing
             // them up by string is how the wrong one gets dropped.
-            select = select.option(
-                DemandOption::with_label(
-                    format!(
-                        "{}  {}  +{} −{}",
-                        hunk.index + 1,
-                        hunk.header,
-                        hunk.insertions,
-                        hunk.deletions
-                    ),
-                    hunk.index,
-                )
-                // `-p` is for taking things out. Starting with nothing selected
-                // would make the safe key — Enter — mean "send nothing", which
-                // is not what anyone typed `-p` to do.
-                .selected(true),
+            select = select.item(
+                hunk.index,
+                format!(
+                    "{}  {}  +{} −{}",
+                    hunk.index + 1,
+                    hunk.header,
+                    hunk.insertions,
+                    hunk.deletions
+                ),
             );
         }
 
@@ -399,6 +428,12 @@ impl Picker for Chooser {
         // emit a patch they never approved. The reason is `cancelled`'s — a
         // page of miette for a keystroke is not a diagnostic — but the shape
         // is different, so it cannot share it.
-        select.run().ok()
+        // Defaults are option positions, while the carried values are actual
+        // hunk indices. Keep those distinct even if they currently coincide.
+        select
+            .defaults(&(0..selection.hunks.len()).collect::<Vec<_>>())
+            .interact_on_opt(&Term::buffered_stderr())
+            .ok()
+            .flatten()
     }
 }

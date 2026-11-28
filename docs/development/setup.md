@@ -121,9 +121,12 @@ src/
 ├── cli.rs           argument types only
 ├── report.rs        the --json envelope, success and failure
 ├── theme.rs         formatting helpers that return String
-├── prompt.rs        the demand-based prompter
+├── prompt.rs        choisir selections/confirmations and dialoguer input
 └── commands/        one module per subcommand
 ```
+
+The [choisir integration](choisir-integration.md) uses the published crate and its shared `MinimalTheme`.
+That page records remaining gaps and terminal checks for selections, confirmations and dialoguer input.
 
 `ops/` holds one *function* per command in `mod.rs` — `init`, `update`, `status`, `diff`, `merge`, `fetch`, `push`,
 `lint`, `questions` and the rest — and separate command orchestration files such as `backport` and `testing`.

@@ -67,3 +67,4 @@ explains the code that existed.
 | [056](056-utc-datetime-prompt-seeds.md) | UTC datetime values may seed an interactive prompt |
 | [057](057-os-user-prompt-seeds.md) | The OS login name may seed an interactive prompt |
 | [058](058-reviewed-template-conveniences.md) | Selected template conveniences are admitted by review |
+| [059](059-interactive-choice-search.md) | Choice search is a presentation hint, with typeahead by default and opt-in fuzzy matching |

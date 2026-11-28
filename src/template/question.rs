@@ -133,7 +133,7 @@ pub struct Question {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
 
-    /// A line of explanation under the prompt.
+    /// An explanation printed above the prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub help: Option<String>,
 
@@ -184,6 +184,11 @@ pub struct Question {
     /// Inclusive maximum number of selections for a `multi_choice` question.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_choices: Option<usize>,
+
+    /// Use fuzzy rather than substring search in an interactive choice prompt.
+    /// This is presentation only; filtering never changes the offered values.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fuzzy: bool,
 
     /// Where the *prompt default* comes from.
     ///
@@ -381,6 +386,7 @@ mod tests {
             default_when_skipped: false,
             choices: None,
             choices_from: None,
+            fuzzy: false,
             default_from: None,
             pattern: None,
             message: None,
@@ -417,6 +423,7 @@ mod tests {
             default_when_skipped: false,
             choices: None,
             choices_from: None,
+            fuzzy: false,
             default_from: default_from.map(str::to_string),
             pattern: None,
             message: None,
@@ -454,6 +461,7 @@ mod tests {
             default_when_skipped: false,
             choices: None,
             choices_from: None,
+            fuzzy: false,
             default_from: None,
             pattern: pattern.map(str::to_string),
             message: message.map(str::to_string),

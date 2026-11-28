@@ -90,6 +90,10 @@ That is the whole feature.
 
 ## Applying it
 
+Reversal confirmations use choisir's Yes/No buttons: Y/N answers directly, arrows change the selection,
+and Enter accepts it.
+Escape or Ctrl-C declines that proposal cleanly.
+
 ### Several owning repositories
 
 A single owner still produces one mailbox on stdout, or in `-o FILE`.

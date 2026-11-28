@@ -81,6 +81,7 @@ nav = [
   ] },
   { "Development" = [
     { "Setup" = "development/setup.md" },
+    { "Choisir integration" = "development/choisir-integration.md" },
     { "Contributing" = "development/contributing.md" },
     { "Roadmap" = "development/roadmap.md" },
     { "Releasing" = "development/releasing.md" },

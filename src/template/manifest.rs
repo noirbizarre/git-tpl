@@ -641,6 +641,12 @@ impl Manifest {
                     reason: "`min_choices` exceeds the number of distinct offered choices".into(),
                 });
             }
+            if question.fuzzy && !question.kind.is_choice() {
+                return Err(ManifestError::InvalidQuestion {
+                    name: name.clone(),
+                    reason: "`fuzzy` only applies to `choice` and `multi_choice` questions".into(),
+                });
+            }
             let has_choices = question.choices.is_some();
             let has_choices_from = question.choices_from.is_some();
 
@@ -1159,6 +1165,40 @@ mod tests {
         )
         .unwrap_err();
         std::assert_matches!(error, ManifestError::InvalidQuestion { .. });
+    }
+
+    #[test]
+    fn fuzzy_search_is_a_choice_presentation_hint_that_survives_round_tripping() {
+        for kind in ["choice", "multi_choice"] {
+            for source in ["choices = ['alpha', 'beta']", "choices_from = 'available'"] {
+                for setting in ["", "fuzzy = false", "fuzzy = true"] {
+                    let manifest = Manifest::parse(
+                        &format!(
+                            "name = 'x'\n[questions.pick]\ntype = '{kind}'\n{source}\n{setting}\n"
+                        ),
+                        MANIFEST_NAME,
+                    )
+                    .unwrap();
+                    let question = &manifest.questions["pick"];
+                    assert_eq!(question.fuzzy, setting == "fuzzy = true");
+                    let encoded = toml::to_string(question).unwrap();
+                    assert_eq!(encoded.contains("fuzzy"), question.fuzzy);
+                    assert_eq!(toml::from_str::<Question>(&encoded).unwrap(), *question);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fuzzy_search_on_a_non_choice_question_is_rejected() {
+        for kind in ["string", "boolean", "integer", "float", "list"] {
+            let error = Manifest::parse(
+                &format!("name = 'x'\n[questions.pick]\ntype = '{kind}'\nfuzzy = true\n"),
+                MANIFEST_NAME,
+            )
+            .unwrap_err();
+            std::assert_matches!(error, ManifestError::InvalidQuestion { ref reason, .. } if reason.contains("`fuzzy`"));
+        }
     }
 
     #[test]

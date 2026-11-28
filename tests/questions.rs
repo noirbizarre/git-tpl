@@ -39,6 +39,19 @@ fn selection_bounds_are_exposed_and_invalid_schemas_are_rejected() {
 }
 
 #[test]
+fn question_schema_exposes_fuzzy_search_without_changing_noninteractive_answers() {
+    let world = World::with_template(
+        "name = 'search'\n[questions.pick]\ntype = 'choice'\nchoices = ['alpha', 'beta']\nfuzzy = true\ndefault = 'beta'\n[questions.other]\ntype = 'multi_choice'\nchoices = ['one', 'two']\ndefault = ['one']\n",
+        &[("picked.jinja", "{{ pick }}:{{ other | join(',') }}")],
+    );
+    let schema = Scratch::new().ask(&world.template.source());
+    assert_eq!(question(&schema, "pick")["fuzzy"], true);
+    assert_eq!(question(&schema, "other")["fuzzy"], false);
+    world.init(&[]).success();
+    assert_eq!(world.project.read("picked"), "beta:one");
+}
+
+#[test]
 fn question_schema_exposes_the_list_item_constraints_enforced_by_evaluation() {
     let world = World::with_template(
         "name = 'lists'\n[questions.modules]\ntype = 'list'\ndefault = []\nitem_pattern = '^[a-z]+$'\nitem_message = 'lowercase module names only'\n",
